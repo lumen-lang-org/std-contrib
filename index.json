@@ -1,6 +1,12 @@
 {
   "packages": [
     {
+      "name": "args",
+      "version": "0.1.0",
+      "summary": "Command-line flag and option parsing (hasFlag, optionValue, positional).",
+      "path": "packages/args"
+    },
+    {
       "name": "mathx",
       "version": "0.1.0",
       "summary": "Integer math helpers: gcd, lcm, ipow, isPrime, clampInt.",

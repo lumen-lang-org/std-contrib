@@ -28,6 +28,7 @@ them — so nothing here locks the project into a single source monorepo.
 
 | Package | Summary |
 |---------|---------|
+| [`args`](packages/args) | Command-line flag and option parsing |
 | [`mathx`](packages/mathx) | Integer math helpers — gcd, lcm, ipow, isPrime, clampInt |
 | [`geo`](packages/geo) | 2D point helpers — distanceSq, manhattan |
 
