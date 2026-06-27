@@ -1,0 +1,16 @@
+{
+  "packages": [
+    {
+      "name": "mathx",
+      "version": "0.1.0",
+      "summary": "Integer math helpers: gcd, lcm, ipow, isPrime, clampInt.",
+      "path": "packages/mathx"
+    },
+    {
+      "name": "geo",
+      "version": "0.1.0",
+      "summary": "2D point helpers: distanceSq, manhattan.",
+      "path": "packages/geo"
+    }
+  ]
+}
