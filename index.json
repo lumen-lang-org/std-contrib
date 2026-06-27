@@ -7,6 +7,12 @@
       "path": "packages/hello"
     },
     {
+      "name": "greeter",
+      "version": "0.1.0",
+      "summary": "Two-file package; demonstrates recursive URL-relative imports.",
+      "path": "packages/greeter"
+    },
+    {
       "name": "args",
       "version": "0.1.0",
       "summary": "Command-line flag and option parsing (hasFlag, optionValue, positional).",
