@@ -34,8 +34,17 @@ them — so nothing here locks the project into a single source monorepo.
 
 ## Using a package
 
-For now, copy the `.ts` into your project (or import its default function), then
-build as usual:
+Import a package's default function straight from its URL -- it is fetched over
+HTTPS and inlined at compile time, no install step:
+
+```ts
+import greet from "https://lumen-lang.org/package/std-contrib/hello/hello.ts";
+
+console.log(greet("world"));
+```
+
+`lumen-lang.org/package/std-contrib/<name>/<file>.ts` redirects here; the raw
+GitHub URL works too. Then build as usual:
 
 ```sh
 lumen compile app.ts && ./app

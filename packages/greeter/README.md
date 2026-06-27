@@ -6,7 +6,7 @@ A two-file package that demonstrates recursive (URL-relative) imports: importing
 ## Use
 
 ```ts
-import greeter from "https://raw.githubusercontent.com/lumen-lang-org/std-contrib/main/packages/greeter/greeter.ts";
+import greeter from "https://lumen-lang.org/package/std-contrib/greeter/greeter.ts";
 
 console.log(greeter("Lumen"));
 ```
