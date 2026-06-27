@@ -1,6 +1,12 @@
 {
   "packages": [
     {
+      "name": "hello",
+      "version": "0.1.0",
+      "summary": "Minimal greet function; canonical URL-import example.",
+      "path": "packages/hello"
+    },
+    {
       "name": "args",
       "version": "0.1.0",
       "summary": "Command-line flag and option parsing (hasFlag, optionValue, positional).",
