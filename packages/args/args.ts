@@ -88,23 +88,23 @@ function positionalIn(argv: string[], index: int): string {
   return "";
 }
 
-test "hasFlagIn" {
+test("hasFlagIn", () => {
   let argv: string[] = ["build", "--verbose", "--out", "a.bin"];
   expect(hasFlagIn(argv, "--verbose"));
   expect(!hasFlagIn(argv, "--quiet"));
-}
+});
 
-test "optionValueIn" {
+test("optionValueIn", () => {
   let argv: string[] = ["build", "--out", "a.bin"];
   expect(optionValueIn(argv, "--out", "x") == "a.bin");
   expect(optionValueIn(argv, "--missing", "def") == "def");
   let trailing: string[] = ["--out"];
   expect(optionValueIn(trailing, "--out", "def") == "def");
-}
+});
 
-test "positionalIn" {
+test("positionalIn", () => {
   let argv: string[] = ["--verbose", "input.ts", "extra"];
   expect(positionalIn(argv, 0) == "input.ts");
   expect(positionalIn(argv, 1) == "extra");
   expect(positionalIn(argv, 2) == "");
-}
+});

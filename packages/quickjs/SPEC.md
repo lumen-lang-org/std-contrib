@@ -124,15 +124,15 @@ const char *qjs_last_error(void) { return errbuf; }
 ```ts
 // @link ./qjs_host.o
 // @link quickjs
-extern function qjs_open(): void;
-extern function qjs_close(): void;
-extern function qjs_set_int(name: string, value: int): void;
-extern function qjs_set_string(name: string, value: string): void;
-extern function qjs_eval_number(src: string): number;
-extern function qjs_eval_string(src: string): string;
-extern function qjs_get_int(name: string): int;
-extern function qjs_get_string(name: string): string;
-extern function qjs_last_error(): string;
+declare function qjs_open(): void;
+declare function qjs_close(): void;
+declare function qjs_set_int(name: string, value: int): void;
+declare function qjs_set_string(name: string, value: string): void;
+declare function qjs_eval_number(src: string): number;
+declare function qjs_eval_string(src: string): string;
+declare function qjs_get_int(name: string): int;
+declare function qjs_get_string(name: string): string;
+declare function qjs_last_error(): string;
 
 export function open(): void { qjs_open(); }
 export function close(): void { qjs_close(); }

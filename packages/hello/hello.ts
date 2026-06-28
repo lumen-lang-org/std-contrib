@@ -4,6 +4,6 @@ export default function greet(name: string): string {
   return "Hello, " + name + "!";
 }
 
-test "greets by name" {
+test("greets by name", () => {
   expect(greet("world")).toBe("Hello, world!");
-}
+});

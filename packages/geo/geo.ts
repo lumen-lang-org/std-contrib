@@ -19,14 +19,14 @@ function manhattan(a: Point, b: Point): int {
   return Math.abs(dx) + Math.abs(dy);
 }
 
-test "distanceSq" {
+test("distanceSq", () => {
   let o: Point = { x: 0, y: 0 };
   let p: Point = { x: 3, y: 4 };
   expect(distanceSq(o, p) == 25);
-}
+});
 
-test "manhattan" {
+test("manhattan", () => {
   let a: Point = { x: 1, y: 1 };
   let b: Point = { x: 4, y: 5 };
   expect(manhattan(a, b) == 7);
-}
+});

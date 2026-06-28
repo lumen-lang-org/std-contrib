@@ -6,6 +6,6 @@ export default function greeter(name: string): string {
   return shout("Hey " + name);
 }
 
-test "shouts a greeting" {
+test("shouts a greeting", () => {
   expect(greeter("Lumen")).toBe("Hey Lumen!!!");
-}
+});

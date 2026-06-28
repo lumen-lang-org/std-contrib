@@ -52,16 +52,16 @@ function clampInt(v: int, lo: int, hi: int): int {
   return v;
 }
 
-test "gcd and lcm" {
+test("gcd and lcm", () => {
   expect(gcd(12, 8) == 4);
   expect(gcd(17, 5) == 1);
   expect(lcm(4, 6) == 12);
-}
+});
 
-test "ipow, isPrime, clampInt" {
+test("ipow, isPrime, clampInt", () => {
   expect(ipow(2, 10) == 1024);
   expect(isPrime(13));
   expect(!isPrime(9));
   expect(clampInt(20, 0, 10) == 10);
   expect(clampInt(-3, 0, 10) == 0);
-}
+});

@@ -22,25 +22,25 @@
 // The C standard library, used by the shim (snprintf/strlen).
 // @link c
 
-extern function qjs_open(): void;
-extern function qjs_close(): void;
+declare function qjs_open(): void;
+declare function qjs_close(): void;
 
-extern function qjs_set_int(name: string, value: int): void;
-extern function qjs_set_number(name: string, value: number): void;
-extern function qjs_set_bool(name: string, value: bool): void;
-extern function qjs_set_string(name: string, value: string): void;
+declare function qjs_set_int(name: string, value: int): void;
+declare function qjs_set_number(name: string, value: number): void;
+declare function qjs_set_bool(name: string, value: bool): void;
+declare function qjs_set_string(name: string, value: string): void;
 
-extern function qjs_eval_int(src: string): int;
-extern function qjs_eval_number(src: string): number;
-extern function qjs_eval_bool(src: string): bool;
-extern function qjs_eval_string(src: string): string;
+declare function qjs_eval_int(src: string): int;
+declare function qjs_eval_number(src: string): number;
+declare function qjs_eval_bool(src: string): bool;
+declare function qjs_eval_string(src: string): string;
 
-extern function qjs_get_int(name: string): int;
-extern function qjs_get_number(name: string): number;
-extern function qjs_get_bool(name: string): bool;
-extern function qjs_get_string(name: string): string;
+declare function qjs_get_int(name: string): int;
+declare function qjs_get_number(name: string): number;
+declare function qjs_get_bool(name: string): bool;
+declare function qjs_get_string(name: string): string;
 
-extern function qjs_last_error(): string;
+declare function qjs_last_error(): string;
 
 // Open the process-global QuickJS runtime + context. Call once before use.
 export function open(): void { qjs_open(); }
