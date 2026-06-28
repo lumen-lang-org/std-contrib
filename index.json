@@ -29,6 +29,12 @@
       "version": "0.1.0",
       "summary": "2D point helpers: distanceSq, manhattan.",
       "path": "packages/geo"
+    },
+    {
+      "name": "quickjs",
+      "version": "0.1.0",
+      "summary": "Embed a QuickJS JavaScript sandbox via FFI; set/eval/get values across the boundary.",
+      "path": "packages/quickjs"
     }
   ]
 }

@@ -31,6 +31,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`args`](packages/args) | Command-line flag and option parsing |
 | [`mathx`](packages/mathx) | Integer math helpers — gcd, lcm, ipow, isPrime, clampInt |
 | [`geo`](packages/geo) | 2D point helpers — distanceSq, manhattan |
+| [`quickjs`](packages/quickjs) | Embed a QuickJS JavaScript sandbox via FFI (community, C shim) |
 
 ## Using a package
 
