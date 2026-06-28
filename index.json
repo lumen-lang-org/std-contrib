@@ -35,6 +35,12 @@
       "version": "0.1.0",
       "summary": "Embed a QuickJS JavaScript sandbox via FFI; set/eval/get values across the boundary.",
       "path": "packages/quickjs"
+    },
+    {
+      "name": "sqlite",
+      "version": "0.1.0",
+      "summary": "Typed SQLite access via FFI; open/exec/query int and text over a C shim.",
+      "path": "packages/sqlite"
     }
   ]
 }
