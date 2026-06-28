@@ -4,7 +4,7 @@
 
 Add one directory under `packages/<name>/`:
 
-- `<name>.ts` — the package source. For now, include `test "…" { expect(…) }`
+- `<name>.ts` — the package source. For now, include `test("…", () => { expect(…) })`
   blocks in the same file.
 - `README.md` — what it does, the public functions, and a usage snippet.
 
