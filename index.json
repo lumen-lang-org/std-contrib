@@ -43,10 +43,10 @@
       "path": "packages/sqlite"
     },
     {
-      "name": "markflow",
+      "name": "markdown",
       "version": "0.1.0",
       "summary": "Pure-Lumen Markdown -> HTML renderer (no FFI); render(md).",
-      "path": "packages/markflow"
+      "path": "packages/markdown"
     }
   ]
 }

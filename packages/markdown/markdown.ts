@@ -1,11 +1,11 @@
-// markflow -- a small Markdown -> HTML renderer, written entirely in Lumen.
+// markdown -- a small Markdown -> HTML renderer, written entirely in Lumen.
 //
 // Pure Lumen: no FFI, no native library, nothing to install or link. Import it
-// by URL and it compiles to native or wasm directly. Supports a practical
+// by URL with no install step. Supports a practical
 // subset of CommonMark: ATX headings, paragraphs, **bold** / *italic* / `code`,
 // [links](url), `-`/`*` lists, > blockquotes, ``` fenced code, and --- rules.
 //
-//   import { render } from "https://lumen-lang.org/package/std-contrib/markflow/markflow.ts";
+//   import { render } from "https://lumen-lang.org/package/std-contrib/markdown/markdown.ts";
 //   console.log(render("# Hello\n\nSome **bold** text."));
 // esc() fast-paths text with nothing to escape, and inline text is flushed in
 // runs (one concat per token) instead of character by character.
