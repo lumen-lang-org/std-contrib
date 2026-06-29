@@ -41,6 +41,12 @@
       "version": "0.1.0",
       "summary": "Typed SQLite access via FFI; open/exec/query int and text over a C shim.",
       "path": "packages/sqlite"
+    },
+    {
+      "name": "markflow",
+      "version": "0.1.0",
+      "summary": "Pure-Lumen Markdown -> HTML renderer (no FFI); render(md).",
+      "path": "packages/markflow"
     }
   ]
 }
