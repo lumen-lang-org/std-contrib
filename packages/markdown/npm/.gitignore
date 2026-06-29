@@ -1,0 +1,2 @@
+# built in CI by lumen compile --reactor
+*.wasm

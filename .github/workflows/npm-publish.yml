@@ -1,12 +1,16 @@
 name: npm-publish
-# Publish an npm package only when its own packages/<name>/npm/ source changed in
-# the push, and only if that version isn't on npm yet.
-# Requires repo secret NPM_TOKEN (an npm automation/granular token for @lumen-org).
+# When a packages/<name>/npm/ folder changes, build its reactor wasm with the
+# Lumen toolchain and publish to npm -- but only if that version isn't published.
+# Requires repo secret NPM_TOKEN (an npm automation token for @lumen-org).
 on:
   push:
     branches: [main]
     paths: ['packages/*/npm/**']
   workflow_dispatch: {}
+
+env:
+  ZIG_VERSION: "0.16.0"
+  LUMEN_REF: "main"
 
 jobs:
   publish:
@@ -14,31 +18,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # need history to diff the push
+          fetch-depth: 0
+
+      - name: Which npm folders changed
+        id: changed
+        run: |
+          base="${{ github.event.before }}"
+          case "$base" in ""|0000000000000000000000000000000000000000) base="HEAD~1" ;; esac
+          dirs=$(git diff --name-only "$base" "${{ github.sha }}" \
+            | grep -E '^packages/[^/]+/npm/' \
+            | sed -E 's#^(packages/[^/]+/npm)/.*#\1#' | sort -u | tr '\n' ' ')
+          echo "dirs=$dirs" >> "$GITHUB_OUTPUT"
+          echo "changed: $dirs"
+
+      - name: Install Zig
+        if: steps.changed.outputs.dirs != ''
+        run: |
+          curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | tar -xJ -C /opt
+          mv /opt/zig-* /opt/zig
+          echo "/opt/zig" >> "$GITHUB_PATH"
+
+      - name: Build the Lumen compiler
+        if: steps.changed.outputs.dirs != ''
+        run: |
+          git clone --depth 1 --branch "$LUMEN_REF" https://github.com/lumen-lang-org/lumen.git /tmp/lumen
+          ( cd /tmp/lumen && zig build -Dcpu=baseline )
+          echo "/tmp/lumen/zig-out/bin" >> "$GITHUB_PATH"
+
       - uses: actions/setup-node@v4
+        if: steps.changed.outputs.dirs != ''
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org   # wires NODE_AUTH_TOKEN into .npmrc
-      - name: Publish changed npm packages (new versions only)
+
+      - name: Build wasm + publish new versions
+        if: steps.changed.outputs.dirs != ''
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -e
-          base="${{ github.event.before }}"
-          case "$base" in ""|0000000000000000000000000000000000000000) base="HEAD~1" ;; esac
-          # only the packages/<name>/npm dirs touched in this push
-          changed=$(git diff --name-only "$base" "${{ github.sha }}" \
-            | grep -E '^packages/[^/]+/npm/' \
-            | sed -E 's#^(packages/[^/]+/npm)/.*#\1#' | sort -u)
-          [ -n "$changed" ] || { echo "no npm folder changes"; exit 0; }
-          for dir in $changed; do
+          for dir in ${{ steps.changed.outputs.dirs }}; do
             [ -f "$dir/package.json" ] || continue
             name=$(node -p "require('./$dir/package.json').name")
             ver=$(node -p "require('./$dir/package.json').version")
             if npm view "$name@$ver" version >/dev/null 2>&1; then
               echo "= $name@$ver already published, skipping"
-            else
-              echo "+ publishing $name@$ver"
-              ( cd "$dir" && npm publish )
+              continue
             fi
+            echo "+ building reactor wasm for $name@$ver"
+            ( cd "$dir" && lumen compile --reactor reactor.ts )
+            echo "+ publishing $name@$ver"
+            ( cd "$dir" && npm publish )
           done

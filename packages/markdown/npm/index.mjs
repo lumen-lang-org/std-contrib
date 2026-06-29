@@ -1,6 +1,6 @@
 // @lumen-org/markdown -- Lumen Markdown renderer, compiled to wasm. Zero deps.
 import fs from "node:fs";
-const bytes = fs.readFileSync(new URL("./markdown.wasm", import.meta.url));
+const bytes = fs.readFileSync(new URL("./reactor.wasm", import.meta.url));
 const wasi = new Proxy({}, { get: () => () => 0 });      // render is pure; stubs never run
 const { instance } = await WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: wasi });
 const ex = instance.exports, enc = new TextEncoder(), dec = new TextDecoder();

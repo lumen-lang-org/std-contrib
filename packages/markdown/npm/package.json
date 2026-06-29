@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.mjs",
   "exports": "./index.mjs",
-  "files": ["index.mjs", "markdown.wasm"],
+  "files": ["index.mjs", "reactor.wasm"],
   "keywords": ["markdown", "html", "wasm", "lumen"],
   "license": "MIT",
   "publishConfig": { "access": "public" },
