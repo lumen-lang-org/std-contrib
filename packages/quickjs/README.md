@@ -108,7 +108,7 @@ above do not apply. Instead the package ships `qjs-wasm.a` — the shim
 `// @wasm-link <url>` pragma in `quickjs.ts`:
 
 ```ts
-// @wasm-link https://lumen-lang.org/package/std-contrib/quickjs/qjs-wasm.a
+// @wasm-link https://github.com/lumen-lang-org/std-contrib/releases/download/wasm-engines-v1/qjs-wasm.a#sha256=fbbc539c…
 ```
 
 When you build with `--wasm`, the compiler fetches that archive (once, cached)
@@ -121,10 +121,11 @@ lumen compile --wasm app.ts   # -> app.wasm, runs anywhere WASI runs (incl. the 
 ```
 
 `qjs-wasm.a` is a **prebuilt artifact, built once per engine version** — not per
-compile. Regenerate it reproducibly with [`build-wasm.sh`](build-wasm.sh) (clones
-quickjs-ng at a pinned commit, archives it with the shim via `zig`), then publish
-it at the `@wasm-link` URL. Consumers never run this — they just `import` the
-package.
+compile, and **not committed to this repo**. Regenerate it reproducibly with
+[`build-wasm.sh`](build-wasm.sh) (clones quickjs-ng at a pinned commit, archives
+it with the shim via `zig`), publish it as a **GitHub Release asset**, and pin it
+in the `@wasm-link` URL with `#sha256=<hash>` so the compiler verifies the
+download. Consumers never run this — they just `import` the package.
 
 ## Security
 

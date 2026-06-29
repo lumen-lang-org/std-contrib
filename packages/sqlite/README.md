@@ -61,16 +61,18 @@ above do not apply. The package ships `sqlite-wasm.a` — the shim plus the SQLi
 amalgamation, prebuilt to `wasm32-wasi` — and declares it in `sqlite.ts`:
 
 ```ts
-// @wasm-link https://lumen-lang.org/package/std-contrib/sqlite/sqlite-wasm.a
+// @wasm-link https://github.com/lumen-lang-org/std-contrib/releases/download/wasm-engines-v1/sqlite-wasm.a#sha256=42c8e34f…
 ```
 
 `lumen compile --wasm app.ts` fetches that archive (once, cached) and links it
 in, so you get a single self-contained `.wasm` whose only imports are WASI — no
 install, nothing to copy. Use `":memory:"` databases (no host filesystem needed).
 
-`sqlite-wasm.a` is a **prebuilt artifact, built once per SQLite version** —
-regenerate it reproducibly with [`build-wasm.sh`](build-wasm.sh) and publish it
-at the `@wasm-link` URL. Consumers never run it; they just `import` the package.
+`sqlite-wasm.a` is a **prebuilt artifact, built once per SQLite version** (not
+committed to this repo) — regenerate it reproducibly with
+[`build-wasm.sh`](build-wasm.sh), publish it as a **GitHub Release asset**, and
+pin it in the `@wasm-link` URL with `#sha256=<hash>`. Consumers never run it; they
+just `import` the package.
 
 ## Notes
 

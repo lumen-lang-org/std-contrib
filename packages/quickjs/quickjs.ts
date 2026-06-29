@@ -27,7 +27,7 @@
 // URL and links it into the program, so the result is a single self-contained
 // wasm whose only imports are WASI -- no native install, no host engine, nothing
 // to copy. To bump the engine, rebuild the archive and replace it at this URL.
-// @wasm-link https://lumen-lang.org/package/std-contrib/quickjs/qjs-wasm.a
+// @wasm-link https://github.com/lumen-lang-org/std-contrib/releases/download/wasm-engines-v1/qjs-wasm.a#sha256=fbbc539cae832769d718c65e845104aef2cc836a28daf49c13f7b5ebae1277e4
 
 declare function qjs_open(): void;
 declare function qjs_close(): void;

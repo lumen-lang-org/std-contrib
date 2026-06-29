@@ -6,7 +6,7 @@
 // prebuilt archive (the shim + the SQLite amalgamation, compiled to wasm32-wasi)
 // and links it in, so the program is a single self-contained wasm. Rebuild it
 // with ./build-wasm.sh. In-memory databases (":memory:") need no host fs.
-// @wasm-link https://lumen-lang.org/package/std-contrib/sqlite/sqlite-wasm.a
+// @wasm-link https://github.com/lumen-lang-org/std-contrib/releases/download/wasm-engines-v1/sqlite-wasm.a#sha256=42c8e34f4a6379272ed158b3b8d761f04569b4b897da8ea9e543348dc24bcb1f
 declare function db_open(path: string): int;
 declare function db_exec(sql: string): int;
 declare function db_query_int(sql: string): int;

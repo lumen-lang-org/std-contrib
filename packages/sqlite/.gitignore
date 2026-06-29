@@ -1,0 +1,3 @@
+# Prebuilt wasm archives are published as GitHub Release assets
+# (see each package build-wasm.sh + the // @wasm-link URL), not committed.
+*.a
