@@ -35,15 +35,16 @@ the connection handle behind a global and exposes a flat, FFI-friendly surface;
 
 ## Use
 
-Copy `sqlite.ts` and `sqlite_shim.c` into your project, then:
+The typed wrapper is imported by URL; only the C shim is built locally. Download the shim once, then build:
 
 ```sh
+curl -fsSL https://lumen-lang.org/package/std-contrib/sqlite/sqlite_shim.c -o sqlite_shim.c
 cc -c sqlite_shim.c -I/opt/homebrew/opt/sqlite/include -o sqlite_shim.o
 lumen compile app.ts && ./app
 ```
 
 ```ts
-import { open, exec, queryInt, queryText, close } from "./sqlite.ts";
+import { open, exec, queryInt, queryText, close } from "https://lumen-lang.org/package/std-contrib/sqlite/sqlite.ts";
 
 open(":memory:");
 exec("CREATE TABLE books (title TEXT, year INT)");

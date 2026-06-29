@@ -79,7 +79,7 @@ platform, also try adding `// @link m`, `// @link pthread`, or `// @link dl`.
 ## Example
 
 ```ts
-import { open, close, setInt, evalNumber, getString } from "./quickjs.ts";
+import { open, close, setInt, evalNumber, getString } from "https://lumen-lang.org/package/std-contrib/quickjs/quickjs.ts";
 
 open();
 using _ = defer(() => close());

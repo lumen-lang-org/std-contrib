@@ -1,6 +1,6 @@
 // A typed wrapper over SQLite, backed by a small C shim (sqlite_shim.c).
 // @link ./sqlite_shim.o
-// @link /opt/homebrew/opt/sqlite/lib/libsqlite3.dylib
+// @link sqlite3
 // @link c
 declare function db_open(path: string): int;
 declare function db_exec(sql: string): int;
