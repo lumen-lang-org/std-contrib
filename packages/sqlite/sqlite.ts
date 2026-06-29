@@ -2,6 +2,11 @@
 // @link ./sqlite_shim.o
 // @link sqlite3
 // @link c
+// On the wasm target there is no native linking: the compiler fetches this
+// prebuilt archive (the shim + the SQLite amalgamation, compiled to wasm32-wasi)
+// and links it in, so the program is a single self-contained wasm. Rebuild it
+// with ./build-wasm.sh. In-memory databases (":memory:") need no host fs.
+// @wasm-link https://lumen-lang.org/package/std-contrib/sqlite/sqlite-wasm.a
 declare function db_open(path: string): int;
 declare function db_exec(sql: string): int;
 declare function db_query_int(sql: string): int;
