@@ -82,7 +82,7 @@ platform, also try adding `// @link m`, `// @link pthread`, or `// @link dl`.
 import { open, close, setInt, evalNumber, getString } from "./quickjs.ts";
 
 open();
-defer close();
+using _ = defer(() => close());
 
 setInt("base", 21);
 console.log(evalNumber("base * 2 + Math.sqrt(16)"));   // 46

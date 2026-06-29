@@ -44,7 +44,7 @@ declare function qjs_last_error(): string;
 
 // Open the process-global QuickJS runtime + context. Call once before use.
 export function open(): void { qjs_open(); }
-// Free the runtime + context. Pair with `defer close();` after open.
+// Free the runtime + context. Pair with `using _ = defer(() => close());` after open.
 export function close(): void { qjs_close(); }
 
 // Lumen -> QuickJS: define globals the evaluated script can read.

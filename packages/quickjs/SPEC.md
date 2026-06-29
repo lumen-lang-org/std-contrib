@@ -152,7 +152,7 @@ import { open, close, setInt, evalNumber, getString } from
   "https://lumen-lang.org/package/std-contrib/quickjs/quickjs.ts";
 
 open();
-defer close();
+using _ = defer(() => close());
 
 setInt("base", 21);
 const n = evalNumber("base * 2 + Math.sqrt(16)");   // 46
