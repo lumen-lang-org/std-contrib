@@ -1,10 +1,10 @@
-# @lumen-org/markdown
+# @lumen-lang/markdown
 
 Fast Markdown → HTML renderer, written in [Lumen](https://lumen-lang.org) and
 compiled to WebAssembly. **Zero dependencies.**
 
 ```js
-import { render } from "@lumen-org/markdown";
+import { render } from "@lumen-lang/markdown";
 console.log(render("# Hello\n\nSome **bold** text."));
 ```
 

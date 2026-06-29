@@ -1,5 +1,5 @@
 {
-  "name": "@lumen-org/markdown",
+  "name": "@lumen-lang/markdown",
   "version": "0.1.0",
   "description": "Fast Markdown -> HTML renderer (Lumen) via WebAssembly. No dependencies.",
   "type": "module",
