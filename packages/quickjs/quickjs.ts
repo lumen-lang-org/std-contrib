@@ -22,6 +22,13 @@
 // The C standard library, used by the shim (snprintf/strlen).
 // @link c
 
+// On the wasm target there is no native linking. Instead the compiler fetches a
+// prebuilt wasm archive (the shim + QuickJS, compiled to wasm32-wasi) from this
+// URL and links it into the program, so the result is a single self-contained
+// wasm whose only imports are WASI -- no native install, no host engine, nothing
+// to copy. To bump the engine, rebuild the archive and replace it at this URL.
+// @wasm-link https://lumen-lang.org/package/std-contrib/quickjs/qjs-wasm.a
+
 declare function qjs_open(): void;
 declare function qjs_close(): void;
 
