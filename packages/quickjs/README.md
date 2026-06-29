@@ -100,30 +100,28 @@ call into the shim; Lumen copies the bytes at the FFI boundary, so this is safe
 for V1's single-threaded use. Multiple VMs, handle-based contexts, and exporting
 structured JS values are future revisions — see `SPEC.md`.
 
-## Web binding (wasm target)
+## Wasm target (embedded, no install)
 
 On the wasm target there is no native linking, so the `cc`/`brew`/`@link` steps
-above do not apply. Instead this package ships `quickjs.web.js`, a **web
-binding** that backs the package's FFI symbols (`qjs_*`) with a wasm build of
-QuickJS, pinned to a version here in the package. A Lumen wasm host loads it
-straight from the package URL — so a consumer needs no install and no file
-copying; the engine travels with the package.
+above do not apply. Instead the package ships `qjs-wasm.a` — the shim
+(`qjs_host.c`) plus QuickJS, prebuilt to `wasm32-wasi` — and declares it with a
+`// @wasm-link <url>` pragma in `quickjs.ts`:
 
-A host (such as the playground) compiles the program, sees it imports `qjs_*`,
-loads this module, and wires up the env table:
-
-```js
-import { createBinding } from "https://lumen-lang.org/package/std-contrib/quickjs/quickjs.web.js";
-// `getInstance` returns the running Lumen wasm instance.
-const env = await createBinding(getInstance);
-const instance = await WebAssembly.instantiate(module, { wasi_snapshot_preview1, env });
+```ts
+// @wasm-link https://lumen-lang.org/package/std-contrib/quickjs/qjs-wasm.a
 ```
 
-String arguments cross in the program's linear memory; string results are
-written into the program's exported `__lumen_ffi_buf` scratch buffer (the same
-"valid until the next call" contract as the native shim). To move providers or
-bump the engine version, edit the single import line at the top of
-`quickjs.web.js`; consumers pick it up automatically.
+When you build with `--wasm`, the compiler fetches that archive (once, cached)
+and **links it into your program**. The result is a single self-contained
+`.wasm` whose only imports are WASI — the QuickJS engine is inside the binary, so
+there is no native install, nothing to copy, and no host engine to load. Just:
+
+```sh
+lumen compile --wasm app.ts   # -> app.wasm, runs anywhere WASI runs (incl. the browser)
+```
+
+`qjs-wasm.a` is a generated artifact (quickjs-ng built with `zig cc` for
+`wasm32-wasi`); rebuild and replace it at that URL to bump the engine.
 
 ## Security
 
