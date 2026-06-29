@@ -1,0 +1,44 @@
+name: npm-publish
+# Publish an npm package only when its own packages/<name>/npm/ source changed in
+# the push, and only if that version isn't on npm yet.
+# Requires repo secret NPM_TOKEN (an npm automation/granular token for @lumen-org).
+on:
+  push:
+    branches: [main]
+    paths: ['packages/*/npm/**']
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need history to diff the push
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org   # wires NODE_AUTH_TOKEN into .npmrc
+      - name: Publish changed npm packages (new versions only)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          base="${{ github.event.before }}"
+          case "$base" in ""|0000000000000000000000000000000000000000) base="HEAD~1" ;; esac
+          # only the packages/<name>/npm dirs touched in this push
+          changed=$(git diff --name-only "$base" "${{ github.sha }}" \
+            | grep -E '^packages/[^/]+/npm/' \
+            | sed -E 's#^(packages/[^/]+/npm)/.*#\1#' | sort -u)
+          [ -n "$changed" ] || { echo "no npm folder changes"; exit 0; }
+          for dir in $changed; do
+            [ -f "$dir/package.json" ] || continue
+            name=$(node -p "require('./$dir/package.json').name")
+            ver=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "= $name@$ver already published, skipping"
+            else
+              echo "+ publishing $name@$ver"
+              ( cd "$dir" && npm publish )
+            fi
+          done

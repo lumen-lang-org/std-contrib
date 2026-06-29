@@ -1,0 +1,13 @@
+{
+  "name": "@lumen-org/markdown",
+  "version": "0.1.0",
+  "description": "Fast Markdown -> HTML renderer (Lumen) via WebAssembly. No dependencies.",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "markdown.wasm"],
+  "keywords": ["markdown", "html", "wasm", "lumen"],
+  "license": "MIT",
+  "publishConfig": { "access": "public" },
+  "repository": { "type": "git", "url": "https://github.com/lumen-lang-org/std-contrib", "directory": "packages/markdown/npm" }
+}
