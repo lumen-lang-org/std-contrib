@@ -120,8 +120,11 @@ there is no native install, nothing to copy, and no host engine to load. Just:
 lumen compile --wasm app.ts   # -> app.wasm, runs anywhere WASI runs (incl. the browser)
 ```
 
-`qjs-wasm.a` is a generated artifact (quickjs-ng built with `zig cc` for
-`wasm32-wasi`); rebuild and replace it at that URL to bump the engine.
+`qjs-wasm.a` is a **prebuilt artifact, built once per engine version** — not per
+compile. Regenerate it reproducibly with [`build-wasm.sh`](build-wasm.sh) (clones
+quickjs-ng at a pinned commit, archives it with the shim via `zig`), then publish
+it at the `@wasm-link` URL. Consumers never run this — they just `import` the
+package.
 
 ## Security
 

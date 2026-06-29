@@ -54,6 +54,24 @@ console.log(queryText("SELECT title FROM books"));      // Crafting Interpreters
 close();
 ```
 
+## Wasm target (embedded, no install)
+
+On the wasm target there is no native linking, so the `cc`/`brew`/`@link` steps
+above do not apply. The package ships `sqlite-wasm.a` — the shim plus the SQLite
+amalgamation, prebuilt to `wasm32-wasi` — and declares it in `sqlite.ts`:
+
+```ts
+// @wasm-link https://lumen-lang.org/package/std-contrib/sqlite/sqlite-wasm.a
+```
+
+`lumen compile --wasm app.ts` fetches that archive (once, cached) and links it
+in, so you get a single self-contained `.wasm` whose only imports are WASI — no
+install, nothing to copy. Use `":memory:"` databases (no host filesystem needed).
+
+`sqlite-wasm.a` is a **prebuilt artifact, built once per SQLite version** —
+regenerate it reproducibly with [`build-wasm.sh`](build-wasm.sh) and publish it
+at the `@wasm-link` URL. Consumers never run it; they just `import` the package.
+
 ## Notes
 
 `queryInt`/`queryText` return the first column of the first row — enough for
