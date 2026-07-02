@@ -53,6 +53,12 @@
       "version": "0.1.0",
       "summary": "Semantic Versioning parser, comparator, incrementer, and range evaluator.",
       "path": "packages/semver"
+    },
+    {
+      "name": "dotenv",
+      "version": "0.1.0",
+      "summary": ".env parser for key/value config strings.",
+      "path": "packages/dotenv"
     }
   ]
 }

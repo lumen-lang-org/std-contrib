@@ -33,6 +33,9 @@ them — so nothing here locks the project into a single source monorepo.
 | [`geo`](packages/geo) | 2D point helpers — distanceSq, manhattan |
 | [`quickjs`](packages/quickjs) | Embed a QuickJS JavaScript sandbox via FFI (community, C shim) |
 | [`sqlite`](packages/sqlite) | Typed SQLite access via FFI (community, C shim) |
+| [`markdown`](packages/markdown) | Pure-Lumen Markdown -> HTML renderer |
+| [`semver`](packages/semver) | Semantic Versioning parser, comparator, incrementer, and range evaluator |
+| [`dotenv`](packages/dotenv) | .env parser for key/value config strings |
 
 ## Using a package
 
