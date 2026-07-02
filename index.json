@@ -59,6 +59,12 @@
       "version": "0.1.0",
       "summary": ".env parser for key/value config strings.",
       "path": "packages/dotenv"
+    },
+    {
+      "name": "toml",
+      "version": "0.1.0",
+      "summary": "Practical TOML parser/stringifier for sections, dotted keys, typed values, and simple arrays.",
+      "path": "packages/toml"
     }
   ]
 }
