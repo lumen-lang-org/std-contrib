@@ -47,6 +47,12 @@
       "version": "0.1.0",
       "summary": "Pure-Lumen Markdown -> HTML renderer (no FFI); render(md).",
       "path": "packages/markdown"
+    },
+    {
+      "name": "semver",
+      "version": "0.1.0",
+      "summary": "Semantic Versioning parser, comparator, incrementer, and range evaluator.",
+      "path": "packages/semver"
     }
   ]
 }
