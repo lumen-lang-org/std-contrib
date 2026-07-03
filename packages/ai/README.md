@@ -43,6 +43,15 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `user(content)` | Create a user message |
 | `assistant(content)` | Create an assistant message |
 | `renderTemplate(template, keys, values)` | Replace `{{key}}` placeholders |
+| `partialTemplate(template, keys, values)` | Replace known placeholders and leave unknown ones intact |
+| `missingVariables(template, keys)` | Return placeholder names not present in `keys` |
+| `unusedVariables(template, keys)` | Return provided keys not used by the template |
+| `systemTemplate(template, keys, values)` | Render a system message template |
+| `userTemplate(template, keys, values)` | Render a user message template |
+| `assistantTemplate(template, keys, values)` | Render an assistant message template |
+| `renderChatPrompt(roles, templates, keys, values)` | Render flat `role/content` chat prompt entries |
+| `chatPromptRole(entry)` | Read the role from a rendered chat prompt entry |
+| `chatPromptContent(entry)` | Read the content from a rendered chat prompt entry |
 | `chatRequest(provider, model, messages, temperature, maxTokens)` | Build a provider-neutral chat request |
 | `aiResult(status, ok, content, raw)` | Build a provider-neutral result |
 | `providerError(provider, status, message, raw)` | Build a provider-neutral error |
@@ -84,6 +93,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
 - `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
 - `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
+- `examples/prompt-snapshot.ts` is a deterministic prompt rendering example.
 - `spec.md` and `tasks.md` track the AI package roadmap.
 
 ## Design

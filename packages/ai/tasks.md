@@ -31,14 +31,14 @@
 
 ## M2: Prompting
 
-- [ ] Add chat prompt template renderer.
-- [ ] Add `systemTemplate`, `userTemplate`, and `assistantTemplate`.
-- [ ] Add missing variable detection.
-- [ ] Add unused variable detection.
-- [ ] Add partial template application.
-- [ ] Add prompt snapshot examples.
-- [ ] Add tests for repeated variables.
-- [ ] Add tests for missing variables.
+- [x] Add chat prompt template renderer.
+- [x] Add `systemTemplate`, `userTemplate`, and `assistantTemplate`.
+- [x] Add missing variable detection.
+- [x] Add unused variable detection.
+- [x] Add partial template application.
+- [x] Add prompt snapshot examples.
+- [x] Add tests for repeated variables.
+- [x] Add tests for missing variables.
 
 ## M3: Output Parsers
 
