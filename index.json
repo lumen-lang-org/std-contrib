@@ -71,6 +71,12 @@
       "version": "0.1.0",
       "summary": "CSV parser/stringifier with quoted fields, CRLF, row helpers, and flat arrays.",
       "path": "packages/csv"
+    },
+    {
+      "name": "ai",
+      "version": "0.1.0",
+      "summary": "Typed AI helpers for OpenAI-compatible chat APIs.",
+      "path": "packages/ai"
     }
   ]
 }

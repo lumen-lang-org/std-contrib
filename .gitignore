@@ -1,0 +1,18 @@
+/.env
+/packages/ai/examples/.env
+
+# Lumen compile/test outputs are emitted in the repo root by default.
+/.lumen-*.zig
+/args
+/ai
+/csv
+/dotenv
+/geo
+/greeter
+/hello
+/markdown
+/mathx
+/semver
+/toml
+/shout
+/mistral-chat

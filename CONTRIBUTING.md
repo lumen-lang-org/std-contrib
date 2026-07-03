@@ -12,10 +12,10 @@ Then add an entry to the root `index.json`.
 
 ## Rules
 
-- **Current language only.** Use features that compile today — no `async`,
-  generics, growable arrays, `Map`/`Set`, `JSON`, or anything marked "planned"
-  on the stdlib page. If it doesn't compile with the released `lumen`, it can't
-  be merged.
+- **Current language only.** Use features that compile today. If it does not
+  compile with the released `lumen`, it cannot be merged. New stdlib features
+  such as `Map`, `Set`, and typed `JSON` are allowed once they are available in
+  the released compiler used by CI.
 - **Statically typed.** Annotate parameters and return types. No reliance on
   dynamic behavior.
 - **Tested.** Ship `test` blocks that cover the package. CI runs `lumen test` on

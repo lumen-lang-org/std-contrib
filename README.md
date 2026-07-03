@@ -38,6 +38,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`dotenv`](packages/dotenv) | .env parser for key/value config strings |
 | [`toml`](packages/toml) | Practical TOML parser/stringifier for sections, dotted keys, typed values, and simple arrays |
 | [`csv`](packages/csv) | CSV parser/stringifier with quoted fields, CRLF, row helpers, and flat arrays |
+| [`ai`](packages/ai) | Typed AI helpers for OpenAI-compatible chat APIs |
 
 ## Using a package
 
