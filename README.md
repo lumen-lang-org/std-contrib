@@ -37,6 +37,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`semver`](packages/semver) | Semantic Versioning parser, comparator, incrementer, and range evaluator |
 | [`dotenv`](packages/dotenv) | .env parser for key/value config strings |
 | [`toml`](packages/toml) | Practical TOML parser/stringifier for sections, dotted keys, typed values, and simple arrays |
+| [`csv`](packages/csv) | CSV parser/stringifier with quoted fields, CRLF, row helpers, and flat arrays |
 
 ## Using a package
 
