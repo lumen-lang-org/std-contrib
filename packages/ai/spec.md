@@ -470,12 +470,17 @@ Status: mostly complete.
 - browser runtime support before stdlib HTTP and filesystem parity
 - dynamic plugin loading
 
+## Policy Decisions
+
+- Core package modules should stay self-contained unless a cross-package
+  dependency is intentional and documented.
+- Examples may import sibling std-contrib packages when the example compiles
+  locally and the dependency is mentioned in the package README.
+
 ## Open Questions
 
 - Should public type aliases wait until Lumen supports exported types?
 - Should provider selection be string-based or function-based?
-- Should cross-package imports from `dotenv`, `csv`, and `toml` be allowed in
-  production package code or only examples?
 - Should vector storage use plain arrays first or depend on future typed array
   support?
 - Should live tests live in examples, scripts, or a `live/` folder?

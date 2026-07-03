@@ -12,22 +12,22 @@
 - [x] Ignore generated binaries and local `.env` files.
 - [x] Add live-shaped Mistral parser test.
 - [x] Add `spec.md` and `tasks.md` to README file list.
-- [ ] Decide whether examples should import other std-contrib packages.
+- [x] Decide whether examples should import other std-contrib packages.
 
 ## M1: Provider Core
 
-- [ ] Create provider-neutral request helper.
-- [ ] Create provider-neutral result helper.
-- [ ] Add provider error record.
-- [ ] Parse OpenAI-compatible error JSON.
-- [ ] Parse Mistral error JSON.
-- [ ] Parse token usage from OpenAI-compatible responses.
-- [ ] Parse token usage from Mistral responses.
-- [ ] Add model option helpers for temperature and max tokens.
-- [ ] Add stop sequence support.
-- [ ] Add provider selector for `openai`, `mistral`, and `openai-compatible`.
-- [ ] Add OpenAI live example using environment key.
-- [ ] Add local OpenAI-compatible example for Ollama or compatible gateway.
+- [x] Create provider-neutral request helper.
+- [x] Create provider-neutral result helper.
+- [x] Add provider error record.
+- [x] Parse OpenAI-compatible error JSON.
+- [x] Parse Mistral error JSON.
+- [x] Parse token usage from OpenAI-compatible responses.
+- [x] Parse token usage from Mistral responses.
+- [x] Add model option helpers for temperature and max tokens.
+- [x] Add stop sequence support.
+- [x] Add provider selector for `openai`, `mistral`, and `openai-compatible`.
+- [x] Add OpenAI live example using environment key.
+- [x] Add local OpenAI-compatible example for Ollama or compatible gateway.
 
 ## M2: Prompting
 
@@ -193,7 +193,7 @@
 
 ## M16: Integrations
 
-- [ ] Keep dotenv usage in examples only unless package policy changes.
+- [x] Keep dotenv usage in examples only unless package policy changes.
 - [ ] Add file document loader.
 - [ ] Add HTTP fetch tool.
 - [ ] Add filesystem read tool with explicit allowlist.

@@ -6,8 +6,13 @@
 
 import { systemMessage, userMessage, assistantMessage } from "./messages.ts";
 import { renderPromptTemplate } from "./prompt.ts";
-import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, readOpenAIContent, readOpenAIResult } from "./openai.ts";
-import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, readMistralContent, readMistralResult } from "./mistral.ts";
+import { buildChatRequest } from "./request.ts";
+import { makeAiResult } from "./result.ts";
+import { makeProviderError } from "./error.ts";
+import { makeModelOptions, defaultModelOptions as makeDefaultModelOptions } from "./options.ts";
+import { buildProviderChatBody } from "./provider.ts";
+import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, buildOpenAIChatBodyWithStops, readOpenAIContent, readOpenAIResult, readOpenAIError, readOpenAITokenUsage } from "./openai.ts";
+import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, buildMistralChatBodyWithStops, readMistralContent, readMistralResult, readMistralError, readMistralTokenUsage } from "./mistral.ts";
 
 export function system(content: string): LumenAiMessage {
   return systemMessage(content);
@@ -25,8 +30,36 @@ export function renderTemplate(template: string, keys: string[], values: string[
   return renderPromptTemplate(template, keys, values);
 }
 
+export function chatRequest(provider: string, model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): LumenAiChatRequest {
+  return buildChatRequest(provider, model, messages, temperature, maxTokens);
+}
+
+export function aiResult(status: int, ok: bool, content: string, raw: string): LumenAiResult {
+  return makeAiResult(status, ok, content, raw);
+}
+
+export function providerError(provider: string, status: int, message: string, raw: string): LumenAiProviderError {
+  return makeProviderError(provider, status, message, raw);
+}
+
+export function modelOptions(temperature: number, maxTokens: int): LumenAiModelOptions {
+  return makeModelOptions(temperature, maxTokens);
+}
+
+export function defaultModelOptions(): LumenAiModelOptions {
+  return makeDefaultModelOptions();
+}
+
+export function providerChatBody(provider: string, model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+  return buildProviderChatBody(provider, model, messages, temperature, maxTokens);
+}
+
 export function openAIChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
   return buildOpenAIChatBody(model, messages, temperature, maxTokens);
+}
+
+export function openAIChatBodyWithStops(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
+  return buildOpenAIChatBodyWithStops(model, messages, temperature, maxTokens, stop);
 }
 
 export function authHeaders(apiKey: string): Map<string, string> {
@@ -45,6 +78,14 @@ export function parseOpenAIResult(status: int, ok: bool, raw: string): LumenAiRe
   return readOpenAIResult(status, ok, raw);
 }
 
+export function parseOpenAIError(status: int, raw: string): LumenAiProviderError {
+  return readOpenAIError(status, raw);
+}
+
+export function parseOpenAITokenUsage(raw: string): LumenAiTokenUsage {
+  return readOpenAITokenUsage(raw);
+}
+
 export function chatOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
   return runOpenAIChatWithBaseUrl(baseUrl, apiKey, model, messages);
 }
@@ -57,12 +98,24 @@ export function mistralChatBody(model: string, messages: LumenAiMessage[], tempe
   return buildMistralChatBody(model, messages, temperature, maxTokens);
 }
 
+export function mistralChatBodyWithStops(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
+  return buildMistralChatBodyWithStops(model, messages, temperature, maxTokens, stop);
+}
+
 export function parseMistralContent(raw: string): string {
   return readMistralContent(raw);
 }
 
 export function parseMistralResult(status: int, ok: bool, raw: string): LumenAiResult {
   return readMistralResult(status, ok, raw);
+}
+
+export function parseMistralError(status: int, raw: string): LumenAiProviderError {
+  return readMistralError(status, raw);
+}
+
+export function parseMistralTokenUsage(raw: string): LumenAiTokenUsage {
+  return readMistralTokenUsage(raw);
 }
 
 export function chatMistralWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
@@ -92,6 +145,49 @@ test("render template", () => {
   expect(out == "Write a short note to Aymen. short matters.");
 });
 
+test("provider-neutral chat request", () => {
+  let messages = [system("You are helpful."), user("Say hi")];
+  let req = chatRequest("mistral", "mistral-large-latest", messages, 0.3, 128);
+  expect(req.provider == "mistral");
+  expect(req.model == "mistral-large-latest");
+  expect(req.messages.length == 2);
+  expect(req.messages[1].content == "Say hi");
+  expect(req.max_tokens == 128);
+});
+
+test("provider-neutral result", () => {
+  let result = aiResult(200, true, "ok", "{\"content\":\"ok\"}");
+  expect(result.status == 200);
+  expect(result.ok);
+  expect(result.content == "ok");
+  expect(result.raw.includes("content"));
+});
+
+test("provider-neutral error", () => {
+  let err = providerError("mistral", 401, "Unauthorized", "{\"detail\":\"Unauthorized\"}");
+  expect(err.provider == "mistral");
+  expect(err.status == 401);
+  expect(err.message == "Unauthorized");
+  expect(err.raw.includes("Unauthorized"));
+});
+
+test("model options", () => {
+  let opts = modelOptions(0.4, 256);
+  expect(opts.max_tokens == 256);
+  let defaults = defaultModelOptions();
+  expect(defaults.max_tokens == 1024);
+});
+
+test("provider chat body selector", () => {
+  let messages = [user("Say hi")];
+  let openaiBody = providerChatBody("openai-compatible", "local-model", messages, 0.1, 16);
+  let mistralBody = providerChatBody("mistral", "mistral-large-latest", messages, 0.1, 16);
+  let missingBody = providerChatBody("unknown", "x", messages, 0.1, 16);
+  expect(openaiBody.includes("\"model\":\"local-model\""));
+  expect(mistralBody.includes("\"model\":\"mistral-large-latest\""));
+  expect(missingBody == "");
+});
+
 test("openai request body", () => {
   let messages = [system("You are helpful."), user("Say hi")];
   let body = openAIChatBody("gpt-test", messages, 0.2, 64);
@@ -100,6 +196,8 @@ test("openai request body", () => {
   expect(body.includes("\"content\":\"Say hi\""));
   expect(body.includes("\"temperature\":2e-1") || body.includes("\"temperature\":0.2"));
   expect(body.includes("\"max_tokens\":64"));
+  let stopped = openAIChatBodyWithStops("gpt-test", messages, 0.2, 64, ["END"]);
+  expect(stopped.includes("\"stop\":[\"END\"]"));
 });
 
 test("auth headers", () => {
@@ -120,6 +218,22 @@ test("parse openai content", () => {
   expect(result.content == "Hello from Lumen");
 });
 
+test("parse openai error", () => {
+  let raw = "{\"error\":{\"message\":\"Invalid API key\",\"type\":\"auth_error\",\"code\":\"invalid_api_key\"}}";
+  let err = parseOpenAIError(401, raw);
+  expect(err.provider == "openai");
+  expect(err.status == 401);
+  expect(err.message == "Invalid API key");
+});
+
+test("parse openai token usage", () => {
+  let raw = "{\"id\":\"chatcmpl-test\",\"object\":\"chat.completion\",\"created\":1,\"model\":\"gpt-test\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14},\"choices\":[]}";
+  let usage = parseOpenAITokenUsage(raw);
+  expect(usage.prompt_tokens == 10);
+  expect(usage.completion_tokens == 4);
+  expect(usage.total_tokens == 14);
+});
+
 test("malformed response returns empty content", () => {
   expect(parseOpenAIContent("not json") == "");
 });
@@ -131,6 +245,8 @@ test("mistral request body", () => {
   expect(body.includes("\"role\":\"user\""));
   expect(body.includes("\"content\":\"Say hi\""));
   expect(body.includes("\"max_tokens\":32"));
+  let stopped = mistralChatBodyWithStops("mistral-large-latest", messages, 0.1, 32, ["DONE"]);
+  expect(stopped.includes("\"stop\":[\"DONE\"]"));
 });
 
 test("parse mistral content", () => {
@@ -140,6 +256,22 @@ test("parse mistral content", () => {
   expect(result.ok);
   expect(result.status == 200);
   expect(result.content == "Bonjour from Mistral");
+});
+
+test("parse mistral error", () => {
+  let raw = "{\"detail\":\"Unauthorized\"}";
+  let err = parseMistralError(401, raw);
+  expect(err.provider == "mistral");
+  expect(err.status == 401);
+  expect(err.message == "Unauthorized");
+});
+
+test("parse mistral token usage", () => {
+  let raw = "{\"id\":\"cmpl-test\",\"created\":1,\"model\":\"mistral-large-latest\",\"usage\":{\"prompt_tokens\":15,\"total_tokens\":19,\"completion_tokens\":4,\"prompt_tokens_details\":{\"cached_tokens\":0}},\"object\":\"chat.completion\",\"choices\":[]}";
+  let usage = parseMistralTokenUsage(raw);
+  expect(usage.prompt_tokens == 15);
+  expect(usage.completion_tokens == 4);
+  expect(usage.total_tokens == 19);
 });
 
 test("parse live-shaped mistral content", () => {
