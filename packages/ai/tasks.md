@@ -42,15 +42,15 @@
 
 ## M3: Output Parsers
 
-- [ ] Add text parser.
-- [ ] Add line parser.
-- [ ] Add string list parser.
-- [ ] Add enum choice parser.
-- [ ] Add first fenced block extractor.
-- [ ] Add first JSON object extractor.
-- [ ] Add typed JSON parse result helper.
-- [ ] Add retry prompt helper for invalid output.
-- [ ] Add parser tests with malformed model output.
+- [x] Add text parser.
+- [x] Add line parser.
+- [x] Add string list parser.
+- [x] Add enum choice parser.
+- [x] Add first fenced block extractor.
+- [x] Add first JSON object extractor.
+- [x] Add typed JSON parse result helper.
+- [x] Add retry prompt helper for invalid output.
+- [x] Add parser tests with malformed model output.
 
 ## M4: Structured Output
 

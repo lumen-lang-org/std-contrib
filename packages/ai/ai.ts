@@ -11,8 +11,13 @@ import { makeAiResult } from "./result.ts";
 import { makeProviderError } from "./error.ts";
 import { makeModelOptions, defaultModelOptions as makeDefaultModelOptions } from "./options.ts";
 import { buildProviderChatBody } from "./provider.ts";
+import { parseTextOutput as readTextOutput, parseLineOutput as readLineOutput, parseStringListOutput as readStringListOutput, parseChoiceOutput as readChoiceOutput, firstFencedBlockOutput as readFirstFencedBlockOutput, firstJsonObjectOutput as readFirstJsonObjectOutput, typedJsonInputOutput as readTypedJsonInputOutput, retryPromptOutput as buildRetryPromptOutput } from "./output.ts";
 import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, buildOpenAIChatBodyWithStops, readOpenAIContent, readOpenAIResult, readOpenAIError, readOpenAITokenUsage } from "./openai.ts";
 import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, buildMistralChatBodyWithStops, readMistralContent, readMistralResult, readMistralError, readMistralTokenUsage } from "./mistral.ts";
+
+type JsonName = {
+  name: string,
+};
 
 export function system(content: string): LumenAiMessage {
   return systemMessage(content);
@@ -88,6 +93,38 @@ export function defaultModelOptions(): LumenAiModelOptions {
 
 export function providerChatBody(provider: string, model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
   return buildProviderChatBody(provider, model, messages, temperature, maxTokens);
+}
+
+export function parseText(raw: string): string {
+  return readTextOutput(raw);
+}
+
+export function parseLines(raw: string): string[] {
+  return readLineOutput(raw);
+}
+
+export function parseStringList(raw: string): string[] {
+  return readStringListOutput(raw);
+}
+
+export function parseChoice(raw: string, choices: string[], fallback: string): string {
+  return readChoiceOutput(raw, choices, fallback);
+}
+
+export function firstFencedBlock(raw: string): string {
+  return readFirstFencedBlockOutput(raw);
+}
+
+export function firstJsonObject(raw: string): string {
+  return readFirstJsonObjectOutput(raw);
+}
+
+export function typedJsonInput(raw: string): string {
+  return readTypedJsonInputOutput(raw);
+}
+
+export function retryPrompt(instruction: string, invalidOutput: string, errorMessage: string): string {
+  return buildRetryPromptOutput(instruction, invalidOutput, errorMessage);
 }
 
 export function openAIChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
@@ -266,6 +303,58 @@ test("provider chat body selector", () => {
   expect(openaiBody.includes("\"model\":\"local-model\""));
   expect(mistralBody.includes("\"model\":\"mistral-large-latest\""));
   expect(missingBody == "");
+});
+
+test("parse text output", () => {
+  expect(parseText("hello") == "hello");
+});
+
+test("parse line output", () => {
+  let lines = parseLines("a\nb\nc");
+  expect(lines.length == 3);
+  expect(lines[1] == "b");
+  let empty = parseLines("");
+  expect(empty.length == 0);
+});
+
+test("parse string list output", () => {
+  let items = parseStringList("- alpha\n* beta\n3. gamma\nplain\n");
+  expect(items.length == 4);
+  expect(items[0] == "alpha");
+  expect(items[1] == "beta");
+  expect(items[2] == "gamma");
+  expect(items[3] == "plain");
+});
+
+test("parse choice output", () => {
+  expect(parseChoice(" yes ", ["yes", "no"], "unknown") == "yes");
+  expect(parseChoice("maybe", ["yes", "no"], "unknown") == "unknown");
+});
+
+test("first fenced block output", () => {
+  let block = firstFencedBlock("before\n```json\n{\"ok\":true}\n```\nafter");
+  expect(block == "{\"ok\":true}");
+  expect(firstFencedBlock("no fence") == "");
+});
+
+test("first json object output", () => {
+  let json = firstJsonObject("prefix {\"a\":{\"b\":\"}\"}} suffix");
+  expect(json == "{\"a\":{\"b\":\"}\"}}");
+  expect(firstJsonObject("no object") == "");
+});
+
+test("typed json input output", () => {
+  let json = typedJsonInput("answer:\n```json\n{\"name\":\"Ada\"}\n```");
+  const parsed: JsonName = JSON.parse<JsonName>(json);
+  expect(parsed.name == "Ada");
+});
+
+test("retry prompt output", () => {
+  let prompt = retryPrompt("Return JSON.", "nope", "missing object");
+  expect(prompt.includes("Return JSON."));
+  expect(prompt.includes("nope"));
+  expect(prompt.includes("missing object"));
+  expect(prompt.includes("Return only corrected output."));
 });
 
 test("openai request body", () => {

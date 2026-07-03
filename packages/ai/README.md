@@ -58,6 +58,14 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `modelOptions(temperature, maxTokens)` | Build provider-neutral model options |
 | `defaultModelOptions()` | Build default model options |
 | `providerChatBody(provider, model, messages, temperature, maxTokens)` | Build provider-specific chat JSON by provider name |
+| `parseText(raw)` | Return raw model output as text |
+| `parseLines(raw)` | Split model output into lines |
+| `parseStringList(raw)` | Parse common bullet/number/plain line lists |
+| `parseChoice(raw, choices, fallback)` | Parse one allowed string choice |
+| `firstFencedBlock(raw)` | Extract the first triple-backtick block |
+| `firstJsonObject(raw)` | Extract the first balanced JSON object |
+| `typedJsonInput(raw)` | Extract the best JSON string to pass to `JSON.parse<T>` |
+| `retryPrompt(instruction, invalidOutput, errorMessage)` | Build a correction prompt after invalid output |
 | `openAIChatBody(model, messages, temperature, maxTokens)` | Build request JSON |
 | `openAIChatBodyWithStops(model, messages, temperature, maxTokens, stop)` | Build request JSON with stop sequences |
 | `authHeaders(apiKey)` | Build OpenAI-compatible HTTP headers |
@@ -86,6 +94,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 - `usage.ts` contains provider-neutral token usage helpers.
 - `options.ts` contains provider-neutral model option helpers.
 - `provider.ts` contains provider selection helpers.
+- `output.ts` contains output parser helpers.
 - `prompt.ts` contains prompt templating.
 - `openai.ts` contains OpenAI-compatible request, response, and HTTP helpers.
 - `mistral.ts` contains Mistral request, response, and HTTP helpers.
