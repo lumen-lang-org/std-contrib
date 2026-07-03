@@ -65,6 +65,12 @@
       "version": "0.1.0",
       "summary": "Practical TOML parser/stringifier for sections, dotted keys, typed values, and simple arrays.",
       "path": "packages/toml"
+    },
+    {
+      "name": "csv",
+      "version": "0.1.0",
+      "summary": "CSV parser/stringifier with quoted fields, CRLF, row helpers, and flat arrays.",
+      "path": "packages/csv"
     }
   ]
 }
