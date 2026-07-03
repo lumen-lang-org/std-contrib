@@ -20,8 +20,10 @@ Then add an entry to the root `index.json`.
   dynamic behavior.
 - **Tested.** Ship `test` blocks that cover the package. CI runs `lumen test` on
   every package.
-- **Self-contained.** A package should not depend on another package yet (no
-  cross-package imports until the module system supports it).
+- **Self-contained core.** A package's public source should stay self-contained
+  unless a dependency is intentional and documented. Examples may import sibling
+  std-contrib packages when the example compiles locally and the dependency is
+  mentioned in the package README.
 - **Small and focused.** One clear concern per package.
 - **Naming.** Lowercase, short, descriptive directory name (`mathx`, `geo`).
 

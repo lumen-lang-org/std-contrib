@@ -43,16 +43,28 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `user(content)` | Create a user message |
 | `assistant(content)` | Create an assistant message |
 | `renderTemplate(template, keys, values)` | Replace `{{key}}` placeholders |
+| `chatRequest(provider, model, messages, temperature, maxTokens)` | Build a provider-neutral chat request |
+| `aiResult(status, ok, content, raw)` | Build a provider-neutral result |
+| `providerError(provider, status, message, raw)` | Build a provider-neutral error |
+| `modelOptions(temperature, maxTokens)` | Build provider-neutral model options |
+| `defaultModelOptions()` | Build default model options |
+| `providerChatBody(provider, model, messages, temperature, maxTokens)` | Build provider-specific chat JSON by provider name |
 | `openAIChatBody(model, messages, temperature, maxTokens)` | Build request JSON |
+| `openAIChatBodyWithStops(model, messages, temperature, maxTokens, stop)` | Build request JSON with stop sequences |
 | `authHeaders(apiKey)` | Build OpenAI-compatible HTTP headers |
 | `parseOpenAIContent(raw)` | Extract the first assistant message from response JSON |
 | `parseOpenAIResult(status, ok, raw)` | Build a normalized result record |
+| `parseOpenAIError(status, raw)` | Parse an OpenAI-compatible error JSON body |
+| `parseOpenAITokenUsage(raw)` | Parse OpenAI-compatible token usage |
 | `chatOpenAI(apiKey, model, messages)` | POST to `https://api.openai.com/v1/chat/completions` |
 | `chatOpenAIWithBaseUrl(baseUrl, apiKey, model, messages)` | POST to another OpenAI-compatible base URL |
 | `mistralChatBody(model, messages, temperature, maxTokens)` | Build Mistral request JSON |
+| `mistralChatBodyWithStops(model, messages, temperature, maxTokens, stop)` | Build Mistral request JSON with stop sequences |
 | `mistralAuthHeaders(apiKey)` | Build Mistral HTTP headers |
 | `parseMistralContent(raw)` | Extract the first assistant message from Mistral response JSON |
 | `parseMistralResult(status, ok, raw)` | Build a normalized Mistral result record |
+| `parseMistralError(status, raw)` | Parse a Mistral error JSON body |
+| `parseMistralTokenUsage(raw)` | Parse Mistral token usage |
 | `chatMistral(apiKey, model, messages)` | POST to `https://api.mistral.ai/v1/chat/completions` |
 | `chatMistralWithBaseUrl(baseUrl, apiKey, model, messages)` | POST to another Mistral-compatible base URL |
 
@@ -60,11 +72,18 @@ lumen compile packages/ai/examples/mistral-chat.ts
 
 - `ai.ts` is the public entry point.
 - `messages.ts` contains chat message constructors and the shared message type.
+- `request.ts` contains provider-neutral chat request helpers.
+- `error.ts` contains provider-neutral error helpers.
+- `usage.ts` contains provider-neutral token usage helpers.
+- `options.ts` contains provider-neutral model option helpers.
+- `provider.ts` contains provider selection helpers.
 - `prompt.ts` contains prompt templating.
 - `openai.ts` contains OpenAI-compatible request, response, and HTTP helpers.
 - `mistral.ts` contains Mistral request, response, and HTTP helpers.
 - `headers.ts` and `result.ts` contain shared provider helpers.
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
+- `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
+- `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
 - `spec.md` and `tasks.md` track the AI package roadmap.
 
 ## Design
