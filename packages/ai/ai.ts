@@ -5,7 +5,7 @@
 // Run: lumen test packages/ai/ai.ts
 
 import { systemMessage, userMessage, assistantMessage } from "./messages.ts";
-import { renderPromptTemplate } from "./prompt.ts";
+import { renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt.ts";
 import { buildChatRequest } from "./request.ts";
 import { makeAiResult } from "./result.ts";
 import { makeProviderError } from "./error.ts";
@@ -28,6 +28,42 @@ export function assistant(content: string): LumenAiMessage {
 
 export function renderTemplate(template: string, keys: string[], values: string[]): string {
   return renderPromptTemplate(template, keys, values);
+}
+
+export function partialTemplate(template: string, keys: string[], values: string[]): string {
+  return renderPromptTemplate(template, keys, values);
+}
+
+export function missingVariables(template: string, keys: string[]): string[] {
+  return readMissingTemplateVariables(template, keys);
+}
+
+export function unusedVariables(template: string, keys: string[]): string[] {
+  return readUnusedTemplateVariables(template, keys);
+}
+
+export function systemTemplate(template: string, keys: string[], values: string[]): LumenAiMessage {
+  return system(renderPromptTemplate(template, keys, values));
+}
+
+export function userTemplate(template: string, keys: string[], values: string[]): LumenAiMessage {
+  return user(renderPromptTemplate(template, keys, values));
+}
+
+export function assistantTemplate(template: string, keys: string[], values: string[]): LumenAiMessage {
+  return assistant(renderPromptTemplate(template, keys, values));
+}
+
+export function renderChatPrompt(roles: string[], templates: string[], keys: string[], values: string[]): string[] {
+  return renderFlatChatPrompt(roles, templates, keys, values);
+}
+
+export function chatPromptRole(entry: string): string {
+  return readChatPromptRole(entry);
+}
+
+export function chatPromptContent(entry: string): string {
+  return readChatPromptContent(entry);
 }
 
 export function chatRequest(provider: string, model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): LumenAiChatRequest {
@@ -143,6 +179,50 @@ test("render template", () => {
     ["short", "Aymen"],
   );
   expect(out == "Write a short note to Aymen. short matters.");
+});
+
+test("missing variables", () => {
+  let missing = missingVariables("Hello {{name}} from {{place}} and {{name}}", ["name"]);
+  expect(missing.length == 1);
+  expect(missing[0] == "place");
+});
+
+test("unused variables", () => {
+  let unused = unusedVariables("Hello {{name}}", ["name", "place", "tone", "place"]);
+  expect(unused.length == 2);
+  expect(unused[0] == "place");
+  expect(unused[1] == "tone");
+});
+
+test("partial template", () => {
+  let out = partialTemplate("Hello {{name}} from {{place}}", ["name"], ["Aymen"]);
+  expect(out == "Hello Aymen from {{place}}");
+});
+
+test("render chat prompt", () => {
+  let entries = renderChatPrompt(
+    ["system", "user"],
+    ["You are {{tone}}.", "Explain {{topic}}."],
+    ["tone", "topic"],
+    ["concise", "Lumen"],
+  );
+  expect(entries.length == 2);
+  expect(chatPromptRole(entries[0]) == "system");
+  expect(chatPromptContent(entries[0]) == "You are concise.");
+  expect(chatPromptRole(entries[1]) == "user");
+  expect(chatPromptContent(entries[1]) == "Explain Lumen.");
+});
+
+test("message templates", () => {
+  let s = systemTemplate("You are {{tone}}.", ["tone"], ["brief"]);
+  let u = userTemplate("Explain {{topic}}.", ["topic"], ["Lumen"]);
+  let a = assistantTemplate("Answer: {{answer}}", ["answer"], ["ok"]);
+  expect(s.role == "system");
+  expect(s.content == "You are brief.");
+  expect(u.role == "user");
+  expect(u.content == "Explain Lumen.");
+  expect(a.role == "assistant");
+  expect(a.content == "Answer: ok");
 });
 
 test("provider-neutral chat request", () => {
