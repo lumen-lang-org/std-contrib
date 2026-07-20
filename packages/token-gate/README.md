@@ -21,12 +21,31 @@ Measured against the Rust `rtk` proxy on the same machine:
 - `git diff` / `git show` — diffstat only, with a hint to run the plain
   command for hunks
 - `ls` — names + human sizes, permission/owner columns dropped, dirs marked `/`
+- `find` — paths grouped by top-level directory with counts and examples
+- `du` — largest entries first, top 20
 - `grep` / `rg` — max 3 matches per file, `+N more matches` marker
+- `ps`, `docker ps` / `docker images`, `kubectl get` — table header + capped
+  rows (`... +N more rows`)
+- linters/compilers (`tsc`, `eslint`, `cargo build`/`check`/`clippy`, `ruff`,
+  `mypy`) — errors and warnings only, plus a one-line verdict
 - test runners (`zig build`, `cargo test`, `npm test`, `go test`, `pytest`,
   `jest`) — failures/errors/summary only, plus a one-line verdict
 - everything else — ANSI-strip, blank-line drop, consecutive-duplicate
   collapse (`same  [x3]`), head+tail truncation (40-line cap)
 - always propagates the wrapped command's exit status
+
+## Savings ledger
+
+Every call appends `rawBytes outBytes` to `~/.tkg-log`. `tkg gain` reports the
+running total:
+
+```
+$ tkg gain
+calls:  5
+raw:    36938 bytes
+out:    1984 bytes
+saved:  34954 bytes (94.0%), ~8738 tokens
+```
 
 ## Public functions
 
@@ -59,27 +78,19 @@ lumen compile --release-fast packages/token-gate/examples/tkg.ts
 
 ## Use with Claude Code
 
-Route Bash commands through `tkg` with a PreToolUse hook in
-`.claude/settings.json`:
+A ready PreToolUse hook ships in [`hook/`](hook):
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "/path/to/tkg-rewrite.sh" }
-        ]
-      }
-    ]
-  }
-}
+- `hook/tkg-hook.sh` — reads the tool event on stdin and rewrites a single
+  supported command to `tkg <command>`. Anything with a pipe, redirect, or
+  `&&`/`||`/`;`, and any unsupported command, passes through untouched. Requires
+  `tkg` on `PATH` (or `TKG_BIN`) and `jq`; fail-open on any error.
+- `hook/settings.snippet.json` — drop into `.claude/settings.json`, pointing
+  `command` at the absolute path of `tkg-hook.sh`.
+
+```sh
+chmod +x hook/tkg-hook.sh
+# then merge hook/settings.snippet.json into .claude/settings.json
 ```
-
-where `tkg-rewrite.sh` prefixes supported commands (`git status`, `git log`,
-`ls`, `grep`, test runners) with the `tkg` binary. Unsupported commands pass
-through untouched.
 
 ## Tests
 
