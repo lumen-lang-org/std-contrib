@@ -24,6 +24,8 @@ Measured against the Rust `rtk` proxy on the same machine:
 - `find` — paths grouped by top-level directory with counts and examples
 - `du` — largest entries first, top 20
 - `grep` / `rg` — max 3 matches per file, `+N more matches` marker
+- `cat` / `head` / `tail` — line-numbered; a long file keeps head + tail with
+  an elision marker pointing the model to Read the middle if it needs it
 - `ps`, `docker ps` / `docker images`, `kubectl get` — table header + capped
   rows (`... +N more rows`)
 - linters/compilers (`tsc`, `eslint`, `cargo build`/`check`/`clippy`, `ruff`,

@@ -19,3 +19,7 @@
 /openai-chat
 /openai-compatible-chat
 /prompt-snapshot
+/tkg
+/cidx
+/.cidx
+/.tkg-log
