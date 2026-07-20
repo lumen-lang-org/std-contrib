@@ -144,8 +144,11 @@ export function findSymbol(paths: string[], outlines: string[][], query: string)
       const colon = entry.lastIndexOf(":");
       const name = entry.substring(0, colon);
       const lineNo = entry.substring(colon + 1);
-      if (name === query) exact.push(paths[i] + ":" + lineNo + " " + name);
-      else if (name.startsWith(query)) prefix.push(paths[i] + ":" + lineNo + " " + name);
+      // Match the full name (`Stack.push`) or the unqualified tail (`push`).
+      const dot = name.lastIndexOf(".");
+      const tail = dot >= 0 ? name.substring(dot + 1) : name;
+      if (name === query || tail === query) exact.push(paths[i] + ":" + lineNo + " " + name);
+      else if (name.startsWith(query) || tail.startsWith(query)) prefix.push(paths[i] + ":" + lineNo + " " + name);
     }
   }
   if (exact.length > 0) return exact;
@@ -159,7 +162,144 @@ export function skipDir(name: string): bool {
     name === "__pycache__" || name === "vendor" || name === "build";
 }
 
+// --- class members (TS) ---
+
+function isMemberKeyword(name: string): bool {
+  return name === "if" || name === "for" || name === "while" || name === "switch" ||
+    name === "catch" || name === "return" || name === "do" || name === "else" ||
+    name === "new" || name === "await" || name === "yield" || name === "constructor" ||
+    name === "function" || name === "throw" || name === "typeof";
+}
+
+// An indented TypeScript class member (`method(`, `get x()`, `async run(`), or
+// "" when the line is not a member declaration. Caller supplies class context.
+export function classMemberOnLine(line: string, lang: string): string {
+  if (lang !== "ts") return "";
+  if (!(line.startsWith(" ") || line.startsWith("\t"))) return "";
+  let l = line.trimStart();
+  // Strip leading modifiers, in any order.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const kw of ["public ", "private ", "protected ", "static ", "async ", "readonly ", "abstract ", "override "]) {
+      if (l.startsWith(kw)) { l = l.substring(kw.length); changed = true; }
+    }
+  }
+  // get/set accessors keep their property name.
+  if (l.startsWith("get ") || l.startsWith("set ")) l = l.substring(4);
+  const name = identAt(l, 0);
+  if (name.length === 0 || isMemberKeyword(name)) return "";
+  // Must be a call-like member: `name(` or `name<...>(` (generic method).
+  const after = l.substring(name.length);
+  const t = after.trimStart();
+  if (t.startsWith("(") || t.startsWith("<")) return name;
+  return "";
+}
+
+// Top-level symbols plus TS class members as `Class.member:line`. Class context
+// is the most recent top-level `class`/`interface`, cleared when another
+// top-level declaration or a column-0 `}` closes it.
+export function outlineDeep(src: string, lang: string): string[] {
+  let out: string[] = [];
+  const lines = src.split("\n");
+  let curClass = "";
+  for (let i = 0; i < lines.length; i = i + 1) {
+    const line = lines[i];
+    const top = symbolOnLine(line, lang);
+    if (top.length > 0) {
+      out.push(top + ":" + (i + 1));
+      if (lang === "ts" && (line.indexOf("class ") >= 0 || line.indexOf("interface ") >= 0)) curClass = top;
+      else curClass = "";
+      continue;
+    }
+    // A column-0 closing brace ends the current class body.
+    if (line.startsWith("}")) { curClass = ""; continue; }
+    if (curClass.length > 0) {
+      const m = classMemberOnLine(line, lang);
+      if (m.length > 0) out.push(curClass + "." + m + ":" + (i + 1));
+    }
+  }
+  return out;
+}
+
+// --- references (who calls X) ---
+
+function identCharBefore(s: string, i: int): bool {
+  if (i <= 0) return false;
+  const c = s.charAt(i - 1);
+  return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === "_";
+}
+
+// 1-based line numbers where `name` appears as a whole-word call (`name(`),
+// excluding its own definition line (defLine, 0 to keep all).
+export function refLinesInSource(src: string, name: string, defLine: int): int[] {
+  let out: int[] = [];
+  const lines = src.split("\n");
+  for (let i = 0; i < lines.length; i = i + 1) {
+    if (i + 1 === defLine) continue;
+    const line = lines[i];
+    let from = 0;
+    let found = false;
+    while (from <= line.length - name.length) {
+      const idx = line.indexOf(name, from);
+      if (idx < 0) break;
+      const end = idx + name.length;
+      // Whole word, immediately followed by `(` (allowing a generic `<`).
+      const nextOk = end < line.length && (line.charAt(end) === "(" || line.charAt(end) === "<");
+      if (!identCharBefore(line, idx) && nextOk) { found = true; break; }
+      from = idx + 1;
+    }
+    if (found) out.push(i + 1);
+  }
+  return out;
+}
+
+// Total whole-word call references to `name` across all sources (importance
+// signal, PageRank's cheap cousin).
+export function countRefs(srcs: string[], name: string): int {
+  let total = 0;
+  for (const src of srcs) total = total + refLinesInSource(src, name, 0).length;
+  return total;
+}
+
 // --- tests ---
+
+test("classMemberOnLine detects members and skips control flow", () => {
+  expect(classMemberOnLine("  push(x: T): void {", "ts")).toBe("push");
+  expect(classMemberOnLine("  async fetchAll(): Promise<void> {", "ts")).toBe("fetchAll");
+  expect(classMemberOnLine("  get celsius(): number {", "ts")).toBe("celsius");
+  expect(classMemberOnLine("  private v: number = 0;", "ts")).toBe("");
+  expect(classMemberOnLine("  if (x > 0) {", "ts")).toBe("");
+  expect(classMemberOnLine("  for (const y of xs) {", "ts")).toBe("");
+  expect(classMemberOnLine("function top() {", "ts")).toBe("");
+});
+
+test("outlineDeep includes qualified members", () => {
+  const src = "class Stack {\n  push(x: number): void {}\n  pop(): number { return 0; }\n}\nfunction free() {}\n";
+  const r = outlineDeep(src, "ts");
+  expect(r.length).toBe(4);
+  expect(r[0]).toBe("Stack:1");
+  expect(r[1]).toBe("Stack.push:2");
+  expect(r[2]).toBe("Stack.pop:3");
+  expect(r[3]).toBe("free:5");
+});
+
+test("refLinesInSource finds whole-word calls only", () => {
+  const src = "run();\nmyRun();\nx = run(1) + 2;\nfunction run() {}\n";
+  const r = refLinesInSource(src, "run", 4);
+  expect(r.length).toBe(2);
+  expect(r[0]).toBe(1);
+  expect(r[1]).toBe(3);
+});
+
+test("countRefs sums across sources", () => {
+  const a = "foo();\nfoo();\n";
+  const b = "bar(); foo();\n";
+  expect(countRefs([a, b], "foo")).toBe(3);
+  expect(countRefs([a, b], "bar")).toBe(1);
+});
+
+// --- original tests ---
 
 test("ts function and class", () => {
   expect(symbolOnLine("export function greet(name: string): string {", "ts")).toBe("greet");
