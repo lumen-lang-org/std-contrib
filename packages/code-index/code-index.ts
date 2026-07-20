@@ -18,6 +18,9 @@ export function langOf(path: string): string {
   if (path.endsWith(".py")) return "py";
   if (path.endsWith(".rs")) return "rs";
   if (path.endsWith(".go")) return "go";
+  if (path.endsWith(".java")) return "java";
+  if (path.endsWith(".c") || path.endsWith(".h")) return "c";
+  if (path.endsWith(".cpp") || path.endsWith(".cc") || path.endsWith(".hpp")) return "c";
   return "";
 }
 
@@ -112,7 +115,63 @@ export function symbolOnLine(line: string, lang: string): string {
     if (n.length > 0) return n;
     return "";
   }
+  if (lang === "java") {
+    // Types at any indent (after modifiers); methods are class members.
+    let l = line.trimStart();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const kw of ["public ", "private ", "protected ", "static ", "final ", "abstract ", "sealed "]) {
+        if (l.startsWith(kw)) { l = l.substring(kw.length); changed = true; }
+      }
+    }
+    let n = afterKeyword(l, "class ");
+    if (n.length > 0) return n;
+    n = afterKeyword(l, "interface ");
+    if (n.length > 0) return n;
+    n = afterKeyword(l, "enum ");
+    if (n.length > 0) return n;
+    n = afterKeyword(l, "record ");
+    if (n.length > 0) return n;
+    return "";
+  }
+  if (lang === "c") {
+    // Top-level only. struct/enum/union tags, and function definitions
+    // (`ret name(args) {` at column 0, not a call or control keyword).
+    if (line.startsWith(" ") || line.startsWith("\t") || line.startsWith("#")) return "";
+    let n = afterKeyword(line, "struct ");
+    if (n.length > 0) return n;
+    n = afterKeyword(line, "enum ");
+    if (n.length > 0) return n;
+    n = afterKeyword(line, "union ");
+    if (n.length > 0) return n;
+    n = afterKeyword(line, "class ");
+    if (n.length > 0) return n;
+    // A function definition: an identifier immediately before the first '(',
+    // on a line that opens a body or continues a signature.
+    const paren = line.indexOf("(");
+    if (paren <= 0) return "";
+    const trimmedEnd = line.trimEnd();
+    const last = trimmedEnd.charAt(trimmedEnd.length - 1);
+    if (last !== "{" && last !== ")" && last !== ",") return "";
+    const name = identBeforeParen(line, paren);
+    if (name.length === 0 || isMemberKeyword(name) || name === "sizeof") return "";
+    return name;
+  }
   return "";
+}
+
+// The identifier ending immediately before position `paren` (the '(' index).
+function identBeforeParen(s: string, paren: int): string {
+  let end = paren;
+  while (end > 0 && s.charAt(end - 1) === " ") end = end - 1;
+  let start = end;
+  while (start > 0) {
+    const c = s.charAt(start - 1);
+    if ((c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === "_") start = start - 1;
+    else break;
+  }
+  return s.substring(start, end);
 }
 
 // --- whole-source outline ---
@@ -262,7 +321,48 @@ export function countRefs(srcs: string[], name: string): int {
   return total;
 }
 
+// --- persistent index cache ---
+//
+// The cache file is one line per source file: `path\tsym:line,sym:line,...`.
+// `cidx build` writes it once; `find`/`map` read it back instantly instead of
+// re-walking and re-parsing the tree.
+
+// One cache line for a file (""  when it has no symbols).
+export function cacheLine(path: string, outline: string[]): string {
+  if (outline.length === 0) return "";
+  return path + "\t" + outline.join(",");
+}
+
+// The path recorded on a cache line.
+export function cachePath(line: string): string {
+  const tab = line.indexOf("\t");
+  return tab < 0 ? line : line.substring(0, tab);
+}
+
+// The outline entries recorded on a cache line.
+export function cacheOutline(line: string): string[] {
+  const tab = line.indexOf("\t");
+  if (tab < 0) return [];
+  const rest = line.substring(tab + 1);
+  if (rest.length === 0) return [];
+  return rest.split(",");
+}
+
 // --- tests ---
+
+test("cache round-trips path and outline", () => {
+  const line = cacheLine("src/x.ts", ["a:1", "B.m:4"]);
+  expect(line).toBe("src/x.ts\ta:1,B.m:4");
+  expect(cachePath(line)).toBe("src/x.ts");
+  const o = cacheOutline(line);
+  expect(o.length).toBe(2);
+  expect(o[0]).toBe("a:1");
+  expect(o[1]).toBe("B.m:4");
+});
+
+test("cacheLine empty for no symbols", () => {
+  expect(cacheLine("src/x.ts", [])).toBe("");
+});
 
 test("classMemberOnLine detects members and skips control flow", () => {
   expect(classMemberOnLine("  push(x: T): void {", "ts")).toBe("push");
@@ -333,6 +433,21 @@ test("go funcs and receivers", () => {
   expect(symbolOnLine("func Handle(w http.ResponseWriter) {", "go")).toBe("Handle");
   expect(symbolOnLine("func (s *Server) Start() error {", "go")).toBe("Start");
   expect(symbolOnLine("type Config struct {", "go")).toBe("Config");
+});
+
+test("java types after modifiers", () => {
+  expect(symbolOnLine("public final class Widget {", "java")).toBe("Widget");
+  expect(symbolOnLine("interface Drawable {", "java")).toBe("Drawable");
+  expect(symbolOnLine("public enum Color {", "java")).toBe("Color");
+  expect(symbolOnLine("    int x = 0;", "java")).toBe("");
+});
+
+test("c functions and tags", () => {
+  expect(symbolOnLine("int main(int argc, char **argv) {", "c")).toBe("main");
+  expect(symbolOnLine("static void handle_signal(int sig) {", "c")).toBe("handle_signal");
+  expect(symbolOnLine("struct Node {", "c")).toBe("Node");
+  expect(symbolOnLine("    return foo(1);", "c")).toBe("");
+  expect(symbolOnLine("if (x > 0) {", "c")).toBe("");
 });
 
 test("outlineSource collects with line numbers", () => {

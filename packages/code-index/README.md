@@ -11,12 +11,17 @@ with exact `file:line` hits.
 ## Commands
 
 ```sh
+cidx build <dir>          # write a `.cidx` cache; find reads it instantly
 cidx map <dir> [--rank]   # one line per file: `path: sym:line, sym:line, ...`
                           # --rank: flat symbol list sorted by call count
 cidx find <symbol> [dir]  # where a symbol is defined: `path:line name`
 cidx refs <symbol> [dir]  # who calls it: `path:line: <source line>`
 cidx outline <file>       # one file's symbols, including class members
 ```
+
+`cidx build` writes a `.cidx` file (one line per source file, symbols cached).
+After that, `cidx find <symbol>` reads the cache and answers with no tree walk —
+the persistent-index pattern serena / codebase-memory use, in one text file.
 
 `find` matches a full name (`Stack.push`) or its unqualified tail (`push`);
 exact wins, prefix is the fallback. `refs` lists call sites only (the
@@ -32,11 +37,15 @@ On the Lumen compiler source, `map --rank` surfaces the load-bearing symbols:
 Pattern-based top-level declaration scan (no parser dependency):
 
 - TypeScript / JavaScript / Lumen — `function`, `class`, `interface`, `enum`,
-  `type`, with `export` / `export default` / `async` prefixes
+  `type` (+ class members via `outlineDeep`), with `export` / `export default`
+  / `async` prefixes
 - Zig — `pub fn`, `pub const`, `pub var`
 - Python — top-level `def` / `async def` / `class`
 - Rust — `pub fn` / `pub struct` / `pub enum` / `pub trait`
 - Go — `func`, methods with receivers, `type`
+- Java — `class` / `interface` / `enum` / `record` after modifiers
+- C / C++ — `struct` / `enum` / `union` / `class` tags and top-level function
+  definitions
 
 Skipped directories: `.git`, `node_modules`, `.zig-cache`, `zig-out`,
 `target`, `dist`, `.venv`, `__pycache__`, `vendor`, `build`.

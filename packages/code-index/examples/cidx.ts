@@ -8,7 +8,9 @@
 //
 // Build: lumen compile --release-fast packages/code-index/examples/cidx.ts
 
-import { langOf, outlineDeep, symbolOnLine, classMemberOnLine, formatMapLine, findSymbol, refLinesInSource, countRefs, skipDir } from "../code-index.ts";
+import { langOf, outlineDeep, symbolOnLine, classMemberOnLine, formatMapLine, findSymbol, refLinesInSource, countRefs, skipDir, cacheLine, cachePath, cacheOutline } from "../code-index.ts";
+
+const CACHE = ".cidx";
 
 function walk(dir: string, acc: string[]): string[] {
   const entries = fs.readdirSync(dir);
@@ -37,13 +39,53 @@ function readAll(paths: string[]): string[] {
   return out;
 }
 
+// Cache lines if a `.cidx` file exists, else empty (caller falls back to walk).
+function readCacheLines(): string[] {
+  if (!fs.existsSync(CACHE)) return [];
+  let out: string[] = [];
+  for (const l of fs.readFileSync(CACHE).split("\n")) {
+    if (l.length > 0) out.push(l);
+  }
+  return out;
+}
+
 function main(): void {
   const argv = process.argv;
   if (argv.length < 3) {
-    console.log("usage: cidx map <dir> [--rank] | cidx find <symbol> [dir] | cidx refs <symbol> [dir] | cidx outline <file>");
+    console.log("usage: cidx build <dir> | cidx map <dir> [--rank] | cidx find <symbol> [dir] | cidx refs <symbol> [dir] | cidx outline <file>");
     process.exit(2);
   }
   const mode = argv[1];
+
+  if (mode === "build") {
+    const dir = argv.length > 2 ? argv[2] : ".";
+    const files = walk(dir, []);
+    const outs = buildOutlines(files);
+    let body = "";
+    let n = 0;
+    for (let i = 0; i < files.length; i = i + 1) {
+      const line = cacheLine(files[i], outs[i]);
+      if (line.length > 0) { body += line + "\n"; n = n + 1; }
+    }
+    fs.writeFileSync(CACHE, body);
+    console.log("indexed " + n + " files -> " + CACHE);
+    process.exit(0);
+  }
+
+  if (mode === "find") {
+    // Prefer the cache: instant, no walk.
+    const cache = readCacheLines();
+    if (cache.length > 0) {
+      let paths: string[] = [];
+      let outs: string[][] = [];
+      for (const cl of cache) { paths.push(cachePath(cl)); outs.push(cacheOutline(cl)); }
+      const hits = findSymbol(paths, outs, argv[2]);
+      if (hits.length === 0) { console.log("not found: " + argv[2]); process.exit(1); }
+      for (const h of hits.slice(0, 20)) console.log(h);
+      if (hits.length > 20) console.log("+" + (hits.length - 20) + " more");
+      process.exit(0);
+    }
+  }
 
   if (mode === "map") {
     const dir = argv[2];
