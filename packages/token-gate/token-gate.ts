@@ -185,7 +185,114 @@ export function filterTestOutput(lines: string[]): string[] {
   return truncate(out, 40);
 }
 
+// `find` / path-list output grouped by top-level directory with a count and
+// up to 4 example leaf names per group.
+export function groupByDir(paths: string[]): string[] {
+  const groups = new Map<string, string[]>();
+  let order: string[] = [];
+  for (const raw of paths) {
+    let p = raw;
+    if (p.startsWith("./")) p = p.substring(2);
+    const slash = p.indexOf("/");
+    let dir = ".";
+    let leaf = p;
+    if (slash >= 0) {
+      dir = p.substring(0, slash);
+      const lastSlash = p.lastIndexOf("/");
+      leaf = p.substring(lastSlash + 1);
+    }
+    if (groups.get(dir) === null) order.push(dir);
+    const cur = groups.get(dir) ?? [];
+    groups.set(dir, [...cur, leaf]);
+  }
+  let out: string[] = [];
+  for (const dir of order) {
+    const names = groups.get(dir) ?? [];
+    const shown = names.slice(0, 4).join(", ");
+    const more = names.length > 4 ? " +" + (names.length - 4) + " more" : "";
+    out.push(dir + "/ (" + names.length + "): " + shown + more);
+  }
+  return out;
+}
+
+// `du` output (`size<tab>path`) sorted by size descending, top n rows.
+export function topBySize(lines: string[], n: int): string[] {
+  let sizes: number[] = [];
+  let kept: string[] = [];
+  for (const line of lines) {
+    const parts = line.split("\t");
+    if (parts.length < 2) continue;
+    const size = parseInt(parts[0].trim()) ?? 0;
+    sizes.push(size);
+    kept.push(line);
+  }
+  let order: number[] = [];
+  for (let i = 0; i < kept.length; i = i + 1) order.push(i);
+  order = order.sort((a, b) => sizes[b] - sizes[a]);
+  let out: string[] = [];
+  for (const i of order.slice(0, n)) out.push(kept[i]);
+  return out;
+}
+
+// Compiler/linter output filtered to error and warning lines (tsc, eslint,
+// cargo, gcc, ...). Falls back to the last 3 lines (the summary) when clean.
+export function errorLines(lines: string[]): string[] {
+  let out: string[] = [];
+  for (const line of lines) {
+    const l = line.toLowerCase();
+    if (l.includes("error") || l.includes("warning") || l.includes("warn ") ||
+        l.includes("✖") || l.includes("✘") || l.includes(" fail")) {
+      out.push(line);
+    }
+  }
+  if (out.length === 0) return lines.slice(-3);
+  return truncate(out, 40);
+}
+
+// Tabular output (docker ps, kubectl get, ps aux): keep the header line and up
+// to maxRows data rows, appending a `+N more rows` marker.
+export function tableHead(lines: string[], maxRows: int): string[] {
+  if (lines.length <= maxRows + 1) return lines;
+  let out: string[] = [];
+  for (let i = 0; i < maxRows + 1; i = i + 1) out.push(lines[i]);
+  out.push("... +" + (lines.length - maxRows - 1) + " more rows");
+  return out;
+}
+
 // --- tests ---
+
+test("groupByDir groups paths with counts", () => {
+  const r = groupByDir(["./src/a.ts", "src/b.ts", "src/c.ts", "docs/x.md"]);
+  expect(r.length).toBe(2);
+  expect(r[0]).toBe("src/ (3): a.ts, b.ts, c.ts");
+  expect(r[1]).toBe("docs/ (1): x.md");
+});
+
+test("topBySize sorts descending", () => {
+  const r = topBySize(["4\t./a", "128\t./b", "16\t./c"], 2);
+  expect(r.length).toBe(2);
+  expect(r[0]).toBe("128\t./b");
+  expect(r[1]).toBe("16\t./c");
+});
+
+test("errorLines extracts errors and warnings", () => {
+  const r = errorLines(["compiling...", "src/x.ts:3:1 - error TS2304: name", "1 warning", "done"]);
+  expect(r.length).toBe(2);
+  expect(r[0]).toBe("src/x.ts:3:1 - error TS2304: name");
+});
+
+test("errorLines falls back to tail when clean", () => {
+  const r = errorLines(["a", "b", "c", "d"]);
+  expect(r.length).toBe(3);
+  expect(r[2]).toBe("d");
+});
+
+test("tableHead keeps header and caps rows", () => {
+  const r = tableHead(["HEADER", "r1", "r2", "r3", "r4"], 2);
+  expect(r.length).toBe(4);
+  expect(r[0]).toBe("HEADER");
+  expect(r[3]).toBe("... +2 more rows");
+});
 
 test("dedupe collapses consecutive repeats", () => {
   const r = dedupe(["same", "same", "same", "other"]);
