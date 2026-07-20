@@ -1,14 +1,16 @@
 // cidx — the code-index CLI: compact symbol maps for AI navigation.
 //
+//   cidx build <dir>            write a `.cidx` cache for instant queries
 //   cidx map <dir> [--rank]     one line per file: `path: sym:line, ...`
 //                               --rank sorts a flat symbol list by call count
 //   cidx find <symbol> [dir]    where a symbol is defined: `path:line name`
 //   cidx refs <symbol> [dir]    who calls it: `path:line: <source line>`
+//   cidx search <words...>      tokenized fuzzy match over symbol names
 //   cidx outline <file>         one file's symbols (incl. class members)
 //
 // Build: lumen compile --release-fast packages/code-index/examples/cidx.ts
 
-import { langOf, outlineDeep, symbolOnLine, classMemberOnLine, formatMapLine, findSymbol, refLinesInSource, countRefs, skipDir, cacheLine, cachePath, cacheOutline } from "../code-index.ts";
+import { langOf, outlineDeep, symbolOnLine, classMemberOnLine, formatMapLine, findSymbol, refLinesInSource, countRefs, skipDir, cacheLine, cachePath, cacheOutline, splitIdentWords, scoreSymbol } from "../code-index.ts";
 
 const CACHE = ".cidx";
 
@@ -52,7 +54,7 @@ function readCacheLines(): string[] {
 function main(): void {
   const argv = process.argv;
   if (argv.length < 3) {
-    console.log("usage: cidx build <dir> | cidx map <dir> [--rank] | cidx find <symbol> [dir] | cidx refs <symbol> [dir] | cidx outline <file>");
+    console.log("usage: cidx build <dir> | map <dir> [--rank] | find <sym> [dir] | refs <sym> [dir] | search <words...> | outline <file>");
     process.exit(2);
   }
   const mode = argv[1];
@@ -155,6 +157,42 @@ function main(): void {
     }
     if (shown === 0) { console.log("no references: " + name); process.exit(1); }
     if (shown > 40) console.log("+" + (shown - 40) + " more");
+    process.exit(0);
+  }
+
+  if (mode === "search") {
+    // `cidx search <word> [word...]` — tokenized fuzzy match over symbol names.
+    // Uses the .cidx cache when present, else walks the current directory.
+    let query: string[] = [];
+    for (const w of argv.slice(2)) query.push(w.toLowerCase());
+    let paths: string[] = [];
+    let outs: string[][] = [];
+    const cache = readCacheLines();
+    if (cache.length > 0) {
+      for (const cl of cache) { paths.push(cachePath(cl)); outs.push(cacheOutline(cl)); }
+    } else {
+      paths = walk(".", []);
+      outs = buildOutlines(paths);
+    }
+    let scores: number[] = [];
+    let labels: string[] = [];
+    for (let i = 0; i < paths.length; i = i + 1) {
+      for (const entry of outs[i]) {
+        const colon = entry.lastIndexOf(":");
+        const name = entry.substring(0, colon);
+        const s = scoreSymbol(splitIdentWords(name), query);
+        if (s > 0) {
+          scores.push(s);
+          labels.push(paths[i] + ":" + entry.substring(colon + 1) + " " + name);
+        }
+      }
+    }
+    let order: number[] = [];
+    for (let i = 0; i < scores.length; i = i + 1) order.push(i);
+    order = order.sort((a, b) => scores[b] - scores[a]);
+    if (order.length === 0) { console.log("no match: " + query.join(" ")); process.exit(1); }
+    for (const i of order.slice(0, 20)) console.log(scores[i] + "  " + labels[i]);
+    if (order.length > 20) console.log("+" + (order.length - 20) + " more");
     process.exit(0);
   }
 
