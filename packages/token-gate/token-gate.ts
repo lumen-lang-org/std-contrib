@@ -108,6 +108,83 @@ export function splitLines(s: string): string[] {
   return out;
 }
 
+
+// --- per-command handlers ---
+
+// `ls -la` lines compacted to `name  size` (dirs marked with /), header and
+// permission/owner columns dropped — the columns are the token cost.
+export function lsSummary(lines: string[]): string[] {
+  let out: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("total ")) continue;
+    const parts = line.split(" ").filter(p => p.length > 0);
+    if (parts.length < 9) continue;
+    const name = parts.slice(8).join(" ");
+    if (name === "." || name === "..") continue;
+    const size = parseInt(parts[4]) ?? 0;
+    const human =
+      size >= 1048576 ? ((size / 1048576).toFixed(1) + "M") :
+      size >= 1024 ? ((size / 1024).toFixed(0) + "K") :
+      (size + "B");
+    if (line.startsWith("d")) out.push(name + "/");
+    else out.push(name + "  " + human);
+  }
+  return out;
+}
+
+// Full `git log` output compacted to `shorthash subject` per commit.
+export function compactLog(lines: string[]): string[] {
+  let out: string[] = [];
+  let hash = "";
+  let wantSubject = false;
+  for (const line of lines) {
+    if (line.startsWith("commit ")) {
+      hash = line.substring(7, 14);
+      wantSubject = true;
+      continue;
+    }
+    if (!wantSubject) continue;
+    if (line.startsWith("Author:") || line.startsWith("Date:") || line.startsWith("Merge:")) continue;
+    const t = line.trim();
+    if (t.length === 0) continue;
+    out.push(hash + " " + t);
+    wantSubject = false;
+  }
+  return out;
+}
+
+// grep output capped to 3 matches per file, with a +N-more marker.
+export function capGrep(lines: string[]): string[] {
+  const seen = new Map<string, number>();
+  let out: string[] = [];
+  const extra = new Map<string, number>();
+  for (const line of lines) {
+    const colon = line.indexOf(":");
+    const file = colon > 0 ? line.substring(0, colon) : line;
+    const n = seen.get(file) ?? 0;
+    seen.set(file, n + 1);
+    if (n < 3) out.push(line);
+    else extra.set(file, (extra.get(file) ?? 0) + 1);
+  }
+  for (const [file, n] of extra) out.push(file + ": +" + n + " more matches");
+  return out;
+}
+
+// Test-runner output filtered to failures, errors, and summary lines; if
+// nothing matches, the last 3 lines (the summary) are kept.
+export function filterTestOutput(lines: string[]): string[] {
+  let out: string[] = [];
+  for (const line of lines) {
+    const l = line.toLowerCase();
+    if (l.includes("error") || l.includes("fail") || l.includes("panic") ||
+        l.includes("passed") || l.includes("test result") || l.includes("assert")) {
+      out.push(line);
+    }
+  }
+  if (out.length === 0) return lines.slice(-3);
+  return truncate(out, 40);
+}
+
 // --- tests ---
 
 test("dedupe collapses consecutive repeats", () => {
@@ -159,4 +236,46 @@ test("stripAnsi removes color codes", () => {
   const esc = String.fromCharCode(27);
   const colored = esc + "[31mred" + esc + "[0m plain";
   expect(stripAnsi(colored)).toBe("red plain");
+});
+
+test("lsSummary drops columns and marks dirs", () => {
+  const r = lsSummary([
+    "total 12",
+    "drwxr-xr-x 2 root root 4096 Jul 20 00:00 src",
+    "-rw-r--r-- 1 root root 2048 Jul 20 00:00 a.ts",
+  ]);
+  expect(r.length).toBe(2);
+  expect(r[0]).toBe("src/");
+  expect(r[1]).toBe("a.ts  2K");
+});
+
+test("compactLog emits hash and subject", () => {
+  const r = compactLog([
+    "commit abcdef1234567890",
+    "Author: A <a@b.c>",
+    "Date: today",
+    "",
+    "    fix: the thing",
+    "",
+    "    body detail",
+  ]);
+  expect(r.length).toBe(1);
+  expect(r[0]).toBe("abcdef1 fix: the thing");
+});
+
+test("capGrep caps per file", () => {
+  const r = capGrep(["f.ts:1:a", "f.ts:2:b", "f.ts:3:c", "f.ts:4:d", "f.ts:5:e", "g.ts:1:x"]);
+  expect(r.length).toBe(5);
+  expect(r[4]).toBe("f.ts: +2 more matches");
+});
+
+test("filterTestOutput keeps failures and summary", () => {
+  const r = filterTestOutput(["running 3 tests", "test a ... FAILED", "2 passed; 1 failed"]);
+  expect(r.length).toBe(2);
+});
+
+test("filterTestOutput falls back to tail", () => {
+  const r = filterTestOutput(["a", "b", "c", "d"]);
+  expect(r.length).toBe(3);
+  expect(r[2]).toBe("d");
 });
