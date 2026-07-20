@@ -81,13 +81,13 @@
     {
       "name": "token-gate",
       "version": "0.1.0",
-      "summary": "Token-optimizing command proxy (tkg): dedupe, ANSI-strip, truncate, git-status grouping.",
+      "summary": "Token-optimizing command proxy (tkg): per-command handlers for git/ls/find/du/grep/tables/linters/tests, savings ledger, Claude Code hook.",
       "path": "packages/token-gate"
     },
     {
       "name": "code-index",
       "version": "0.1.0",
-      "summary": "Compact codebase symbol index (cidx): map, find, outline for AI navigation.",
+      "summary": "Codebase symbol index (cidx): map/find/refs/outline/rank, persistent cache, 8 languages \u2014 AI navigation.",
       "path": "packages/code-index"
     }
   ]
