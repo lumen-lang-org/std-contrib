@@ -11,13 +11,21 @@ with exact `file:line` hits.
 ## Commands
 
 ```sh
-cidx map <dir>            # one line per file: `path: sym:line, sym:line, ...`
+cidx map <dir> [--rank]   # one line per file: `path: sym:line, sym:line, ...`
+                          # --rank: flat symbol list sorted by call count
 cidx find <symbol> [dir]  # where a symbol is defined: `path:line name`
-cidx outline <file>       # one file's symbols
+cidx refs <symbol> [dir]  # who calls it: `path:line: <source line>`
+cidx outline <file>       # one file's symbols, including class members
 ```
 
-Exact matches win; prefix matches are the fallback. Hits cap at 20 with a
-`+N more` marker.
+`find` matches a full name (`Stack.push`) or its unqualified tail (`push`);
+exact wins, prefix is the fallback. `refs` lists call sites only (the
+definition line is excluded). `map --rank` orders symbols by how often they are
+called across the tree — a cheap importance signal (aider's PageRank cousin).
+Output caps: find 20, refs/rank 40, with a `+N more` marker.
+
+On the Lumen compiler source, `map --rank` surfaces the load-bearing symbols:
+`fail` (715 calls), `emitExpr` (480), `exprType` (300).
 
 ## Languages
 
@@ -36,10 +44,14 @@ Skipped directories: `.git`, `node_modules`, `.zig-cache`, `zig-out`,
 ## Public functions
 
 - `langOf(path: string): string` — language key by extension ("" = not indexed)
-- `symbolOnLine(line: string, lang: string): string` — declared symbol or ""
-- `outlineSource(src: string, lang: string): string[]` — `name:line` entries
+- `symbolOnLine(line: string, lang: string): string` — top-level declared symbol or ""
+- `classMemberOnLine(line: string, lang: string): string` — TS class member or ""
+- `outlineSource(src: string, lang: string): string[]` — top-level `name:line` entries
+- `outlineDeep(src: string, lang: string): string[]` — top-level + `Class.member:line`
+- `refLinesInSource(src, name, defLine): int[]` — call-site line numbers
+- `countRefs(srcs: string[], name: string): int` — whole-corpus call count
 - `formatMapLine(path: string, syms: string[]): string` — compact map line
-- `findSymbol(paths, outlines, query): string[]` — exact-then-prefix lookup
+- `findSymbol(paths, outlines, query): string[]` — exact-then-prefix, tail-aware
 - `identAt(s: string, i: int): string` — identifier scan helper
 - `skipDir(name: string): bool` — index-worthiness of a directory
 
