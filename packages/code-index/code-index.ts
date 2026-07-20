@@ -153,7 +153,9 @@ export function symbolOnLine(line: string, lang: string): string {
     if (paren <= 0) return "";
     const trimmedEnd = line.trimEnd();
     const last = trimmedEnd.charAt(trimmedEnd.length - 1);
-    if (last !== "{" && last !== ")" && last !== ",") return "";
+    // Body opener `{`, complete signature `)`, or a multi-line signature that
+    // breaks after `(` or a parameter `,`.
+    if (last !== "{" && last !== ")" && last !== "," && last !== "(") return "";
     const name = identBeforeParen(line, paren);
     if (name.length === 0 || isMemberKeyword(name) || name === "sizeof") return "";
     return name;
