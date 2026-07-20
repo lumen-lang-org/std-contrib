@@ -39,6 +39,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`toml`](packages/toml) | Practical TOML parser/stringifier for sections, dotted keys, typed values, and simple arrays |
 | [`csv`](packages/csv) | CSV parser/stringifier with quoted fields, CRLF, row helpers, and flat arrays |
 | [`token-gate`](packages/token-gate) | Token-optimizing command proxy (`tkg`) — dedupe, ANSI-strip, truncate, git-status grouping |
+| [`code-index`](packages/code-index) | Compact codebase symbol index (`cidx`) — map, find, outline for AI navigation |
 | [`ai`](packages/ai) | Typed AI helpers for OpenAI-compatible chat APIs |
 
 ## Using a package

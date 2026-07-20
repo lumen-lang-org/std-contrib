@@ -83,6 +83,12 @@
       "version": "0.1.0",
       "summary": "Token-optimizing command proxy (tkg): dedupe, ANSI-strip, truncate, git-status grouping.",
       "path": "packages/token-gate"
+    },
+    {
+      "name": "code-index",
+      "version": "0.1.0",
+      "summary": "Compact codebase symbol index (cidx): map, find, outline for AI navigation.",
+      "path": "packages/code-index"
     }
   ]
 }
