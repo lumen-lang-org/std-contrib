@@ -77,6 +77,12 @@
       "version": "0.1.0",
       "summary": "Typed AI helpers for OpenAI-compatible chat APIs.",
       "path": "packages/ai"
+    },
+    {
+      "name": "token-gate",
+      "version": "0.1.0",
+      "summary": "Token-optimizing command proxy (tkg): dedupe, ANSI-strip, truncate, git-status grouping.",
+      "path": "packages/token-gate"
     }
   ]
 }
