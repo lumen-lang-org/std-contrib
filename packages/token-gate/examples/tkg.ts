@@ -19,7 +19,7 @@
 // Build: lumen compile --release-fast packages/token-gate/examples/tkg.ts
 // Usage: tkg <command> [args...]
 
-import { stripAnsi, dedupe, truncate, groupGitStatus, splitLines, lsSummary, compactLog, capGrep, filterTestOutput, groupByDir, topBySize, errorLines, tableHead } from "../token-gate.ts";
+import { stripAnsi, dedupe, truncate, groupGitStatus, splitLines, lsSummary, compactLog, capGrep, filterTestOutput, groupByDir, topBySize, errorLines, tableHead, numberedHeadTail } from "../token-gate.ts";
 
 function logPath(): string {
   return (process.env.HOME ?? ".") + "/.tkg-log";
@@ -177,6 +177,15 @@ function main(): void {
     let out = filterTestOutput(splitLines(raw));
     out.push(res.status === 0 ? "[tests ok]" : "[tests FAILED, exit " + res.status + "]");
     emit(raw.length, out, res.status);
+  }
+
+  if (cmd === "cat" || cmd === "head" || cmd === "tail") {
+    const res = child_process.spawnSync(cmd, args);
+    const raw = res.stdout;
+    // Keep blank lines (file content); drop only the final-newline empty tail.
+    let ls = raw.split("\n");
+    if (ls.length > 0 && ls[ls.length - 1] === "") ls = ls.slice(0, ls.length - 1);
+    emit(raw.length, numberedHeadTail(ls, 60, 30), res.status);
   }
 
   const res = child_process.spawnSync(cmd, args);

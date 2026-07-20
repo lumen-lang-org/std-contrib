@@ -249,6 +249,22 @@ export function errorLines(lines: string[]): string[] {
   return truncate(out, 40);
 }
 
+// A long file dump reduced to line-numbered head + tail with an elision
+// marker, so an assistant sees the shape and can Read a precise range if it
+// needs the middle. Short files (<= head+tail) pass through numbered.
+export function numberedHeadTail(lines: string[], head: int, tail: int): string[] {
+  let out: string[] = [];
+  if (lines.length <= head + tail) {
+    for (let i = 0; i < lines.length; i = i + 1) out.push((i + 1) + "\t" + lines[i]);
+    return out;
+  }
+  for (let i = 0; i < head; i = i + 1) out.push((i + 1) + "\t" + lines[i]);
+  const from = lines.length - tail;
+  out.push("... [lines " + (head + 1) + "-" + from + " elided; Read the file for the middle] ...");
+  for (let i = from; i < lines.length; i = i + 1) out.push((i + 1) + "\t" + lines[i]);
+  return out;
+}
+
 // Tabular output (docker ps, kubectl get, ps aux): keep the header line and up
 // to maxRows data rows, appending a `+N more rows` marker.
 export function tableHead(lines: string[], maxRows: int): string[] {
@@ -285,6 +301,23 @@ test("errorLines falls back to tail when clean", () => {
   const r = errorLines(["a", "b", "c", "d"]);
   expect(r.length).toBe(3);
   expect(r[2]).toBe("d");
+});
+
+test("numberedHeadTail passes short files through numbered", () => {
+  const r = numberedHeadTail(["a", "b", "c"], 40, 15);
+  expect(r.length).toBe(3);
+  expect(r[0]).toBe("1\ta");
+  expect(r[2]).toBe("3\tc");
+});
+
+test("numberedHeadTail elides the middle of a long file", () => {
+  let lines: string[] = [];
+  for (let i = 0; i < 100; i = i + 1) lines.push("L" + i);
+  const r = numberedHeadTail(lines, 3, 2);
+  expect(r.length).toBe(6);
+  expect(r[0]).toBe("1\tL0");
+  expect(r[3]).toBe("... [lines 4-98 elided; Read the file for the middle] ...");
+  expect(r[5]).toBe("100\tL99");
 });
 
 test("tableHead keeps header and caps rows", () => {
