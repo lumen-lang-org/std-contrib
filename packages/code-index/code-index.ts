@@ -323,6 +323,54 @@ export function countRefs(srcs: string[], name: string): int {
   return total;
 }
 
+// --- tokenized fuzzy search (no embeddings) ---
+//
+// Split an identifier into lowercase words on camelCase, snake_case, dots, and
+// digit boundaries, so `validateExpiry`, `validate_expiry`, and `JWTToken`
+// become word sets a natural-language query can overlap. This is the cheap,
+// deterministic stand-in for semantic search: the AI supplies the meaning, the
+// index supplies exact anchors.
+export function splitIdentWords(name: string): string[] {
+  let words: string[] = [];
+  let cur = "";
+  for (let i = 0; i < name.length; i = i + 1) {
+    const c = name.charAt(i);
+    const code = name.charCodeAt(i);
+    const isUpper = code >= 65 && code <= 90;
+    if (c === "_" || c === "-" || c === "." || c === " ") {
+      if (cur.length > 0) { words.push(cur); cur = ""; }
+      continue;
+    }
+    if (isUpper && cur.length > 0) {
+      const prevCode = name.charCodeAt(i - 1);
+      const prevUpper = prevCode >= 65 && prevCode <= 90;
+      const nextLower = i + 1 < name.length && name.charCodeAt(i + 1) >= 97 && name.charCodeAt(i + 1) <= 122;
+      // Break lower->Upper (word end) or Acronym->Word (`JWTToken` -> jwt token).
+      if (!prevUpper || nextLower) { words.push(cur); cur = ""; }
+    }
+    cur += c;
+  }
+  if (cur.length > 0) words.push(cur);
+  let out: string[] = [];
+  for (const w of words) out.push(w.toLowerCase());
+  return out;
+}
+
+// Overlap score of a symbol's words against the query words: +2 per exact word
+// match, +1 per prefix/substring match, summed over query words.
+export function scoreSymbol(symWords: string[], queryWords: string[]): int {
+  let score = 0;
+  for (const q of queryWords) {
+    let best = 0;
+    for (const w of symWords) {
+      if (w === q) { best = 2; break; }
+      if (w.startsWith(q) || w.indexOf(q) >= 0) { if (best < 1) best = 1; }
+    }
+    score = score + best;
+  }
+  return score;
+}
+
 // --- persistent index cache ---
 //
 // The cache file is one line per source file: `path\tsym:line,sym:line,...`.
@@ -351,6 +399,23 @@ export function cacheOutline(line: string): string[] {
 }
 
 // --- tests ---
+
+test("splitIdentWords handles camel, snake, acronyms", () => {
+  expect(splitIdentWords("validateExpiry").join(",")).toBe("validate,expiry");
+  expect(splitIdentWords("validate_expiry").join(",")).toBe("validate,expiry");
+  expect(splitIdentWords("JWTToken").join(",")).toBe("jwt,token");
+  expect(splitIdentWords("parseHTTPResponse").join(",")).toBe("parse,http,response");
+  expect(splitIdentWords("Stack.push").join(",")).toBe("stack,push");
+  expect(splitIdentWords("main").join(",")).toBe("main");
+});
+
+test("scoreSymbol ranks overlap", () => {
+  const sym = splitIdentWords("validateExpiry");
+  expect(scoreSymbol(sym, ["validate", "expiry"])).toBe(4);
+  expect(scoreSymbol(sym, ["expiry"])).toBe(2);
+  expect(scoreSymbol(sym, ["valid"])).toBe(1);
+  expect(scoreSymbol(sym, ["nothing"])).toBe(0);
+});
 
 test("cache round-trips path and outline", () => {
   const line = cacheLine("src/x.ts", ["a:1", "B.m:4"]);

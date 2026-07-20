@@ -16,6 +16,7 @@ cidx map <dir> [--rank]   # one line per file: `path: sym:line, sym:line, ...`
                           # --rank: flat symbol list sorted by call count
 cidx find <symbol> [dir]  # where a symbol is defined: `path:line name`
 cidx refs <symbol> [dir]  # who calls it: `path:line: <source line>`
+cidx search <words...>    # tokenized fuzzy match over symbol names
 cidx outline <file>       # one file's symbols, including class members
 ```
 
@@ -31,6 +32,29 @@ Output caps: find 20, refs/rank 40, with a `+N more` marker.
 
 On the Lumen compiler source, `map --rank` surfaces the load-bearing symbols:
 `fail` (715 calls), `emitExpr` (480), `exprType` (300).
+
+## Fuzzy search instead of a vector DB
+
+`cidx search <words>` splits every symbol name into words on camelCase,
+snake_case, dots, and acronym boundaries (`validateExpiry` → `validate`,
+`expiry`; `JWTToken` → `jwt`, `token`), then ranks symbols by how many query
+words overlap (exact +2, prefix/substring +1). It is the deterministic,
+zero-dependency stand-in for semantic search — no embeddings, no model, no
+store:
+
+```
+$ cidx search specialize class
+4  src/lumen_check_generics.zig:490 specializeClass
+2  src/lumen_emit_class.zig:63 emitClass
+
+$ cidx search check assign
+4  src/lumen_check_stmt.zig:296 checkMemberAssign
+```
+
+The AI supplies the meaning; the index supplies exact anchors. A vector DB
+would add an embedding model, a store, a chunking pipeline, and reindex-on-edit
+cost, trading exactness for approximate recall — the wrong trade for
+jump-to-definition navigation.
 
 ## Languages
 
