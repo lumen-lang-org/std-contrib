@@ -40,6 +40,12 @@ import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy,
 // So every toolchat name is imported unaliased, exactly like the sibling-shared
 // vector/tool names above, and the public wrappers below take a different name.
 import { buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./toolchat.ts";
+// mcp.ts imports makeTool from tools.ts (inlined once already through the tool
+// layer above) and declares LumenMcpTool / LumenMcpResult unexported; importing
+// any value from it brings those types into scope. No sibling imports an mcp
+// name, so every mcp function is aliased here and the public wrappers below take
+// the clean name.
+import { mcpRequest as buildMcpRequest, mcpInitializeRequest as buildMcpConnectBody, mcpListToolsRequest as buildMcpListToolsBody, mcpCallToolRequest as buildMcpCallBody, parseMcpTools as readMcpTools, parseMcpToolResult as readMcpResult, mcpResponseId as readMcpResponseId, mcpIsError as readMcpIsError, mcpErrorMessage as readMcpErrorMessage, mcpResultField as readMcpResultField, mcpInitialize as runMcpInitialize, mcpListTools as runMcpListTools, mcpCallTool as runMcpCallTool, mcpToolToLumen as adaptMcpTool, mcpToolsToRegistry as adaptMcpTools } from "./mcp.ts";
 
 type JsonName = {
   name: string,
@@ -584,6 +590,74 @@ export function toolChatOpenAI(apiKey: string, model: string, turns: LumenAiChat
 
 export function toolChatMistral(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
   return runMistralToolChat(apiKey, model, turns, tools);
+}
+
+// MCP (Model Context Protocol) over HTTP JSON-RPC. Transport is HTTP only: each
+// call is one POST and one complete JSON reply. `params` and `argumentsJson` are
+// raw JSON strings embedded verbatim; method and tool names are escaped for you.
+export function mcpRequestBody(id: int, method: string, params: string): string {
+  return buildMcpRequest(id, method, params);
+}
+
+export function mcpConnectBody(): string {
+  return buildMcpConnectBody();
+}
+
+export function mcpListToolsBody(id: int): string {
+  return buildMcpListToolsBody(id);
+}
+
+export function mcpCallBody(id: int, name: string, argumentsJson: string): string {
+  return buildMcpCallBody(id, name, argumentsJson);
+}
+
+export function parseMcpTools(raw: string): LumenMcpTool[] {
+  return readMcpTools(raw);
+}
+
+export function parseMcpResult(raw: string): LumenMcpResult {
+  return readMcpResult(raw);
+}
+
+export function mcpResponseId(raw: string): int {
+  return readMcpResponseId(raw);
+}
+
+export function mcpIsError(raw: string): bool {
+  return readMcpIsError(raw);
+}
+
+export function mcpErrorMessage(raw: string): string {
+  return readMcpErrorMessage(raw);
+}
+
+export function mcpResultField(raw: string): string {
+  return readMcpResultField(raw);
+}
+
+// Handshake with an MCP server: POST an initialize request and return the raw
+// JSON-RPC reply body. Thin HTTP wrapper, so it is untested like the other live
+// provider calls.
+export function mcpConnect(url: string, headers: Map<string, string>): string {
+  return runMcpInitialize(url, headers);
+}
+
+export function mcpTools(url: string, headers: Map<string, string>): LumenMcpTool[] {
+  return runMcpListTools(url, headers);
+}
+
+export function mcpCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): LumenMcpResult {
+  return runMcpCallTool(url, headers, name, argumentsJson);
+}
+
+// Adapt an MCP tool descriptor into a first-class LumenAiTool whose `run` POSTs a
+// tools/call request, so an MCP server's tools drop straight into `runAgent`.
+export function mcpAsTool(url: string, headers: Map<string, string>, tool: LumenMcpTool): LumenAiTool {
+  return adaptMcpTool(url, headers, tool);
+}
+
+export function mcpAsTools(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
+  return adaptMcpTools(url, headers, tools);
 }
 
 test("message helpers", () => {
@@ -1201,4 +1275,38 @@ test("live tool-calling agent surface through the barrel", () => {
     mistralAgent("mk-test", "mistral-large-latest", tools),
   ];
   expect(models.length == 2);
+});
+
+test("mcp surface through the barrel", () => {
+  // Request builders frame JSON-RPC and round-trip their ids.
+  let connect = mcpConnectBody();
+  expect(mcpResponseId(connect) == 1);
+  expect(mcpListToolsBody(2).includes("\"method\":\"tools/list\""));
+  let callBody = mcpCallBody(3, "weather", "{\"input\":\"Paris\"}");
+  expect(callBody.includes("\"method\":\"tools/call\""));
+  expect(mcpResponseId(callBody) == 3);
+  expect(mcpRequestBody(5, "ping", "{}").includes("\"method\":\"ping\""));
+  // A tools/list reply parses into descriptors and adapts into runnable tools.
+  let listReply = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"weather\",\"description\":\"Current weather for a city.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}}}}]}}";
+  let descriptors = parseMcpTools(listReply);
+  expect(descriptors.length == 1);
+  expect(descriptors[0].name == "weather");
+  let registry = mcpAsTools("http://127.0.0.1:9/mcp", new Map<string, string>(), descriptors);
+  expect(registry.length == 1);
+  expect(registry[0].name == "weather");
+  expect(registry[0].params == descriptors[0].schema);
+  let single = mcpAsTool("http://127.0.0.1:9/mcp", new Map<string, string>(), descriptors[0]);
+  expect(single.name == "weather");
+  // A tools/call reply parses its text parts; an error reply reports its message.
+  let callReply = "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"18C in Paris\"}]}}";
+  let res = parseMcpResult(callReply);
+  expect(res.ok);
+  expect(res.content == "18C in Paris");
+  expect(mcpResultField(callReply).startsWith("{\"content\":"));
+  let errReply = "{\"jsonrpc\":\"2.0\",\"id\":9,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}";
+  expect(mcpIsError(errReply));
+  expect(mcpErrorMessage(errReply) == "Method not found");
+  let bad = parseMcpResult(errReply);
+  expect(!bad.ok);
+  expect(bad.error == "Method not found");
 });

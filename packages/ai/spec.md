@@ -395,6 +395,38 @@ Success criteria:
 
 - Integrations remain optional and do not make core chat helpers harder to use.
 
+### 17. MCP
+
+The Model Context Protocol lets the package borrow tools that live on a separate
+server and expose them to an agent as ordinary tools.
+
+Scope:
+
+- MCP client over HTTP JSON-RPC 2.0
+- `initialize` handshake
+- `tools/list` discovery
+- `tools/call` invocation
+- JSON-RPC request framing and response parsing
+- an adapter turning an MCP tool descriptor into a first-class `LumenAiTool`
+
+Transport is HTTP only: each call is one POST that returns one complete JSON
+reply. Two transports are deliberately out of scope for now:
+
+- stdio transport is blocked — `spawnSync` runs a process to completion and
+  returns its output, so it cannot hold a server open for an interactive
+  JSON-RPC exchange
+- SSE / streaming responses are not supported; each call assumes a single
+  complete JSON object in the body, and streaming waits on the same stdlib
+  support tracked under Streaming
+
+Success criteria:
+
+- A user can list an MCP server's tools, adapt them, and hand them to `runAgent`
+  next to local tools.
+- JSON-RPC framing, response parsing, tool-descriptor extraction, and the tool
+  adapter's argument mapping are covered by offline tests over hand-written
+  JSON-RPC bodies.
+
 ## Milestones
 
 ### M0: Current Baseline
@@ -460,6 +492,15 @@ Status: mostly complete.
 - JSONL traces
 - human-in-the-loop
 - streaming when stdlib enables it
+
+### M17: MCP
+
+- MCP client over HTTP JSON-RPC
+- `initialize` / `tools/list` / `tools/call`
+- JSON-RPC framing and response parsing
+- adapter from an MCP tool into a `LumenAiTool`
+- stdio transport blocked on `spawnSync` being one-shot
+- SSE / streaming replies deferred with the rest of streaming
 
 ## Non-Goals For Now
 

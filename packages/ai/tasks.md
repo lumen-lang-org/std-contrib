@@ -219,6 +219,23 @@
 - [ ] Plan SQLite vector store integration once sqlite package is CI-friendly.
 - [ ] Plan CSV/TOML document loaders.
 
+## M17: MCP
+
+- [x] Add JSON-RPC 2.0 request framing.
+- [x] Add the `initialize` handshake over HTTP.
+- [x] Add `tools/list` discovery over HTTP.
+- [x] Add `tools/call` invocation over HTTP.
+- [x] Parse tool descriptors (name, description, raw input schema) from a
+      `tools/list` reply.
+- [x] Parse a `tools/call` reply into an `ok`/`content`/`error` record.
+- [x] Adapt an MCP tool descriptor into a first-class `LumenAiTool` for
+      `runAgent`.
+- [x] Add offline tests over hand-written JSON-RPC bodies.
+- [ ] Add stdio transport. Blocked: `spawnSync` is one-shot and cannot hold a
+      server open for an interactive JSON-RPC exchange.
+- [ ] Add SSE / streaming reply handling. Blocked on the same stdlib streaming
+      support as M13.
+
 ## Continuous Quality
 
 - [ ] Keep `lumen test packages/ai/ai.ts` passing.
