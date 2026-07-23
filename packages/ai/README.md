@@ -3,9 +3,14 @@
 Typed AI helpers for OpenAI-compatible chat APIs, written in Lumen.
 
 This package starts with the practical core of AI applications: messages,
-prompt templates, model calls, and a small response parser. It stays
-intentionally lean for V1 because Lumen is statically typed and does not expose
-dynamic JSON, streaming HTTP responses, or provider SDKs yet.
+prompt templates, model calls, a small response parser, retrieval over local
+documents, and conversation memory. It stays intentionally lean for V1 because
+Lumen is statically typed and does not expose dynamic JSON, streaming HTTP
+responses, or provider SDKs yet.
+
+Everything is immutable: nothing in this package mutates an argument. Helpers
+that look like they update a store, a document, or a history take a value and
+return a new one.
 
 ## Use
 
@@ -84,6 +89,147 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `parseMistralTokenUsage(raw)` | Parse Mistral token usage |
 | `chatMistral(apiKey, model, messages)` | POST to `https://api.mistral.ai/v1/chat/completions` |
 | `chatMistralWithBaseUrl(baseUrl, apiKey, model, messages)` | POST to another Mistral-compatible base URL |
+| `document(id, text, source, metadata)` | Build a document record |
+| `docMetadata(doc, key)` | Read one metadata value, or `""` when absent |
+| `withDocMetadata(doc, key, value)` | Return a copy of the document with one metadata entry set |
+| `splitText(text, size, overlap)` | Split text into fixed-size overlapping chunks |
+| `splitTextRecursive(text, size, overlap)` | Split on paragraph, line, then word boundaries |
+| `splitParagraphs(text)` | Split text on blank lines |
+| `splitDocuments(text, source, size, overlap)` | Split text straight into document records |
+| `dot(a, b)` | Dot product of two vectors |
+| `norm(v)` | Euclidean length of a vector |
+| `normalize(v)` | Scale a vector to unit length |
+| `cosine(a, b)` | Cosine similarity in `[-1, 1]` |
+| `distance(a, b)` | Euclidean distance between two vectors |
+| `hashEmbedding(text, dims)` | Deterministic offline embedding, no API key |
+| `embeddingBody(model, input)` | Build embeddings request JSON |
+| `embeddingBodyBatch(model, inputs)` | Build batch embeddings request JSON |
+| `parseEmbedding(raw)` | Parse one vector from an embeddings response |
+| `parseEmbeddingBatch(raw)` | Parse every vector from an embeddings response |
+| `embedText(apiKey, model, input)` | POST to `https://api.openai.com/v1/embeddings` |
+| `embedTextWithBaseUrl(baseUrl, apiKey, model, input)` | POST to another OpenAI-compatible base URL |
+| `embedMistral(apiKey, model, input)` | POST to `https://api.mistral.ai/v1/embeddings` |
+| `vectorStore()` | Build an empty in-memory vector store |
+| `storeSize(store)` | Count the documents in a store |
+| `addVector(store, doc, vector)` | Return a new store with one document and its vector |
+| `addDocs(store, docs, dims)` | Return a new store with documents embedded offline |
+| `deleteDoc(store, id)` | Return a new store without the document with that ID |
+| `filterDocs(store, key, value)` | Return a new store keeping only matching metadata |
+| `searchVector(store, query, k)` | Top-k search with a vector you already have |
+| `search(store, query, dims, k)` | Top-k search from query text |
+| `queryTerms(text)` | Lowercase, punctuation-free query tokens |
+| `keywordScore(doc, terms)` | Term-overlap score in `[0, 1]` |
+| `keywordRetrieve(docs, query, k)` | Retrieve by term overlap, dropping non-matches |
+| `vectorRetrieve(store, query, dims, k)` | Retrieve by cosine similarity, dropping zero scores |
+| `retrieve(store, docs, query, dims, k)` | Hybrid retrieval: 0.6 keyword plus 0.4 vector |
+| `formatContext(hits)` | Render hits as numbered, cited context blocks |
+| `ragPrompt(question, hits)` | Build a grounded single-string answer prompt |
+| `ragMessages(question, hits)` | Build grounded system and user messages |
+| `appendMessage(history, msg)` | Return a new history with one message appended |
+| `windowMemory(history, turns)` | Keep the last N messages plus any leading system message |
+| `budgetMemory(history, maxChars)` | Drop the oldest turns until the history fits a character budget |
+| `estimateTokens(text)` | Rough chars/4 token estimate |
+| `historyChars(history)` | Total character count of a history |
+| `transcript(history)` | Render a history as `role: content` lines |
+| `summaryPrompt(history, priorSummary)` | Build a prompt that folds turns into a running summary |
+| `applySummary(summary, recent)` | Replace old turns with a summary system message |
+| `remember(store, key, value)` | Return a new key/value memory store with one entry set |
+| `recall(store, key)` | Read one key/value memory entry, or `""` when absent |
+| `serializeHistory(history)` | Serialize a history to JSON |
+| `parseHistory(raw)` | Parse a history from JSON |
+| `saveHistory(path, history)` | Write a history to a file |
+| `loadHistory(path)` | Read a history from a file |
+
+## RAG
+
+Retrieval runs entirely offline: split local text into documents, index them
+with the built-in hashing embedder, retrieve, then send grounded messages to a
+model.
+
+```ts
+import {
+  splitDocuments,
+  vectorStore,
+  addDocs,
+  retrieve,
+  formatContext,
+  ragMessages,
+  chatMistral,
+} from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+
+let notes = "lumen compiles to a native binary with no runtime and no interpreter.\n\nsourdough bread needs a starter, flour, water and salt.";
+
+let docs = splitDocuments(notes, "notes.md", 200, 20);
+let store = addDocs(vectorStore(), docs, 128);
+
+let question = "does lumen need a runtime?";
+let hits = retrieve(store, docs, question, 128, 3);
+
+console.log(formatContext(hits));
+
+let result = chatMistral(
+  "mistral-key",
+  "mistral-large-latest",
+  ragMessages(question, hits),
+);
+console.log(result.content);
+```
+
+The grounded system message tells the model to cite each claim with the bracket
+number of its context block and to reply exactly `The context does not contain
+the answer.` when the context does not answer the question.
+
+Use at least 128 dimensions. `hashEmbedding` is a hashing bag of words, so
+distinct terms collide into the same bucket at low dimension counts. When "no
+match" must mean no results, use `keywordRetrieve`: it drops documents that
+share no term with the query, while the vector path always returns some
+collision noise. For real semantic search, index with `embedText` instead and
+insert the returned vectors with `addVector`.
+
+## Conversation memory
+
+A history is a plain `LumenAiMessage[]`. Every memory helper returns a new
+array, so a turn is a rebind rather than a mutation.
+
+```ts
+import {
+  system,
+  user,
+  assistant,
+  appendMessage,
+  windowMemory,
+  saveHistory,
+  loadHistory,
+  remember,
+  recall,
+  chatMistral,
+} from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+
+let history = [system("You are concise.")];
+history = appendMessage(history, user("What compiles to a native binary?"));
+
+let reply = chatMistral(
+  "mistral-key",
+  "mistral-large-latest",
+  windowMemory(history, 8),
+);
+history = appendMessage(history, assistant(reply.content));
+
+saveHistory("chat.json", history);
+let resumed = loadHistory("chat.json");
+console.log(resumed.length);
+
+let facts = remember("", "name", "Aymen");
+facts = remember(facts, "language", "Lumen");
+console.log(recall(facts, "language"));
+```
+
+`windowMemory` counts messages, not turn pairs, and always re-prepends a leading
+system message. `budgetMemory` trims by character count instead but never drops
+the system message or the most recent turn, so it can return a history that is
+still over budget. For long conversations, build a running summary with
+`summaryPrompt`, send it to a model, and fold the result back in with
+`applySummary`.
 
 ## Files
 
@@ -99,6 +245,12 @@ lumen compile packages/ai/examples/mistral-chat.ts
 - `openai.ts` contains OpenAI-compatible request, response, and HTTP helpers.
 - `mistral.ts` contains Mistral request, response, and HTTP helpers.
 - `headers.ts` and `result.ts` contain shared provider helpers.
+- `document.ts` contains the document record, metadata, and text splitters.
+- `vector.ts` contains vector maths and the offline hashing embedder.
+- `embed.ts` contains embeddings request bodies, parsers, and HTTP helpers.
+- `store.ts` contains the in-memory vector store and similarity search.
+- `retrieve.ts` contains keyword, vector, and hybrid retrievers plus RAG prompts.
+- `memory.ts` contains conversation memory, key/value memory, and history files.
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
 - `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
 - `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
@@ -118,19 +270,30 @@ useful Lumen-native layer:
 - HTTP calls through stdlib `http.request`
 - `Map<string, string>` headers
 - OpenAI and Mistral non-streaming chat APIs
+- documents, splitters, embeddings, and an in-memory vector store
+- keyword, vector, and hybrid retrieval with grounded RAG prompts
+- window, budget, summary, key/value, and file-backed memory
 
 That gives Lumen users a real AI API client without Node.js, npm packages, or a
 JavaScript runtime.
 
 ## Limits in V1
 
+Retrieval, embeddings, and memory now ship. What is still missing:
+
 - no streaming responses
 - no multimodal or chunk-list response content; V1 expects string `content`
 - no tool-call loop yet
+- no agent loop yet
 - no dynamic schema validation
 - no provider-specific SDKs
 - no automatic retries
 - no response-header inspection
+- the vector store is in-memory only; there is no persistent vector database
+- `hashEmbedding` is a hashing bag of words, not a semantic model; real
+  similarity needs provider embeddings through `embedText`
+- no stemming, no stop-word list, and no re-ranking in the keyword retriever
+- summary memory builds the prompt but does not call a model for you
 
 These are natural follow-ups as Lumen grows network streams, richer JSON value
 support, and more runtime primitives.

@@ -14,6 +14,17 @@ import { buildProviderChatBody } from "./provider.ts";
 import { parseTextOutput as readTextOutput, parseLineOutput as readLineOutput, parseStringListOutput as readStringListOutput, parseChoiceOutput as readChoiceOutput, firstFencedBlockOutput as readFirstFencedBlockOutput, firstJsonObjectOutput as readFirstJsonObjectOutput, typedJsonInputOutput as readTypedJsonInputOutput, retryPromptOutput as buildRetryPromptOutput } from "./output.ts";
 import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, buildOpenAIChatBodyWithStops, readOpenAIContent, readOpenAIResult, readOpenAIError, readOpenAITokenUsage } from "./openai.ts";
 import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, buildMistralChatBodyWithStops, readMistralContent, readMistralResult, readMistralError, readMistralTokenUsage } from "./mistral.ts";
+// Names a sibling module imports (cosineSimilarity, fakeEmbedding,
+// makeDocument, withMetadata, documentMetadata, emptyVectorStore,
+// addDocuments, searchByText) are imported here WITHOUT an alias: module
+// inlining renames the definition itself, so aliasing one of them would break
+// the sibling that imports it under its original name.
+import { dotProduct as computeDotProduct, vectorNorm as computeVectorNorm, normalizeVector as computeNormalizeVector, cosineSimilarity, euclideanDistance as computeEuclideanDistance, fakeEmbedding } from "./vector.ts";
+import { makeDocument, documentMetadata, withMetadata, splitFixed as splitFixedText, splitRecursive as splitRecursiveText, splitParagraphs as splitParagraphText, splitToDocuments as splitTextToDocuments } from "./document.ts";
+import { embeddingBody as buildEmbeddingBody, embeddingBodyBatch as buildEmbeddingBodyBatch, parseEmbeddingResponse as readEmbeddingResponse, parseEmbeddingBatch as readEmbeddingBatch, embedOpenAI as runEmbedOpenAI, embedOpenAIWithBaseUrl as runEmbedOpenAIWithBaseUrl, embedMistral as runEmbedMistral } from "./embed.ts";
+import { emptyVectorStore, storeSize as readStoreSize, addVector as addStoreVector, addDocuments, deleteById as deleteStoreDocument, filterByMetadata as filterStoreByMetadata, searchByVector as runSearchByVector, searchByText } from "./store.ts";
+import { tokenizeQuery as readQueryTerms, keywordScore as computeKeywordScore, keywordRetrieve as runKeywordRetrieve, vectorRetrieve as runVectorRetrieve, hybridRetrieve as runHybridRetrieve, formatContext as buildRagContext, ragPrompt as buildRagPrompt, ragMessages as buildRagMessages } from "./retrieve.ts";
+import { appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory.ts";
 
 type JsonName = {
   name: string,
@@ -197,6 +208,209 @@ export function chatMistralWithBaseUrl(baseUrl: string, apiKey: string, model: s
 
 export function chatMistral(apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
   return runMistralChat(apiKey, model, messages);
+}
+
+export function document(id: string, text: string, source: string, metadata: string): LumenAiDocument {
+  return makeDocument(id, text, source, metadata);
+}
+
+export function docMetadata(doc: LumenAiDocument, key: string): string {
+  return documentMetadata(doc, key);
+}
+
+export function withDocMetadata(doc: LumenAiDocument, key: string, value: string): LumenAiDocument {
+  return withMetadata(doc, key, value);
+}
+
+export function splitText(text: string, size: int, overlap: int): string[] {
+  return splitFixedText(text, size, overlap);
+}
+
+export function splitTextRecursive(text: string, size: int, overlap: int): string[] {
+  return splitRecursiveText(text, size, overlap);
+}
+
+export function splitParagraphs(text: string): string[] {
+  return splitParagraphText(text);
+}
+
+export function splitDocuments(text: string, source: string, size: int, overlap: int): LumenAiDocument[] {
+  return splitTextToDocuments(text, source, size, overlap);
+}
+
+export function dot(a: number[], b: number[]): number {
+  return computeDotProduct(a, b);
+}
+
+export function norm(v: number[]): number {
+  return computeVectorNorm(v);
+}
+
+export function normalize(v: number[]): number[] {
+  return computeNormalizeVector(v);
+}
+
+export function cosine(a: number[], b: number[]): number {
+  return cosineSimilarity(a, b);
+}
+
+export function distance(a: number[], b: number[]): number {
+  return computeEuclideanDistance(a, b);
+}
+
+// Offline, deterministic, dependency-free embedder. Hashing bag of words, so
+// use at least 64 dimensions and prefer a real provider embedding in
+// production.
+export function hashEmbedding(text: string, dims: int): number[] {
+  return fakeEmbedding(text, dims);
+}
+
+export function embeddingBody(model: string, input: string): string {
+  return buildEmbeddingBody(model, input);
+}
+
+export function embeddingBodyBatch(model: string, inputs: string[]): string {
+  return buildEmbeddingBodyBatch(model, inputs);
+}
+
+export function parseEmbedding(raw: string): number[] {
+  return readEmbeddingResponse(raw);
+}
+
+export function parseEmbeddingBatch(raw: string): number[][] {
+  return readEmbeddingBatch(raw);
+}
+
+export function embedText(apiKey: string, model: string, input: string): number[] {
+  return runEmbedOpenAI(apiKey, model, input);
+}
+
+export function embedTextWithBaseUrl(baseUrl: string, apiKey: string, model: string, input: string): number[] {
+  return runEmbedOpenAIWithBaseUrl(baseUrl, apiKey, model, input);
+}
+
+export function embedMistral(apiKey: string, model: string, input: string): number[] {
+  return runEmbedMistral(apiKey, model, input);
+}
+
+export function vectorStore(): LumenAiVectorStore {
+  return emptyVectorStore();
+}
+
+export function storeSize(store: LumenAiVectorStore): int {
+  return readStoreSize(store);
+}
+
+export function addVector(store: LumenAiVectorStore, doc: LumenAiDocument, vector: number[]): LumenAiVectorStore {
+  return addStoreVector(store, doc, vector);
+}
+
+export function addDocs(store: LumenAiVectorStore, docs: LumenAiDocument[], dims: int): LumenAiVectorStore {
+  return addDocuments(store, docs, dims);
+}
+
+export function deleteDoc(store: LumenAiVectorStore, id: string): LumenAiVectorStore {
+  return deleteStoreDocument(store, id);
+}
+
+export function filterDocs(store: LumenAiVectorStore, key: string, value: string): LumenAiVectorStore {
+  return filterStoreByMetadata(store, key, value);
+}
+
+export function searchVector(store: LumenAiVectorStore, query: number[], k: int): LumenAiSearchHit[] {
+  return runSearchByVector(store, query, k);
+}
+
+export function search(store: LumenAiVectorStore, query: string, dims: int, k: int): LumenAiSearchHit[] {
+  return searchByText(store, query, dims, k);
+}
+
+export function queryTerms(text: string): string[] {
+  return readQueryTerms(text);
+}
+
+export function keywordScore(doc: LumenAiDocument, terms: string[]): number {
+  return computeKeywordScore(doc, terms);
+}
+
+export function keywordRetrieve(docs: LumenAiDocument[], query: string, k: int): LumenAiSearchHit[] {
+  return runKeywordRetrieve(docs, query, k);
+}
+
+export function vectorRetrieve(store: LumenAiVectorStore, query: string, dims: int, k: int): LumenAiSearchHit[] {
+  return runVectorRetrieve(store, query, dims, k);
+}
+
+export function retrieve(store: LumenAiVectorStore, docs: LumenAiDocument[], query: string, dims: int, k: int): LumenAiSearchHit[] {
+  return runHybridRetrieve(store, docs, query, dims, k);
+}
+
+export function formatContext(hits: LumenAiSearchHit[]): string {
+  return buildRagContext(hits);
+}
+
+export function ragPrompt(question: string, hits: LumenAiSearchHit[]): string {
+  return buildRagPrompt(question, hits);
+}
+
+export function ragMessages(question: string, hits: LumenAiSearchHit[]): LumenAiMessage[] {
+  return buildRagMessages(question, hits);
+}
+
+export function appendMessage(history: LumenAiMessage[], msg: LumenAiMessage): LumenAiMessage[] {
+  return pushHistoryMessage(history, msg);
+}
+
+export function windowMemory(history: LumenAiMessage[], turns: int): LumenAiMessage[] {
+  return applyWindowMemory(history, turns);
+}
+
+export function budgetMemory(history: LumenAiMessage[], maxChars: int): LumenAiMessage[] {
+  return applyCharBudgetMemory(history, maxChars);
+}
+
+export function estimateTokens(text: string): int {
+  return computeEstimateTokens(text);
+}
+
+export function historyChars(history: LumenAiMessage[]): int {
+  return computeHistoryChars(history);
+}
+
+export function transcript(history: LumenAiMessage[]): string {
+  return buildTranscript(history);
+}
+
+export function summaryPrompt(history: LumenAiMessage[], priorSummary: string): string {
+  return buildSummaryPrompt(history, priorSummary);
+}
+
+export function applySummary(summary: string, recent: LumenAiMessage[]): LumenAiMessage[] {
+  return buildSummaryHistory(summary, recent);
+}
+
+export function remember(store: string, key: string, value: string): string {
+  return writeMemoryValue(store, key, value);
+}
+
+export function recall(store: string, key: string): string {
+  return readMemoryValue(store, key);
+}
+
+export function serializeHistory(history: LumenAiMessage[]): string {
+  return writeHistoryJson(history);
+}
+
+export function parseHistory(raw: string): LumenAiMessage[] {
+  return readHistoryJson(raw);
+}
+
+export function saveHistory(path: string, history: LumenAiMessage[]): void {
+  writeHistoryFile(path, history);
+}
+
+export function loadHistory(path: string): LumenAiMessage[] {
+  return readHistoryFile(path);
 }
 
 test("message helpers", () => {
@@ -446,4 +660,185 @@ test("parse mistral token usage", () => {
 test("parse live-shaped mistral content", () => {
   let raw = "{\"id\":\"cmpl-test\",\"created\":1,\"model\":\"mistral-large-latest\",\"usage\":{\"prompt_tokens\":15,\"total_tokens\":19,\"completion_tokens\":4},\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"tool_calls\":null,\"content\":\"lumen ok\"}}]}";
   expect(parseMistralContent(raw) == "lumen ok");
+});
+
+function barrelCorpus(): LumenAiDocument[] {
+  let out: LumenAiDocument[] = [
+    document("lumen", "lumen compiles to a native binary with no runtime", "langs.md", "topic\tlangs"),
+    document("python", "python runs on an interpreter and ships a large standard library", "langs.md", "topic\tlangs"),
+    document("bread", "sourdough bread needs a starter, flour, water and salt", "recipes.md", "topic\tfood"),
+  ];
+  return out;
+}
+
+test("document helpers through the barrel", () => {
+  let doc = document("d1", "hello", "notes.md", "");
+  expect(doc.id == "d1");
+  expect(doc.source == "notes.md");
+  let tagged = withDocMetadata(doc, "topic", "greeting");
+  expect(docMetadata(tagged, "topic") == "greeting");
+  expect(docMetadata(doc, "topic") == "");
+});
+
+test("splitters through the barrel", () => {
+  let chunks = splitText("abcdefgh", 3, 1);
+  expect(chunks.length > 1);
+  expect(chunks[0] == "abc");
+  let recursive = splitTextRecursive("one two three four five six", 12, 0);
+  expect(recursive.length > 1);
+  let paragraphs = splitParagraphs("first block\n\nsecond block");
+  expect(paragraphs.length == 2);
+  expect(paragraphs[1] == "second block");
+  let docs = splitDocuments("abcdefgh", "notes.md", 4, 0);
+  expect(docs.length == 2);
+  expect(docs[0].source == "notes.md");
+  expect(docs[0].text == "abcd");
+});
+
+test("vector maths through the barrel", () => {
+  let a: number[] = [3.0, 4.0];
+  let b: number[] = [3.0, 4.0];
+  expect(dot(a, b) == 25.0);
+  expect(norm(a) == 5.0);
+  expect(cosine(a, b) > 0.999);
+  expect(distance(a, b) == 0.0);
+  let unit = normalize(a);
+  expect(unit[0] > 0.59 && unit[0] < 0.61);
+});
+
+test("hash embedding through the barrel", () => {
+  let one = hashEmbedding("native binary compiler", 64);
+  let same = hashEmbedding("native binary compiler", 64);
+  let other = hashEmbedding("sourdough bread starter", 64);
+  expect(one.length == 64);
+  expect(cosine(one, same) > 0.999);
+  expect(cosine(one, other) < cosine(one, same));
+});
+
+test("embedding bodies and parsing through the barrel", () => {
+  let body = embeddingBody("text-embedding-3-small", "hello");
+  expect(body.includes("\"model\":\"text-embedding-3-small\""));
+  expect(body.includes("\"input\":\"hello\""));
+  let batch = embeddingBodyBatch("text-embedding-3-small", ["a", "b"]);
+  expect(batch.includes("\"input\":[\"a\",\"b\"]"));
+  let vector = parseEmbedding("{\"object\":\"list\",\"data\":[{\"object\":\"embedding\",\"index\":0,\"embedding\":[0.5,-0.25]}],\"model\":\"m\"}");
+  expect(vector.length == 2);
+  expect(vector[0] == 0.5);
+  let many = parseEmbeddingBatch("{\"data\":[{\"embedding\":[1.0,0.0]},{\"embedding\":[0.0,1.0]}]}");
+  expect(many.length == 2);
+  expect(many[1][1] == 1.0);
+  expect(parseEmbedding("not json").length == 0);
+});
+
+test("vector store through the barrel", () => {
+  let store = addDocs(vectorStore(), barrelCorpus(), 64);
+  expect(storeSize(store) == 3);
+  let hits = search(store, "native binary", 64, 2);
+  expect(hits.length == 2);
+  expect(hits[0].doc.id == "lumen");
+  let smaller = deleteDoc(store, "bread");
+  expect(storeSize(smaller) == 2);
+  expect(storeSize(store) == 3);
+  let food = filterDocs(store, "topic", "food");
+  expect(storeSize(food) == 1);
+  expect(food.docs[0].id == "bread");
+});
+
+test("manual vector insertion through the barrel", () => {
+  let store = addVector(vectorStore(), document("v1", "x", "mem", ""), [1.0, 0.0]);
+  store = addVector(store, document("v2", "y", "mem", ""), [0.0, 1.0]);
+  let hits = searchVector(store, [1.0, 0.0], 1);
+  expect(hits.length == 1);
+  expect(hits[0].doc.id == "v1");
+  expect(hits[0].score > 0.999);
+});
+
+test("retrieval through the barrel", () => {
+  let docs = barrelCorpus();
+  let store = addDocs(vectorStore(), docs, 64);
+  let terms = queryTerms("Which language compiles to a native binary?");
+  expect(terms.length == 7);
+  expect(terms[0] == "which");
+  expect(keywordScore(docs[0], terms) > keywordScore(docs[2], terms));
+  let keyword = keywordRetrieve(docs, "native binary runtime", 2);
+  expect(keyword[0].doc.id == "lumen");
+  let vectorHits = vectorRetrieve(store, "native binary runtime", 64, 2);
+  expect(vectorHits[0].doc.id == "lumen");
+  let hybrid = retrieve(store, docs, "native binary runtime", 64, 2);
+  expect(hybrid[0].doc.id == "lumen");
+  expect(keywordRetrieve(docs, "", 2).length == 0);
+});
+
+test("rag prompt through the barrel", () => {
+  let docs = barrelCorpus();
+  let store = addDocs(vectorStore(), docs, 64);
+  let hits = retrieve(store, docs, "native binary runtime", 64, 1);
+  let context = formatContext(hits);
+  expect(context.includes("[1] (langs.md)"));
+  expect(context.includes("native binary"));
+  let prompt = ragPrompt("Does lumen need a runtime?", hits);
+  expect(prompt.includes("Context:"));
+  expect(prompt.includes("Does lumen need a runtime?"));
+  expect(prompt.includes("The context does not contain the answer."));
+  let messages = ragMessages("Does lumen need a runtime?", hits);
+  expect(messages.length == 2);
+  expect(messages[0].role == "system");
+  expect(messages[1].role == "user");
+  expect(messages[1].content == "Does lumen need a runtime?");
+  let emptyPrompt = ragPrompt("anything", keywordRetrieve(docs, "", 3));
+  expect(emptyPrompt.includes("(no context available)"));
+});
+
+test("conversation memory through the barrel", () => {
+  let history: LumenAiMessage[] = [system("You are concise.")];
+  history = appendMessage(history, user("Hi"));
+  history = appendMessage(history, assistant("Hello"));
+  history = appendMessage(history, user("What is Lumen?"));
+  expect(history.length == 4);
+  let windowed = windowMemory(history, 2);
+  expect(windowed.length == 3);
+  expect(windowed[0].role == "system");
+  expect(windowed[2].content == "What is Lumen?");
+  let budgeted = budgetMemory(history, 20);
+  expect(budgeted.length < history.length);
+  expect(budgeted[0].role == "system");
+  expect(historyChars(history) > 0);
+  expect(estimateTokens("abcdefgh") == 2);
+  let text = transcript(history);
+  expect(text.includes("system: You are concise."));
+  expect(text.includes("user: What is Lumen?"));
+});
+
+test("summary memory through the barrel", () => {
+  let history: LumenAiMessage[] = [user("Ship the parser"), assistant("Done Tuesday")];
+  let prompt = summaryPrompt(history, "");
+  expect(prompt.includes("(none)"));
+  expect(prompt.includes("user: Ship the parser"));
+  let folded = applySummary("The team shipped the parser.", [user("What next?")]);
+  expect(folded.length == 2);
+  expect(folded[0].role == "system");
+  expect(folded[0].content.includes("The team shipped the parser."));
+});
+
+test("key value memory through the barrel", () => {
+  let store = remember("", "name", "Aymen");
+  store = remember(store, "lang", "Lumen");
+  store = remember(store, "name", "Ada");
+  expect(recall(store, "name") == "Ada");
+  expect(recall(store, "lang") == "Lumen");
+  expect(recall(store, "missing") == "");
+});
+
+test("history serialization through the barrel", () => {
+  let history: LumenAiMessage[] = [system("be brief"), user("hi")];
+  let raw = serializeHistory(history);
+  expect(raw.includes("\"role\":\"system\""));
+  let parsed = parseHistory(raw);
+  expect(parsed.length == 2);
+  expect(parsed[1].content == "hi");
+  let path = "/tmp/lumen-ai-barrel-history.json";
+  saveHistory(path, history);
+  let loaded = loadHistory(path);
+  expect(loaded.length == 2);
+  expect(loaded[0].content == "be brief");
 });

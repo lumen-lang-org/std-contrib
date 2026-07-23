@@ -65,10 +65,17 @@ export function makeAuthHeaders(apiKey: string): Map<string, string> {
   return bearerJsonHeaders(apiKey);
 }
 
+// JSON.parse<T> throws on malformed bodies and on unknown fields, so a provider
+// response that is not the expected shape yields an empty string instead of
+// aborting the caller.
 export function readOpenAIContent(raw: string): string {
-  const parsed: OpenAIChatResponse = JSON.parse<OpenAIChatResponse>(raw);
-  if (parsed.choices.length == 0) { return ""; }
-  return parsed.choices[0].message.content;
+  try {
+    const parsed: OpenAIChatResponse = JSON.parse<OpenAIChatResponse>(raw);
+    if (parsed.choices.length == 0) { return ""; }
+    return parsed.choices[0].message.content;
+  } catch (err) {
+    return "";
+  }
 }
 
 export function readOpenAIResult(status: int, ok: bool, raw: string): LumenAiResult {

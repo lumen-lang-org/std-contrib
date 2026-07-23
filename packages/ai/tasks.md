@@ -116,38 +116,40 @@
 
 ## M9: Embeddings
 
-- [ ] Add embedding request body helper.
-- [ ] Add OpenAI-compatible embeddings helper.
-- [ ] Add Mistral embeddings helper if API support is confirmed.
-- [ ] Add deterministic fake embedding helper for tests.
-- [ ] Add dot product helper.
-- [ ] Add vector norm helper.
-- [ ] Add cosine similarity helper.
-- [ ] Add batch embedding helper.
+- [x] Add embedding request body helper.
+- [x] Add OpenAI-compatible embeddings helper.
+- [x] Add Mistral embeddings helper if API support is confirmed.
+- [x] Add deterministic fake embedding helper for tests.
+- [x] Add dot product helper.
+- [x] Add vector norm helper.
+- [x] Add cosine similarity helper.
+- [ ] Add batch embedding helper. Batch request body and batch response parser
+      are done; the batch HTTP call itself is not.
 - [ ] Add live embedding example behind environment key.
 
 ## M10: Vector Stores And Retrievers
 
-- [ ] Add in-memory vector store record.
-- [ ] Add document insertion helper.
-- [ ] Add vector insertion helper.
-- [ ] Add delete by ID helper.
-- [ ] Add top-k similarity search.
-- [ ] Add keyword retriever.
-- [ ] Add vector retriever.
-- [ ] Add metadata filter plan.
-- [ ] Add RAG context formatter.
-- [ ] Add RAG example over local text.
+- [x] Add in-memory vector store record.
+- [x] Add document insertion helper.
+- [x] Add vector insertion helper.
+- [x] Add delete by ID helper.
+- [x] Add top-k similarity search.
+- [x] Add keyword retriever.
+- [x] Add vector retriever.
+- [x] Add metadata filter plan.
+- [x] Add RAG context formatter.
+- [ ] Add RAG example over local text. README carries a runnable snippet; no
+      `examples/` program yet.
 
 ## M11: Memory
 
-- [ ] Add conversation buffer helper.
-- [ ] Add fixed-window memory helper.
-- [ ] Add summary memory plan.
-- [ ] Add key/value memory helper.
-- [ ] Add file-backed memory helper.
+- [x] Add conversation buffer helper.
+- [x] Add fixed-window memory helper.
+- [x] Add summary memory plan.
+- [x] Add key/value memory helper.
+- [x] Add file-backed memory helper.
 - [ ] Add retrieval-backed memory plan.
-- [ ] Add memory update tests.
+- [x] Add memory update tests.
 
 ## M12: Persistence And Checkpointing
 

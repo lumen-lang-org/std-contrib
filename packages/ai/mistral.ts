@@ -158,10 +158,17 @@ export function makeMistralAuthHeaders(apiKey: string): Map<string, string> {
   return bearerJsonHeaders(apiKey);
 }
 
+// JSON.parse<T> throws on malformed bodies and on unknown fields, so an
+// unexpected response shape falls back to the string scanner instead of
+// aborting the caller.
 export function readMistralContent(raw: string): string {
-  const parsed: MistralChatResponse = JSON.parse<MistralChatResponse>(raw);
-  if (parsed.choices.length > 0) { return parsed.choices[0].message.content; }
-  return scanFirstContent(raw);
+  try {
+    const parsed: MistralChatResponse = JSON.parse<MistralChatResponse>(raw);
+    if (parsed.choices.length > 0) { return parsed.choices[0].message.content; }
+    return scanFirstContent(raw);
+  } catch (err) {
+    return scanFirstContent(raw);
+  }
 }
 
 export function readMistralResult(status: int, ok: bool, raw: string): LumenAiResult {

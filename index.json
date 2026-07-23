@@ -75,7 +75,7 @@
     {
       "name": "ai",
       "version": "0.1.0",
-      "summary": "Typed AI helpers for OpenAI-compatible chat APIs.",
+      "summary": "Typed AI helpers for OpenAI-compatible chat APIs, plus RAG (splitters, embeddings, vector store, retrievers) and conversation memory.",
       "path": "packages/ai"
     },
     {
