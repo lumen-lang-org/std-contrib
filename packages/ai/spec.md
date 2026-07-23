@@ -402,22 +402,22 @@ server and expose them to an agent as ordinary tools.
 
 Scope:
 
-- MCP client over HTTP JSON-RPC 2.0
-- `initialize` handshake
-- `tools/list` discovery
-- `tools/call` invocation
-- JSON-RPC request framing and response parsing
+- MCP client with JSON-RPC 2.0 framing and response parsing
+- `initialize` handshake, `tools/list` discovery, `tools/call` invocation
 - an adapter turning an MCP tool descriptor into a first-class `LumenAiTool`
+- three transports, all driving the same agent loop:
+  - **HTTP** — one POST per call, one complete JSON reply
+  - **stdio** — a persistent subprocess (spec 450's `child_process.spawn`),
+    newline-delimited JSON-RPC over stdin/stdout, replies matched by id so a
+    server's banner or stray lines can't desync the session
+  - **SSE / streamable HTTP** — chunked Server-Sent Events over a raw `net`
+    socket, with a hand-written HTTP/1.1 client, chunked-transfer decoding, and
+    SSE frame parsing
 
-Transport is HTTP only: each call is one POST that returns one complete JSON
-reply. Two transports are deliberately out of scope for now:
-
-- stdio transport is blocked — `spawnSync` runs a process to completion and
-  returns its output, so it cannot hold a server open for an interactive
-  JSON-RPC exchange
-- SSE / streaming responses are not supported; each call assumes a single
-  complete JSON object in the body, and streaming waits on the same stdlib
-  support tracked under Streaming
+One transport limit remains: the SSE path uses `net.connect`, which has no TLS,
+so it is plain `http://` only (localhost or a terminating proxy). Full duplex /
+long-lived server-initiated streaming is still bounded by the stdlib streaming
+support tracked under Streaming.
 
 Success criteria:
 
@@ -499,8 +499,7 @@ Status: mostly complete.
 - `initialize` / `tools/list` / `tools/call`
 - JSON-RPC framing and response parsing
 - adapter from an MCP tool into a `LumenAiTool`
-- stdio transport blocked on `spawnSync` being one-shot
-- SSE / streaming replies deferred with the rest of streaming
+- SSE path is `http://` only (no TLS over raw `net`)
 
 ## Non-Goals For Now
 
