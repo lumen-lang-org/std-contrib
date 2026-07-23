@@ -75,7 +75,7 @@
     {
       "name": "ai",
       "version": "0.1.0",
-      "summary": "Typed AI helpers for OpenAI-compatible chat APIs, plus RAG, conversation memory, and a tool-calling agent loop.",
+      "summary": "Typed AI helpers for OpenAI-compatible chat APIs, plus RAG, conversation memory, and a tool-calling agent loop that runs against live providers.",
       "path": "packages/ai"
     },
     {

@@ -167,6 +167,13 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `fakeModel(responses)` | Deterministic offline model driver replaying canned response bodies |
 | `fakeAnswer(text)` | Build a canned provider body carrying a final answer |
 | `fakeToolCall(name, input)` | Build a canned provider body carrying one tool call |
+| `openAIAgent(apiKey, model, tools)` | Live OpenAI-compatible `LumenAiModel` for `runAgent`, tool definitions and round trip included |
+| `mistralAgent(apiKey, model, tools)` | Live Mistral `LumenAiModel` for `runAgent`, tool definitions and round trip included |
+| `agentChatTurns(messages)` | Rebuild native `tool_calls` / `tool_call_id` turns from the loop's neutral history |
+| `openAIToolBody(model, turns, tools, temperature, maxTokens)` | Build a tool-enabled OpenAI-compatible chat body from native turns |
+| `mistralToolBody(model, turns, tools, temperature, maxTokens)` | Build a tool-enabled Mistral chat body from native turns |
+| `toolChatOpenAI(apiKey, model, turns, tools)` | One tool-enabled OpenAI-compatible round trip, returning the raw body |
+| `toolChatMistral(apiKey, model, turns, tools)` | One tool-enabled Mistral round trip, returning the raw body |
 
 ## RAG
 
@@ -349,21 +356,70 @@ dispatched, so the trace shows what the agent was doing when it ran out of
 budget; if a side effect must never run unobserved, deny that tool or raise the
 budget.
 
-To drive the loop with a real provider, pass a closure that returns the raw
-response body, and send the tool definitions with the request:
+### Live tool-calling agents
+
+`openAIAgent` and `mistralAgent` return a `LumenAiModel` you hand straight to
+`runAgent`. The closure carries the serialized tool definitions in every request
+and performs the native tool round trip, so the loop and its public signature are
+unchanged — only the model source differs from the offline `fakeModel`.
 
 ```ts
-let model = (messages: LumenAiMessage[]) => {
-  return chatMistral("mistral-key", "mistral-large-latest", messages).raw;
-};
-console.log(serializeToolDefs(tools));
+import {
+  defineTool,
+  toolRegistry,
+  registerTool,
+  system,
+  user,
+  agentSystemPrompt,
+  runAgent,
+  agentTrace,
+  openAIAgent,
+} from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+
+function weatherTool(city: string): string {
+  return "18C and clear in " + city;
+}
+
+function clockTool(zone: string): string {
+  return "12:00 in " + zone;
+}
+
+let tools = registerTool(
+  toolRegistry(),
+  defineTool("weather", "Current weather for a city.", "city name", weatherTool),
+);
+tools = registerTool(
+  tools,
+  defineTool("clock", "The local time in a zone.", "zone name", clockTool),
+);
+
+let history = [
+  system(agentSystemPrompt(tools, "You are a weather assistant.")),
+  user("What is the weather in Paris?"),
+];
+
+// The only change from the offline example is the model source. The request now
+// carries the tool definitions, and the assistant tool_calls -> tool result
+// round trip is handled for you: each request rebuilds native tool_calls on the
+// assistant turn and a matching tool_call_id on each tool turn.
+let model = openAIAgent("sk-your-key", "gpt-4o-mini", tools);
+
+let result = runAgent(model, tools, history, 6);
+
+console.log(result.answer);
+console.log(result.stopReason);
+console.log(agentTrace(result));
 ```
 
-V1 sends that `tools` array as its own request field. The loop's own bookkeeping
-is provider-neutral text: the assistant turn that asked for tools is recorded as
-`[tool_calls] weather({"input":"Paris"})`, and results come back with role
-`tool`. A live provider needs an adapter that turns those back into its native
-`tool_calls` and `tool_call_id` fields rather than sending them verbatim.
+`mistralAgent` is the same against the Mistral endpoint. The loop still keeps its
+own bookkeeping as provider-neutral text (`[tool_calls] weather({"input":"Paris"})`
+for the assistant turn, role `tool` for a result); the agent model rebuilds that
+into native `tool_calls` and `tool_call_id` fields per request. The ids are
+synthesized fresh each request (`call_1`, `call_2`, ...) — a chat request is
+self-contained, so they only need to agree within the one request, not with any
+id the provider returned earlier. To build or send a single tool-enabled request
+yourself, use `openAIToolBody` / `toolChatOpenAI` (and the Mistral equivalents)
+over turns from `agentChatTurns`.
 
 ## Files
 
@@ -389,8 +445,10 @@ is provider-neutral text: the assistant turn that asked for tools is recorded as
   allow/deny policy.
 - `toolcall.ts` contains provider tool-call parsing and tool definition
   serialization.
-- `agent.ts` contains the agent loop, its trace, and the offline fake model
-  driver.
+- `toolchat.ts` contains the live tool-calling adapter: native turn records,
+  tool-enabled request bodies, and the tool round-trip HTTP helpers.
+- `agent.ts` contains the agent loop, its trace, the offline fake model driver,
+  and the live `openAIAgent` / `mistralAgent` model sources.
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
 - `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
 - `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
@@ -429,9 +487,6 @@ missing:
 - a tool takes one string and returns one string; no typed tool arguments yet
 - a tool body cannot throw, because the compiler rejects a throwing function in
   the registry's `run` field; report failures by returning text
-- the agent loop records tool calls as provider-neutral text, so sending a run
-  to a live provider needs an adapter that re-serializes native `tool_calls` and
-  maps the `tool` role to a `tool_call_id`
 - no middleware or guardrail hooks beyond the tool allow/deny policy
 - no model retry policy and no tool retry policy
 - no checkpoint, resume, or rewind of a partly finished agent run
