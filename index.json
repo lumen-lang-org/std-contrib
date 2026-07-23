@@ -75,7 +75,7 @@
     {
       "name": "ai",
       "version": "0.1.0",
-      "summary": "Typed AI helpers for OpenAI-compatible chat APIs, plus RAG, conversation memory, a live tool-calling agent loop, and an MCP (Model Context Protocol) client.",
+      "summary": "Typed AI helpers for OpenAI-compatible chat APIs, plus RAG, conversation memory, a live tool-calling agent loop, and an MCP client with HTTP, stdio, and SSE transports.",
       "path": "packages/ai"
     },
     {

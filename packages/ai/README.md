@@ -178,9 +178,9 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `mcpConnectBody()` | Build the MCP `initialize` request body |
 | `mcpListToolsBody(id)` | Build a `tools/list` request body |
 | `mcpCallBody(id, name, argumentsJson)` | Build a `tools/call` request body with raw JSON arguments |
-| `parseMcpTools(raw)` | Parse tool descriptors (name, description, raw schema) from a `tools/list` reply |
+| `mcpParseTools(raw)` | Parse tool descriptors (name, description, raw schema) from a `tools/list` reply |
 | `parseMcpResult(raw)` | Parse a `tools/call` reply into an `ok`/`content`/`error` record |
-| `mcpResponseId(raw)` | Read the JSON-RPC `id` from a reply |
+| `mcpReplyId(raw)` | Read the JSON-RPC `id` from a reply |
 | `mcpIsError(raw)` | Whether a reply carries a JSON-RPC error |
 | `mcpErrorMessage(raw)` | Read the JSON-RPC error message, or `""` |
 | `mcpResultField(raw)` | Source text of the top-level `result`, or `""` |
@@ -189,6 +189,14 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `mcpCall(url, headers, name, argumentsJson)` | Call one MCP tool over HTTP |
 | `mcpAsTool(url, headers, tool)` | Adapt one MCP tool descriptor into a runnable `LumenAiTool` |
 | `mcpAsTools(url, headers, tools)` | Adapt every MCP tool descriptor into a `LumenAiTool[]` for `runAgent` |
+| `mcpStdioConnect(command, args)` | Spawn a local MCP server as a subprocess and return a live stdio session |
+| `mcpStdioTools(session)` | List an MCP server's tools over stdio |
+| `mcpStdioCall(session, name, argumentsJson)` | Call one MCP tool over stdio |
+| `mcpStdioAsTools(session, tools)` | Adapt stdio MCP tools into a `LumenAiTool[]` for `runAgent` |
+| `mcpStdioClose(session)` | Close the server's stdin and wait for it to exit |
+| `mcpSseTools(url, headers)` | List tools from an SSE/streamable-HTTP MCP server (`http://` only) |
+| `mcpSseCall(url, headers, name, argumentsJson)` | Call one MCP tool over SSE |
+| `mcpSseAsTools(url, headers, tools)` | Adapt SSE MCP tools into a `LumenAiTool[]` for `runAgent` |
 
 ## RAG
 
@@ -491,12 +499,29 @@ performs the `initialize` handshake, and the request builders (`mcpConnectBody`,
 `mcpListToolsBody`, `mcpCallBody`) plus parsers (`parseMcpTools`,
 `parseMcpResult`) are exposed for building or reading JSON-RPC yourself.
 
-Transport is **HTTP JSON-RPC only**: every call is one POST that returns one
-complete JSON reply. There is no stdio transport — `spawnSync` runs a process to
-completion and cannot hold a server open for an interactive exchange — and no
-SSE or streaming responses yet; streaming waits on the same stdlib support as
-the rest of the package (see M13). Pass authentication through the `headers`
-map; `Content-Type: application/json` is set for you.
+Three transports are supported, all driving the same `runAgent`:
+
+- **HTTP JSON-RPC** (`mcpConnect` / `mcpTools` / `mcpCall` / `mcpAsTools`) — one
+  POST per call returning one complete JSON reply. Pass auth through `headers`.
+- **stdio** (`mcpStdioConnect` / `mcpStdioTools` / `mcpStdioCall` /
+  `mcpStdioAsTools` / `mcpStdioClose`) — spawn a local MCP server as a
+  subprocess and exchange newline-delimited JSON-RPC over its stdin/stdout. The
+  session stays live across calls, and the reader matches replies by id so a
+  server's startup banner or stray blank lines can't desync it.
+- **SSE / streamable HTTP** (`mcpSseTools` / `mcpSseCall` / `mcpSseAsTools`) —
+  for servers whose replies stream as chunked Server-Sent Events, over a raw TCP
+  socket. Plain `http://` only: `net.connect` has no TLS, so use localhost or a
+  server behind a terminating proxy.
+
+```ts
+// stdio: spawn a server and give its tools to the agent
+let session = mcpStdioConnect("npx", ["-y", "@modelcontextprotocol/server-everything"]);
+let tools = mcpStdioAsTools(session, mcpStdioTools(session));
+let result = runAgent(openAIAgent(apiKey, "gpt-4o", tools), tools, history, 8);
+mcpStdioClose(session);
+```
+
+See `examples/support-agent/` for runnable HTTP, stdio, and SSE examples.
 
 ## Files
 
@@ -563,8 +588,8 @@ Retrieval, embeddings, memory, tools, and the agent loop now ship. What is still
 missing:
 
 - no streaming responses
-- MCP is HTTP JSON-RPC only: no stdio transport (`spawnSync` is one-shot) and no
-  SSE or streaming replies
+- MCP over SSE is plain `http://` only (`net.connect` has no TLS); point it at
+  localhost or a server behind a terminating proxy
 - no multimodal or chunk-list response content; V1 expects string `content`
 - a tool takes one string and returns one string; no typed tool arguments yet
 - a tool body cannot throw, because the compiler rejects a throwing function in

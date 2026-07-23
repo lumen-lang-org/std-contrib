@@ -40,12 +40,20 @@ import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy,
 // So every toolchat name is imported unaliased, exactly like the sibling-shared
 // vector/tool names above, and the public wrappers below take a different name.
 import { buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./toolchat.ts";
-// mcp.ts imports makeTool from tools.ts (inlined once already through the tool
-// layer above) and declares LumenMcpTool / LumenMcpResult unexported; importing
-// any value from it brings those types into scope. No sibling imports an mcp
-// name, so every mcp function is aliased here and the public wrappers below take
-// the clean name.
-import { mcpRequest as buildMcpRequest, mcpInitializeRequest as buildMcpConnectBody, mcpListToolsRequest as buildMcpListToolsBody, mcpCallToolRequest as buildMcpCallBody, parseMcpTools as readMcpTools, parseMcpToolResult as readMcpResult, mcpResponseId as readMcpResponseId, mcpIsError as readMcpIsError, mcpErrorMessage as readMcpErrorMessage, mcpResultField as readMcpResultField, mcpInitialize as runMcpInitialize, mcpListTools as runMcpListTools, mcpCallTool as runMcpCallTool, mcpToolToLumen as adaptMcpTool, mcpToolsToRegistry as adaptMcpTools } from "./mcp.ts";
+// mcp.ts declares LumenMcpTool / LumenMcpResult unexported; importing any value
+// from it brings those types into scope.
+// mcp_stdio.ts and mcp_sse.ts import six of mcp.ts's helpers UNALIASED
+// (mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools,
+// parseMcpToolResult, mcpResponseId), so those six must be imported unaliased
+// here too — aliasing one would rename the definition and dangle the siblings'
+// bare references. The remaining mcp.ts names are barrel-only, so they stay
+// aliased. The two public wrappers whose name would then collide with an
+// unaliased import are exposed as mcpParseTools / mcpReplyId.
+import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId, mcpRequest as buildMcpRequest, mcpIsError as readMcpIsError, mcpErrorMessage as readMcpErrorMessage, mcpResultField as readMcpResultField, mcpInitialize as runMcpInitialize, mcpListTools as runMcpListTools, mcpCallTool as runMcpCallTool, mcpToolToLumen as adaptMcpTool, mcpToolsToRegistry as adaptMcpTools } from "./mcp.ts";
+// The stdio and SSE MCP transports (mcp_stdio.ts / mcp_sse.ts) are self-contained
+// modules; no sibling imports their names, so every one is aliased here.
+import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp_stdio.ts";
+import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen as adaptSseTool, sseToolsToRegistry as adaptSseTools } from "./mcp_sse.ts";
 
 type JsonName = {
   name: string,
@@ -600,27 +608,30 @@ export function mcpRequestBody(id: int, method: string, params: string): string 
 }
 
 export function mcpConnectBody(): string {
-  return buildMcpConnectBody();
+  return mcpInitializeRequest();
 }
 
 export function mcpListToolsBody(id: int): string {
-  return buildMcpListToolsBody(id);
+  return mcpListToolsRequest(id);
 }
 
 export function mcpCallBody(id: int, name: string, argumentsJson: string): string {
-  return buildMcpCallBody(id, name, argumentsJson);
+  return mcpCallToolRequest(id, name, argumentsJson);
 }
 
-export function parseMcpTools(raw: string): LumenMcpTool[] {
-  return readMcpTools(raw);
+// `parseMcpTools` / `mcpResponseId` are imported unaliased from mcp.ts (the
+// stdio/SSE transports need them under those names), so the barrel exposes them
+// as mcpParseTools / mcpReplyId to avoid a same-name clash with the imports.
+export function mcpParseTools(raw: string): LumenMcpTool[] {
+  return parseMcpTools(raw);
 }
 
 export function parseMcpResult(raw: string): LumenMcpResult {
-  return readMcpResult(raw);
+  return parseMcpToolResult(raw);
 }
 
-export function mcpResponseId(raw: string): int {
-  return readMcpResponseId(raw);
+export function mcpReplyId(raw: string): int {
+  return mcpResponseId(raw);
 }
 
 export function mcpIsError(raw: string): bool {
@@ -658,6 +669,46 @@ export function mcpAsTool(url: string, headers: Map<string, string>, tool: Lumen
 
 export function mcpAsTools(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
   return adaptMcpTools(url, headers, tools);
+}
+
+// --- MCP over stdio ---------------------------------------------------------
+// Spawn a local MCP server as a subprocess and exchange newline-delimited
+// JSON-RPC over its stdin/stdout. The session stays live across calls.
+
+export function mcpStdioConnect(command: string, args: string[]): LumenMcpStdioSession {
+  return runStdioSpawn(command, args);
+}
+
+export function mcpStdioTools(session: LumenMcpStdioSession): LumenMcpTool[] {
+  return runStdioListTools(session);
+}
+
+export function mcpStdioCall(session: LumenMcpStdioSession, name: string, argumentsJson: string): LumenMcpResult {
+  return runStdioCall(session, name, argumentsJson);
+}
+
+export function mcpStdioClose(session: LumenMcpStdioSession): void {
+  runStdioClose(session);
+}
+
+export function mcpStdioAsTools(session: LumenMcpStdioSession, tools: LumenMcpTool[]): LumenAiTool[] {
+  return adaptStdioTools(session, tools);
+}
+
+// --- MCP over SSE / streamable HTTP -----------------------------------------
+// Talk to an MCP server whose responses stream as chunked Server-Sent Events,
+// over a raw TCP socket. Plain http:// only (no TLS).
+
+export function mcpSseTools(url: string, headers: Map<string, string>): LumenMcpTool[] {
+  return runSseListTools(url, headers);
+}
+
+export function mcpSseCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): LumenMcpResult {
+  return runSseCall(url, headers, name, argumentsJson);
+}
+
+export function mcpSseAsTools(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
+  return adaptSseTools(url, headers, tools);
 }
 
 test("message helpers", () => {
@@ -1280,15 +1331,15 @@ test("live tool-calling agent surface through the barrel", () => {
 test("mcp surface through the barrel", () => {
   // Request builders frame JSON-RPC and round-trip their ids.
   let connect = mcpConnectBody();
-  expect(mcpResponseId(connect) == 1);
+  expect(mcpReplyId(connect) == 1);
   expect(mcpListToolsBody(2).includes("\"method\":\"tools/list\""));
   let callBody = mcpCallBody(3, "weather", "{\"input\":\"Paris\"}");
   expect(callBody.includes("\"method\":\"tools/call\""));
-  expect(mcpResponseId(callBody) == 3);
+  expect(mcpReplyId(callBody) == 3);
   expect(mcpRequestBody(5, "ping", "{}").includes("\"method\":\"ping\""));
   // A tools/list reply parses into descriptors and adapts into runnable tools.
   let listReply = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"weather\",\"description\":\"Current weather for a city.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}}}}]}}";
-  let descriptors = parseMcpTools(listReply);
+  let descriptors = mcpParseTools(listReply);
   expect(descriptors.length == 1);
   expect(descriptors[0].name == "weather");
   let registry = mcpAsTools("http://127.0.0.1:9/mcp", new Map<string, string>(), descriptors);

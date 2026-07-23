@@ -231,10 +231,12 @@
 - [x] Adapt an MCP tool descriptor into a first-class `LumenAiTool` for
       `runAgent`.
 - [x] Add offline tests over hand-written JSON-RPC bodies.
-- [ ] Add stdio transport. Blocked: `spawnSync` is one-shot and cannot hold a
-      server open for an interactive JSON-RPC exchange.
-- [ ] Add SSE / streaming reply handling. Blocked on the same stdlib streaming
-      support as M13.
+- [x] Add stdio transport (spec 450's persistent `child_process.spawn`): a live
+      session over newline-delimited JSON-RPC, with id-matched reads that skip a
+      server's banner/blank/notification lines.
+- [x] Add SSE / streamable-HTTP transport over raw `net` sockets: a hand-written
+      HTTP/1.1 client, chunked transfer decoding, and SSE frame parsing.
+      (`http://` only — `net.connect` has no TLS.)
 
 ## Continuous Quality
 
