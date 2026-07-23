@@ -63,31 +63,46 @@
 
 ## M5: Tools
 
-- [ ] Add tool metadata record.
-- [ ] Add string-input/string-output tool function shape.
-- [ ] Add tool registry builder.
-- [ ] Add tool lookup by name.
-- [ ] Add tool dispatch result record.
-- [ ] Add tool error result record.
-- [ ] Add provider-neutral tool call record.
-- [ ] Parse OpenAI-compatible tool calls.
-- [ ] Parse Mistral tool calls.
-- [ ] Serialize tool definitions for OpenAI-compatible providers.
-- [ ] Serialize tool definitions for Mistral.
-- [ ] Add deterministic fake tool tests.
+- [x] Add tool metadata record.
+- [x] Add string-input/string-output tool function shape.
+- [x] Add tool registry builder.
+- [x] Add tool lookup by name.
+- [x] Add tool dispatch result record.
+- [x] Add tool error result record.
+- [x] Add provider-neutral tool call record.
+- [x] Parse OpenAI-compatible tool calls.
+- [x] Parse Mistral tool calls.
+- [x] Serialize tool definitions for OpenAI-compatible providers.
+- [x] Serialize tool definitions for Mistral.
+- [x] Add deterministic fake tool tests.
+- [ ] Carry the serialized tool definitions in the chat request bodies.
+      `serializeToolDefs` builds the array, but `openAIChatBody` and
+      `mistralChatBody` still have no `tools` field.
+- [ ] Add a provider adapter for the tool round trip. The loop records the
+      assistant tool-call turn as provider-neutral text and tags results with
+      role `tool`; a live request needs native `tool_calls` and a
+      `tool_call_id`.
+- [ ] Add typed tool arguments. V1 tools take and return one string, and a tool
+      body cannot throw because the compiler rejects a throwing function in the
+      registry's `run` field.
 
 ## M6: Agent Loop
 
-- [ ] Add agent input record.
-- [ ] Add agent result record.
-- [ ] Add max-step loop.
-- [ ] Add stop condition for final assistant message.
-- [ ] Add stop condition for max steps reached.
-- [ ] Add tool execution step.
-- [ ] Append tool result messages.
-- [ ] Add intermediate step trace.
-- [ ] Add deterministic fake model driver for tests.
-- [ ] Add one-tool agent example.
+- [ ] Add agent input record. `runAgent` takes the model, the registry, the
+      history, and the step budget as parameters; there is no single input
+      record yet.
+- [x] Add agent result record.
+- [x] Add max-step loop.
+- [x] Add stop condition for final assistant message.
+- [x] Add stop condition for max steps reached.
+- [x] Add tool execution step.
+- [x] Append tool result messages.
+- [x] Add intermediate step trace.
+- [x] Add deterministic fake model driver for tests.
+- [x] Add a stop condition for an unusable provider body. A response with no
+      message object ends the run with `error` instead of retrying.
+- [ ] Add one-tool agent example. README carries a runnable offline snippet; no
+      `examples/` program yet.
 
 ## M7: Middleware And Guardrails
 
@@ -96,8 +111,8 @@
 - [ ] Add before-tool middleware hook.
 - [ ] Add after-tool middleware hook.
 - [ ] Add request redaction helper.
-- [ ] Add allowlist guard for tool names.
-- [ ] Add denylist guard for tool names.
+- [x] Add allowlist guard for tool names.
+- [x] Add denylist guard for tool names.
 - [ ] Add token budget guard.
 - [ ] Add retry policy record.
 - [ ] Add retry wrapper for transient provider errors.

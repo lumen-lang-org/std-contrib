@@ -25,6 +25,15 @@ import { embeddingBody as buildEmbeddingBody, embeddingBodyBatch as buildEmbeddi
 import { emptyVectorStore, storeSize as readStoreSize, addVector as addStoreVector, addDocuments, deleteById as deleteStoreDocument, filterByMetadata as filterStoreByMetadata, searchByVector as runSearchByVector, searchByText } from "./store.ts";
 import { tokenizeQuery as readQueryTerms, keywordScore as computeKeywordScore, keywordRetrieve as runKeywordRetrieve, vectorRetrieve as runVectorRetrieve, hybridRetrieve as runHybridRetrieve, formatContext as buildRagContext, ragPrompt as buildRagPrompt, ragMessages as buildRagMessages } from "./retrieve.ts";
 import { appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory.ts";
+// Same rule for the tool and agent layers: toolcall.ts imports makeTool, and
+// agent.ts imports makeTool, describeTools, runToolWithPolicy,
+// toolResultMessage, parseToolCalls, toolCallInput, makeToolCall and
+// toolCallArgument. Those eight names are imported here WITHOUT an alias, so
+// their public wrappers below take a different name rather than renaming the
+// definition out from under a sibling.
+import { makeTool, describeTools, runToolWithPolicy, toolResultMessage, toolRegistry as emptyToolRegistry, registerTool as addToolEntry, findTool as findToolIndex, hasTool as hasToolNamed, toolNames as readToolNames, runTool as dispatchTool } from "./tools.ts";
+import { makeToolCall, toolCallArgument, toolCallInput, parseToolCalls, serializeToolDefs as buildToolDefs, serializeToolDefsMistral as buildToolDefsMistral, parseMistralToolCalls as readMistralToolCalls, hasToolCalls as responseHasToolCalls, finishReason as readFinishReason } from "./toolcall.ts";
+import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall } from "./agent.ts";
 
 type JsonName = {
   name: string,
@@ -411,6 +420,125 @@ export function saveHistory(path: string, history: LumenAiMessage[]): void {
 
 export function loadHistory(path: string): LumenAiMessage[] {
   return readHistoryFile(path);
+}
+
+// A tool is a name, a description the model reads, a one-line note about the
+// input, and a function from one string to one string. V1 tools take and return
+// text; a tool body must not throw, so report trouble by returning it.
+export function defineTool(name: string, description: string, params: string, run: (input: string) => string): LumenAiTool {
+  return makeTool(name, description, params, run);
+}
+
+export function toolRegistry(): LumenAiTool[] {
+  return emptyToolRegistry();
+}
+
+export function registerTool(tools: LumenAiTool[], entry: LumenAiTool): LumenAiTool[] {
+  return addToolEntry(tools, entry);
+}
+
+export function findTool(tools: LumenAiTool[], name: string): int {
+  return findToolIndex(tools, name);
+}
+
+export function hasTool(tools: LumenAiTool[], name: string): bool {
+  return hasToolNamed(tools, name);
+}
+
+export function toolNames(tools: LumenAiTool[]): string[] {
+  return readToolNames(tools);
+}
+
+export function toolDescriptions(tools: LumenAiTool[]): string {
+  return describeTools(tools);
+}
+
+export function runTool(tools: LumenAiTool[], name: string, input: string): LumenAiToolResult {
+  return dispatchTool(tools, name, input);
+}
+
+// Deny wins over allow, and an empty allow list means everything not denied.
+export function runToolGuarded(tools: LumenAiTool[], allow: string[], deny: string[], name: string, input: string): LumenAiToolResult {
+  return runToolWithPolicy(tools, allow, deny, name, input);
+}
+
+export function toolMessage(result: LumenAiToolResult): LumenAiMessage {
+  return toolResultMessage(result);
+}
+
+export function toolCall(id: string, name: string, args: string): LumenAiToolCall {
+  return makeToolCall(id, name, args);
+}
+
+export function toolCalls(raw: string): LumenAiToolCall[] {
+  return parseToolCalls(raw);
+}
+
+export function parseMistralToolCalls(raw: string): LumenAiToolCall[] {
+  return readMistralToolCalls(raw);
+}
+
+export function toolCallArg(call: LumenAiToolCall, key: string): string {
+  return toolCallArgument(call, key);
+}
+
+export function toolInput(call: LumenAiToolCall): string {
+  return toolCallInput(call);
+}
+
+export function hasToolCalls(raw: string): bool {
+  return responseHasToolCalls(raw);
+}
+
+export function finishReason(raw: string): string {
+  return readFinishReason(raw);
+}
+
+export function serializeToolDefs(tools: LumenAiTool[]): string {
+  return buildToolDefs(tools);
+}
+
+export function serializeToolDefsMistral(tools: LumenAiTool[]): string {
+  return buildToolDefsMistral(tools);
+}
+
+export function agentStep(index: int, name: string, input: string, output: string, ok: bool): LumenAiAgentStep {
+  return buildAgentStep(index, name, input, output, ok);
+}
+
+export function agentSystemPrompt(tools: LumenAiTool[], instruction: string): string {
+  return buildAgentSystemPrompt(tools, instruction);
+}
+
+// One step is one model call plus every tool call it asked for, so `maxSteps`
+// bounds model calls and the loop terminates even against a model that asks for
+// a tool forever.
+export function runAgent(model: LumenAiModel, tools: LumenAiTool[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
+  return runAgentLoop(model, tools, history, maxSteps);
+}
+
+export function runAgentWithPolicy(model: LumenAiModel, tools: LumenAiTool[], allow: string[], deny: string[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
+  return runAgentLoopWithPolicy(model, tools, allow, deny, history, maxSteps);
+}
+
+export function agentTrace(result: LumenAiAgentResult): string {
+  return renderAgentTrace(result);
+}
+
+// Offline model driver for tests and examples: it replays canned provider
+// bodies in order, then answers "done". Start a fake run from a system/user
+// history, because the turn is counted off the assistant messages already in
+// the conversation.
+export function fakeModel(responses: string[]): LumenAiModel {
+  return makeFakeModel(responses);
+}
+
+export function fakeAnswer(text: string): string {
+  return buildFakeAnswer(text);
+}
+
+export function fakeToolCall(name: string, input: string): string {
+  return buildFakeToolCall(name, input);
 }
 
 test("message helpers", () => {
@@ -841,4 +969,154 @@ test("history serialization through the barrel", () => {
   let loaded = loadHistory(path);
   expect(loaded.length == 2);
   expect(loaded[0].content == "be brief");
+});
+
+function barrelWeatherBody(input: string): string {
+  return "18C in " + input;
+}
+
+function barrelClockBody(input: string): string {
+  return "12:00 in " + input;
+}
+
+function barrelTools(): LumenAiTool[] {
+  let tools = registerTool(toolRegistry(), defineTool("weather", "Current weather for a city.", "city name", barrelWeatherBody));
+  tools = registerTool(tools, defineTool("clock", "The local time in a zone.", "zone name", barrelClockBody));
+  return tools;
+}
+
+function barrelAgentHistory(): LumenAiMessage[] {
+  let history: LumenAiMessage[] = [
+    system(agentSystemPrompt(barrelTools(), "You are a weather assistant.")),
+    user("What is the weather in Paris?"),
+  ];
+  return history;
+}
+
+test("tool registry through the barrel", () => {
+  let tools = barrelTools();
+  expect(tools.length == 2);
+  expect(hasTool(tools, "weather"));
+  expect(!hasTool(tools, "missing"));
+  expect(findTool(tools, "clock") == 1);
+  expect(findTool(tools, "missing") == -1);
+  let names = toolNames(tools);
+  expect(names.length == 2);
+  expect(names[0] == "weather");
+  let block = toolDescriptions(tools);
+  expect(block.includes("- weather(city name): Current weather for a city."));
+  expect(toolDescriptions(toolRegistry()) == "");
+  let replaced = registerTool(tools, defineTool("weather", "Replaced.", "city", barrelClockBody));
+  expect(replaced.length == 2);
+  expect(tools[0].description == "Current weather for a city.");
+});
+
+test("tool dispatch through the barrel", () => {
+  let tools = barrelTools();
+  let ok = runTool(tools, "weather", "Paris");
+  expect(ok.ok);
+  expect(ok.output == "18C in Paris");
+  expect(toolMessage(ok).role == "tool");
+  expect(toolMessage(ok).content == "[tool weather] 18C in Paris");
+  let missing = runTool(tools, "nope", "x");
+  expect(!missing.ok);
+  expect(missing.error.includes("unknown tool"));
+  expect(toolMessage(missing).content.includes("error: unknown tool"));
+  let denied = runToolGuarded(tools, [], ["weather"], "weather", "Paris");
+  expect(!denied.ok);
+  expect(denied.error.includes("denied"));
+  let allowed = runToolGuarded(tools, ["weather"], [], "weather", "Paris");
+  expect(allowed.ok);
+  let outside = runToolGuarded(tools, ["weather"], [], "clock", "CET");
+  expect(!outside.ok);
+});
+
+test("tool call parsing through the barrel", () => {
+  let raw = fakeToolCall("weather", "Paris");
+  expect(hasToolCalls(raw));
+  expect(finishReason(raw) == "tool_calls");
+  let calls = toolCalls(raw);
+  expect(calls.length == 1);
+  expect(calls[0].name == "weather");
+  expect(toolInput(calls[0]) == "Paris");
+  expect(toolCallArg(calls[0], "input") == "Paris");
+  expect(toolCallArg(calls[0], "missing") == "");
+  let mistral = parseMistralToolCalls(raw);
+  expect(mistral.length == 1);
+  let answer = fakeAnswer("all done");
+  expect(!hasToolCalls(answer));
+  expect(finishReason(answer) == "stop");
+  expect(toolCalls("not json").length == 0);
+  let manual = toolCall("call_1", "clock", "{\"input\":\"CET\"}");
+  expect(toolInput(manual) == "CET");
+});
+
+test("tool definitions through the barrel", () => {
+  let body = serializeToolDefs(barrelTools());
+  expect(body.includes("\"name\":\"weather\""));
+  expect(body.includes("\"type\":\"function\""));
+  expect(body.includes("\"required\":[\"input\"]"));
+  expect(serializeToolDefsMistral(barrelTools()) == body);
+  expect(serializeToolDefs(toolRegistry()) == "[]");
+});
+
+test("agent system prompt through the barrel", () => {
+  let prompt = agentSystemPrompt(barrelTools(), "You are a weather assistant.");
+  expect(prompt.startsWith("You are a weather assistant."));
+  expect(prompt.includes("- weather(city name): Current weather for a city."));
+  expect(prompt.includes("final answer"));
+});
+
+test("agent loop through the barrel", () => {
+  let model = fakeModel([
+    fakeToolCall("weather", "Paris"),
+    fakeAnswer("It is 18C in Paris."),
+  ]);
+  let result = runAgent(model, barrelTools(), barrelAgentHistory(), 4);
+  expect(result.stopReason == "final");
+  expect(result.answer == "It is 18C in Paris.");
+  expect(result.stepCount == 2);
+  expect(result.steps.length == 1);
+  expect(result.steps[0].tool == "weather");
+  expect(result.steps[0].input == "Paris");
+  expect(result.steps[0].output == "18C in Paris");
+  expect(result.steps[0].ok);
+  let trace = agentTrace(result);
+  expect(trace.includes("1. weather(Paris) -> 18C in Paris"));
+  expect(trace.includes("stopped: final after 2 model calls, 1 tool call"));
+});
+
+test("agent step limit through the barrel", () => {
+  let model = fakeModel([
+    fakeToolCall("weather", "Paris"),
+    fakeToolCall("clock", "CET"),
+    fakeToolCall("weather", "Lyon"),
+  ]);
+  let result = runAgent(model, barrelTools(), barrelAgentHistory(), 2);
+  expect(result.stopReason == "max_steps");
+  expect(result.stepCount == 2);
+  expect(result.steps.length == 2);
+  expect(agentTrace(result).includes("stopped: max_steps"));
+});
+
+test("agent policy through the barrel", () => {
+  let model = fakeModel([
+    fakeToolCall("clock", "CET"),
+    fakeAnswer("I cannot check the clock."),
+  ]);
+  let deny: string[] = ["clock"];
+  let allow: string[] = [];
+  let result = runAgentWithPolicy(model, barrelTools(), allow, deny, barrelAgentHistory(), 4);
+  expect(result.stopReason == "final");
+  expect(result.steps.length == 1);
+  expect(!result.steps[0].ok);
+  expect(result.steps[0].output.includes("blocked by policy"));
+  expect(result.answer == "I cannot check the clock.");
+});
+
+test("agent step record through the barrel", () => {
+  let step = agentStep(0, "weather", "Paris", "18C in Paris", true);
+  expect(step.index == 0);
+  expect(step.tool == "weather");
+  expect(step.ok);
 });
