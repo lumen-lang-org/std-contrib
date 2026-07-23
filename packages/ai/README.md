@@ -4,7 +4,8 @@ Typed AI helpers for OpenAI-compatible chat APIs, written in Lumen.
 
 This package starts with the practical core of AI applications: messages,
 prompt templates, model calls, a small response parser, retrieval over local
-documents, and conversation memory. It stays intentionally lean for V1 because
+documents, conversation memory, tools, and an agent loop that runs a model and
+its tools until the task is done. It stays intentionally lean for V1 because
 Lumen is statically typed and does not expose dynamic JSON, streaming HTTP
 responses, or provider SDKs yet.
 
@@ -139,6 +140,33 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `parseHistory(raw)` | Parse a history from JSON |
 | `saveHistory(path, history)` | Write a history to a file |
 | `loadHistory(path)` | Read a history from a file |
+| `defineTool(name, description, params, run)` | Build a tool from a `(string) => string` function |
+| `toolRegistry()` | Build an empty tool registry |
+| `registerTool(tools, entry)` | Return a new registry with a tool added, or replaced by name |
+| `findTool(tools, name)` | Index of a registered tool, or `-1` |
+| `hasTool(tools, name)` | Whether a name is registered |
+| `toolNames(tools)` | Registered tool names, in order |
+| `toolDescriptions(tools)` | Render the registry as one `- name(params): description` line per tool |
+| `runTool(tools, name, input)` | Dispatch one tool and return a result record |
+| `runToolGuarded(tools, allow, deny, name, input)` | Dispatch only when the allow/deny policy permits it |
+| `toolMessage(result)` | Turn a tool result into a `role: "tool"` message |
+| `toolCall(id, name, args)` | Build a provider-neutral tool call record |
+| `toolCalls(raw)` | Parse tool calls out of an OpenAI-compatible response body |
+| `parseMistralToolCalls(raw)` | Parse tool calls out of a Mistral response body |
+| `toolCallArg(call, key)` | Read one argument out of a tool call payload |
+| `toolInput(call)` | Read the V1 `input` argument of a tool call |
+| `hasToolCalls(raw)` | Whether a response body asks for any tool |
+| `finishReason(raw)` | Read `finish_reason` from a response body |
+| `serializeToolDefs(tools)` | Serialize the registry as an OpenAI-compatible `tools` array |
+| `serializeToolDefsMistral(tools)` | Serialize the registry as a Mistral `tools` array |
+| `agentSystemPrompt(tools, instruction)` | Build the agent system prompt that lists the tools and how to stop |
+| `runAgent(model, tools, history, maxSteps)` | Run the model/tool loop and return answer, steps, and stop reason |
+| `runAgentWithPolicy(model, tools, allow, deny, history, maxSteps)` | Run the loop with a tool allow/deny policy |
+| `agentStep(index, name, input, output, ok)` | Build one agent step record |
+| `agentTrace(result)` | Render every tool call in order and why the run stopped |
+| `fakeModel(responses)` | Deterministic offline model driver replaying canned response bodies |
+| `fakeAnswer(text)` | Build a canned provider body carrying a final answer |
+| `fakeToolCall(name, input)` | Build a canned provider body carrying one tool call |
 
 ## RAG
 
@@ -231,6 +259,112 @@ still over budget. For long conversations, build a running summary with
 `summaryPrompt`, send it to a model, and fold the result back in with
 `applySummary`.
 
+## Tools and agents
+
+A tool is a name, a description the model reads, a one-line note about the
+input, and a plain function from one string to one string. An agent is a model
+and a registry run in a loop: the model asks for a tool, the loop dispatches it,
+appends the result to the conversation, and calls the model again until it
+answers or the step budget runs out.
+
+This example runs offline. `fakeModel` replays canned provider response bodies
+in order, so the whole loop is testable with no network and no API key.
+
+```ts
+import {
+  defineTool,
+  toolRegistry,
+  registerTool,
+  system,
+  user,
+  agentSystemPrompt,
+  runAgent,
+  agentTrace,
+  fakeModel,
+  fakeToolCall,
+  fakeAnswer,
+} from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+
+function weatherTool(city: string): string {
+  return "18C and clear in " + city;
+}
+
+function clockTool(zone: string): string {
+  return "12:00 in " + zone;
+}
+
+let tools = registerTool(
+  toolRegistry(),
+  defineTool("weather", "Current weather for a city.", "city name", weatherTool),
+);
+tools = registerTool(
+  tools,
+  defineTool("clock", "The local time in a zone.", "zone name", clockTool),
+);
+
+let history = [
+  system(agentSystemPrompt(tools, "You are a weather assistant.")),
+  user("What is the weather in Paris?"),
+];
+
+// Turn one asks for the tool, turn two answers. A real run passes a closure
+// that calls a provider and returns the raw response body instead.
+let model = fakeModel([
+  fakeToolCall("weather", "Paris"),
+  fakeAnswer("It is 18C and clear in Paris."),
+]);
+
+let result = runAgent(model, tools, history, 4);
+
+console.log(result.answer);      // It is 18C and clear in Paris.
+console.log(result.stopReason);  // final
+console.log(agentTrace(result));
+// 1. weather(Paris) -> 18C and clear in Paris
+// stopped: final after 2 model calls, 1 tool call
+```
+
+`stopReason` is one of exactly three values: `final` when the model answered
+without asking for another tool, `max_steps` when the budget ran out first, and
+`error` when the provider returned a body with no usable message in it.
+`stepCount` counts model calls; `steps` holds one record per tool call, so a
+turn that asked for two tools contributes one to `stepCount` and two to `steps`.
+`answer` is the best answer seen so far, so a run that stops early still returns
+whatever prose the model had already written.
+
+A tool body must not throw, and must not call anything that throws: the
+compiler rejects a throwing function in the registry's `run` field. Report
+trouble by returning text. A failed dispatch — an unknown name, a denied name —
+is not a crash either; it comes back as a step whose output is `error: ...` and
+goes to the model in the same message shape as a success, so the model can read
+it and try something else.
+
+`runToolGuarded` and `runAgentWithPolicy` take an allow list and a deny list.
+Deny wins over allow, an empty allow list means everything not denied, and
+policy is checked before the registry is consulted, so a denied name never
+reveals whether such a tool exists.
+
+`maxSteps` bounds model calls, so the loop terminates even against a model that
+asks for a tool forever. The tool calls of the last permitted turn are still
+dispatched, so the trace shows what the agent was doing when it ran out of
+budget; if a side effect must never run unobserved, deny that tool or raise the
+budget.
+
+To drive the loop with a real provider, pass a closure that returns the raw
+response body, and send the tool definitions with the request:
+
+```ts
+let model = (messages: LumenAiMessage[]) => {
+  return chatMistral("mistral-key", "mistral-large-latest", messages).raw;
+};
+console.log(serializeToolDefs(tools));
+```
+
+V1 sends that `tools` array as its own request field. The loop's own bookkeeping
+is provider-neutral text: the assistant turn that asked for tools is recorded as
+`[tool_calls] weather({"input":"Paris"})`, and results come back with role
+`tool`. A live provider needs an adapter that turns those back into its native
+`tool_calls` and `tool_call_id` fields rather than sending them verbatim.
+
 ## Files
 
 - `ai.ts` is the public entry point.
@@ -251,6 +385,12 @@ still over budget. For long conversations, build a running summary with
 - `store.ts` contains the in-memory vector store and similarity search.
 - `retrieve.ts` contains keyword, vector, and hybrid retrievers plus RAG prompts.
 - `memory.ts` contains conversation memory, key/value memory, and history files.
+- `tools.ts` contains the tool record, the registry, dispatch, and the
+  allow/deny policy.
+- `toolcall.ts` contains provider tool-call parsing and tool definition
+  serialization.
+- `agent.ts` contains the agent loop, its trace, and the offline fake model
+  driver.
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
 - `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
 - `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
@@ -273,18 +413,29 @@ useful Lumen-native layer:
 - documents, splitters, embeddings, and an in-memory vector store
 - keyword, vector, and hybrid retrieval with grounded RAG prompts
 - window, budget, summary, key/value, and file-backed memory
+- a tool registry, tool dispatch, and an allow/deny policy
+- provider tool-call parsing and a step-bounded agent loop
 
 That gives Lumen users a real AI API client without Node.js, npm packages, or a
 JavaScript runtime.
 
 ## Limits in V1
 
-Retrieval, embeddings, and memory now ship. What is still missing:
+Retrieval, embeddings, memory, tools, and the agent loop now ship. What is still
+missing:
 
 - no streaming responses
 - no multimodal or chunk-list response content; V1 expects string `content`
-- no tool-call loop yet
-- no agent loop yet
+- a tool takes one string and returns one string; no typed tool arguments yet
+- a tool body cannot throw, because the compiler rejects a throwing function in
+  the registry's `run` field; report failures by returning text
+- the agent loop records tool calls as provider-neutral text, so sending a run
+  to a live provider needs an adapter that re-serializes native `tool_calls` and
+  maps the `tool` role to a `tool_call_id`
+- no middleware or guardrail hooks beyond the tool allow/deny policy
+- no model retry policy and no tool retry policy
+- no checkpoint, resume, or rewind of a partly finished agent run
+- no human-in-the-loop pause before a sensitive tool
 - no dynamic schema validation
 - no provider-specific SDKs
 - no automatic retries
