@@ -33,7 +33,13 @@ import { appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory,
 // definition out from under a sibling.
 import { makeTool, describeTools, runToolWithPolicy, toolResultMessage, toolRegistry as emptyToolRegistry, registerTool as addToolEntry, findTool as findToolIndex, hasTool as hasToolNamed, toolNames as readToolNames, runTool as dispatchTool } from "./tools.ts";
 import { makeToolCall, toolCallArgument, toolCallInput, parseToolCalls, serializeToolDefs as buildToolDefs, serializeToolDefsMistral as buildToolDefsMistral, parseMistralToolCalls as readMistralToolCalls, hasToolCalls as responseHasToolCalls, finishReason as readFinishReason } from "./toolcall.ts";
-import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall } from "./agent.ts";
+import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall, openAIAgentModel as makeOpenAIAgentModel, mistralAgentModel as makeMistralAgentModel, agentHistoryToTurns as buildAgentTurns } from "./agent.ts";
+// toolchat.ts is already inlined through agent.ts (which imports several of its
+// functions), so its exports are in scope under their ORIGINAL names. Importing
+// them here under an alias would not bind — the module was inlined once already.
+// So every toolchat name is imported unaliased, exactly like the sibling-shared
+// vector/tool names above, and the public wrappers below take a different name.
+import { buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./toolchat.ts";
 
 type JsonName = {
   name: string,
@@ -539,6 +545,45 @@ export function fakeAnswer(text: string): string {
 
 export function fakeToolCall(name: string, input: string): string {
   return buildFakeToolCall(name, input);
+}
+
+// A live OpenAI-compatible model for runAgent. The returned closure carries the
+// serialized tool definitions in every request and handles the native tool_calls
+// / tool_call_id round trip, so `runAgent(openAIAgent(key, model, tools), tools,
+// history, maxSteps)` drives a real provider with no change to the loop.
+export function openAIAgent(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
+  return makeOpenAIAgentModel(apiKey, model, tools);
+}
+
+export function mistralAgent(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
+  return makeMistralAgentModel(apiKey, model, tools);
+}
+
+// Rebuild the native turn history (with native tool_calls and tool_call_id) that
+// a live tool round trip needs from the loop's provider-neutral message history.
+export function agentChatTurns(messages: LumenAiMessage[]): LumenAiChatTurn[] {
+  return buildAgentTurns(messages);
+}
+
+// Build a tool-enabled chat request body from native turns: the serialized tool
+// definitions ride in the `tools` field, dropped entirely when the registry is
+// empty.
+export function openAIToolBody(model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[], temperature: number, maxTokens: int): string {
+  return buildOpenAIToolBody(model, turns, tools, temperature, maxTokens);
+}
+
+export function mistralToolBody(model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[], temperature: number, maxTokens: int): string {
+  return buildMistralToolBody(model, turns, tools, temperature, maxTokens);
+}
+
+// One tool-enabled round trip: POST the native turns plus tool definitions and
+// return the raw response body for parseToolCalls / finishReason to read.
+export function toolChatOpenAI(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
+  return runOpenAIToolChat(apiKey, model, turns, tools);
+}
+
+export function toolChatMistral(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
+  return runMistralToolChat(apiKey, model, turns, tools);
 }
 
 test("message helpers", () => {
@@ -1119,4 +1164,41 @@ test("agent step record through the barrel", () => {
   expect(step.index == 0);
   expect(step.tool == "weather");
   expect(step.ok);
+});
+
+test("live tool-calling agent surface through the barrel", () => {
+  let tools = barrelTools();
+  let history: LumenAiMessage[] = [
+    system("You are a weather assistant."),
+    user("weather in Paris?"),
+    assistant("[tool_calls] weather({\"input\":\"Paris\"})"),
+    toolMessage(runTool(tools, "weather", "Paris")),
+  ];
+  // The neutral history rebuilds into native turns with matching ids.
+  let turns = agentChatTurns(history);
+  expect(turns.length == 4);
+  expect(turns[2].role == "assistant");
+  expect(turns[2].tool_calls != "");
+  expect(turns[3].role == "tool");
+  expect(turns[3].tool_call_id == "call_1");
+  expect(turns[3].content == "18C in Paris");
+  // The tool-enabled body carries both the tools array and the tool_call_id.
+  let body = openAIToolBody("gpt-4o-mini", turns, tools, 0.2, 256);
+  expect(body.includes("\"tools\":[{\"type\":\"function\""));
+  expect(body.includes("\"name\":\"weather\""));
+  expect(body.includes("\"tool_call_id\":\"call_1\""));
+  expect(mistralToolBody("gpt-4o-mini", turns, tools, 0.2, 256) == body);
+  // The rebuilt assistant tool_calls fragment re-parses losslessly.
+  let assistantJson = "{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":" + turns[2].tool_calls + "}";
+  let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + assistantJson + "}]}";
+  let back = toolCalls(responseLike);
+  expect(back.length == 1);
+  expect(back[0].id == "call_1");
+  expect(toolInput(back[0]) == "Paris");
+  // The agent model builders yield LumenAiModel closures with no I/O.
+  let models: LumenAiModel[] = [
+    openAIAgent("sk-test", "gpt-4o-mini", tools),
+    mistralAgent("mk-test", "mistral-large-latest", tools),
+  ];
+  expect(models.length == 2);
 });

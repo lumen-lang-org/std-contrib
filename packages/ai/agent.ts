@@ -3,6 +3,7 @@
 import { makeTool, runToolWithPolicy, toolResultMessage, describeTools } from "./tools.ts";
 import { parseToolCalls, toolCallInput, makeToolCall, toolCallArgument } from "./toolcall.ts";
 import { assistantMessage, systemMessage, userMessage } from "./messages.ts";
+import { messageTurn, assistantToolCallsTurn, toolResultTurn, runOpenAIToolChat, runMistralToolChat, emitChatTurn, emitChatMessages } from "./toolchat.ts";
 
 // One dispatched tool call. `index` is the step's own position in the run, so
 // the trace can be numbered from it and two calls made in the same model turn
@@ -329,6 +330,159 @@ export function runAgent(model: LumenAiModel, tools: LumenAiTool[], history: Lum
 // as a failed step the model can read and recover from.
 export function runAgentWithPolicy(model: LumenAiModel, tools: LumenAiTool[], allow: string[], deny: string[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
   return agentLoop(model, tools, allow, deny, history, maxSteps);
+}
+
+// The loop keeps its history as provider-neutral text: an assistant tool-call
+// turn is `[tool_calls] name(args)` and a tool result is `[tool name] output`
+// (agCallSummary and toolResultMessage). A live provider will not accept that —
+// it needs native `tool_calls` on the assistant turn and a `tool_call_id` on
+// each following tool turn. So a real model builder rebuilds the turn records
+// from the neutral history inside its own closure, leaving runAgent's signature
+// and the loop untouched.
+//
+// The ids do NOT have to match anything the provider returned earlier: each chat
+// request is self-contained, so the provider only requires that within THIS
+// request every tool turn's id matches a preceding assistant tool_call. Fresh
+// synthetic ids (`call_1`, `call_2`, ...) assigned in reading order satisfy that
+// exactly, which is why the lossy neutral summary — which never carried the real
+// ids — is still enough to reconstruct a valid request.
+
+// The raw tool body, with the "[tool name] " prefix toolResultMessage prepends
+// stripped back off. A tool turn the loop wrote always has that prefix; anything
+// without it is passed through whole.
+function agToolBody(content: string): string {
+  if (!content.startsWith("[tool ")) { return content; }
+  let close = content.indexOf("] ");
+  if (close < 0) { return content; }
+  return content.slice(close + 2, content.length);
+}
+
+// A tool-result turn carrying an already-rendered body. The output is placed on
+// a success-shaped result so toolResultTurn emits it verbatim; a body that reads
+// "error: ..." (a failed dispatch) survives unchanged because that path emits
+// the output string as-is.
+function agToolTurn(id: string, body: string): LumenAiChatTurn {
+  let result: LumenAiToolResult = {
+    name: "",
+    input: "",
+    output: body,
+    ok: true,
+    error: "",
+  };
+  return toolResultTurn(id, result);
+}
+
+// Parse the `name(args)` list that follows the `[tool_calls]` marker back into
+// tool-call records, assigning ids `call_{base+1}` upward. `args` is read as a
+// parenthesis-balanced run that steps over quoted text as a unit, so a `)` or a
+// `,` inside the JSON payload cannot end an entry early.
+function agParseSummaryCalls(seg: string, base: int): LumenAiToolCall[] {
+  let out: LumenAiToolCall[] = [];
+  let i: int = 0;
+  while (i < seg.length) {
+    while (i < seg.length && (seg.charAt(i) == " " || seg.charAt(i) == ",")) { i = i + 1; }
+    if (i >= seg.length) { break; }
+    let nameStart: int = i;
+    while (i < seg.length && seg.charAt(i) != "(") { i = i + 1; }
+    if (i >= seg.length) { break; }
+    let name = seg.slice(nameStart, i);
+    i = i + 1;
+    let argStart: int = i;
+    let depth: int = 1;
+    while (i < seg.length && depth > 0) {
+      let c = seg.charAt(i);
+      if (c == "\"") {
+        i = i + 1;
+        while (i < seg.length) {
+          let d = seg.charAt(i);
+          if (d == "\\") { i = i + 2; continue; }
+          if (d == "\"") { i = i + 1; break; }
+          i = i + 1;
+        }
+        continue;
+      }
+      if (c == "(") { depth = depth + 1; i = i + 1; continue; }
+      if (c == ")") {
+        depth = depth - 1;
+        if (depth == 0) { break; }
+        i = i + 1;
+        continue;
+      }
+      i = i + 1;
+    }
+    let args = seg.slice(argStart, i);
+    if (i < seg.length && seg.charAt(i) == ")") { i = i + 1; }
+    let id = "call_" + `${base + out.length + 1}`;
+    out.push(makeToolCall(id, name, args));
+  }
+  return out;
+}
+
+// Rebuild the native turn history a live tool round trip needs from the loop's
+// neutral-text history. A system/user/plain-assistant message lifts straight
+// through messageTurn; an assistant `[tool_calls]` summary becomes a native
+// assistant tool-call turn; each following tool message is tied to that turn's
+// next synthetic id. Ids run in reading order so an assistant turn's calls and
+// the tool turns that answer them always agree.
+export function agentHistoryToTurns(messages: LumenAiMessage[]): LumenAiChatTurn[] {
+  let out: LumenAiChatTurn[] = [];
+  let pendingIds: string[] = [];
+  let cursor: int = 0;
+  let idBase: int = 0;
+  let i: int = 0;
+  while (i < messages.length) {
+    let msg = messages[i];
+    let marker = "[tool_calls]";
+    let at = msg.content.indexOf(marker);
+    if (msg.role == "assistant" && at >= 0) {
+      let prose = msg.content.slice(0, at);
+      if (prose.length > 0 && prose.charAt(prose.length - 1) == "\n") {
+        prose = prose.slice(0, prose.length - 1);
+      }
+      let seg = msg.content.slice(at + marker.length, msg.content.length);
+      let calls = agParseSummaryCalls(seg, idBase);
+      out.push(assistantToolCallsTurn(prose, calls));
+      let ids: string[] = [];
+      let k: int = 0;
+      while (k < calls.length) { ids.push(calls[k].id); k = k + 1; }
+      pendingIds = ids;
+      cursor = 0;
+      idBase = idBase + calls.length;
+    } else if (msg.role == "tool") {
+      let id = "";
+      if (cursor < pendingIds.length) {
+        id = pendingIds[cursor];
+        cursor = cursor + 1;
+      } else {
+        idBase = idBase + 1;
+        id = "call_" + `${idBase}`;
+      }
+      out.push(agToolTurn(id, agToolBody(msg.content)));
+    } else {
+      out.push(messageTurn(msg));
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// A model backed by a live OpenAI-compatible endpoint. The returned closure is a
+// plain LumenAiModel: given the loop's running history, it rebuilds the native
+// turn records, POSTs a tool-enabled chat body (the serialized tool definitions
+// ride in the request), and hands back the raw response body — exactly what the
+// loop already feeds to parseToolCalls and the answer extractor. runAgent's
+// signature is unchanged; the round trip lives entirely inside the closure.
+export function openAIAgentModel(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
+  return (messages: LumenAiMessage[]) => {
+    return runOpenAIToolChat(apiKey, model, agentHistoryToTurns(messages), tools);
+  };
+}
+
+// The same live model source against Mistral's chat endpoint.
+export function mistralAgentModel(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
+  return (messages: LumenAiMessage[]) => {
+    return runMistralToolChat(apiKey, model, agentHistoryToTurns(messages), tools);
+  };
 }
 
 // What the platform shows someone debugging their agent: every tool call in
@@ -862,4 +1016,117 @@ test("the caller's history is left untouched", () => {
   expect(run.steps.length == 1);
   expect(history.length == 2);
   expect(history[1].role == "user");
+});
+
+test("the live model rebuilds native turns from a neutral tool history", () => {
+  let weather = makeTool("weather", "Current weather for a city.", "city name", agWeatherBody);
+  let reg: LumenAiTool[] = [weather];
+  let allow: string[] = [];
+  let deny: string[] = [];
+  let history: LumenAiMessage[] = [
+    systemMessage("You are a weather assistant."),
+    userMessage("What is the weather in Paris?"),
+    assistantMessage("[tool_calls] weather({\"input\":\"Paris\"})"),
+    toolResultMessage(runToolWithPolicy(reg, allow, deny, "weather", "Paris")),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 4);
+  expect(turns[0].role == "system");
+  expect(turns[0].tool_calls == "");
+  expect(turns[0].tool_call_id == "");
+  expect(turns[1].role == "user");
+  expect(turns[2].role == "assistant");
+  expect(turns[2].tool_calls != "");
+  expect(turns[3].role == "tool");
+  expect(turns[3].tool_call_id == "call_1");
+  expect(turns[3].content == "18C in Paris");
+  expect(emitChatMessages(turns).startsWith("["));
+  // The rebuilt assistant tool_calls array is valid JSON and its id matches the
+  // tool turn that answers it, so the whole request is internally consistent.
+  let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + emitChatTurn(turns[2]) + "}]}";
+  let back = parseToolCalls(responseLike);
+  expect(back.length == 1);
+  expect(back[0].id == "call_1");
+  expect(back[0].name == "weather");
+  expect(toolCallInput(back[0]) == "Paris");
+});
+
+test("the live model ties two tool turns to one assistant turn's ids", () => {
+  let weather = makeTool("weather", "Current weather for a city.", "city name", agWeatherBody);
+  let clock = makeTool("clock", "The time in a zone.", "zone name", agClockBody);
+  let reg: LumenAiTool[] = [weather, clock];
+  let allow: string[] = [];
+  let deny: string[] = [];
+  let history: LumenAiMessage[] = [
+    userMessage("weather and time?"),
+    assistantMessage("[tool_calls] weather({\"input\":\"Paris\"}), clock({\"input\":\"UTC\"})"),
+    toolResultMessage(runToolWithPolicy(reg, allow, deny, "weather", "Paris")),
+    toolResultMessage(runToolWithPolicy(reg, allow, deny, "clock", "UTC")),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 4);
+  expect(turns[2].tool_call_id == "call_1");
+  expect(turns[2].content == "18C in Paris");
+  expect(turns[3].tool_call_id == "call_2");
+  expect(turns[3].content == "12:00 UTC");
+  let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + emitChatTurn(turns[1]) + "}]}";
+  let back = parseToolCalls(responseLike);
+  expect(back.length == 2);
+  expect(back[0].id == "call_1");
+  expect(back[0].name == "weather");
+  expect(back[1].id == "call_2");
+  expect(back[1].name == "clock");
+  expect(toolCallInput(back[1]) == "UTC");
+});
+
+test("assistant prose before the tool calls is kept and the calls still parse", () => {
+  let history: LumenAiMessage[] = [
+    userMessage("weather in Paris?"),
+    assistantMessage("looking it up\n[tool_calls] weather({\"input\":\"Paris\"})"),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 2);
+  let assistantJson = emitChatTurn(turns[1]);
+  expect(assistantJson.indexOf("looking it up") > 0);
+  let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + assistantJson + "}]}";
+  let back = parseToolCalls(responseLike);
+  expect(back.length == 1);
+  expect(back[0].id == "call_1");
+  expect(toolCallInput(back[0]) == "Paris");
+});
+
+test("a failed tool result and a stray tool turn both stay valid", () => {
+  let none: LumenAiTool[] = [];
+  let allow: string[] = [];
+  let deny: string[] = [];
+  let history: LumenAiMessage[] = [
+    userMessage("do it"),
+    toolResultMessage(runToolWithPolicy(none, allow, deny, "wether", "Paris")),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 2);
+  expect(turns[1].role == "tool");
+  // No preceding assistant tool-call turn, but a tool turn still needs an id for
+  // the request to be accepted, so one is synthesized.
+  expect(turns[1].tool_call_id == "call_1");
+  expect(turns[1].content.startsWith("error: unknown tool \"wether\""));
+});
+
+test("a plain chat history lifts through with no tool metadata", () => {
+  let history: LumenAiMessage[] = [
+    systemMessage("You are concise."),
+    userMessage("hi"),
+    assistantMessage("Hello. How can I help?"),
+    userMessage("what is Lumen?"),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 4);
+  let i: int = 0;
+  while (i < turns.length) {
+    expect(turns[i].tool_calls == "");
+    expect(turns[i].tool_call_id == "");
+    i = i + 1;
+  }
+  expect(turns[2].role == "assistant");
+  expect(turns[2].content == "Hello. How can I help?");
 });

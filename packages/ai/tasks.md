@@ -75,13 +75,14 @@
 - [x] Serialize tool definitions for OpenAI-compatible providers.
 - [x] Serialize tool definitions for Mistral.
 - [x] Add deterministic fake tool tests.
-- [ ] Carry the serialized tool definitions in the chat request bodies.
-      `serializeToolDefs` builds the array, but `openAIChatBody` and
-      `mistralChatBody` still have no `tools` field.
-- [ ] Add a provider adapter for the tool round trip. The loop records the
-      assistant tool-call turn as provider-neutral text and tags results with
-      role `tool`; a live request needs native `tool_calls` and a
-      `tool_call_id`.
+- [x] Carry the serialized tool definitions in the chat request bodies.
+      `toolchat.ts` (`buildOpenAIToolBody` / `buildMistralToolBody`) splices the
+      `serializeToolDefs` array into the chat body, omitting the field for an
+      empty registry.
+- [x] Add a provider adapter for the tool round trip. `toolchat.ts` emits native
+      `tool_calls` on the assistant turn and a `tool_call_id` on each tool turn,
+      and `agent.ts` `openAIAgent` / `mistralAgent` rebuild those turns from the
+      loop's neutral history so `runAgent` drives a live provider unchanged.
 - [ ] Add typed tool arguments. V1 tools take and return one string, and a tool
       body cannot throw because the compiler rejects a throwing function in the
       registry's `run` field.
