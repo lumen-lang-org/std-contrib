@@ -174,6 +174,21 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `mistralToolBody(model, turns, tools, temperature, maxTokens)` | Build a tool-enabled Mistral chat body from native turns |
 | `toolChatOpenAI(apiKey, model, turns, tools)` | One tool-enabled OpenAI-compatible round trip, returning the raw body |
 | `toolChatMistral(apiKey, model, turns, tools)` | One tool-enabled Mistral round trip, returning the raw body |
+| `mcpRequestBody(id, method, params)` | Build a JSON-RPC 2.0 request with raw JSON `params` embedded verbatim |
+| `mcpConnectBody()` | Build the MCP `initialize` request body |
+| `mcpListToolsBody(id)` | Build a `tools/list` request body |
+| `mcpCallBody(id, name, argumentsJson)` | Build a `tools/call` request body with raw JSON arguments |
+| `parseMcpTools(raw)` | Parse tool descriptors (name, description, raw schema) from a `tools/list` reply |
+| `parseMcpResult(raw)` | Parse a `tools/call` reply into an `ok`/`content`/`error` record |
+| `mcpResponseId(raw)` | Read the JSON-RPC `id` from a reply |
+| `mcpIsError(raw)` | Whether a reply carries a JSON-RPC error |
+| `mcpErrorMessage(raw)` | Read the JSON-RPC error message, or `""` |
+| `mcpResultField(raw)` | Source text of the top-level `result`, or `""` |
+| `mcpConnect(url, headers)` | POST an `initialize` handshake and return the raw reply body |
+| `mcpTools(url, headers)` | List an MCP server's tools over HTTP |
+| `mcpCall(url, headers, name, argumentsJson)` | Call one MCP tool over HTTP |
+| `mcpAsTool(url, headers, tool)` | Adapt one MCP tool descriptor into a runnable `LumenAiTool` |
+| `mcpAsTools(url, headers, tools)` | Adapt every MCP tool descriptor into a `LumenAiTool[]` for `runAgent` |
 
 ## RAG
 
@@ -421,6 +436,68 @@ id the provider returned earlier. To build or send a single tool-enabled request
 yourself, use `openAIToolBody` / `toolChatOpenAI` (and the Mistral equivalents)
 over turns from `agentChatTurns`.
 
+## MCP
+
+The Model Context Protocol lets an agent borrow tools that live on another
+server. `mcpTools` lists a server's tools, `mcpAsTools` adapts each one into a
+`LumenAiTool` whose `run` calls the server, and the result drops straight into
+`runAgent` next to any local tools you defined. The adapter keeps each tool's
+raw JSON input schema in the `params` field, and follows this package's one
+string in, one string out convention: the input is sent as `{"input": <input>}`
+and the server's text output comes back as the tool result.
+
+```ts
+import {
+  mcpTools,
+  mcpAsTools,
+  registerTool,
+  defineTool,
+  system,
+  user,
+  agentSystemPrompt,
+  runAgent,
+  agentTrace,
+  openAIAgent,
+} from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+
+let url = "http://127.0.0.1:8080/mcp";
+let headers = new Map<string, string>();
+
+// List the server's tools and adapt them into runnable LumenAiTools.
+let remote = mcpAsTools(url, headers, mcpTools(url, headers));
+
+// Mix them with any local tools and hand the registry to runAgent.
+let tools = remote;
+tools = registerTool(
+  tools,
+  defineTool("clock", "The local time in a zone.", "zone name", (zone: string) => "12:00 in " + zone),
+);
+
+let history = [
+  system(agentSystemPrompt(tools, "You are a helpful assistant.")),
+  user("What is the weather in Paris?"),
+];
+
+let model = openAIAgent("sk-your-key", "gpt-4o-mini", tools);
+let result = runAgent(model, tools, history, 6);
+
+console.log(result.answer);
+console.log(agentTrace(result));
+```
+
+To call a single MCP tool without an agent, use `mcpCall(url, headers, name,
+argumentsJson)`; it returns an `ok` / `content` / `error` record. `mcpConnect`
+performs the `initialize` handshake, and the request builders (`mcpConnectBody`,
+`mcpListToolsBody`, `mcpCallBody`) plus parsers (`parseMcpTools`,
+`parseMcpResult`) are exposed for building or reading JSON-RPC yourself.
+
+Transport is **HTTP JSON-RPC only**: every call is one POST that returns one
+complete JSON reply. There is no stdio transport — `spawnSync` runs a process to
+completion and cannot hold a server open for an interactive exchange — and no
+SSE or streaming responses yet; streaming waits on the same stdlib support as
+the rest of the package (see M13). Pass authentication through the `headers`
+map; `Content-Type: application/json` is set for you.
+
 ## Files
 
 - `ai.ts` is the public entry point.
@@ -449,6 +526,9 @@ over turns from `agentChatTurns`.
   tool-enabled request bodies, and the tool round-trip HTTP helpers.
 - `agent.ts` contains the agent loop, its trace, the offline fake model driver,
   and the live `openAIAgent` / `mistralAgent` model sources.
+- `mcp.ts` contains the MCP (Model Context Protocol) client: JSON-RPC framing,
+  the response parsers, the HTTP `initialize` / `tools/list` / `tools/call`
+  calls, and the adapter that turns an MCP tool into a `LumenAiTool`.
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
 - `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
 - `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
@@ -483,6 +563,8 @@ Retrieval, embeddings, memory, tools, and the agent loop now ship. What is still
 missing:
 
 - no streaming responses
+- MCP is HTTP JSON-RPC only: no stdio transport (`spawnSync` is one-shot) and no
+  SSE or streaming replies
 - no multimodal or chunk-list response content; V1 expects string `content`
 - a tool takes one string and returns one string; no typed tool arguments yet
 - a tool body cannot throw, because the compiler rejects a throwing function in
