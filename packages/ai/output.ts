@@ -67,12 +67,56 @@ export function parseStringListOutput(raw: string): string[] {
   return out.split("\n");
 }
 
-export function parseChoiceOutput(raw: string, choices: string[], fallback: string): string {
-  let value = trimOutputSpaces(raw);
-  for (const choice of choices) {
-    if (value == choice) { return choice; }
+// True when `text` holds `needle` as a whole word — the characters on either
+// side must not be letters or digits. Substring matching alone would let the
+// choice "no" match inside "I don't know".
+function choiceWordAt(text: string, needle: string): bool {
+  if (needle.length == 0) { return false; }
+  let i: int = 0;
+  while (i + needle.length <= text.length) {
+    if (text.slice(i, i + needle.length) == needle) {
+      let beforeOk: bool = i == 0;
+      if (!beforeOk) { beforeOk = !isChoiceWordChar(text.charAt(i - 1)); }
+      let afterAt = i + needle.length;
+      let afterOk: bool = afterAt >= text.length;
+      if (!afterOk) { afterOk = !isChoiceWordChar(text.charAt(afterAt)); }
+      if (beforeOk && afterOk) { return true; }
+    }
+    i = i + 1;
   }
-  return fallback;
+  return false;
+}
+
+function isChoiceWordChar(c: string): bool {
+  if (c.length == 0) { return false; }
+  let code = c.charCodeAt(0);
+  if (code >= "a".charCodeAt(0) && code <= "z".charCodeAt(0)) { return true; }
+  if (code >= "A".charCodeAt(0) && code <= "Z".charCodeAt(0)) { return true; }
+  if (code >= "0".charCodeAt(0) && code <= "9".charCodeAt(0)) { return true; }
+  return code >= 128;
+}
+
+// Pick one allowed choice out of a model's reply. Models rarely answer with the
+// bare token: "Compiled", "Compiled." and "Lumen is compiled." are all the same
+// answer, so matching is case-insensitive and looks for the choice as a whole
+// word rather than demanding an exact string. Longer choices are preferred so
+// overlapping options ("yes" vs "yes, always") resolve to the specific one.
+export function parseChoiceOutput(raw: string, choices: string[], fallback: string): string {
+  let value = trimOutputSpaces(raw).toLowerCase();
+  // Exact match first, so an unambiguous reply never depends on word scanning.
+  for (const choice of choices) {
+    if (value == choice.toLowerCase()) { return choice; }
+  }
+  let best = fallback;
+  let bestLen: int = 0;
+  for (const choice of choices) {
+    let lowered = choice.toLowerCase();
+    if (lowered.length > bestLen && choiceWordAt(value, lowered)) {
+      best = choice;
+      bestLen = lowered.length;
+    }
+  }
+  return best;
 }
 
 export function firstFencedBlockOutput(raw: string): string {
@@ -142,3 +186,27 @@ export function typedJsonInputOutput(raw: string): string {
 export function retryPromptOutput(instruction: string, invalidOutput: string, errorMessage: string): string {
   return instruction + "\n\nPrevious output was invalid:\n" + invalidOutput + "\n\nReason:\n" + errorMessage + "\n\nReturn only corrected output.";
 }
+
+test("parseChoice tolerates real model phrasing", () => {
+  let choices: string[] = ["compiled", "interpreted"];
+  expect(parseChoiceOutput("compiled", choices, "unknown") == "compiled");
+  expect(parseChoiceOutput("Compiled", choices, "unknown") == "compiled");
+  expect(parseChoiceOutput("Compiled.", choices, "unknown") == "compiled");
+  expect(parseChoiceOutput("Lumen is compiled.", choices, "unknown") == "compiled");
+  expect(parseChoiceOutput("  INTERPRETED  ", choices, "unknown") == "interpreted");
+  expect(parseChoiceOutput("neither, really", choices, "unknown") == "unknown");
+});
+
+test("parseChoice does not match a choice inside a longer word", () => {
+  let yn: string[] = ["yes", "no"];
+  // "no" must not match inside "know"
+  expect(parseChoiceOutput("I don't know", yn, "unknown") == "unknown");
+  expect(parseChoiceOutput("No.", yn, "unknown") == "no");
+  expect(parseChoiceOutput("nobody", yn, "unknown") == "unknown");
+});
+
+test("parseChoice prefers the longer overlapping choice", () => {
+  let opts: string[] = ["yes", "yes always"];
+  expect(parseChoiceOutput("yes always", opts, "unknown") == "yes always");
+  expect(parseChoiceOutput("yes", opts, "unknown") == "yes");
+});
