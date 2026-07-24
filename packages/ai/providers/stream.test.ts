@@ -146,3 +146,79 @@ test("a handler sees every delta in arrival order", () => {
   expect(seen == "ab");
   expect(count == 2);
 });
+
+// --- Structure-aware scanning ----------------------------------------------
+// A chunk is read by walking the JSON, not by searching for substrings. These
+// cases all produced wrong text or a wrong classification under a plain
+// substring scan.
+
+test("a nested content field does not shadow the real delta", () => {
+  let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"meta\":{\"content\":\"NESTED\"},\"content\":\"REAL\"}}]}");
+  expect(e.delta == "REAL");
+});
+
+test("a content key outside choices is ignored", () => {
+  let e = streamEventFromLine("data: {\"weird\":{\"delta\":\"nope\",\"content\":\"HIJACK\"},\"choices\":[{\"delta\":{\"content\":\"real\"}}]}");
+  expect(e.delta == "real");
+});
+
+test("a second choice does not leak into the first", () => {
+  // choices[0] has no text; reading past it would invent one.
+  let e = streamEventFromLine("data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}},{\"index\":1,\"delta\":{\"content\":\"second\"}}]}");
+  expect(e.kind == "other");
+  expect(e.delta == "");
+});
+
+test("a finish reason on a later choice is not stamped on the first", () => {
+  let e = streamEventFromLine("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"}},{\"index\":1,\"delta\":{},\"finish_reason\":\"stop\"}]}");
+  expect(e.kind == "delta");
+  expect(e.delta == "Hi");
+  expect(e.finishReason == "");
+});
+
+test("whitespace around colons does not hide a field", () => {
+  // Compact on the wire from OpenAI and Mistral, but anything that reformats
+  // the JSON in between (a proxy, a saved fixture) spaces it out.
+  let e = streamEventFromLine("data: {\"choices\": [{\"delta\": {\"content\": \"Hi\"}}]}");
+  expect(e.kind == "delta");
+  expect(e.delta == "Hi");
+});
+
+test("a spaced finish_reason still ends the message", () => {
+  let e = streamEventFromLine("data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}]}");
+  expect(e.kind == "done");
+  expect(e.finishReason == "stop");
+});
+
+test("unicode escapes are decoded", () => {
+  let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"content\":\"\\u0041\\u00e9\"}}]}");
+  expect(e.delta == "Aé");
+});
+
+test("a surrogate pair decodes to one character", () => {
+  // An emoji arrives as two escapes; decoding each alone emits garbage.
+  let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"content\":\"\\ud83d\\ude00\"}}]}");
+  expect(e.delta == "😀");
+});
+
+test("a delta whose text contains chunk syntax stays intact", () => {
+  let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"content\":\"say \\\"content\\\": and [DONE]\"}}]}");
+  expect(e.kind == "delta");
+  expect(e.delta == "say \"content\": and [DONE]");
+});
+
+test("a null content is not text", () => {
+  let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"content\":null}}]}");
+  expect(e.kind == "other");
+  expect(e.delta == "");
+});
+
+test("a payload with no choices array yields no text", () => {
+  let e = streamEventFromLine("data: {\"id\":\"x\",\"object\":\"chunk\"}");
+  expect(e.kind == "other");
+});
+
+test("a truncated payload does not hang or throw", () => {
+  let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"content\":\"unterminated");
+  expect(e.kind == "other");
+});
