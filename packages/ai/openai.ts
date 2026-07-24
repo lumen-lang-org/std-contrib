@@ -8,14 +8,14 @@ import { bearerJsonHeaders } from "./headers.ts";
 
 type OpenAIChatRequest = {
   model: string,
-  messages: LumenAiMessage[],
+  messages: AiMessage[],
   temperature: number,
   max_tokens: int,
 };
 
 type OpenAIChatRequestWithStops = {
   model: string,
-  messages: LumenAiMessage[],
+  messages: AiMessage[],
   temperature: number,
   max_tokens: int,
   stop: string[],
@@ -40,7 +40,7 @@ type OpenAIChatResponse = {
   choices: OpenAIChoice[],
 };
 
-export function buildOpenAIChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function buildOpenAIChatBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   const req: OpenAIChatRequest = {
     model: model,
     messages: messages,
@@ -50,7 +50,7 @@ export function buildOpenAIChatBody(model: string, messages: LumenAiMessage[], t
   return JSON.stringify(req);
 }
 
-export function buildOpenAIChatBodyWithStops(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
+export function buildOpenAIChatBodyWithStops(model: string, messages: AiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
   const req: OpenAIChatRequestWithStops = {
     model: model,
     messages: messages,
@@ -78,7 +78,7 @@ export function readOpenAIContent(raw: string): string {
   }
 }
 
-export function readOpenAIResult(status: int, ok: bool, raw: string): LumenAiResult {
+export function readOpenAIResult(status: int, ok: bool, raw: string): AiResult {
   return makeAiResult(status, ok, readOpenAIContent(raw), raw);
 }
 
@@ -149,13 +149,13 @@ function scanOpenAIIntField(raw: string, field: string): int {
   return out;
 }
 
-export function readOpenAIError(status: int, raw: string): LumenAiProviderError {
+export function readOpenAIError(status: int, raw: string): AiProviderError {
   let message = scanOpenAIMessage(raw);
   if (message == "") { message = raw; }
   return makeProviderError("openai", status, message, raw);
 }
 
-export function readOpenAITokenUsage(raw: string): LumenAiTokenUsage {
+export function readOpenAITokenUsage(raw: string): AiTokenUsage {
   return makeTokenUsage(
     scanOpenAIIntField(raw, "prompt_tokens"),
     scanOpenAIIntField(raw, "completion_tokens"),
@@ -163,12 +163,12 @@ export function readOpenAITokenUsage(raw: string): LumenAiTokenUsage {
   );
 }
 
-export function runOpenAIChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function runOpenAIChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[]): AiResult {
   const body = buildOpenAIChatBody(model, messages, 0.7, 1024);
   const res = http.request(baseUrl + "/chat/completions", "POST", body, makeAuthHeaders(apiKey));
   return readOpenAIResult(res.status, res.ok, res.body);
 }
 
-export function runOpenAIChat(apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function runOpenAIChat(apiKey: string, model: string, messages: AiMessage[]): AiResult {
   return runOpenAIChatWithBaseUrl("https://api.openai.com/v1", apiKey, model, messages);
 }

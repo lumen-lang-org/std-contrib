@@ -8,14 +8,14 @@ import { bearerJsonHeaders } from "./headers.ts";
 
 type MistralChatRequest = {
   model: string,
-  messages: LumenAiMessage[],
+  messages: AiMessage[],
   temperature: number,
   max_tokens: int,
 };
 
 type MistralChatRequestWithStops = {
   model: string,
-  messages: LumenAiMessage[],
+  messages: AiMessage[],
   temperature: number,
   max_tokens: int,
   stop: string[],
@@ -133,7 +133,7 @@ function scanMistralIntField(raw: string, field: string): int {
   return out;
 }
 
-export function buildMistralChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function buildMistralChatBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   const req: MistralChatRequest = {
     model: model,
     messages: messages,
@@ -143,7 +143,7 @@ export function buildMistralChatBody(model: string, messages: LumenAiMessage[], 
   return JSON.stringify(req);
 }
 
-export function buildMistralChatBodyWithStops(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
+export function buildMistralChatBodyWithStops(model: string, messages: AiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
   const req: MistralChatRequestWithStops = {
     model: model,
     messages: messages,
@@ -171,18 +171,18 @@ export function readMistralContent(raw: string): string {
   }
 }
 
-export function readMistralResult(status: int, ok: bool, raw: string): LumenAiResult {
+export function readMistralResult(status: int, ok: bool, raw: string): AiResult {
   return makeAiResult(status, ok, readMistralContent(raw), raw);
 }
 
-export function readMistralError(status: int, raw: string): LumenAiProviderError {
+export function readMistralError(status: int, raw: string): AiProviderError {
   let message = scanMistralStringField(raw, "detail");
   if (message == "") { message = scanMistralStringField(raw, "message"); }
   if (message == "") { message = raw; }
   return makeProviderError("mistral", status, message, raw);
 }
 
-export function readMistralTokenUsage(raw: string): LumenAiTokenUsage {
+export function readMistralTokenUsage(raw: string): AiTokenUsage {
   return makeTokenUsage(
     scanMistralIntField(raw, "prompt_tokens"),
     scanMistralIntField(raw, "completion_tokens"),
@@ -190,12 +190,12 @@ export function readMistralTokenUsage(raw: string): LumenAiTokenUsage {
   );
 }
 
-export function runMistralChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function runMistralChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[]): AiResult {
   const body = buildMistralChatBody(model, messages, 0.7, 1024);
   const res = http.request(baseUrl + "/chat/completions", "POST", body, makeMistralAuthHeaders(apiKey));
   return readMistralResult(res.status, res.ok, res.body);
 }
 
-export function runMistralChat(apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function runMistralChat(apiKey: string, model: string, messages: AiMessage[]): AiResult {
   return runMistralChatWithBaseUrl("https://api.mistral.ai/v1", apiKey, model, messages);
 }

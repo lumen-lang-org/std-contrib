@@ -8,9 +8,9 @@
 // (spec 450) returns a ChildProcess whose write/writeLine/readLine/close never
 // throw, so a session handle and a captured-session tool run() both stay total.
 //
-// Importing the value builders from mcp.ts also pulls that module's LumenMcpTool
-// and LumenMcpResult types into scope, and importing makeTool from tools.ts
-// pulls in LumenAiTool — the same trick mcp.ts uses so the types need no export.
+// Importing the value builders from mcp.ts also pulls that module's McpTool
+// and McpResult types into scope, and importing makeTool from tools.ts
+// pulls in AiTool — the same trick mcp.ts uses so the types need no export.
 
 import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId } from "./mcp.ts";
 import { makeTool } from "./tools.ts";
@@ -24,14 +24,14 @@ import { makeTool } from "./tools.ts";
 // session, so the JSON-RPC id can advance across calls without rebuilding the
 // handle. Each request carries a fresh id and every reply is matched to it, so a
 // stray/unsolicited stdout line can no longer shift the request/reply stream.
-type LumenMcpStdioSession = {
+type McpStdioSession = {
   child: ChildProcess,
   nextId: Map<string, int>,
 };
 
 // Hand out this session's next JSON-RPC id and advance the shared counter. The
 // counter lives in a Map so the mutation survives the by-value session copy.
-function stdioNextId(session: LumenMcpStdioSession): int {
+function stdioNextId(session: McpStdioSession): int {
   let cur = session.nextId.get("v");
   let n: int = 1;
   if (cur != null) { n = cur; }
@@ -46,7 +46,7 @@ function stdioNextId(session: LumenMcpStdioSession): int {
 // with its trailing newline, and "" only at EOF; a blank line is "\n" (non-empty
 // after readLine, empty after trim) so it is skipped, while a true "" ends the
 // scan. The skip budget guards against a server that never sends the id.
-function stdioReadReply(session: LumenMcpStdioSession, expectedId: int): string {
+function stdioReadReply(session: McpStdioSession, expectedId: int): string {
   let skips: int = 0;
   while (skips < 100000) {
     let line = session.child.readLine();
@@ -60,7 +60,7 @@ function stdioReadReply(session: LumenMcpStdioSession, expectedId: int): string 
 // One request/one reply against the live child. writeLine appends the "\n" that
 // frames the JSON-RPC object; the read loop returns the reply line whose id
 // matches `expectedId`, so unsolicited stdout lines cannot desync the stream.
-function stdioExchange(session: LumenMcpStdioSession, requestJson: string, expectedId: int): string {
+function stdioExchange(session: McpStdioSession, requestJson: string, expectedId: int): string {
   session.child.writeLine(requestJson);
   return stdioReadReply(session, expectedId);
 }
@@ -70,11 +70,11 @@ function stdioExchange(session: LumenMcpStdioSession, requestJson: string, expec
 // startup banner or blank line on stdout is skipped rather than mistaken for the
 // handshake reply; the reply body is not otherwise needed. The id counter starts
 // at 2 so the first tools/list or tools/call cannot collide with the handshake.
-export function mcpStdioSpawn(command: string, args: string[]): LumenMcpStdioSession {
+export function mcpStdioSpawn(command: string, args: string[]): McpStdioSession {
   let child = child_process.spawn(command, args);
   let counter = new Map<string, int>();
   counter.set("v", 2);
-  let session: LumenMcpStdioSession = {
+  let session: McpStdioSession = {
     child: child,
     nextId: counter,
   };
@@ -86,7 +86,7 @@ export function mcpStdioSpawn(command: string, args: string[]): LumenMcpStdioSes
 // tools/list over the live child: send the reused builder's request under a
 // fresh id, read the reply that echoes that id, parse with the reused parser. A
 // malformed or error reply degrades to an empty list inside parseMcpTools.
-export function mcpStdioListTools(session: LumenMcpStdioSession): LumenMcpTool[] {
+export function mcpStdioListTools(session: McpStdioSession): McpTool[] {
   let id = stdioNextId(session);
   let reply = stdioExchange(session, mcpListToolsRequest(id), id);
   return parseMcpTools(reply);
@@ -96,23 +96,23 @@ export function mcpStdioListTools(session: LumenMcpStdioSession): LumenMcpTool[]
 // "arguments" by the reused builder. The reply is matched to the fresh request
 // id. A JSON-RPC error reply comes back ok:false with its message;
 // parseMcpToolResult never throws.
-export function mcpStdioCall(session: LumenMcpStdioSession, name: string, argumentsJson: string): LumenMcpResult {
+export function mcpStdioCall(session: McpStdioSession, name: string, argumentsJson: string): McpResult {
   let id = stdioNextId(session);
   let reply = stdioExchange(session, mcpCallToolRequest(id, name, argumentsJson), id);
   return parseMcpToolResult(reply);
 }
 
 // Close stdin and wait for the child to exit. The session must not be used after.
-export function mcpStdioClose(session: LumenMcpStdioSession): void {
+export function mcpStdioClose(session: McpStdioSession): void {
   session.child.close();
 }
 
-// A LumenMcpTool becomes a first-class LumenAiTool whose run drives the captured
+// A McpTool becomes a first-class AiTool whose run drives the captured
 // session: it wraps its single string input as {"input": <input>} — this
 // package's one-string-arg convention — writes the tools/call request, reads the
 // reply, and returns the result text. run never throws: writeLine/readLine do
 // not throw and parseMcpToolResult does not throw, so trouble comes back as text.
-export function mcpStdioToolToLumen(session: LumenMcpStdioSession, tool: LumenMcpTool): LumenAiTool {
+export function mcpStdioToolToLumen(session: McpStdioSession, tool: McpTool): AiTool {
   let toolName = tool.name;
   return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
@@ -126,8 +126,8 @@ export function mcpStdioToolToLumen(session: LumenMcpStdioSession, tool: LumenMc
 
 // Adapt a whole tools/list reply into a registry, every tool bound to the same
 // live session.
-export function mcpStdioToolsToRegistry(session: LumenMcpStdioSession, tools: LumenMcpTool[]): LumenAiTool[] {
-  let out: LumenAiTool[] = [];
+export function mcpStdioToolsToRegistry(session: McpStdioSession, tools: McpTool[]): AiTool[] {
+  let out: AiTool[] = [];
   let i: int = 0;
   while (i < tools.length) {
     out.push(mcpStdioToolToLumen(session, tools[i]));
@@ -221,17 +221,17 @@ function mockBannerServerScript(): string {
     + "    sys.stdout.flush()\n";
 }
 
-function spawnMockSession(): LumenMcpStdioSession {
+function spawnMockSession(): McpStdioSession {
   let args: string[] = ["-c", mockMcpServerScript()];
   return mcpStdioSpawn("python3", args);
 }
 
-function spawnNoisySession(): LumenMcpStdioSession {
+function spawnNoisySession(): McpStdioSession {
   let args: string[] = ["-c", mockNoisyServerScript()];
   return mcpStdioSpawn("python3", args);
 }
 
-function spawnBannerSession(): LumenMcpStdioSession {
+function spawnBannerSession(): McpStdioSession {
   let args: string[] = ["-c", mockBannerServerScript()];
   return mcpStdioSpawn("python3", args);
 }

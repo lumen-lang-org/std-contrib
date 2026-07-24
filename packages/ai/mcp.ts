@@ -5,13 +5,13 @@
 
 import { makeTool } from "./tools.ts";
 
-type LumenMcpTool = {
+type McpTool = {
   name: string,
   description: string,
   schema: string,
 };
 
-type LumenMcpResult = {
+type McpResult = {
   ok: bool,
   content: string,
   error: string,
@@ -31,8 +31,8 @@ function mcStr(value: string, next: int): McString {
   };
 }
 
-function mcNoTools(): LumenMcpTool[] {
-  let empty: LumenMcpTool[] = [];
+function mcNoTools(): McpTool[] {
+  let empty: McpTool[] = [];
   return empty;
 }
 
@@ -43,8 +43,8 @@ function mcNoItems(): int[] {
 
 // The record with an `ok: bool` + `error: string` pair cannot be returned as a
 // literal, so both constructors bind an annotated local first.
-function mcpResultOk(content: string): LumenMcpResult {
-  let r: LumenMcpResult = {
+function mcpResultOk(content: string): McpResult {
+  let r: McpResult = {
     ok: true,
     content: content,
     error: "",
@@ -52,8 +52,8 @@ function mcpResultOk(content: string): LumenMcpResult {
   return r;
 }
 
-function mcpResultErr(message: string): LumenMcpResult {
-  let r: LumenMcpResult = {
+function mcpResultErr(message: string): McpResult {
+  let r: McpResult = {
     ok: false,
     content: "",
     error: message,
@@ -359,12 +359,12 @@ export function mcpCallToolRequest(id: int, name: string, argumentsJson: string)
 // raw inputSchema JSON. A real body carries far more fields than a typed parse
 // would accept, so this walks the string; any malformed or error body degrades
 // to an empty list.
-export function parseMcpTools(raw: string): LumenMcpTool[] {
+export function parseMcpTools(raw: string): McpTool[] {
   let resultAt = mcFieldValue(raw, 0, "result");
   if (resultAt < 0) { return mcNoTools(); }
   let toolsAt = mcFieldValue(raw, resultAt, "tools");
   let items = mcArrayItems(raw, toolsAt);
-  let out: LumenMcpTool[] = [];
+  let out: McpTool[] = [];
   let i: int = 0;
   while (i < items.length) {
     let entry = items[i];
@@ -372,7 +372,7 @@ export function parseMcpTools(raw: string): LumenMcpTool[] {
     if (name != "") {
       let description = mcStringField(raw, entry, "description");
       let schema = mcValueText(raw, mcFieldValue(raw, entry, "inputSchema"));
-      let tool: LumenMcpTool = {
+      let tool: McpTool = {
         name: name,
         description: description,
         schema: schema,
@@ -387,7 +387,7 @@ export function parseMcpTools(raw: string): LumenMcpTool[] {
 // The text of a tools/call reply: every text part in result.content[] joined
 // into one string. A JSON-RPC error body comes back ok:false with the error
 // message. Never throws — a garbage body yields ok:true with empty content.
-export function parseMcpToolResult(raw: string): LumenMcpResult {
+export function parseMcpToolResult(raw: string): McpResult {
   if (mcpIsError(raw)) {
     return mcpResultErr(mcpErrorMessage(raw));
   }
@@ -418,23 +418,23 @@ export function mcpInitialize(url: string, headers: Map<string, string>): string
   return res.body;
 }
 
-export function mcpListTools(url: string, headers: Map<string, string>): LumenMcpTool[] {
+export function mcpListTools(url: string, headers: Map<string, string>): McpTool[] {
   const res = http.request(url, "POST", mcpListToolsRequest(1), mcpHeaders(headers));
   return parseMcpTools(res.body);
 }
 
-export function mcpCallTool(url: string, headers: Map<string, string>, name: string, argumentsJson: string): LumenMcpResult {
+export function mcpCallTool(url: string, headers: Map<string, string>, name: string, argumentsJson: string): McpResult {
   const res = http.request(url, "POST", mcpCallToolRequest(1, name, argumentsJson), mcpHeaders(headers));
   return parseMcpToolResult(res.body);
 }
 
-// --- Adapter into a first-class LumenAiTool ---------------------------------
+// --- Adapter into a first-class AiTool ---------------------------------
 
-// A LumenMcpTool becomes a LumenAiTool whose run POSTs a tools/call request.
+// A McpTool becomes an AiTool whose run POSTs a tools/call request.
 // run wraps its single string input as {"input": <input>} — this package's
 // one-string-arg tool convention — and never throws: http.request does not
 // throw and parseMcpToolResult does not throw, so trouble comes back as text.
-export function mcpToolToLumen(url: string, headers: Map<string, string>, tool: LumenMcpTool): LumenAiTool {
+export function mcpToolToLumen(url: string, headers: Map<string, string>, tool: McpTool): AiTool {
   let toolName = tool.name;
   return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
@@ -444,8 +444,8 @@ export function mcpToolToLumen(url: string, headers: Map<string, string>, tool: 
   });
 }
 
-export function mcpToolsToRegistry(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
-  let out: LumenAiTool[] = [];
+export function mcpToolsToRegistry(url: string, headers: Map<string, string>, tools: McpTool[]): AiTool[] {
+  let out: AiTool[] = [];
   let i: int = 0;
   while (i < tools.length) {
     out.push(mcpToolToLumen(url, headers, tools[i]));
@@ -607,7 +607,7 @@ test("mcpResultField and mcpIsError separate success from failure", () => {
   expect(mcpResponseId(mcErrorResponse()) == 9);
 });
 
-test("a tools/list reply adapts into runnable LumenAiTools", () => {
+test("a tools/list reply adapts into runnable AiTools", () => {
   let tools = parseMcpTools(mcToolsListResponse());
   let headers = new Map<string, string>();
   let registry = mcpToolsToRegistry("http://127.0.0.1:9/mcp", headers, tools);

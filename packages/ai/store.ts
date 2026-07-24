@@ -3,38 +3,38 @@
 import { cosineSimilarity, fakeEmbedding } from "./vector.ts";
 import { makeDocument, withMetadata, documentMetadata } from "./document.ts";
 
-type LumenAiVectorStore = {
-  docs: LumenAiDocument[],
+type AiVectorStore = {
+  docs: AiDocument[],
   vectors: number[][],
 };
 
-type LumenAiSearchHit = {
-  doc: LumenAiDocument,
+type AiSearchHit = {
+  doc: AiDocument,
   score: number,
 };
 
-function makeSearchHit(doc: LumenAiDocument, score: number): LumenAiSearchHit {
+function makeSearchHit(doc: AiDocument, score: number): AiSearchHit {
   return {
     doc: doc,
     score: score,
   };
 }
 
-function makeVectorStore(docs: LumenAiDocument[], vectors: number[][]): LumenAiVectorStore {
+function makeVectorStore(docs: AiDocument[], vectors: number[][]): AiVectorStore {
   return {
     docs: docs,
     vectors: vectors,
   };
 }
 
-function noSearchHits(): LumenAiSearchHit[] {
-  let empty: LumenAiSearchHit[] = [];
+function noSearchHits(): AiSearchHit[] {
+  let empty: AiSearchHit[] = [];
   return empty;
 }
 
 // The store keeps docs and vectors as parallel lists, so a vector is only
 // usable when the doc at the same index exists.
-function storeVectorAt(store: LumenAiVectorStore, index: int): number[] {
+function storeVectorAt(store: AiVectorStore, index: int): number[] {
   if (index < 0 || index >= store.vectors.length) {
     let empty: number[] = [];
     return empty;
@@ -42,22 +42,22 @@ function storeVectorAt(store: LumenAiVectorStore, index: int): number[] {
   return store.vectors[index];
 }
 
-export function emptyVectorStore(): LumenAiVectorStore {
-  let docs: LumenAiDocument[] = [];
+export function emptyVectorStore(): AiVectorStore {
+  let docs: AiDocument[] = [];
   let vectors: number[][] = [];
   return makeVectorStore(docs, vectors);
 }
 
-export function storeSize(store: LumenAiVectorStore): int {
+export function storeSize(store: AiVectorStore): int {
   return store.docs.length;
 }
 
 // Values are immutable, so every write returns a fresh store.
-export function addVector(store: LumenAiVectorStore, doc: LumenAiDocument, vector: number[]): LumenAiVectorStore {
+export function addVector(store: AiVectorStore, doc: AiDocument, vector: number[]): AiVectorStore {
   return makeVectorStore([...store.docs, doc], [...store.vectors, vector]);
 }
 
-export function addDocuments(store: LumenAiVectorStore, docs: LumenAiDocument[], dims: int): LumenAiVectorStore {
+export function addDocuments(store: AiVectorStore, docs: AiDocument[], dims: int): AiVectorStore {
   let out = store;
   let i: int = 0;
   while (i < docs.length) {
@@ -67,8 +67,8 @@ export function addDocuments(store: LumenAiVectorStore, docs: LumenAiDocument[],
   return out;
 }
 
-export function deleteById(store: LumenAiVectorStore, id: string): LumenAiVectorStore {
-  let docs: LumenAiDocument[] = [];
+export function deleteById(store: AiVectorStore, id: string): AiVectorStore {
+  let docs: AiDocument[] = [];
   let vectors: number[][] = [];
   let i: int = 0;
   while (i < store.docs.length) {
@@ -81,8 +81,8 @@ export function deleteById(store: LumenAiVectorStore, id: string): LumenAiVector
   return makeVectorStore(docs, vectors);
 }
 
-export function filterByMetadata(store: LumenAiVectorStore, key: string, value: string): LumenAiVectorStore {
-  let docs: LumenAiDocument[] = [];
+export function filterByMetadata(store: AiVectorStore, key: string, value: string): AiVectorStore {
+  let docs: AiDocument[] = [];
   let vectors: number[][] = [];
   let i: int = 0;
   while (i < store.docs.length) {
@@ -107,9 +107,9 @@ function storeBeatsScore(candidate: number, current: number): bool {
 
 // Sorting in place is impossible, so the top k comes out of repeated
 // max-extraction over a shrinking copy. Ties keep insertion order.
-function storeTopHits(scored: LumenAiSearchHit[], k: int): LumenAiSearchHit[] {
+function storeTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
   let rest = scored;
-  let out: LumenAiSearchHit[] = [];
+  let out: AiSearchHit[] = [];
   let n: int = 0;
   while (n < k && rest.length > 0) {
     let best: int = 0;
@@ -125,9 +125,9 @@ function storeTopHits(scored: LumenAiSearchHit[], k: int): LumenAiSearchHit[] {
   return out;
 }
 
-export function searchByVector(store: LumenAiVectorStore, query: number[], k: int): LumenAiSearchHit[] {
+export function searchByVector(store: AiVectorStore, query: number[], k: int): AiSearchHit[] {
   if (k <= 0 || store.docs.length == 0 || query.length == 0) { return noSearchHits(); }
-  let scored: LumenAiSearchHit[] = [];
+  let scored: AiSearchHit[] = [];
   let i: int = 0;
   while (i < store.docs.length && i < store.vectors.length) {
     scored.push(makeSearchHit(store.docs[i], cosineSimilarity(query, store.vectors[i])));
@@ -136,7 +136,7 @@ export function searchByVector(store: LumenAiVectorStore, query: number[], k: in
   return storeTopHits(scored, k);
 }
 
-export function searchByText(store: LumenAiVectorStore, query: string, dims: int, k: int): LumenAiSearchHit[] {
+export function searchByText(store: AiVectorStore, query: string, dims: int, k: int): AiSearchHit[] {
   if (k <= 0 || dims <= 0) { return noSearchHits(); }
   return searchByVector(store, fakeEmbedding(query, dims), k);
 }
@@ -162,7 +162,7 @@ test("add vector returns a new store", () => {
 
 test("add documents embeds each document", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     makeDocument("d1", "alpha beta gamma", "notes.txt", ""),
     makeDocument("d2", "delta epsilon zeta", "notes.txt", ""),
   ];
@@ -173,13 +173,13 @@ test("add documents embeds each document", () => {
   expect(filled.vectors[1].length == 64);
   expect(filled.docs[1].id == "d2");
   expect(storeSize(store) == 0);
-  let none: LumenAiDocument[] = [];
+  let none: AiDocument[] = [];
   expect(storeSize(addDocuments(filled, none, 64)) == 2);
 });
 
 test("delete by id", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     makeDocument("d1", "alpha", "notes.txt", ""),
     makeDocument("d2", "beta", "notes.txt", ""),
     makeDocument("d3", "gamma", "notes.txt", ""),
@@ -246,7 +246,7 @@ test("search an empty store is safe", () => {
 
 test("search by text retrieves the closest document", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     makeDocument("cat", "the cat sat on the warm mat", "s", ""),
     makeDocument("physics", "quantum chromodynamics describes gluon interactions", "s", ""),
     makeDocument("lumen", "lumen compiles to a native binary", "s", ""),
@@ -263,7 +263,7 @@ test("search by text retrieves the closest document", () => {
 
 test("search by text over unembeddable query scores zero", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     makeDocument("d1", "alpha beta", "s", ""),
   ];
   let filled = addDocuments(store, docs, 32);
@@ -274,7 +274,7 @@ test("search by text over unembeddable query scores zero", () => {
 
 test("a NaN score never takes the top rank in the store", () => {
   let notANumber = 0.0 / 0.0;
-  let scored: LumenAiSearchHit[] = [
+  let scored: AiSearchHit[] = [
     makeSearchHit(makeDocument("poisoned", "poisoned", "s", ""), notANumber),
     makeSearchHit(makeDocument("perfect", "perfect", "s", ""), 1.0),
     makeSearchHit(makeDocument("okay", "okay", "s", ""), 0.707),
@@ -284,7 +284,7 @@ test("a NaN score never takes the top rank in the store", () => {
   expect(ranked[0].doc.id == "perfect");
   expect(ranked[1].doc.id == "okay");
   expect(ranked[2].doc.id == "poisoned");
-  let allBroken: LumenAiSearchHit[] = [
+  let allBroken: AiSearchHit[] = [
     makeSearchHit(makeDocument("a", "a", "s", ""), notANumber),
     makeSearchHit(makeDocument("b", "b", "s", ""), notANumber),
   ];
@@ -314,7 +314,7 @@ test("a non-finite stored vector cannot take over the results", () => {
 
 test("metadata filtering cannot be bypassed by a forged value", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     withMetadata(makeDocument("public", "public secret", "s", ""), "note", "hello\nrole\tadmin"),
     withMetadata(makeDocument("private", "private secret", "s", ""), "role", "admin"),
   ];
@@ -328,7 +328,7 @@ test("metadata filtering cannot be bypassed by a forged value", () => {
 
 test("filter by metadata", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     withMetadata(makeDocument("d1", "alpha", "notes.txt", ""), "lang", "en"),
     withMetadata(makeDocument("d2", "beta", "notes.txt", ""), "lang", "fr"),
     withMetadata(makeDocument("d3", "gamma", "notes.txt", ""), "lang", "en"),
@@ -347,7 +347,7 @@ test("filter by metadata", () => {
 
 test("filtered store is still searchable", () => {
   let store = emptyVectorStore();
-  let docs: LumenAiDocument[] = [
+  let docs: AiDocument[] = [
     withMetadata(makeDocument("cat", "the cat sat on the warm mat", "s", ""), "lang", "en"),
     withMetadata(makeDocument("physics", "quantum chromodynamics describes gluon interactions", "s", ""), "lang", "fr"),
   ];

@@ -229,7 +229,7 @@
 - [x] Parse tool descriptors (name, description, raw input schema) from a
       `tools/list` reply.
 - [x] Parse a `tools/call` reply into an `ok`/`content`/`error` record.
-- [x] Adapt an MCP tool descriptor into a first-class `LumenAiTool` for
+- [x] Adapt an MCP tool descriptor into a first-class `AiTool` for
       `runAgent`.
 - [x] Add offline tests over hand-written JSON-RPC bodies.
 - [x] Add stdio transport (spec 450's persistent `child_process.spawn`): a live

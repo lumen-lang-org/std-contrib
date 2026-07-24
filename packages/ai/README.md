@@ -181,8 +181,8 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `fakeModel(responses)` | Deterministic offline model driver replaying canned response bodies |
 | `fakeAnswer(text)` | Build a canned provider body carrying a final answer |
 | `fakeToolCall(name, input)` | Build a canned provider body carrying one tool call |
-| `openAIAgent(apiKey, model, tools)` | Live OpenAI-compatible `LumenAiModel` for `runAgent`, tool definitions and round trip included |
-| `mistralAgent(apiKey, model, tools)` | Live Mistral `LumenAiModel` for `runAgent`, tool definitions and round trip included |
+| `openAIAgent(apiKey, model, tools)` | Live OpenAI-compatible `AiModel` for `runAgent`, tool definitions and round trip included |
+| `mistralAgent(apiKey, model, tools)` | Live Mistral `AiModel` for `runAgent`, tool definitions and round trip included |
 | `agentChatTurns(messages)` | Rebuild native `tool_calls` / `tool_call_id` turns from the loop's neutral history |
 | `openAIToolBody(model, turns, tools, temperature, maxTokens)` | Build a tool-enabled OpenAI-compatible chat body from native turns |
 | `mistralToolBody(model, turns, tools, temperature, maxTokens)` | Build a tool-enabled Mistral chat body from native turns |
@@ -201,16 +201,16 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `mcpConnect(url, headers)` | POST an `initialize` handshake and return the raw reply body |
 | `mcpTools(url, headers)` | List an MCP server's tools over HTTP |
 | `mcpCall(url, headers, name, argumentsJson)` | Call one MCP tool over HTTP |
-| `mcpAsTool(url, headers, tool)` | Adapt one MCP tool descriptor into a runnable `LumenAiTool` |
-| `mcpAsTools(url, headers, tools)` | Adapt every MCP tool descriptor into a `LumenAiTool[]` for `runAgent` |
+| `mcpAsTool(url, headers, tool)` | Adapt one MCP tool descriptor into a runnable `AiTool` |
+| `mcpAsTools(url, headers, tools)` | Adapt every MCP tool descriptor into a `AiTool[]` for `runAgent` |
 | `mcpStdioConnect(command, args)` | Spawn a local MCP server as a subprocess and return a live stdio session |
 | `mcpStdioTools(session)` | List an MCP server's tools over stdio |
 | `mcpStdioCall(session, name, argumentsJson)` | Call one MCP tool over stdio |
-| `mcpStdioAsTools(session, tools)` | Adapt stdio MCP tools into a `LumenAiTool[]` for `runAgent` |
+| `mcpStdioAsTools(session, tools)` | Adapt stdio MCP tools into a `AiTool[]` for `runAgent` |
 | `mcpStdioClose(session)` | Close the server's stdin and wait for it to exit |
 | `mcpSseTools(url, headers)` | List tools from an SSE/streamable-HTTP MCP server (`http://` only) |
 | `mcpSseCall(url, headers, name, argumentsJson)` | Call one MCP tool over SSE |
-| `mcpSseAsTools(url, headers, tools)` | Adapt SSE MCP tools into a `LumenAiTool[]` for `runAgent` |
+| `mcpSseAsTools(url, headers, tools)` | Adapt SSE MCP tools into a `AiTool[]` for `runAgent` |
 
 ## RAG
 
@@ -260,7 +260,7 @@ insert the returned vectors with `addVector`.
 
 ## Conversation memory
 
-A history is a plain `LumenAiMessage[]`. Every memory helper returns a new
+A history is a plain `AiMessage[]`. Every memory helper returns a new
 array, so a turn is a rebind rather than a mutation.
 
 ```ts
@@ -395,7 +395,7 @@ budget.
 
 ### Live tool-calling agents
 
-`openAIAgent` and `mistralAgent` return a `LumenAiModel` you hand straight to
+`openAIAgent` and `mistralAgent` return a `AiModel` you hand straight to
 `runAgent`. The closure carries the serialized tool definitions in every request
 and performs the native tool round trip, so the loop and its public signature are
 unchanged — only the model source differs from the offline `fakeModel`.
@@ -462,7 +462,7 @@ over turns from `agentChatTurns`.
 
 The Model Context Protocol lets an agent borrow tools that live on another
 server. `mcpTools` lists a server's tools, `mcpAsTools` adapts each one into a
-`LumenAiTool` whose `run` calls the server, and the result drops straight into
+`AiTool` whose `run` calls the server, and the result drops straight into
 `runAgent` next to any local tools you defined. The adapter keeps each tool's
 raw JSON input schema in the `params` field, and follows this package's one
 string in, one string out convention: the input is sent as `{"input": <input>}`
@@ -485,7 +485,7 @@ import {
 let url = "http://127.0.0.1:8080/mcp";
 let headers = new Map<string, string>();
 
-// List the server's tools and adapt them into runnable LumenAiTools.
+// List the server's tools and adapt them into runnable AiTools.
 let remote = mcpAsTools(url, headers, mcpTools(url, headers));
 
 // Mix them with any local tools and hand the registry to runAgent.
@@ -637,7 +637,7 @@ string value. Types and nested constraints are left to the provider's strict mod
   and the live `openAIAgent` / `mistralAgent` model sources.
 - `mcp.ts` contains the MCP (Model Context Protocol) client: JSON-RPC framing,
   the response parsers, the HTTP `initialize` / `tools/list` / `tools/call`
-  calls, and the adapter that turns an MCP tool into a `LumenAiTool`.
+  calls, and the adapter that turns an MCP tool into a `AiTool`.
 - `examples/mistral-chat.ts` is a live Mistral smoke test.
 - `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
 - `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
