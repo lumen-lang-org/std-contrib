@@ -145,6 +145,15 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `compressIfNeeded(summarize, history, maxChars, keepRecent)` | Compress only when over budget |
 | `openAISummarizer(apiKey, model)` | A summarizer backed by an OpenAI-compatible model |
 | `mistralSummarizer(apiKey, model)` | A summarizer backed by Mistral |
+| `schemaField(name, type, description, required)` | Describe one property of an object schema |
+| `objectSchema(fields)` | Build a strict JSON Schema object from fields |
+| `schemaRequired(fields)` | The required field names, for validation |
+| `structuredChat(provider, apiKey, model, messages, name, schema, required)` | Native schema-mode request by provider name |
+| `structuredOpenAI(...)` / `structuredMistral(...)` | Native schema mode for a specific provider |
+| `structuredWithBaseUrl(baseUrl, ...)` | Schema mode against any OpenAI-compatible endpoint |
+| `structuredJsonMode(baseUrl, ...)` | JSON-mode fallback for endpoints without schema mode |
+| `validateStructured(json, required)` | Check a reply is an object carrying every required field |
+| `structuredRetryPrompt(schema, invalid, reason)` | Correction prompt after an invalid structured reply |
 | `defineTool(name, description, params, run)` | Build a tool from a `(string) => string` function |
 | `toolRegistry()` | Build an empty tool registry |
 | `registerTool(tools, entry)` | Return a new registry with a tool added, or replaced by name |
@@ -558,6 +567,45 @@ Two safety properties matter in practice:
 The summarizer is an injected `(prompt: string) => string`, so the memory module
 does no I/O and is testable with a deterministic fake; the provider-backed
 `openAISummarizer` / `mistralSummarizer` are conveniences.
+
+## Structured output
+
+Ask a provider for JSON that conforms to a schema and get a validated result
+instead of free text. Lumen has no runtime reflection, so a schema is described
+with explicit fields:
+
+```ts
+let fields = [
+  schemaField("name", "string", "the person's full name", true),
+  schemaField("age", "integer", "age in years", true),
+  schemaField("city", "string", "city of residence", true),
+];
+let schema = objectSchema(fields);
+
+let r = structuredChat("mistral", apiKey, "mistral-large-latest",
+                       [user("Invent a person from Lisbon.")],
+                       "person", schema, schemaRequired(fields));
+if (r.ok) { let p = JSON.parse<Person>(r.json); }
+else      { console.log(r.error); }
+```
+
+**The two provider modes are not equivalent**, and the difference bites:
+
+- **Schema mode** (`response_format: {"type":"json_schema", strict: true}`)
+  constrains the *shape*. Verified against OpenAI and Mistral.
+- **JSON mode** (`{"type":"json_object"}`) only guarantees the reply *parses*.
+  Probed against Mistral, asking for name/age/city in JSON mode returned
+  `{"person":{...}}` — valid JSON, wrong shape.
+
+So `structuredChat` uses schema mode for `openai` and `mistral`. For the many
+OpenAI-compatible endpoints that accept only JSON mode (Groq, Together,
+OpenRouter, Ollama, ...), `structuredJsonMode` states the schema in the prompt
+and validates the reply locally with `validateStructured`, which reports every
+missing field so you can drive a `structuredRetryPrompt`.
+
+`validateStructured` is a top-level presence check, not a full JSON Schema
+validator — it deliberately ignores a key that only appears nested or inside a
+string value. Types and nested constraints are left to the provider's strict mode.
 
 ## Files
 

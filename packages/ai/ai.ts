@@ -11,7 +11,10 @@ import { makeAiResult } from "./result.ts";
 import { makeProviderError } from "./error.ts";
 import { makeModelOptions, defaultModelOptions as makeDefaultModelOptions } from "./options.ts";
 import { buildProviderChatBody } from "./provider.ts";
-import { parseTextOutput as readTextOutput, parseLineOutput as readLineOutput, parseStringListOutput as readStringListOutput, parseChoiceOutput as readChoiceOutput, firstFencedBlockOutput as readFirstFencedBlockOutput, firstJsonObjectOutput as readFirstJsonObjectOutput, typedJsonInputOutput as readTypedJsonInputOutput, retryPromptOutput as buildRetryPromptOutput } from "./output.ts";
+// structured.ts imports firstJsonObjectOutput, typedJsonInputOutput and
+// retryPromptOutput UNALIASED, so those three are imported unaliased here too;
+// their public wrappers already use different names, so nothing collides.
+import { firstJsonObjectOutput, typedJsonInputOutput, retryPromptOutput, parseTextOutput as readTextOutput, parseLineOutput as readLineOutput, parseStringListOutput as readStringListOutput, parseChoiceOutput as readChoiceOutput, firstFencedBlockOutput as readFirstFencedBlockOutput } from "./output.ts";
 import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, buildOpenAIChatBodyWithStops, readOpenAIContent, readOpenAIResult, readOpenAIError, readOpenAITokenUsage } from "./openai.ts";
 import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, buildMistralChatBodyWithStops, readMistralContent, readMistralResult, readMistralError, readMistralTokenUsage } from "./mistral.ts";
 // Names a sibling module imports (cosineSimilarity, fakeEmbedding,
@@ -53,6 +56,7 @@ import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcp
 // The stdio and SSE MCP transports (mcp_stdio.ts / mcp_sse.ts) are self-contained
 // modules; no sibling imports their names, so every one is aliased here.
 import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp_stdio.ts";
+import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./structured.ts";
 import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen as adaptSseTool, sseToolsToRegistry as adaptSseTools } from "./mcp_sse.ts";
 
 type JsonName = {
@@ -156,15 +160,15 @@ export function firstFencedBlock(raw: string): string {
 }
 
 export function firstJsonObject(raw: string): string {
-  return readFirstJsonObjectOutput(raw);
+  return firstJsonObjectOutput(raw);
 }
 
 export function typedJsonInput(raw: string): string {
-  return readTypedJsonInputOutput(raw);
+  return typedJsonInputOutput(raw);
 }
 
 export function retryPrompt(instruction: string, invalidOutput: string, errorMessage: string): string {
-  return buildRetryPromptOutput(instruction, invalidOutput, errorMessage);
+  return retryPromptOutput(instruction, invalidOutput, errorMessage);
 }
 
 export function openAIChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
@@ -605,6 +609,71 @@ export function toolChatMistral(apiKey: string, model: string, turns: LumenAiCha
 // raw JSON strings embedded verbatim; method and tool names are escaped for you.
 export function mcpRequestBody(id: int, method: string, params: string): string {
   return buildMcpRequest(id, method, params);
+}
+
+// --- Structured output ------------------------------------------------------
+// Ask a provider for JSON that conforms to a schema, and get a validated result
+// instead of free text. Schema mode constrains the shape; JSON mode only
+// guarantees the reply parses, so the shape is prompted and validated locally.
+
+export function schemaField(name: string, fieldType: string, description: string, required: bool): LumenAiSchemaField {
+  return makeSchemaField(name, fieldType, description, required);
+}
+
+export function objectSchema(fields: LumenAiSchemaField[]): string {
+  return buildObjectSchema(fields);
+}
+
+export function schemaRequired(fields: LumenAiSchemaField[]): string[] {
+  return readRequiredFields(fields);
+}
+
+export function jsonObjectBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+  return buildJsonObjectBody(model, messages, temperature, maxTokens);
+}
+
+export function jsonSchemaBody(model: string, messages: LumenAiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
+  return buildJsonSchemaBody(model, messages, name, schemaJson, temperature, maxTokens);
+}
+
+export function validateStructured(json: string, required: string[]): LumenAiStructured {
+  return checkStructured(json, required);
+}
+
+export function parseStructuredResponse(raw: string, content: string, required: string[]): LumenAiStructured {
+  return readStructuredResponse(raw, content, required);
+}
+
+export function structuredRetryPrompt(schemaJson: string, invalid: string, reason: string): string {
+  return buildStructuredRetryPrompt(schemaJson, invalid, reason);
+}
+
+export function schemaInstruction(schemaJson: string): LumenAiMessage {
+  return buildSchemaInstruction(schemaJson);
+}
+
+// Provider-neutral: "openai" and "mistral" use native schema mode.
+export function structuredChat(provider: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+  return runStructuredChat(provider, apiKey, model, messages, name, schemaJson, required);
+}
+
+export function structuredOpenAI(apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+  return runStructuredOpenAI(apiKey, model, messages, name, schemaJson, required);
+}
+
+export function structuredMistral(apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+  return runStructuredMistral(apiKey, model, messages, name, schemaJson, required);
+}
+
+// Schema mode against any other OpenAI-compatible endpoint that supports it.
+export function structuredWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+  return runStructuredChatWithBaseUrl(baseUrl, apiKey, model, messages, name, schemaJson, required);
+}
+
+// JSON-mode fallback for endpoints without schema mode (Groq, Together,
+// OpenRouter, Ollama, ...): the shape is prompted, then validated locally.
+export function structuredJsonMode(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], schemaJson: string, required: string[]): LumenAiStructured {
+  return runStructuredJsonMode(baseUrl, apiKey, model, messages, schemaJson, required);
 }
 
 // --- Context compression ----------------------------------------------------

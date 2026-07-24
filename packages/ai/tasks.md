@@ -54,12 +54,13 @@
 
 ## M4: Structured Output
 
-- [ ] Add provider-native JSON mode body option where supported.
-- [ ] Add structured output result record.
-- [ ] Add validation status record.
+- [x] Add provider-native JSON mode body option where supported.
+- [x] Add structured output result record.
+- [x] Add validation status record (presence check + missing-field diagnostics).
 - [ ] Add tool-strategy structured output plan.
-- [ ] Add Mistral structured output example if supported by API.
-- [ ] Add OpenAI-compatible structured output example if supported by API.
+- [x] Mistral structured output verified live (schema mode constrains the shape).
+- [x] OpenAI-compatible path via structuredOpenAI / structuredWithBaseUrl, plus a
+      JSON-mode fallback for endpoints without schema mode.
 
 ## M5: Tools
 
