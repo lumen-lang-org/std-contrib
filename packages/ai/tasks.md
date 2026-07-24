@@ -181,12 +181,20 @@
 
 ## M13: Streaming
 
-- [ ] Track stdlib support for streaming HTTP responses.
-- [ ] Design provider-neutral stream event record.
-- [ ] Parse OpenAI-compatible stream events.
-- [ ] Parse Mistral stream events.
-- [ ] Add callback/event handler API.
-- [ ] Add streaming example once stdlib supports it.
+- [x] Track stdlib support for streaming HTTP responses. Landed as lumen spec
+      452: `http.stream` returns a read handle over a response in progress.
+- [x] Design provider-neutral stream event record. `AiStreamEvent` carries a
+      `kind` discriminator (delta/done/other/error), the text `delta`, a
+      `finishReason`, and the `raw` payload for anything the record omits.
+- [x] Parse OpenAI-compatible stream events.
+- [x] Parse Mistral stream events. Both wire formats send the same chunk shape,
+      so one parser serves both and the entry points differ only by name.
+- [x] Add callback/event handler API. `streamChat(cfg, messages, onEvent)`
+      calls the handler per event and returns the assembled reply;
+      `streamChatCollect` is the handler-free form.
+- [x] Add streaming example. `examples/mistral-stream.ts` prints each delta with
+      its arrival time — verified live against mistral-large-latest, first token
+      at 410ms and 9 deltas over 685ms, which a buffered call cannot produce.
 
 ## M14: Human In The Loop
 

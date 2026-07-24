@@ -324,20 +324,27 @@ Success criteria:
 
 ### 13. Streaming
 
-Blocked on stdlib streaming HTTP responses.
-
-Planned features:
+Features:
 
 - token streaming
-- tool-call streaming
-- reasoning/event streaming
 - stream event parser
 - callback interface
 
+Not yet covered: tool-call streaming and reasoning/event streaming. A tool call
+arrives split across chunks as `delta.tool_calls` fragments that must be
+reassembled by index, which is a different accumulation problem from text and is
+left to its own slice. `raw` on every event keeps those fields reachable in the
+meantime.
+
 Success criteria:
 
-- Once HTTP streaming is available, a provider stream can produce normalized
-  event records.
+- A provider stream produces normalized event records, and a caller sees each
+  one as it arrives rather than after the reply completes.
+- Parsing is covered offline by tests over hand-written event lines, including
+  the chunks that carry no text.
+
+Both are met. Streaming rests on `http.stream` (lumen spec 452); a captured body
+can also be replayed through the same parser without a network.
 
 ### 14. Human In The Loop
 

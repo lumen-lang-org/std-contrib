@@ -607,6 +607,46 @@ missing field so you can drive a `structuredRetryPrompt`.
 validator — it deliberately ignores a key that only appears nested or inside a
 string value. Types and nested constraints are left to the provider's strict mode.
 
+## Streaming
+
+Read a reply as it is generated instead of waiting for it to finish. Each
+`data:` line the provider sends becomes one normalized event, handed to your
+handler the moment it arrives:
+
+```ts
+let stats = new Map<string, i64>();
+stats.set("n", 0);
+
+let onEvent: AiStreamHandler = (event: AiStreamEvent): void => {
+  if (event.kind == "delta") {
+    stats.set("n", (stats.get("n") ?? 0) + 1);
+    console.log(event.delta);          // one piece of the answer
+  }
+};
+
+let r = streamChat(mistral, [user("Name the planets.")], onEvent);
+console.log(r.content);                // the whole reply, assembled
+```
+
+`event.kind` is `"delta"` (text in `event.delta`), `"done"` (the stream ended,
+with `finishReason` when the provider sent one), `"other"` (a chunk carrying no
+text — a role announcement or keep-alive), or `"error"` (a line that was not a
+chunk, kept verbatim in `raw`). Every event carries `raw`, so a field this
+record does not model is still reachable.
+
+A handler assigned to a function type may read the variables it closes over but
+not reassign them, which is why the counter above lives in a map.
+
+`streamChat` returns the assembled reply as well as streaming it, so one call
+serves both the live view and the final text. `streamChatCollect` drops the
+handler when you want streaming's arrival behaviour but have nothing to do per
+token, and `streamEvents`/`streamText` replay a captured body through the same
+parser with no network — which is how the tests cover it.
+
+OpenAI and Mistral send the same chunk shape, so one parser serves both.
+Tool-call streaming is not covered yet: those arrive as fragments that must be
+reassembled by index, which is its own slice.
+
 ## Files
 
 The package is grouped by concern; `ai.ts` at the root is the public barrel and
@@ -616,7 +656,7 @@ the only entry point consumers import.
 ai.ts              public barrel — the package API
 core/              provider-neutral schema: messages, request, result,
                    error, options, usage, headers, provider selection
-providers/         openai.ts, mistral.ts
+providers/         openai.ts, mistral.ts, chat.ts, stream.ts
 prompt/            prompt templates, output parsers, structured output
 rag/               vector maths, documents, embeddings, store, retrieval
 memory/            conversation memory, persistence, context compression
@@ -664,7 +704,8 @@ JavaScript runtime.
 Retrieval, embeddings, memory, tools, and the agent loop now ship. What is still
 missing:
 
-- no streaming responses
+- token streaming ships, but tool-call streaming does not: a streamed tool call
+  arrives as fragments that must be reassembled by index
 - MCP over SSE is plain `http://` only (`net.connect` has no TLS); point it at
   localhost or a server behind a terminating proxy
 - no multimodal or chunk-list response content; V1 expects string `content`
@@ -685,8 +726,8 @@ missing:
 - no stemming, no stop-word list, and no re-ranking in the keyword retriever
 - summary memory builds the prompt but does not call a model for you
 
-These are natural follow-ups as Lumen grows network streams, richer JSON value
-support, and more runtime primitives.
+These are natural follow-ups as Lumen grows richer JSON value support and more
+runtime primitives. Streaming was one of them until `http.stream` landed.
 
 Test:
 
