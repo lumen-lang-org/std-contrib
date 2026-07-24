@@ -8,23 +8,12 @@
 //   ./openai-compatible-chat
 
 import { chatOpenAIWithBaseUrl, system, user } from "../ai.ts";
-import { get as getEnvValue } from "../../dotenv/dotenv.ts";
+import { envValueOr } from "./env.ts";
 
-function readConfig(key: string, fallback: string): string {
-  let fromEnv = process.env(key) ?? "";
-  if (fromEnv != "") { return fromEnv; }
 
-  let rootEnv = fs.readFileSync(".env");
-  let fromRoot = getEnvValue(rootEnv, key, "");
-  if (fromRoot != "") { return fromRoot; }
-
-  let exampleEnv = fs.readFileSync("packages/ai/examples/.env");
-  return getEnvValue(exampleEnv, key, fallback);
-}
-
-let baseUrl = readConfig("OPENAI_COMPATIBLE_BASE_URL", "http://localhost:11434/v1");
-let model = readConfig("OPENAI_COMPATIBLE_MODEL", "llama3.2");
-let apiKey = readConfig("OPENAI_COMPATIBLE_API_KEY", "local");
+let baseUrl = envValueOr("OPENAI_COMPATIBLE_BASE_URL", "http://localhost:11434/v1");
+let model = envValueOr("OPENAI_COMPATIBLE_MODEL", "llama3.2");
+let apiKey = envValueOr("OPENAI_COMPATIBLE_API_KEY", "local");
 
 let result = chatOpenAIWithBaseUrl(baseUrl, apiKey, model, [
   system("You are concise."),

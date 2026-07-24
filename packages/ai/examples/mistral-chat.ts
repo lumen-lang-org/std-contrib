@@ -1,34 +1,28 @@
-// Live Mistral chat example.
+// Live Mistral chat example, driven by a model config.
+//
+// The config carries the provider, model name, credential and generation
+// options in one value, so the call names a model instead of threading
+// arguments — and unlike chatMistral it can actually set temperature.
 //
 // Run:
 //   export MISTRAL_API_KEY="..."
-//   # or create .env with MISTRAL_API_KEY=...
+//   # or put MISTRAL_API_KEY=... in .env
 //   lumen compile packages/ai/examples/mistral-chat.ts
 //   ./mistral-chat
 
-import { chatMistral, system, user } from "../ai.ts";
-import { get as getEnvValue } from "../../dotenv/dotenv.ts";
+import { modelConfig, withTemperature, chat, modelEndpoint, system, user } from "../ai.ts";
+import { requireEnv } from "./env.ts";
 
-function readMistralKey(): string {
-  let fromEnv = process.env("MISTRAL_API_KEY") ?? "";
-  if (fromEnv != "") { return fromEnv; }
+let apiKey = requireEnv("MISTRAL_API_KEY");
 
-  let rootEnv = fs.readFileSync(".env");
-  let fromRoot = getEnvValue(rootEnv, "MISTRAL_API_KEY", "");
-  if (fromRoot != "") { return fromRoot; }
+let mistral = withTemperature(
+  modelConfig("mistral", "mistral-large-latest", apiKey),
+  0.2,
+);
 
-  let exampleEnv = fs.readFileSync("packages/ai/examples/.env");
-  return getEnvValue(exampleEnv, "MISTRAL_API_KEY", "");
-}
+console.log(`calling ${mistral.model} at ${modelEndpoint(mistral)} (temperature ${mistral.temperature})`);
 
-let apiKey = readMistralKey();
-
-if (apiKey == "") {
-  console.error("Set MISTRAL_API_KEY in the shell or in a local .env file.");
-  process.exit(1);
-}
-
-let result = chatMistral(apiKey, "mistral-large-latest", [
+let result = chat(mistral, [
   system("You are concise."),
   user("Reply with exactly: lumen ok"),
 ]);

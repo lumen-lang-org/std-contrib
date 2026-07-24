@@ -652,3 +652,39 @@ test("mcp surface through the barrel", () => {
   expect(!bad.ok);
   expect(bad.error == "Method not found");
 });
+
+test("a model config carries provider, model, key and options", () => {
+  let m = modelConfig("mistral", "mistral-large-latest", "k");
+  expect(m.provider == "mistral");
+  expect(m.model == "mistral-large-latest");
+  expect(m.apiKey == "k");
+  expect(m.temperature == 0.7);
+  expect(m.maxTokens == 1024);
+  expect(modelEndpoint(m) == "https://api.mistral.ai/v1");
+});
+
+test("config helpers return a new value and never mutate", () => {
+  let base = modelConfig("openai", "gpt-4o", "k");
+  let hot = withTemperature(base, 0.1);
+  let big = withMaxTokens(hot, 4096);
+  expect(base.temperature == 0.7);
+  expect(hot.temperature == 0.1);
+  expect(big.temperature == 0.1);
+  expect(big.maxTokens == 4096);
+  expect(base.maxTokens == 1024);
+});
+
+test("baseUrl overrides the provider default and survives other edits", () => {
+  let m = withBaseUrl(modelConfig("openai", "llama3", "k"), "http://127.0.0.1:11434/v1");
+  expect(modelEndpoint(m) == "http://127.0.0.1:11434/v1");
+  expect(modelEndpoint(withTemperature(m, 0.3)) == "http://127.0.0.1:11434/v1");
+  expect(withApiKey(m, "other").apiKey == "other");
+});
+
+test("an unknown provider without a baseUrl is unroutable, not guessed", () => {
+  let m = modelConfig("acme", "x", "k");
+  expect(modelEndpoint(m) == "");
+  let r = chat(m, [user("hi")]);
+  expect(!r.ok);
+  expect(r.raw.includes("unroutable"));
+});
