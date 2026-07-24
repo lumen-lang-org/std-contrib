@@ -62,6 +62,7 @@ import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcp
 // modules; no sibling imports their names, so every one is aliased here.
 import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
 import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
+import { makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
 import { splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
 import { loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
 import { streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString } from "./providers/stream.ts";
@@ -652,6 +653,59 @@ export function modelEndpoint(cfg: AiModelConfig): string {
 // Send messages using a config.
 export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   return runConfiguredChat(cfg, messages);
+}
+
+// --- Token budget -----------------------------------------------------------
+// A ceiling on what a run may spend. Checked before a call and charged after
+// one, so an over-budget run stops before spending rather than after noticing.
+// Counts are estimates: there is no tokenizer here.
+
+export function budget(limit: int): AiBudget {
+  return newBudget(limit);
+}
+
+export function unlimitedBudget(): AiBudget {
+  return newUnlimitedBudget();
+}
+
+export function budgetLimited(b: AiBudget): bool {
+  return readBudgetLimited(b);
+}
+
+export function budgetLeft(b: AiBudget): int {
+  return readBudgetRemaining(b);
+}
+
+export function budgetExhausted(b: AiBudget): bool {
+  return readBudgetExhausted(b);
+}
+
+export function messagesCost(messages: AiMessage[]): int {
+  return readMessagesCost(messages);
+}
+
+export function chargeTokens(b: AiBudget, tokens: int): AiBudget {
+  return applyCharge(b, tokens);
+}
+
+export function chargeMessages(b: AiBudget, messages: AiMessage[]): AiBudget {
+  return applyChargeMessages(b, messages);
+}
+
+export function chargeCall(b: AiBudget, messages: AiMessage[], reply: string): AiBudget {
+  return applyChargeCall(b, messages, reply);
+}
+
+export function budgetAllows(b: AiBudget, tokens: int): bool {
+  return readBudgetAllows(b, tokens);
+}
+
+export function budgetAllowsMessages(b: AiBudget, messages: AiMessage[]): bool {
+  return readBudgetAllowsMessages(b, messages);
+}
+
+export function budgetRefusal(b: AiBudget, tokens: int): string {
+  return readBudgetRefusal(b, tokens);
 }
 
 // --- Batch embeddings -------------------------------------------------------
