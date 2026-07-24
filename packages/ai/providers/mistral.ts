@@ -1,10 +1,10 @@
 // Mistral-compatible request and response helpers.
 
-import { systemMessage } from "./messages.ts";
-import { makeAiResult } from "./result.ts";
-import { makeProviderError } from "./error.ts";
-import { makeTokenUsage } from "./usage.ts";
-import { bearerJsonHeaders } from "./headers.ts";
+import { systemMessage } from "../core/messages.ts";
+import { makeAiResult } from "../core/result.ts";
+import { makeProviderError } from "../core/error.ts";
+import { makeTokenUsage } from "../core/usage.ts";
+import { bearerJsonHeaders } from "../core/headers.ts";
 
 type MistralChatRequest = {
   model: string,
