@@ -279,11 +279,36 @@ function applyOverlap(text: string, list: AiChunk[], overlap: int): AiChunk[] {
   return out;
 }
 
-function dropEmpty(list: AiChunk[]): AiChunk[] {
+// A piece that is only whitespace is not worth returning on its own, but its
+// bytes still belong to the document: dropping them outright would leave a hole
+// between one chunk's end and the next one's start, and the chunks would no
+// longer reconstruct the text. So a blank piece is absorbed into its neighbour
+// — the previous chunk's end is extended over it, or the first real chunk's
+// start is pulled back to cover a leading run.
+//
+// The one case that still yields nothing is a document that is entirely
+// whitespace, which has no content to chunk.
+function dropEmpty(text: string, list: AiChunk[]): AiChunk[] {
   let out: AiChunk[] = [];
+  let carry: int = -1;
   let i: int = 0;
   while (i < list.length) {
-    if (list[i].text.trim() != "") { out = [...out, list[i]]; }
+    let c = list[i];
+    if (c.text.trim() != "") {
+      let from = c.start;
+      if (carry >= 0) {
+        from = carry;
+        carry = -1;
+      }
+      out = [...out, chunkAt(text, from, c.end, c.forced)];
+    } else {
+      if (out.length > 0) {
+        let prev = out[out.length - 1];
+        out = [...out.slice(0, out.length - 1), chunkAt(text, prev.start, c.end, prev.forced)];
+      } else {
+        if (carry < 0) { carry = c.start; }
+      }
+    }
     i = i + 1;
   }
   return out;
@@ -295,11 +320,14 @@ function dropEmpty(list: AiChunk[]): AiChunk[] {
 export function splitChunksWith(text: string, seps: string[], size: int, overlap: int): AiChunk[] {
   let out: AiChunk[] = [];
   if (text == "" || size <= 0) { return out; }
+  // An overlap at or above the size would not advance, so it is clamped rather
+  // than rejected: this returns a list of chunks and has no error channel to
+  // report a rejection through, and hanging is the worse outcome.
   let over = overlap;
   if (over < 0) { over = 0; }
   if (over >= size) { over = size - 1; }
   out = splitRange(text, 0, text.length, seps, 0, size);
-  return applyOverlap(text, dropEmpty(out), over);
+  return applyOverlap(text, dropEmpty(text, out), over);
 }
 
 // Split prose.
