@@ -11,10 +11,11 @@
 //   MCP_URL=http://localhost:3000/mcp lumen compile packages/ai/examples/support-agent/mcp-tools.ts
 //   ./mcp-tools
 
+import { envValue } from "../env.ts";
 import { mcpTools, mcpAsTools, runAgent, fakeModel, fakeToolCall, agentTrace, agentSystemPrompt, system, user, appendMessage } from "../../ai.ts";
 
 function main(): void {
-  let url = process.env.MCP_URL ?? "";
+  let url = envValue("MCP_URL");
   if (url == "") {
     console.log("Set MCP_URL to a running MCP HTTP endpoint to try this example.");
     console.log("It lists the server's tools, adapts them into agent tools, and");

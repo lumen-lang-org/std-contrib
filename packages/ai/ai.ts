@@ -7,6 +7,11 @@
 import { systemMessage, userMessage, assistantMessage } from "./core/messages.ts";
 import { renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
 import { buildChatRequest } from "./core/request.ts";
+// providers/chat.ts imports makeModelConfig and modelBaseUrl from core/model.ts
+// unaliased, so they are imported unaliased here too. The public wrappers below
+// take different names, so nothing collides.
+import { makeModelConfig, modelBaseUrl, modelWithTemperature, modelWithMaxTokens, modelWithBaseUrl, modelWithApiKey } from "./core/model.ts";
+import { runConfiguredChat } from "./providers/chat.ts";
 import { makeAiResult } from "./core/result.ts";
 import { makeProviderError } from "./core/error.ts";
 import { makeModelOptions, defaultModelOptions as makeDefaultModelOptions } from "./core/options.ts";
@@ -609,6 +614,41 @@ export function toolChatMistral(apiKey: string, model: string, turns: AiChatTurn
 // raw JSON strings embedded verbatim; method and tool names are escaped for you.
 export function mcpRequestBody(id: int, method: string, params: string): string {
   return buildMcpRequest(id, method, params);
+}
+
+// --- Model configuration ----------------------------------------------------
+// One value carrying the provider, model name, credential and generation
+// options, so a call site names a model instead of threading four arguments.
+// Unlike chatOpenAI / chatMistral, `chat` honours temperature and maxTokens.
+
+export function modelConfig(provider: string, model: string, apiKey: string): AiModelConfig {
+  return makeModelConfig(provider, model, apiKey);
+}
+
+export function withTemperature(cfg: AiModelConfig, temperature: number): AiModelConfig {
+  return modelWithTemperature(cfg, temperature);
+}
+
+export function withMaxTokens(cfg: AiModelConfig, maxTokens: int): AiModelConfig {
+  return modelWithMaxTokens(cfg, maxTokens);
+}
+
+export function withBaseUrl(cfg: AiModelConfig, baseUrl: string): AiModelConfig {
+  return modelWithBaseUrl(cfg, baseUrl);
+}
+
+export function withApiKey(cfg: AiModelConfig, apiKey: string): AiModelConfig {
+  return modelWithApiKey(cfg, apiKey);
+}
+
+// The endpoint a config resolves to ("" when unroutable).
+export function modelEndpoint(cfg: AiModelConfig): string {
+  return modelBaseUrl(cfg);
+}
+
+// Send messages using a config.
+export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
+  return runConfiguredChat(cfg, messages);
 }
 
 // --- Structured output ------------------------------------------------------
