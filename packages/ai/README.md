@@ -140,6 +140,11 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `parseHistory(raw)` | Parse a history from JSON |
 | `saveHistory(path, history)` | Write a history to a file |
 | `loadHistory(path)` | Read a history from a file |
+| `needsCompression(history, maxChars)` | Whether the conversation has outgrown its character budget |
+| `compressHistory(summarize, history, keepRecent)` | Fold older turns into a running summary, keeping the system prompt and the last `keepRecent` messages |
+| `compressIfNeeded(summarize, history, maxChars, keepRecent)` | Compress only when over budget |
+| `openAISummarizer(apiKey, model)` | A summarizer backed by an OpenAI-compatible model |
+| `mistralSummarizer(apiKey, model)` | A summarizer backed by Mistral |
 | `defineTool(name, description, params, run)` | Build a tool from a `(string) => string` function |
 | `toolRegistry()` | Build an empty tool registry |
 | `registerTool(tools, entry)` | Return a new registry with a tool added, or replaced by name |
@@ -522,6 +527,37 @@ mcpStdioClose(session);
 ```
 
 See `examples/support-agent/` for runnable HTTP, stdio, and SSE examples.
+
+## Context compression
+
+A long conversation eventually costs more to resend than it is worth. Compression
+folds the older turns into a running summary **on demand** — the app checks a
+budget and compresses only when it is exceeded:
+
+```ts
+let summarize = mistralSummarizer(apiKey, "mistral-large-latest");
+
+if (needsCompression(history, 8000)) {
+  history = compressHistory(summarize, history, 4);   // keep the last 4 turns
+}
+// or, the same thing guarded in one call:
+history = compressIfNeeded(summarize, history, 8000, 4);
+```
+
+The result is `[your system prompt, a summary message, ...the recent turns]`. An
+existing summary is folded forward rather than re-summarised, so compressing
+repeatedly keeps one running summary instead of nesting them.
+
+Two safety properties matter in practice:
+
+- **A failed summarizer never destroys the conversation.** If the model call
+  fails or is rate-limited and returns nothing, the history is returned
+  unchanged.
+- **Your system prompt survives.** Only the conversation turns are folded.
+
+The summarizer is an injected `(prompt: string) => string`, so the memory module
+does no I/O and is testable with a deterministic fake; the provider-backed
+`openAISummarizer` / `mistralSummarizer` are conveniences.
 
 ## Files
 

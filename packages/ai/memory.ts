@@ -180,6 +180,68 @@ export function applySummary(summary: string, recent: LumenAiMessage[]): LumenAi
   return [...head, ...recent];
 }
 
+// --- Context compression ----------------------------------------------------
+// A long conversation eventually costs more than it is worth to resend. These
+// fold the older turns into a running summary ON DEMAND, so an app can check a
+// budget and compress only when it actually needs to.
+//
+// The summarizer is injected rather than called directly, so this module stays
+// free of I/O and is testable with a deterministic fake. `openAISummarizer` /
+// `mistralSummarizer` in the barrel build one backed by a real provider.
+
+type LumenAiSummarizer = (prompt: string) => string;
+
+// The marker `applySummary` writes, so a compressed history can be recognised
+// and its prior summary folded forward instead of being summarised again.
+const SUMMARY_MARKER = "Summary of the conversation so far:\n";
+
+function isSummaryMessage(msg: LumenAiMessage): bool {
+  return msg.role == "system" && msg.content.startsWith(SUMMARY_MARKER);
+}
+
+// Whether the history has outgrown its character budget.
+export function needsCompression(history: LumenAiMessage[], maxChars: int): bool {
+  return historyChars(history) > maxChars;
+}
+
+// Fold everything older than the last `keepRecent` messages into one summary
+// message, preserving the app's own leading system prompt and folding any
+// previous summary forward. Returns the history UNCHANGED when there is nothing
+// old enough to compress, or when the summarizer returns nothing — a failed or
+// rate-limited model call must never silently destroy the conversation.
+export function compressHistory(summarize: LumenAiSummarizer, history: LumenAiMessage[], keepRecent: int): LumenAiMessage[] {
+  let keep = keepRecent;
+  if (keep < 0) { keep = 0; }
+
+  let i: int = 0;
+  let head: LumenAiMessage[] = [];
+  if (i < history.length && history[i].role == "system" && !isSummaryMessage(history[i])) {
+    head = [history[i]];
+    i = i + 1;
+  }
+  let prior = "";
+  if (i < history.length && isSummaryMessage(history[i])) {
+    prior = history[i].content.slice(SUMMARY_MARKER.length, history[i].content.length);
+    i = i + 1;
+  }
+
+  let body = history.slice(i, history.length);
+  if (body.length <= keep) { return history; }
+  let older = body.slice(0, body.length - keep);
+  let recent = body.slice(body.length - keep, body.length);
+
+  let summary = summarize(summaryPrompt(older, prior)).trim();
+  if (summary == "") { return history; }
+  let marker: LumenAiMessage[] = [systemMessage(SUMMARY_MARKER + summary)];
+  return [...head, ...marker, ...recent];
+}
+
+// The "call it when needed" form: compress only once the budget is exceeded.
+export function compressIfNeeded(summarize: LumenAiSummarizer, history: LumenAiMessage[], maxChars: int, keepRecent: int): LumenAiMessage[] {
+  if (!needsCompression(history, maxChars)) { return history; }
+  return compressHistory(summarize, history, keepRecent);
+}
+
 export function setMemoryValue(store: string, key: string, value: string): string {
   let name = memoryEscapeField(key);
   let entry = name + "\t" + memoryEscapeField(value);
@@ -487,4 +549,78 @@ test("save and load history round-trips through a file", () => {
   expect(back[2].role == "assistant");
   expect(back[2].content == "hello");
   expect(renderTranscript(back) == renderTranscript(history));
+});
+
+test("needsCompression tracks the character budget", () => {
+  let h = appendMessage([], systemMessage("sys"));
+  h = appendMessage(h, userMessage("hello there"));
+  expect(!needsCompression(h, 1000));
+  expect(needsCompression(h, 5));
+});
+
+test("compressHistory folds old turns and keeps the system prompt and recent turns", () => {
+  let fake = (prompt: string) => "Aymen is building Lumen.";
+  let h = appendMessage([], systemMessage("You are terse."));
+  h = appendMessage(h, userMessage("I am Aymen."));
+  h = appendMessage(h, assistantMessage("Hi Aymen."));
+  h = appendMessage(h, userMessage("I build Lumen."));
+  h = appendMessage(h, assistantMessage("Noted."));
+  h = appendMessage(h, userMessage("What am I building?"));
+
+  let c = compressHistory(fake, h, 2);
+  // [original system, summary, last 2]
+  expect(c.length == 4);
+  expect(c[0].content == "You are terse.");
+  expect(c[1].role == "system");
+  expect(c[1].content.includes("Aymen is building Lumen."));
+  expect(c[2].content == "Noted.");
+  expect(c[3].content == "What am I building?");
+});
+
+test("compressHistory folds a previous summary forward instead of dropping it", () => {
+  let seen = "";
+  let capture = (prompt: string) => {
+    // the prior summary must reach the summarizer
+    if (prompt.includes("earlier facts")) { return "merged summary"; }
+    return "";
+  };
+  let h = appendMessage([], systemMessage("sys"));
+  h = appendMessage(h, systemMessage("Summary of the conversation so far:\nearlier facts"));
+  h = appendMessage(h, userMessage("one"));
+  h = appendMessage(h, assistantMessage("two"));
+  h = appendMessage(h, userMessage("three"));
+
+  let c = compressHistory(capture, h, 1);
+  expect(c.length == 3);
+  expect(c[1].content.includes("merged summary"));
+  expect(c[2].content == "three");
+});
+
+test("a failed summarizer leaves the history untouched", () => {
+  let failing = (prompt: string) => "";
+  let h = appendMessage([], systemMessage("sys"));
+  h = appendMessage(h, userMessage("a"));
+  h = appendMessage(h, assistantMessage("b"));
+  h = appendMessage(h, userMessage("c"));
+  let c = compressHistory(failing, h, 1);
+  expect(c.length == h.length);
+  expect(c[1].content == "a");
+});
+
+test("compressHistory does nothing when there is nothing old enough", () => {
+  let fake = (prompt: string) => "summary";
+  let h = appendMessage([], systemMessage("sys"));
+  h = appendMessage(h, userMessage("only turn"));
+  expect(compressHistory(fake, h, 5).length == h.length);
+});
+
+test("compressIfNeeded only compresses over budget", () => {
+  let fake = (prompt: string) => "S";
+  let h = appendMessage([], systemMessage("sys"));
+  h = appendMessage(h, userMessage("aaaaaaaaaa"));
+  h = appendMessage(h, assistantMessage("bbbbbbbbbb"));
+  h = appendMessage(h, userMessage("cccccccccc"));
+  expect(compressIfNeeded(fake, h, 10000, 1).length == h.length);
+  let c = compressIfNeeded(fake, h, 5, 1);
+  expect(c.length < h.length);
 });
