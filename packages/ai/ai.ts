@@ -24,7 +24,7 @@ import { makeDocument, documentMetadata, withMetadata, splitFixed as splitFixedT
 import { embeddingBody as buildEmbeddingBody, embeddingBodyBatch as buildEmbeddingBodyBatch, parseEmbeddingResponse as readEmbeddingResponse, parseEmbeddingBatch as readEmbeddingBatch, embedOpenAI as runEmbedOpenAI, embedOpenAIWithBaseUrl as runEmbedOpenAIWithBaseUrl, embedMistral as runEmbedMistral } from "./embed.ts";
 import { emptyVectorStore, storeSize as readStoreSize, addVector as addStoreVector, addDocuments, deleteById as deleteStoreDocument, filterByMetadata as filterStoreByMetadata, searchByVector as runSearchByVector, searchByText } from "./store.ts";
 import { tokenizeQuery as readQueryTerms, keywordScore as computeKeywordScore, keywordRetrieve as runKeywordRetrieve, vectorRetrieve as runVectorRetrieve, hybridRetrieve as runHybridRetrieve, formatContext as buildRagContext, ragPrompt as buildRagPrompt, ragMessages as buildRagMessages } from "./retrieve.ts";
-import { appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory.ts";
+import { needsCompression as historyNeedsCompression, compressHistory as foldHistory, compressIfNeeded as foldHistoryIfNeeded, appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory.ts";
 // Same rule for the tool and agent layers: toolcall.ts imports makeTool, and
 // agent.ts imports makeTool, describeTools, runToolWithPolicy,
 // toolResultMessage, parseToolCalls, toolCallInput, makeToolCall and
@@ -605,6 +605,38 @@ export function toolChatMistral(apiKey: string, model: string, turns: LumenAiCha
 // raw JSON strings embedded verbatim; method and tool names are escaped for you.
 export function mcpRequestBody(id: int, method: string, params: string): string {
   return buildMcpRequest(id, method, params);
+}
+
+// --- Context compression ----------------------------------------------------
+// Fold a long conversation into a running summary on demand: check the budget,
+// compress only when it is exceeded. A failed model call leaves the history
+// untouched rather than losing it.
+
+export function needsCompression(history: LumenAiMessage[], maxChars: int): bool {
+  return historyNeedsCompression(history, maxChars);
+}
+
+export function compressHistory(summarize: LumenAiSummarizer, history: LumenAiMessage[], keepRecent: int): LumenAiMessage[] {
+  return foldHistory(summarize, history, keepRecent);
+}
+
+export function compressIfNeeded(summarize: LumenAiSummarizer, history: LumenAiMessage[], maxChars: int, keepRecent: int): LumenAiMessage[] {
+  return foldHistoryIfNeeded(summarize, history, maxChars, keepRecent);
+}
+
+// Summarizers backed by a real provider, ready to hand to the helpers above.
+export function openAISummarizer(apiKey: string, model: string): LumenAiSummarizer {
+  return (prompt: string) => {
+    let msgs: LumenAiMessage[] = [userMessage(prompt)];
+    return runOpenAIChat(apiKey, model, msgs).content;
+  };
+}
+
+export function mistralSummarizer(apiKey: string, model: string): LumenAiSummarizer {
+  return (prompt: string) => {
+    let msgs: LumenAiMessage[] = [userMessage(prompt)];
+    return runMistralChat(apiKey, model, msgs).content;
+  };
 }
 
 export function mcpConnectBody(): string {
