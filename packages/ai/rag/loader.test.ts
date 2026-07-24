@@ -103,3 +103,42 @@ test("an extension filter matching nothing loads nothing", () => {
   expect(r.ok);
   expect(r.docs.length == 0);
 });
+
+// --- failures are reported, never raised ------------------------------------
+// Reading throws for a directory and for a file the process may not read. An
+// uncaught throw would end a whole ingestion run over one bad file, so both
+// come back as a failed result.
+
+test("a directory given where a file belongs is reported", () => {
+  seed();
+  let r = loadFile(LOAD_DIR);
+  expect(!r.ok);
+  expect(r.error.indexOf("is a directory") >= 0);
+  expect(r.docs.length == 0);
+});
+
+test("an unreadable file is reported, not raised", () => {
+  seed();
+  let locked = LOAD_DIR + "/locked.txt";
+  fs.writeFileSync(locked, "secret");
+  fs.chmodSync(locked, 0);
+  let r = loadFile(locked);
+  // Restore first, so a failure here does not leave the file unreadable.
+  fs.chmodSync(locked, 420);
+  expect(!r.ok);
+  expect(r.error.indexOf("cannot read") >= 0);
+});
+
+test("the loader survives a bad file and keeps going", () => {
+  seed();
+  let locked = LOAD_DIR + "/locked2.txt";
+  fs.writeFileSync(locked, "secret");
+  fs.chmodSync(locked, 0);
+  let bad = loadFile(locked);
+  fs.chmodSync(locked, 420);
+  expect(!bad.ok);
+  // The process is still alive to run this, which is the point.
+  let good = loadFile(LOAD_DIR + "/a.txt");
+  expect(good.ok);
+  expect(good.docs[0].text == "alpha text");
+});

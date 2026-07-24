@@ -235,7 +235,9 @@ character regardless — the budget is a ceiling the splitter stays under, backi
 off to a character boundary.
 
 Every chunk carries the byte range it came from, so `text.substring(c.start,
-c.end)` is exactly `c.text`. That is what lets a retrieved chunk point back at
+c.end)` is exactly `c.text`, and the chunks cover the document contiguously —
+with no overlap, each begins where the last ended, so concatenating them
+reproduces the text. That is what lets a retrieved chunk point back at
 its place in the source, which is most of what a citation is. `c.forced` marks a
 chunk whose boundary fell inside a word because the text offered no separator to
 break on — a long URL, or a run of CJK.
@@ -263,6 +265,12 @@ let r = loadDirectory("./docs", [".md", ".txt"], true);
 if (!r.ok) { console.error(r.error); }
 for (const d of r.docs) { /* d.source is the path */ }
 ```
+
+A failure is reported, never raised: a directory passed where a file belongs, or
+a file the process may not read, comes back as `ok: false` rather than ending
+the run. One gap is the runtime's own — a directory that cannot be read comes
+back as an empty listing, indistinguishable from an empty one, so such a subtree
+is skipped silently.
 
 `loadFile` reads one file, `loadText` wraps text already in hand, and
 `loadDirectory` takes an extension filter (including the dot; an empty list

@@ -367,8 +367,10 @@ and emit invalid UTF-8. The fallback must therefore walk code point boundaries,
 which the existing `docCharStart`/`docCharEnd`/`docSafeCut` helpers already do
 and the current fixed-size splitter already uses.
 
-Defaults follow LangChain's, in bytes: size 1000, overlap 200. A size at or below
-the overlap is rejected, as they do.
+Defaults follow LangChain's, in bytes: size 1000, overlap 200. An overlap at or
+above the size is clamped rather than rejected, unlike theirs: splitting returns
+a list of chunks and has no error channel to report a rejection through, and
+looping forever is the worse failure.
 
 Success criteria for this slice:
 
@@ -383,8 +385,13 @@ Success criteria for this slice:
 - An atomic piece larger than the size limit is reported, not cut mid-character
   and not silently oversized.
 - Loading a file yields a document whose metadata records its path; loading a
-  directory yields one per file, and an unreadable file is reported rather than
-  skipped in silence.
+  directory yields one per file, and a file that cannot be read is reported
+  rather than skipped in silence or raised — an uncaught read error would end a
+  whole ingestion run over one bad file.
+- Chunks cover their document contiguously: with no overlap each chunk begins
+  where the last ended, and concatenating them reproduces the text. A
+  whitespace-only piece is absorbed into its neighbour rather than dropped,
+  which would leave a hole between two chunks' ranges.
 
 ### 10. Embeddings
 

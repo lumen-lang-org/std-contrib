@@ -62,13 +62,30 @@ export function loadText(text: string, source: string): AiDocument {
   return makeDocument(source, text, source, "");
 }
 
-// A document from a file, recording its path as the source. A missing or
-// unreadable path is reported.
+// A document from a file, recording its path as the source.
+//
+// Every failure is reported rather than raised: a directory given where a file
+// belongs, and a file the process may not read. Reading throws on both, and an
+// uncaught throw would take down a whole ingestion run over one bad file, so
+// the read is guarded.
 export function loadFile(path: string): AiLoadResult {
   if (!fs.existsSync(path)) {
     return loadErr("no such file: " + path);
   }
-  let text = fs.readFileSync(path);
+  let st = fs.statSync(path);
+  if (st.isDirectory) {
+    return loadErr("is a directory, not a file: " + path);
+  }
+  let text = "";
+  let readable: bool = true;
+  try {
+    text = fs.readFileSync(path);
+  } catch (e) {
+    readable = false;
+  }
+  if (!readable) {
+    return loadErr("cannot read: " + path);
+  }
   let doc = makeDocument(path, text, path, "");
   doc = withMetadata(doc, "name", baseName(path));
   let ext = fileExtension(path);
@@ -100,6 +117,12 @@ function joinPath(dir: string, name: string): string {
 //
 // A file that cannot be read stops the load and is reported, rather than
 // leaving a silent hole in an index that will later look merely incomplete.
+//
+// One gap remains, and it is the runtime's rather than this function's: a
+// directory the process may not read comes back from `readdirSync` as an empty
+// listing, indistinguishable from a directory that is genuinely empty. Such a
+// subtree is skipped silently. Files inside a readable directory are reported
+// normally.
 export function loadDirectory(path: string, extensions: string[], recursive: bool): AiLoadResult {
   if (!fs.existsSync(path)) {
     return loadErr("no such directory: " + path);

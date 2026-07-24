@@ -266,3 +266,51 @@ test("splitting a document that fits yields one part", () => {
   expect(parts.length == 1);
   expect(parts[0].text == "short");
 });
+
+// --- byte preservation ------------------------------------------------------
+// A whitespace-only piece is not worth returning on its own, but its bytes
+// belong to the document. Dropping them left a hole between one chunk's end and
+// the next one's start, so the chunks no longer reconstructed the text.
+
+test("a run of blank lines between paragraphs is not lost", () => {
+  let seps: string[] = ["\n\n"];
+  let text = "hello\n\n\n\nworld";
+  let cs = splitChunksWith(text, seps, 5, 0);
+  let joined = "";
+  let i: int = 0;
+  while (i < cs.length) {
+    joined = joined + cs[i].text;
+    i = i + 1;
+  }
+  expect(joined == text);
+});
+
+test("chunks cover the text with no gaps", () => {
+  let seps: string[] = ["\n\n"];
+  let text = "AAAA\n\n\n\nBBBB\n\n\n\nCCCC";
+  let cs = splitChunksWith(text, seps, 6, 0);
+  expect(cs[0].start == 0);
+  expect(cs[cs.length - 1].end == text.length);
+  let i: int = 1;
+  while (i < cs.length) {
+    // With no overlap each chunk begins exactly where the last ended.
+    expect(cs[i].start == cs[i - 1].end);
+    i = i + 1;
+  }
+});
+
+test("leading blank lines are kept with the first chunk", () => {
+  let text = "\n\n\nalpha beta";
+  let cs = splitChunks(text, 8, 0);
+  expect(cs[0].start == 0);
+});
+
+test("trailing blank lines are kept with the last chunk", () => {
+  let text = "alpha beta\n\n\n";
+  let cs = splitChunks(text, 8, 0);
+  expect(cs[cs.length - 1].end == text.length);
+});
+
+test("a document of only whitespace yields no chunks", () => {
+  expect(splitChunks("\n\n\n\n", 4, 0).length == 0);
+});
