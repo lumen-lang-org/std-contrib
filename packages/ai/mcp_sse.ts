@@ -179,11 +179,11 @@ function pickJsonRpcResponse(responses: string[], id: int): string {
 // Pure end-to-end: a full raw response body (chunked+SSE, or plain JSON) into the
 // parsed tools / call result. Both reuse ./mcp.ts's parsers and degrade to an
 // empty list / ok-empty result on a malformed body, exactly as those parsers do.
-export function sseParseTools(raw: string): LumenMcpTool[] {
+export function sseParseTools(raw: string): McpTool[] {
   return parseMcpTools(pickJsonRpcResponse(sseJsonRpcResponses(raw), 1));
 }
 
-export function sseParseResult(raw: string): LumenMcpResult {
+export function sseParseResult(raw: string): McpResult {
   return parseMcpToolResult(pickJsonRpcResponse(sseJsonRpcResponses(raw), 1));
 }
 
@@ -301,19 +301,19 @@ function sseFetch(url: string, headers: Map<string, string>, requestBody: string
   return sseJsonRpcResponses(httpResponseBody(response));
 }
 
-export function sseListTools(url: string, headers: Map<string, string>): LumenMcpTool[] {
+export function sseListTools(url: string, headers: Map<string, string>): McpTool[] {
   return parseMcpTools(pickJsonRpcResponse(sseFetch(url, headers, mcpListToolsRequest(1)), 1));
 }
 
-export function sseCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): LumenMcpResult {
+export function sseCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): McpResult {
   return parseMcpToolResult(pickJsonRpcResponse(sseFetch(url, headers, mcpCallToolRequest(1, name, argumentsJson)), 1));
 }
 
-// A LumenMcpTool discovered over SSE becomes a LumenAiTool whose run() POSTs a
+// A McpTool discovered over SSE becomes an AiTool whose run() POSTs a
 // tools/call over the same transport. It wraps its single string input as
 // {"input": <input>} (this package's one-string-arg convention) and never throws:
 // net methods and parseMcpToolResult do not throw, so trouble returns as text.
-export function sseToolToLumen(url: string, headers: Map<string, string>, tool: LumenMcpTool): LumenAiTool {
+export function sseToolToLumen(url: string, headers: Map<string, string>, tool: McpTool): AiTool {
   let toolName = tool.name;
   return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
@@ -323,8 +323,8 @@ export function sseToolToLumen(url: string, headers: Map<string, string>, tool: 
   });
 }
 
-export function sseToolsToRegistry(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
-  let out: LumenAiTool[] = [];
+export function sseToolsToRegistry(url: string, headers: Map<string, string>, tools: McpTool[]): AiTool[] {
+  let out: AiTool[] = [];
   let i: int = 0;
   while (i < tools.length) {
     out.push(sseToolToLumen(url, headers, tools[i]));
@@ -456,7 +456,7 @@ test("sseJsonRpcResponses: a chunked SSE body decodes then splits into events", 
   expect(mcpResponseId(responses[0]) == 1);
 });
 
-test("end to end: a chunked+SSE tools/list buffer parses into LumenMcpTools", () => {
+test("end to end: a chunked+SSE tools/list buffer parses into McpTools", () => {
   let raw = sseChunkify("event: message\ndata: " + sseToolsListJson() + "\n\n");
   let tools = sseParseTools(raw);
   expect(tools.length == 2);
@@ -472,7 +472,7 @@ test("end to end: a plain-JSON tools/list body (no SSE) also parses", () => {
   expect(tools[1].name == "add");
 });
 
-test("end to end: a chunked+SSE tools/call buffer parses into a LumenMcpResult", () => {
+test("end to end: a chunked+SSE tools/call buffer parses into a McpResult", () => {
   let raw = sseChunkify("event: message\ndata: " + sseCallResultJson() + "\n\n");
   let res = sseParseResult(raw);
   expect(res.ok);
@@ -560,7 +560,7 @@ test("parseUrl keeps a full path and query, and reads an https default port", ()
   expect(s.path == "/mcp");
 });
 
-test("a tools/list discovered over SSE adapts into runnable LumenAiTools", () => {
+test("a tools/list discovered over SSE adapts into runnable AiTools", () => {
   let tools = sseParseTools(sseChunkify("data: " + sseToolsListJson() + "\n\n"));
   let headers = new Map<string, string>();
   let registry = sseToolsToRegistry("http://127.0.0.1:9/mcp", headers, tools);

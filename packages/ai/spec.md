@@ -404,7 +404,7 @@ Scope:
 
 - MCP client with JSON-RPC 2.0 framing and response parsing
 - `initialize` handshake, `tools/list` discovery, `tools/call` invocation
-- an adapter turning an MCP tool descriptor into a first-class `LumenAiTool`
+- an adapter turning an MCP tool descriptor into a first-class `AiTool`
 - three transports, all driving the same agent loop:
   - **HTTP** — one POST per call, one complete JSON reply
   - **stdio** — a persistent subprocess (spec 450's `child_process.spawn`),
@@ -498,7 +498,7 @@ Status: mostly complete.
 - MCP client over HTTP JSON-RPC
 - `initialize` / `tools/list` / `tools/call`
 - JSON-RPC framing and response parsing
-- adapter from an MCP tool into a `LumenAiTool`
+- adapter from an MCP tool into a `AiTool`
 - SSE path is `http://` only (no TLS over raw `net`)
 
 ## Non-Goals For Now

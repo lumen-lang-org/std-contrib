@@ -18,7 +18,7 @@ import { firstJsonObjectOutput, typedJsonInputOutput, retryPromptOutput } from "
 
 // One property of an object schema. `type` is a JSON Schema primitive name:
 // "string", "integer", "number", "boolean".
-type LumenAiSchemaField = {
+type AiSchemaField = {
   name: string,
   type: string,
   description: string,
@@ -27,7 +27,7 @@ type LumenAiSchemaField = {
 
 // The outcome of a structured request. `json` is the extracted object source on
 // success and "" otherwise; `error` explains a failure in one line.
-type LumenAiStructured = {
+type AiStructured = {
   ok: bool,
   json: string,
   error: string,
@@ -41,8 +41,8 @@ type StructuredScalars = {
   max_tokens: int,
 };
 
-function structOk(json: string): LumenAiStructured {
-  let r: LumenAiStructured = {
+function structOk(json: string): AiStructured {
+  let r: AiStructured = {
     ok: true,
     json: json,
     error: "",
@@ -50,8 +50,8 @@ function structOk(json: string): LumenAiStructured {
   return r;
 }
 
-function structErr(message: string): LumenAiStructured {
-  let r: LumenAiStructured = {
+function structErr(message: string): AiStructured {
+  let r: AiStructured = {
     ok: false,
     json: "",
     error: message,
@@ -59,8 +59,8 @@ function structErr(message: string): LumenAiStructured {
   return r;
 }
 
-export function schemaField(name: string, fieldType: string, description: string, required: bool): LumenAiSchemaField {
-  let f: LumenAiSchemaField = {
+export function schemaField(name: string, fieldType: string, description: string, required: bool): AiSchemaField {
+  let f: AiSchemaField = {
     name: name,
     type: fieldType,
     description: description,
@@ -72,7 +72,7 @@ export function schemaField(name: string, fieldType: string, description: string
 // Build a JSON Schema object from explicit fields. `additionalProperties` is
 // false and every required field is listed, which is what strict schema mode
 // expects.
-export function objectSchema(fields: LumenAiSchemaField[]): string {
+export function objectSchema(fields: AiSchemaField[]): string {
   let props = "";
   let required = "";
   let i: int = 0;
@@ -94,7 +94,7 @@ export function objectSchema(fields: LumenAiSchemaField[]): string {
 }
 
 // The names of every required field, for validating a reply.
-export function requiredFields(fields: LumenAiSchemaField[]): string[] {
+export function requiredFields(fields: AiSchemaField[]): string[] {
   let out: string[] = [];
   for (const f of fields) {
     if (f.required) { out.push(f.name); }
@@ -103,7 +103,7 @@ export function requiredFields(fields: LumenAiSchemaField[]): string[] {
 }
 
 // Shared body builder: the scalars, the messages, then a response_format.
-function structuredBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, responseFormat: string): string {
+function structuredBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int, responseFormat: string): string {
   let scalars: StructuredScalars = {
     model: model,
     temperature: temperature,
@@ -118,13 +118,13 @@ function structuredBody(model: string, messages: LumenAiMessage[], temperature: 
 }
 
 // JSON mode: the reply is valid JSON, but its shape is NOT constrained.
-export function jsonObjectBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function jsonObjectBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   return structuredBody(model, messages, temperature, maxTokens, "{\"type\":\"json_object\"}");
 }
 
 // Schema mode: the reply is constrained to `schemaJson` (build it with
 // objectSchema). `name` labels the schema for the provider.
-export function jsonSchemaBody(model: string, messages: LumenAiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
+export function jsonSchemaBody(model: string, messages: AiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
   let rf = "{\"type\":\"json_schema\",\"json_schema\":{\"name\":" + JSON.stringify(name)
     + ",\"strict\":true,\"schema\":" + schemaJson + "}}";
   return structuredBody(model, messages, temperature, maxTokens, rf);
@@ -167,7 +167,7 @@ function hasTopLevelKey(json: string, key: string): bool {
 // Check that a reply is a JSON object carrying every required field. This is a
 // presence check, not full JSON Schema validation — types and nested
 // constraints are left to the provider's strict mode.
-export function validateStructured(json: string, required: string[]): LumenAiStructured {
+export function validateStructured(json: string, required: string[]): AiStructured {
   let text = json.trim();
   if (text == "") { return structErr("empty response"); }
   let obj = firstJsonObjectOutput(text);
@@ -185,7 +185,7 @@ export function validateStructured(json: string, required: string[]): LumenAiStr
 
 // Pull the JSON out of a raw provider response body and validate it. Tolerates
 // a model that wrapped its JSON in a code fence despite being asked not to.
-export function parseStructuredResponse(raw: string, content: string, required: string[]): LumenAiStructured {
+export function parseStructuredResponse(raw: string, content: string, required: string[]): AiStructured {
   if (content.trim() == "") {
     return structErr("no content in response: " + raw.slice(0, 160));
   }
@@ -201,7 +201,7 @@ export function structuredRetryPrompt(schemaJson: string, invalid: string, reaso
 // Thin, like the other provider entry points: build the body, POST it, hand the
 // content to the pure validator above.
 
-function postStructured(url: string, headers: Map<string, string>, body: string, required: string[]): LumenAiStructured {
+function postStructured(url: string, headers: Map<string, string>, body: string, required: string[]): AiStructured {
   let res = http.request(url, "POST", body, headers);
   let content = structuredContent(res.body);
   return parseStructuredResponse(res.body, content, required);
@@ -247,16 +247,16 @@ function structDecodeString(quoted: string): string {
   return out;
 }
 
-export function structuredOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   let body = jsonSchemaBody(model, messages, name, schemaJson, 0.2, 1024);
   return postStructured(baseUrl + "/chat/completions", makeAuthHeaders(apiKey), body, required);
 }
 
-export function structuredOpenAI(apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredOpenAI(apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return structuredOpenAIWithBaseUrl("https://api.openai.com/v1", apiKey, model, messages, name, schemaJson, required);
 }
 
-export function structuredMistral(apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredMistral(apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   let body = jsonSchemaBody(model, messages, name, schemaJson, 0.2, 1024);
   return postStructured("https://api.mistral.ai/v1/chat/completions", makeMistralAuthHeaders(apiKey), body, required);
 }
@@ -269,14 +269,14 @@ export function structuredMistral(apiKey: string, model: string, messages: Lumen
 // prompt and leans on validateStructured to catch a wrong shape.
 
 // Restate a schema as an instruction, for providers without schema mode.
-export function schemaInstruction(schemaJson: string): LumenAiMessage {
+export function schemaInstruction(schemaJson: string): AiMessage {
   return { role: "system", content: "Reply with a single JSON object and nothing else. It must match this JSON Schema:\n" + schemaJson };
 }
 
 // JSON-mode structured output against any OpenAI-compatible endpoint: the shape
 // is prompted rather than enforced, then validated locally.
-export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], schemaJson: string, required: string[]): LumenAiStructured {
-  let guided: LumenAiMessage[] = [schemaInstruction(schemaJson), ...messages];
+export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], schemaJson: string, required: string[]): AiStructured {
+  let guided: AiMessage[] = [schemaInstruction(schemaJson), ...messages];
   let body = jsonObjectBody(model, guided, 0.2, 1024);
   return postStructured(baseUrl + "/chat/completions", makeAuthHeaders(apiKey), body, required);
 }
@@ -284,7 +284,7 @@ export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, m
 // Dispatch by provider name, matching buildProviderChatBody's vocabulary.
 // "openai" and "mistral" use native schema mode; "openai-compatible" uses the
 // JSON-mode fallback, since schema support varies across those endpoints.
-export function structuredChat(provider: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredChat(provider: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   if (provider == "mistral") {
     return structuredMistral(apiKey, model, messages, name, schemaJson, required);
   }
@@ -295,12 +295,12 @@ export function structuredChat(provider: string, apiKey: string, model: string, 
 }
 
 // Schema mode against any OpenAI-compatible endpoint that supports it.
-export function structuredChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return structuredOpenAIWithBaseUrl(baseUrl, apiKey, model, messages, name, schemaJson, required);
 }
 
 test("objectSchema builds a strict JSON Schema", () => {
-  let fields: LumenAiSchemaField[] = [
+  let fields: AiSchemaField[] = [
     schemaField("name", "string", "full name", true),
     schemaField("age", "integer", "", true),
     schemaField("nickname", "string", "", false),
@@ -316,8 +316,8 @@ test("objectSchema builds a strict JSON Schema", () => {
 });
 
 test("jsonSchemaBody carries the schema in response_format", () => {
-  let fields: LumenAiSchemaField[] = [schemaField("city", "string", "", true)];
-  let msgs: LumenAiMessage[] = [{ role: "user", content: "where?" }];
+  let fields: AiSchemaField[] = [schemaField("city", "string", "", true)];
+  let msgs: AiMessage[] = [{ role: "user", content: "where?" }];
   let body = jsonSchemaBody("m", msgs, "place", objectSchema(fields), 0.2, 100);
   expect(body.includes("\"response_format\":{\"type\":\"json_schema\""));
   expect(body.includes("\"strict\":true"));
@@ -327,7 +327,7 @@ test("jsonSchemaBody carries the schema in response_format", () => {
 });
 
 test("jsonObjectBody asks for plain JSON mode", () => {
-  let msgs: LumenAiMessage[] = [{ role: "user", content: "hi" }];
+  let msgs: AiMessage[] = [{ role: "user", content: "hi" }];
   let body = jsonObjectBody("m", msgs, 0.2, 100);
   expect(body.includes("\"response_format\":{\"type\":\"json_object\"}"));
 });
@@ -400,7 +400,7 @@ test("schemaInstruction states the schema for json-mode providers", () => {
 });
 
 test("structuredChat rejects an unknown provider without calling out", () => {
-  let msgs: LumenAiMessage[] = [{ role: "user", content: "hi" }];
+  let msgs: AiMessage[] = [{ role: "user", content: "hi" }];
   let req: string[] = ["a"];
   let r = structuredChat("nope", "k", "m", msgs, "s", "{}", req);
   expect(!r.ok);

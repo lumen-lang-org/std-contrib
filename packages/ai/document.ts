@@ -1,6 +1,6 @@
 // Retrieval documents and text splitters.
 
-type LumenAiDocument = {
+type AiDocument = {
   id: string,
   text: string,
   source: string,
@@ -104,7 +104,7 @@ function docBestBreak(text: string, start: int, end: int): int {
   return docSafeCut(text, start, end);
 }
 
-export function makeDocument(id: string, text: string, source: string, metadata: string): LumenAiDocument {
+export function makeDocument(id: string, text: string, source: string, metadata: string): AiDocument {
   return {
     id: id,
     text: text,
@@ -161,7 +161,7 @@ function docUnescapeField(s: string): string {
   return out;
 }
 
-export function documentMetadata(doc: LumenAiDocument, key: string): string {
+export function documentMetadata(doc: AiDocument, key: string): string {
   if (doc.metadata == "" || key == "") { return ""; }
   let wanted = docEscapeField(key);
   let lines = doc.metadata.split("\n");
@@ -174,7 +174,7 @@ export function documentMetadata(doc: LumenAiDocument, key: string): string {
   return "";
 }
 
-export function withMetadata(doc: LumenAiDocument, key: string, value: string): LumenAiDocument {
+export function withMetadata(doc: AiDocument, key: string, value: string): AiDocument {
   if (key == "") { return doc; }
   let name = docEscapeField(key);
   let entry = name + "\t" + docEscapeField(value);
@@ -276,8 +276,8 @@ export function splitParagraphs(text: string): string[] {
   return out;
 }
 
-export function splitToDocuments(text: string, source: string, size: int, overlap: int): LumenAiDocument[] {
-  let out: LumenAiDocument[] = [];
+export function splitToDocuments(text: string, source: string, size: int, overlap: int): AiDocument[] {
+  let out: AiDocument[] = [];
   let chunks = splitRecursive(text, size, overlap);
   let i: int = 0;
   while (i < chunks.length) {

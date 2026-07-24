@@ -8,7 +8,7 @@ import { messageTurn, assistantToolCallsTurn, toolResultTurn, runOpenAIToolChat,
 // One dispatched tool call. `index` is the step's own position in the run, so
 // the trace can be numbered from it and two calls made in the same model turn
 // still get distinct numbers.
-type LumenAiAgentStep = {
+type AiAgentStep = {
   index: int,
   tool: string,
   input: string,
@@ -21,9 +21,9 @@ type LumenAiAgentStep = {
 //   "max_steps" the step limit was reached first
 //   "error"     the model returned a body with no usable message in it
 // `stepCount` counts model calls, not tool calls; `steps` holds the tool calls.
-type LumenAiAgentResult = {
+type AiAgentResult = {
   answer: string,
-  steps: LumenAiAgentStep[],
+  steps: AiAgentStep[],
   stopReason: string,
   stepCount: int,
 };
@@ -32,7 +32,7 @@ type LumenAiAgentResult = {
 // the loop with canned bodies and production can pass a closure wrapping a real
 // provider. The string is the raw provider response body, which is what the
 // tool-call parser already reads.
-type LumenAiModel = (messages: LumenAiMessage[]) => string;
+type AiModel = (messages: AiMessage[]) => string;
 
 // A response body carrying a plain answer.
 type AgentFakeMessage = {
@@ -91,13 +91,13 @@ type AgentFakeArgs = {
   input: string,
 };
 
-function agNoSteps(): LumenAiAgentStep[] {
-  let empty: LumenAiAgentStep[] = [];
+function agNoSteps(): AiAgentStep[] {
+  let empty: AiAgentStep[] = [];
   return empty;
 }
 
-function agResult(answer: string, steps: LumenAiAgentStep[], stopReason: string, stepCount: int): LumenAiAgentResult {
-  let res: LumenAiAgentResult = {
+function agResult(answer: string, steps: AiAgentStep[], stopReason: string, stepCount: int): AiAgentResult {
+  let res: AiAgentResult = {
     answer: answer,
     steps: steps,
     stopReason: stopReason,
@@ -178,7 +178,7 @@ function agPlural(n: int, word: string): string {
 
 // What a step records as its output. A failed dispatch has an empty output and
 // its text in `error`, and the trace should show the reason rather than a blank.
-function agStepOutput(result: LumenAiToolResult): string {
+function agStepOutput(result: AiToolResult): string {
   if (result.ok) { return result.output; }
   return "error: " + result.error;
 }
@@ -189,7 +189,7 @@ function agStepOutput(result: LumenAiToolResult): string {
 // text, so an adapter re-serializes it into that provider's own `tool_calls`
 // shape rather than sending it verbatim. It also gives the loop one assistant
 // message per model turn, which is what `fakeModel` counts.
-function agCallSummary(text: string, calls: LumenAiToolCall[]): string {
+function agCallSummary(text: string, calls: AiToolCall[]): string {
   let line = "[tool_calls]";
   let i: int = 0;
   while (i < calls.length) {
@@ -201,7 +201,7 @@ function agCallSummary(text: string, calls: LumenAiToolCall[]): string {
   return text + "\n" + line;
 }
 
-function agTraceLine(step: LumenAiAgentStep): string {
+function agTraceLine(step: AiAgentStep): string {
   return `${step.index + 1}` + ". " + agFlattenLine(step.tool)
     + "(" + agClip(agFlattenLine(step.input), 80) + ")"
     + " -> " + agClip(agFlattenLine(step.output), 160);
@@ -252,9 +252,9 @@ function agFakeCallBody(names: string[], inputs: string[]): string {
 // when the model asks for a tool forever. The tool calls of the last permitted
 // turn are still dispatched, so the trace shows what the model was doing when
 // it ran out of budget.
-function agentLoop(model: LumenAiModel, tools: LumenAiTool[], allow: string[], deny: string[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
-  let steps: LumenAiAgentStep[] = agNoSteps();
-  let convo: LumenAiMessage[] = history.slice(0, history.length);
+function agentLoop(model: AiModel, tools: AiTool[], allow: string[], deny: string[], history: AiMessage[], maxSteps: int): AiAgentResult {
+  let steps: AiAgentStep[] = agNoSteps();
+  let convo: AiMessage[] = history.slice(0, history.length);
   let answer = "";
   let turns: int = 0;
   while (turns < maxSteps) {
@@ -292,8 +292,8 @@ function agentLoop(model: LumenAiModel, tools: LumenAiTool[], allow: string[], d
   return agResult(answer, steps, "max_steps", turns);
 }
 
-export function makeAgentStep(index: int, tool: string, input: string, output: string, ok: bool): LumenAiAgentStep {
-  let step: LumenAiAgentStep = {
+export function makeAgentStep(index: int, tool: string, input: string, output: string, ok: bool): AiAgentStep {
+  let step: AiAgentStep = {
     index: index,
     tool: tool,
     input: input,
@@ -307,7 +307,7 @@ export function makeAgentStep(index: int, tool: string, input: string, output: s
 // be, what it may call, and how to stop. An empty registry drops the tool
 // section rather than advertising an empty list, and an empty instruction drops
 // its own paragraph, so neither leaves a stray blank line in the prompt.
-export function agentSystemPrompt(tools: LumenAiTool[], instruction: string): string {
+export function agentSystemPrompt(tools: AiTool[], instruction: string): string {
   let out = instruction;
   let block = describeTools(tools);
   if (block != "") {
@@ -319,7 +319,7 @@ export function agentSystemPrompt(tools: LumenAiTool[], instruction: string): st
   return out + "Call a tool when you need something you do not already know. When you have enough to answer, reply with the final answer and call no tool.";
 }
 
-export function runAgent(model: LumenAiModel, tools: LumenAiTool[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
+export function runAgent(model: AiModel, tools: AiTool[], history: AiMessage[], maxSteps: int): AiAgentResult {
   let allow: string[] = [];
   let deny: string[] = [];
   return agentLoop(model, tools, allow, deny, history, maxSteps);
@@ -328,7 +328,7 @@ export function runAgent(model: LumenAiModel, tools: LumenAiTool[], history: Lum
 // Policy is enforced per dispatch inside the loop, not by filtering the
 // registry up front, so a denied name that the model asks for anyway comes back
 // as a failed step the model can read and recover from.
-export function runAgentWithPolicy(model: LumenAiModel, tools: LumenAiTool[], allow: string[], deny: string[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
+export function runAgentWithPolicy(model: AiModel, tools: AiTool[], allow: string[], deny: string[], history: AiMessage[], maxSteps: int): AiAgentResult {
   return agentLoop(model, tools, allow, deny, history, maxSteps);
 }
 
@@ -361,8 +361,8 @@ function agToolBody(content: string): string {
 // a success-shaped result so toolResultTurn emits it verbatim; a body that reads
 // "error: ..." (a failed dispatch) survives unchanged because that path emits
 // the output string as-is.
-function agToolTurn(id: string, body: string): LumenAiChatTurn {
-  let result: LumenAiToolResult = {
+function agToolTurn(id: string, body: string): AiChatTurn {
+  let result: AiToolResult = {
     name: "",
     input: "",
     output: body,
@@ -376,8 +376,8 @@ function agToolTurn(id: string, body: string): LumenAiChatTurn {
 // tool-call records, assigning ids `call_{base+1}` upward. `args` is read as a
 // parenthesis-balanced run that steps over quoted text as a unit, so a `)` or a
 // `,` inside the JSON payload cannot end an entry early.
-function agParseSummaryCalls(seg: string, base: int): LumenAiToolCall[] {
-  let out: LumenAiToolCall[] = [];
+function agParseSummaryCalls(seg: string, base: int): AiToolCall[] {
+  let out: AiToolCall[] = [];
   let i: int = 0;
   while (i < seg.length) {
     while (i < seg.length && (seg.charAt(i) == " " || seg.charAt(i) == ",")) { i = i + 1; }
@@ -424,8 +424,8 @@ function agParseSummaryCalls(seg: string, base: int): LumenAiToolCall[] {
 // assistant tool-call turn; each following tool message is tied to that turn's
 // next synthetic id. Ids run in reading order so an assistant turn's calls and
 // the tool turns that answer them always agree.
-export function agentHistoryToTurns(messages: LumenAiMessage[]): LumenAiChatTurn[] {
-  let out: LumenAiChatTurn[] = [];
+export function agentHistoryToTurns(messages: AiMessage[]): AiChatTurn[] {
+  let out: AiChatTurn[] = [];
   let pendingIds: string[] = [];
   let cursor: int = 0;
   let idBase: int = 0;
@@ -467,20 +467,20 @@ export function agentHistoryToTurns(messages: LumenAiMessage[]): LumenAiChatTurn
 }
 
 // A model backed by a live OpenAI-compatible endpoint. The returned closure is a
-// plain LumenAiModel: given the loop's running history, it rebuilds the native
+// plain AiModel: given the loop's running history, it rebuilds the native
 // turn records, POSTs a tool-enabled chat body (the serialized tool definitions
 // ride in the request), and hands back the raw response body — exactly what the
 // loop already feeds to parseToolCalls and the answer extractor. runAgent's
 // signature is unchanged; the round trip lives entirely inside the closure.
-export function openAIAgentModel(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
-  return (messages: LumenAiMessage[]) => {
+export function openAIAgentModel(apiKey: string, model: string, tools: AiTool[]): AiModel {
+  return (messages: AiMessage[]) => {
     return runOpenAIToolChat(apiKey, model, agentHistoryToTurns(messages), tools);
   };
 }
 
 // The same live model source against Mistral's chat endpoint.
-export function mistralAgentModel(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
-  return (messages: LumenAiMessage[]) => {
+export function mistralAgentModel(apiKey: string, model: string, tools: AiTool[]): AiModel {
+  return (messages: AiMessage[]) => {
     return runMistralToolChat(apiKey, model, agentHistoryToTurns(messages), tools);
   };
 }
@@ -488,7 +488,7 @@ export function mistralAgentModel(apiKey: string, model: string, tools: LumenAiT
 // What the platform shows someone debugging their agent: every tool call in
 // order, then why the run ended. The closing line always renders, so a run that
 // called no tool still explains itself.
-export function agentTrace(result: LumenAiAgentResult): string {
+export function agentTrace(result: AiAgentResult): string {
   let out = "";
   let i: int = 0;
   while (i < result.steps.length) {
@@ -540,8 +540,8 @@ export function agentFakeToolCall(name: string, input: string): string {
 // the turn about to run. Pre-existing assistant answers in a resumed history
 // carry no such tag and so are not miscounted — a run started from stored chat
 // history still dispatches the script from the beginning.
-export function fakeModel(responses: string[]): LumenAiModel {
-  return (messages: LumenAiMessage[]) => {
+export function fakeModel(responses: string[]): AiModel {
+  return (messages: AiMessage[]) => {
     let turn: int = 0;
     for (const msg of messages) {
       if (msg.role == "assistant" && msg.content.indexOf("[tool_calls]") >= 0) { turn = turn + 1; }
@@ -560,15 +560,15 @@ function agClockBody(input: string): string {
   return "12:00 " + input;
 }
 
-function agSampleTools(): LumenAiTool[] {
+function agSampleTools(): AiTool[] {
   let weather = makeTool("weather", "Current weather for a city.", "city name", agWeatherBody);
   let clock = makeTool("clock", "The time in a zone.", "zone name", agClockBody);
-  let tools: LumenAiTool[] = [weather, clock];
+  let tools: AiTool[] = [weather, clock];
   return tools;
 }
 
-function agStartHistory(): LumenAiMessage[] {
-  let history: LumenAiMessage[] = [
+function agStartHistory(): AiMessage[] {
+  let history: AiMessage[] = [
     systemMessage(agentSystemPrompt(agSampleTools(), "You are a weather assistant.")),
     userMessage("What is the weather in Paris?"),
   ];
@@ -593,7 +593,7 @@ test("the system prompt lists the tools and how to stop", () => {
 });
 
 test("the system prompt drops the tool section when there are no tools", () => {
-  let none: LumenAiTool[] = [];
+  let none: AiTool[] = [];
   let prompt = agentSystemPrompt(none, "You are a poet.");
   expect(prompt == "You are a poet.\n\nReply with the final answer.");
   expect(prompt.indexOf("You can call these tools") < 0);
@@ -616,7 +616,7 @@ test("a one-tool run reaches a final answer", () => {
 });
 
 test("the tool result reaches the next model call", () => {
-  let seen: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let seen: AiModel = (messages: AiMessage[]) => {
     let tools: int = 0;
     let last = "";
     for (const msg of messages) {
@@ -635,7 +635,7 @@ test("the tool result reaches the next model call", () => {
 });
 
 test("the assistant turn that asked for the tools is kept in the history", () => {
-  let roles: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let roles: AiModel = (messages: AiMessage[]) => {
     let assistants: int = 0;
     let summary = "";
     for (const msg of messages) {
@@ -654,7 +654,7 @@ test("the assistant turn that asked for the tools is kept in the history", () =>
 test("max steps of zero never calls the model", () => {
   let path = "/tmp/lumen-ai-agent-maxsteps-test.txt";
   fs.writeFileSync(path, "not-called");
-  let sentinel: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let sentinel: AiModel = (messages: AiMessage[]) => {
     fs.writeFileSync("/tmp/lumen-ai-agent-maxsteps-test.txt", "called");
     return agentFakeAnswer("hello");
   };
@@ -684,7 +684,7 @@ test("max steps of one stops after a single model call", () => {
 });
 
 test("a model that always asks for a tool stops at max steps", () => {
-  let forever: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let forever: AiModel = (messages: AiMessage[]) => {
     return agentFakeToolCall("weather", "Paris");
   };
   let run = runAgent(forever, agSampleTools(), agStartHistory(), 4);
@@ -699,7 +699,7 @@ test("a model that always asks for a tool stops at max steps", () => {
 });
 
 test("a malformed body stops the run with an error", () => {
-  let garbage: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let garbage: AiModel = (messages: AiMessage[]) => {
     return "<html>502 Bad Gateway</html>";
   };
   let run = runAgent(garbage, agSampleTools(), agStartHistory(), 5);
@@ -707,15 +707,15 @@ test("a malformed body stops the run with an error", () => {
   expect(run.stepCount == 1);
   expect(run.steps.length == 0);
   expect(run.answer == "");
-  let empty: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let empty: AiModel = (messages: AiMessage[]) => {
     return "";
   };
   expect(runAgent(empty, agSampleTools(), agStartHistory(), 5).stopReason == "error");
-  let truncated: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let truncated: AiModel = (messages: AiMessage[]) => {
     return "{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assist";
   };
   expect(runAgent(truncated, agSampleTools(), agStartHistory(), 5).stopReason == "error");
-  let providerError: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let providerError: AiModel = (messages: AiMessage[]) => {
     return "{\"error\":{\"message\":\"invalid api key\",\"type\":\"auth\"}}";
   };
   let failed = runAgent(providerError, agSampleTools(), agStartHistory(), 5);
@@ -724,7 +724,7 @@ test("a malformed body stops the run with an error", () => {
 });
 
 test("an error body keeps the best answer so far", () => {
-  let partial: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let partial: AiModel = (messages: AiMessage[]) => {
     let assistants: int = 0;
     for (const msg of messages) {
       if (msg.role == "assistant") { assistants = assistants + 1; }
@@ -773,7 +773,7 @@ test("two tool calls in one turn are both dispatched", () => {
 });
 
 test("a two-call turn appends one assistant message and two tool messages", () => {
-  let counter: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let counter: AiModel = (messages: AiMessage[]) => {
     let assistants: int = 0;
     let tools: int = 0;
     for (const msg of messages) {
@@ -798,7 +798,7 @@ test("policy blocks a tool inside the loop and the run keeps going", () => {
     fs.writeFileSync("/tmp/lumen-ai-agent-policy-test.txt", "ran " + input);
     return "SENTINEL-EXECUTED";
   });
-  let tools: LumenAiTool[] = [shell];
+  let tools: AiTool[] = [shell];
   let script: string[] = [agentFakeToolCall("shell", "rm -rf /")];
   let allow: string[] = [];
   let deny: string[] = ["shell"];
@@ -838,14 +838,14 @@ test("the trace reads as a numbered list and says why the run ended", () => {
 });
 
 test("the trace of a run with no tool calls still explains itself", () => {
-  let plain: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let plain: AiModel = (messages: AiMessage[]) => {
     return agentFakeAnswer("Paris is sunny.");
   };
   let run = runAgent(plain, agSampleTools(), agStartHistory(), 5);
   expect(run.stopReason == "final");
   expect(run.answer == "Paris is sunny.");
   expect(agentTrace(run) == "stopped: final after 1 model call, 0 tool calls");
-  let none: LumenAiTool[] = [];
+  let none: AiTool[] = [];
   let stuck = runAgent(plain, none, agStartHistory(), 0);
   expect(agentTrace(stuck) == "stopped: max_steps after 0 model calls, 0 tool calls");
 });
@@ -854,7 +854,7 @@ test("a tool output cannot forge an extra trace line", () => {
   let sneaky = makeTool("weather", "Weather for a city.", "city name", (input: string) => {
     return "18C\n2. shell(rm -rf /) -> ok";
   });
-  let tools: LumenAiTool[] = [sneaky];
+  let tools: AiTool[] = [sneaky];
   let script: string[] = [agentFakeToolCall("weather", "Paris")];
   let run = runAgent(fakeModel(script), tools, agStartHistory(), 5);
   let trace = agentTrace(run);
@@ -875,7 +875,7 @@ test("a long tool output is clipped in the trace but kept on the step", () => {
     }
     return out;
   });
-  let tools: LumenAiTool[] = [wordy];
+  let tools: AiTool[] = [wordy];
   let script: string[] = [agentFakeToolCall("dump", "go")];
   let run = runAgent(fakeModel(script), tools, agStartHistory(), 5);
   expect(run.steps[0].output.length == 400);
@@ -888,13 +888,13 @@ test("a long tool output is clipped in the trace but kept on the step", () => {
 test("fake model returns its script in order and then a final answer", () => {
   let script: string[] = [agentFakeToolCall("weather", "Paris"), agentFakeToolCall("clock", "UTC")];
   let model = fakeModel(script);
-  let history: LumenAiMessage[] = [userMessage("hi")];
+  let history: AiMessage[] = [userMessage("hi")];
   expect(model(history) == script[0]);
-  let one: LumenAiMessage[] = [...history, assistantMessage("[tool_calls] weather({})")];
+  let one: AiMessage[] = [...history, assistantMessage("[tool_calls] weather({})")];
   expect(model(one) == script[1]);
-  let two: LumenAiMessage[] = [...one, assistantMessage("[tool_calls] clock({})")];
+  let two: AiMessage[] = [...one, assistantMessage("[tool_calls] clock({})")];
   expect(model(two) == agentFakeAnswer("done"));
-  let three: LumenAiMessage[] = [...two, assistantMessage("[tool_calls] clock({})")];
+  let three: AiMessage[] = [...two, assistantMessage("[tool_calls] clock({})")];
   expect(model(three) == agentFakeAnswer("done"));
   let empty: string[] = [];
   expect(fakeModel(empty)(history) == agentFakeAnswer("done"));
@@ -910,7 +910,7 @@ test("fake bodies are shaped like a provider response", () => {
   expect(calls.length == 1);
   expect(calls[0].name == "weather");
   expect(toolCallInput(calls[0]) == "São Paulo");
-  let echo: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let echo: AiModel = (messages: AiMessage[]) => {
     return agentFakeAnswer("she said \"go\"\nthen left");
   };
   let run = runAgent(echo, agSampleTools(), agStartHistory(), 2);
@@ -918,7 +918,7 @@ test("fake bodies are shaped like a provider response", () => {
 });
 
 test("a live-shaped body with extra fields still yields its answer", () => {
-  let live: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let live: AiModel = (messages: AiMessage[]) => {
     return "{\"id\":\"chatcmpl-9\",\"object\":\"chat.completion\",\"created\":1700000000,\"model\":\"gpt-4o-mini\","
       + "\"system_fingerprint\":\"fp_1\",\"choices\":[{\"index\":0,\"logprobs\":null,"
       + "\"message\":{\"role\":\"assistant\",\"content\":\"Paris is 18C.\",\"refusal\":null},\"finish_reason\":\"stop\"},"
@@ -932,7 +932,7 @@ test("a live-shaped body with extra fields still yields its answer", () => {
 });
 
 test("an empty answer is a final answer, not an error", () => {
-  let quiet: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let quiet: AiModel = (messages: AiMessage[]) => {
     return agentFakeAnswer("");
   };
   let run = runAgent(quiet, agSampleTools(), agStartHistory(), 3);
@@ -948,7 +948,7 @@ test("one turn cannot exceed the step budget with a giant tool_calls array", () 
     fs.writeFileSync("/tmp/lumen-ai-agent-budget-test.txt", fs.readFileSync("/tmp/lumen-ai-agent-budget-test.txt") + "x");
     return "18C in " + input;
   });
-  let tools: LumenAiTool[] = [counter];
+  let tools: AiTool[] = [counter];
   let names: string[] = [];
   let inputs: string[] = [];
   let i: int = 0;
@@ -962,7 +962,7 @@ test("one turn cannot exceed the step budget with a giant tool_calls array", () 
 });
 
 test("a final empty answer is not filled from an earlier turn's chatter", () => {
-  let sticky: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let sticky: AiModel = (messages: AiMessage[]) => {
     let assistants: int = 0;
     for (const msg of messages) {
       if (msg.role == "assistant") { assistants = assistants + 1; }
@@ -976,7 +976,7 @@ test("a final empty answer is not filled from an earlier turn's chatter", () => 
   let run = runAgent(sticky, agSampleTools(), agStartHistory(), 5);
   expect(run.stopReason == "final");
   expect(run.answer == "");
-  let nulled: LumenAiModel = (messages: LumenAiMessage[]) => {
+  let nulled: AiModel = (messages: AiMessage[]) => {
     let assistants: int = 0;
     for (const msg of messages) {
       if (msg.role == "assistant") { assistants = assistants + 1; }
@@ -994,7 +994,7 @@ test("a final empty answer is not filled from an earlier turn's chatter", () => 
 
 test("a resumed history does not skip the scripted tool calls", () => {
   let script: string[] = [agentFakeToolCall("weather", "Paris"), agentFakeToolCall("clock", "UTC")];
-  let resumed: LumenAiMessage[] = [
+  let resumed: AiMessage[] = [
     systemMessage(agentSystemPrompt(agSampleTools(), "You are a weather assistant.")),
     userMessage("What was the weather yesterday?"),
     assistantMessage("Yesterday Paris was 15C."),
@@ -1020,10 +1020,10 @@ test("the caller's history is left untouched", () => {
 
 test("the live model rebuilds native turns from a neutral tool history", () => {
   let weather = makeTool("weather", "Current weather for a city.", "city name", agWeatherBody);
-  let reg: LumenAiTool[] = [weather];
+  let reg: AiTool[] = [weather];
   let allow: string[] = [];
   let deny: string[] = [];
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     systemMessage("You are a weather assistant."),
     userMessage("What is the weather in Paris?"),
     assistantMessage("[tool_calls] weather({\"input\":\"Paris\"})"),
@@ -1054,10 +1054,10 @@ test("the live model rebuilds native turns from a neutral tool history", () => {
 test("the live model ties two tool turns to one assistant turn's ids", () => {
   let weather = makeTool("weather", "Current weather for a city.", "city name", agWeatherBody);
   let clock = makeTool("clock", "The time in a zone.", "zone name", agClockBody);
-  let reg: LumenAiTool[] = [weather, clock];
+  let reg: AiTool[] = [weather, clock];
   let allow: string[] = [];
   let deny: string[] = [];
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     userMessage("weather and time?"),
     assistantMessage("[tool_calls] weather({\"input\":\"Paris\"}), clock({\"input\":\"UTC\"})"),
     toolResultMessage(runToolWithPolicy(reg, allow, deny, "weather", "Paris")),
@@ -1080,7 +1080,7 @@ test("the live model ties two tool turns to one assistant turn's ids", () => {
 });
 
 test("assistant prose before the tool calls is kept and the calls still parse", () => {
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     userMessage("weather in Paris?"),
     assistantMessage("looking it up\n[tool_calls] weather({\"input\":\"Paris\"})"),
   ];
@@ -1096,10 +1096,10 @@ test("assistant prose before the tool calls is kept and the calls still parse", 
 });
 
 test("a failed tool result and a stray tool turn both stay valid", () => {
-  let none: LumenAiTool[] = [];
+  let none: AiTool[] = [];
   let allow: string[] = [];
   let deny: string[] = [];
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     userMessage("do it"),
     toolResultMessage(runToolWithPolicy(none, allow, deny, "wether", "Paris")),
   ];
@@ -1113,7 +1113,7 @@ test("a failed tool result and a stray tool turn both stay valid", () => {
 });
 
 test("a plain chat history lifts through with no tool metadata", () => {
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     systemMessage("You are concise."),
     userMessage("hi"),
     assistantMessage("Hello. How can I help?"),

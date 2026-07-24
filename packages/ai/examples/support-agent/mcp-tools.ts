@@ -31,11 +31,11 @@ function main(): void {
     console.log(`  - ${t.name}: ${t.description}`);
   }
 
-  // 2. Adapt every MCP tool into a LumenAiTool the agent loop can call.
+  // 2. Adapt every MCP tool into an AiTool the agent loop can call.
   let tools = mcpAsTools(url, headers, remote);
 
   // 3. Drive the loop exactly as main.ts does — MCP tools and local tools are
-  //    the same LumenAiTool type. (Scripted here; swap in a real provider model.)
+  //    the same AiTool type. (Scripted here; swap in a real provider model.)
   let history = appendMessage([], system(agentSystemPrompt(tools, "You are an assistant with access to MCP tools.")));
   history = appendMessage(history, user("Use a tool to help me."));
   let firstTool = remote.length > 0 ? remote[0].name : "noop";

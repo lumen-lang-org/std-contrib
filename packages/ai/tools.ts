@@ -2,14 +2,14 @@
 
 import { systemMessage } from "./messages.ts";
 
-type LumenAiTool = {
+type AiTool = {
   name: string,
   description: string,
   params: string,
   run: (input: string) => string,
 };
 
-type LumenAiToolResult = {
+type AiToolResult = {
   name: string,
   input: string,
   output: string,
@@ -17,8 +17,8 @@ type LumenAiToolResult = {
   error: string,
 };
 
-function toolOk(name: string, input: string, output: string): LumenAiToolResult {
-  let res: LumenAiToolResult = {
+function toolOk(name: string, input: string, output: string): AiToolResult {
+  let res: AiToolResult = {
     name: name,
     input: input,
     output: output,
@@ -28,8 +28,8 @@ function toolOk(name: string, input: string, output: string): LumenAiToolResult 
   return res;
 }
 
-function toolFailure(name: string, input: string, message: string): LumenAiToolResult {
-  let res: LumenAiToolResult = {
+function toolFailure(name: string, input: string, message: string): AiToolResult {
+  let res: AiToolResult = {
     name: name,
     input: input,
     output: "",
@@ -80,7 +80,7 @@ function toolFlattenLine(text: string): string {
 
 // The names a dispatch failure may mention, so the model is told what it could
 // have called instead of only that it guessed wrong.
-function toolNameList(tools: LumenAiTool[]): string {
+function toolNameList(tools: AiTool[]): string {
   let out = "";
   let i: int = 0;
   while (i < tools.length) {
@@ -91,7 +91,7 @@ function toolNameList(tools: LumenAiTool[]): string {
   return out;
 }
 
-export function makeTool(name: string, description: string, params: string, run: (input: string) => string): LumenAiTool {
+export function makeTool(name: string, description: string, params: string, run: (input: string) => string): AiTool {
   return {
     name: name,
     description: description,
@@ -100,21 +100,21 @@ export function makeTool(name: string, description: string, params: string, run:
   };
 }
 
-export function toolRegistry(): LumenAiTool[] {
-  let empty: LumenAiTool[] = [];
+export function toolRegistry(): AiTool[] {
+  let empty: AiTool[] = [];
   return empty;
 }
 
 // Registering a name that is already present replaces it in place rather than
 // appending, because two tools sharing a name would make every later lookup
 // pick whichever one happened to be first and silently ignore the other.
-export function registerTool(tools: LumenAiTool[], tool: LumenAiTool): LumenAiTool[] {
+export function registerTool(tools: AiTool[], tool: AiTool): AiTool[] {
   let at = findTool(tools, tool.name);
   if (at < 0) { return [...tools, tool]; }
   return [...tools.slice(0, at), tool, ...tools.slice(at + 1, tools.length)];
 }
 
-export function findTool(tools: LumenAiTool[], name: string): int {
+export function findTool(tools: AiTool[], name: string): int {
   let i: int = 0;
   while (i < tools.length) {
     if (tools[i].name == name) { return i; }
@@ -123,11 +123,11 @@ export function findTool(tools: LumenAiTool[], name: string): int {
   return -1;
 }
 
-export function hasTool(tools: LumenAiTool[], name: string): bool {
+export function hasTool(tools: AiTool[], name: string): bool {
   return findTool(tools, name) >= 0;
 }
 
-export function toolNames(tools: LumenAiTool[]): string[] {
+export function toolNames(tools: AiTool[]): string[] {
   let out: string[] = [];
   let i: int = 0;
   while (i < tools.length) {
@@ -140,7 +140,7 @@ export function toolNames(tools: LumenAiTool[]): string[] {
 // The block a system prompt carries so the model knows what it may call. An
 // empty registry renders as an empty string, which lets the caller drop the
 // whole section instead of telling the model about a list that is not there.
-export function describeTools(tools: LumenAiTool[]): string {
+export function describeTools(tools: AiTool[]): string {
   let out = "";
   let i: int = 0;
   while (i < tools.length) {
@@ -156,7 +156,7 @@ export function describeTools(tools: LumenAiTool[]): string {
 // A model asking for a tool that does not exist is an ordinary event, not a
 // crash: the failure comes back as a result the agent loop can hand straight
 // back to the model so it can pick a real name on the next step.
-export function runTool(tools: LumenAiTool[], name: string, input: string): LumenAiToolResult {
+export function runTool(tools: AiTool[], name: string, input: string): AiToolResult {
   let at = findTool(tools, name);
   if (at < 0) {
     if (tools.length == 0) {
@@ -179,7 +179,7 @@ export function runTool(tools: LumenAiTool[], name: string, input: string): Lume
 // never dispatched and the caller learns nothing about whether it exists. Deny
 // wins over allow: a name on both lists is blocked. An empty allow list means
 // everything that is not denied.
-export function runToolWithPolicy(tools: LumenAiTool[], allow: string[], deny: string[], name: string, input: string): LumenAiToolResult {
+export function runToolWithPolicy(tools: AiTool[], allow: string[], deny: string[], name: string, input: string): AiToolResult {
   if (toolListHas(deny, name)) {
     return toolFailure(name, input, "tool \"" + toolFlattenLine(name) + "\" is blocked by policy: denied");
   }
@@ -192,10 +192,10 @@ export function runToolWithPolicy(tools: LumenAiTool[], allow: string[], deny: s
 // The message that carries a tool result back into the conversation. A failure
 // is reported to the model in the same shape as a success so the loop has one
 // path: the model reads the error and decides what to do next.
-export function toolResultMessage(result: LumenAiToolResult): LumenAiMessage {
+export function toolResultMessage(result: AiToolResult): AiMessage {
   let body = result.output;
   if (!result.ok) { body = "error: " + result.error; }
-  let msg: LumenAiMessage = {
+  let msg: AiMessage = {
     role: "tool",
     content: "[tool " + toolFlattenLine(result.name) + "] " + body,
   };

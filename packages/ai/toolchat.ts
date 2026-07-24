@@ -2,7 +2,7 @@
 // chat request body and serializes a turn history — including native
 // `tool_calls` and `tool_call_id` — into the provider's `messages` array. This
 // is the round trip the neutral-text agent loop cannot do on its own: a
-// LumenAiMessage carries only role+content, so it provably cannot hold the
+// AiMessage carries only role+content, so it provably cannot hold the
 // `tool_call_id` an OpenAI follow-up request requires. A superset turn record is
 // therefore necessary, not optional.
 
@@ -11,12 +11,12 @@ import { serializeToolDefs, serializeToolDefsMistral, parseToolCalls, toolCallIn
 import { systemMessage, userMessage } from "./messages.ts";
 import { bearerJsonHeaders } from "./headers.ts";
 
-// A superset of LumenAiMessage. Absent fields are the empty string, so one
+// A superset of AiMessage. Absent fields are the empty string, so one
 // record shape covers a plain user turn, an assistant turn that asked for tools
 // (`tool_calls` holds the native array fragment), and a tool-result turn
 // (`tool_call_id` matches an id in the preceding assistant turn). Declared
 // without `export`; module inlining exposes it to importers.
-type LumenAiChatTurn = {
+type AiChatTurn = {
   role: string,
   content: string,
   tool_call_id: string,
@@ -39,8 +39,8 @@ type ChatBodyScalars = {
 // because the barrel (ai.ts) exports a top-level `toolCalls` function and inlines
 // this module: a parameter named `toolCalls` would shadow that declaration and
 // the native backend rejects the generated code.
-function chatTurn(role: string, content: string, toolCallId: string, name: string, toolCallsFrag: string): LumenAiChatTurn {
-  let t: LumenAiChatTurn = {
+function chatTurn(role: string, content: string, toolCallId: string, name: string, toolCallsFrag: string): AiChatTurn {
+  let t: AiChatTurn = {
     role: role,
     content: content,
     tool_call_id: toolCallId,
@@ -54,7 +54,7 @@ function chatTurn(role: string, content: string, toolCallId: string, name: strin
 // value is itself a JSON string, so it is re-escaped with JSON.stringify rather
 // than concatenated raw — otherwise a payload like {"input":"São Paulo"} would
 // break the body. The id and name go through JSON.stringify for the same reason.
-function nativeToolCalls(calls: LumenAiToolCall[]): string {
+function nativeToolCalls(calls: AiToolCall[]): string {
   let out = "[";
   let i: int = 0;
   while (i < calls.length) {
@@ -73,7 +73,7 @@ function nativeToolCalls(calls: LumenAiToolCall[]): string {
 //   anything else           -> role, content
 // Every string value is escaped with JSON.stringify; the `tool_calls` fragment
 // is already valid JSON and is concatenated verbatim.
-export function emitChatTurn(turn: LumenAiChatTurn): string {
+export function emitChatTurn(turn: AiChatTurn): string {
   if (turn.role == "tool") {
     return "{\"role\":\"tool\",\"tool_call_id\":" + JSON.stringify(turn.tool_call_id)
       + ",\"content\":" + JSON.stringify(turn.content) + "}";
@@ -87,7 +87,7 @@ export function emitChatTurn(turn: LumenAiChatTurn): string {
     + ",\"content\":" + JSON.stringify(turn.content) + "}";
 }
 
-export function emitChatMessages(turns: LumenAiChatTurn[]): string {
+export function emitChatMessages(turns: AiChatTurn[]): string {
   let out = "[";
   let i: int = 0;
   while (i < turns.length) {
@@ -100,14 +100,14 @@ export function emitChatMessages(turns: LumenAiChatTurn[]): string {
 
 // A plain turn lifted from ordinary chat history. Tool metadata is empty, so it
 // emits as a bare `{role, content}` message.
-export function messageTurn(msg: LumenAiMessage): LumenAiChatTurn {
+export function messageTurn(msg: AiMessage): AiChatTurn {
   return chatTurn(msg.role, msg.content, "", "", "");
 }
 
 // The assistant turn that asked for tools. `content` is whatever prose the model
 // produced alongside the calls (often empty); `calls` become the native
 // `tool_calls` fragment every following tool turn's id must match.
-export function assistantToolCallsTurn(content: string, calls: LumenAiToolCall[]): LumenAiChatTurn {
+export function assistantToolCallsTurn(content: string, calls: AiToolCall[]): AiChatTurn {
   return chatTurn("assistant", content, "", "", nativeToolCalls(calls));
 }
 
@@ -115,7 +115,7 @@ export function assistantToolCallsTurn(content: string, calls: LumenAiToolCall[]
 // assistant turn — the association OpenAI requires and that plain role="tool"
 // text cannot carry. A failed dispatch is reported to the model in the same
 // shape as a success, matching toolResultMessage's one-path rule.
-export function toolResultTurn(toolCallId: string, result: LumenAiToolResult): LumenAiChatTurn {
+export function toolResultTurn(toolCallId: string, result: AiToolResult): AiChatTurn {
   let body = result.output;
   if (!result.ok) { body = "error: " + result.error; }
   return chatTurn("tool", body, toolCallId, result.name, "");
@@ -124,8 +124,8 @@ export function toolResultTurn(toolCallId: string, result: LumenAiToolResult): L
 // Lift a plain neutral-text history into turn records so it can seed a tool
 // round trip. Nothing here carries tool metadata yet; the assistant/tool turns
 // are appended by the loop as calls happen.
-export function toChatTurns(messages: LumenAiMessage[]): LumenAiChatTurn[] {
-  let out: LumenAiChatTurn[] = [];
+export function toChatTurns(messages: AiMessage[]): AiChatTurn[] {
+  let out: AiChatTurn[] = [];
   let i: int = 0;
   while (i < messages.length) {
     out.push(messageTurn(messages[i]));
@@ -138,7 +138,7 @@ export function toChatTurns(messages: LumenAiMessage[]): LumenAiChatTurn[] {
 // registry is non-empty — the serialized tools array. An empty registry omits
 // the `tools` field entirely rather than sending `"tools":[]`, which some
 // providers reject. Build only concatenates, so it never throws.
-function buildToolBody(model: string, turns: LumenAiChatTurn[], frag: string, temperature: number, maxTokens: int): string {
+function buildToolBody(model: string, turns: AiChatTurn[], frag: string, temperature: number, maxTokens: int): string {
   let scalars: ChatBodyScalars = {
     model: model,
     temperature: temperature,
@@ -151,14 +151,14 @@ function buildToolBody(model: string, turns: LumenAiChatTurn[], frag: string, te
   return body + "}";
 }
 
-export function buildOpenAIToolBody(model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[], temperature: number, maxTokens: int): string {
+export function buildOpenAIToolBody(model: string, turns: AiChatTurn[], tools: AiTool[], temperature: number, maxTokens: int): string {
   return buildToolBody(model, turns, serializeToolDefs(tools), temperature, maxTokens);
 }
 
 // Mistral takes the same OpenAI-compatible body, so this only differs in which
 // serializer it calls — leaving room for the two to diverge later without
 // moving every caller.
-export function buildMistralToolBody(model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[], temperature: number, maxTokens: int): string {
+export function buildMistralToolBody(model: string, turns: AiChatTurn[], tools: AiTool[], temperature: number, maxTokens: int): string {
   return buildToolBody(model, turns, serializeToolDefsMistral(tools), temperature, maxTokens);
 }
 
@@ -166,13 +166,13 @@ export function buildMistralToolBody(model: string, turns: LumenAiChatTurn[], to
 // POST it, hand back the raw response body — so the caller parses tool calls or
 // the final answer with parseToolCalls/finishReason, and everything else in the
 // module is offline-testable.
-export function runOpenAIToolChat(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
+export function runOpenAIToolChat(apiKey: string, model: string, turns: AiChatTurn[], tools: AiTool[]): string {
   const body = buildOpenAIToolBody(model, turns, tools, 0.7, 1024);
   const res = http.request("https://api.openai.com/v1/chat/completions", "POST", body, bearerJsonHeaders(apiKey));
   return res.body;
 }
 
-export function runMistralToolChat(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
+export function runMistralToolChat(apiKey: string, model: string, turns: AiChatTurn[], tools: AiTool[]): string {
   const body = buildMistralToolBody(model, turns, tools, 0.7, 1024);
   const res = http.request("https://api.mistral.ai/v1/chat/completions", "POST", body, bearerJsonHeaders(apiKey));
   return res.body;
@@ -249,16 +249,16 @@ type ChatToolMsgT = {
   content: string,
 };
 
-function ctSampleTools(): LumenAiTool[] {
+function ctSampleTools(): AiTool[] {
   let weather = makeTool("weather", "Look up the weather.", "A city name.", (input: string) => "sunny in " + input);
   let clock = makeTool("clock", "Read the clock.", "A time zone.", (input: string) => "12:00 " + input);
-  let tools: LumenAiTool[] = [weather, clock];
+  let tools: AiTool[] = [weather, clock];
   return tools;
 }
 
 test("a plain-history body omits the tools array and round-trips as JSON", () => {
   let turns = toChatTurns([systemMessage("You are helpful."), userMessage("Hello")]);
-  let none: LumenAiTool[] = [];
+  let none: AiTool[] = [];
   let body = buildOpenAIToolBody("gpt-4o-mini", turns, none, 0.7, 1024);
   expect(body.indexOf("\"tools\":") < 0);
   expect(body.indexOf("\"messages\":[") > 0);
@@ -288,14 +288,14 @@ test("a non-empty registry embeds a valid tools array", () => {
 });
 
 test("an assistant tool-calls turn and two tool-result turns serialize with matching ids", () => {
-  let calls: LumenAiToolCall[] = [
+  let calls: AiToolCall[] = [
     makeToolCall("call_a", "weather", "{\"input\":\"Paris\"}"),
     makeToolCall("call_b", "clock", "{\"input\":\"UTC\"}"),
   ];
   let reg = ctSampleTools();
   let r1 = runTool(reg, "weather", "Paris");
   let r2 = runTool(reg, "clock", "UTC");
-  let convo: LumenAiChatTurn[] = [
+  let convo: AiChatTurn[] = [
     assistantToolCallsTurn("", calls),
     toolResultTurn("call_a", r1),
     toolResultTurn("call_b", r2),
@@ -335,7 +335,7 @@ test("an assistant tool-calls turn and two tool-result turns serialize with matc
 
 test("content escaping holds for quotes, newlines, and unicode", () => {
   let turns = toChatTurns([userMessage("she said \"go\"\nfrom São Paulo")]);
-  let none: LumenAiTool[] = [];
+  let none: AiTool[] = [];
   let body = buildOpenAIToolBody("m", turns, none, 0.7, 1024);
   expect(body.indexOf("\n") < 0);
   expect(body.indexOf("\\n") > 0);
@@ -346,7 +346,7 @@ test("content escaping holds for quotes, newlines, and unicode", () => {
 });
 
 test("a tool call argument with quotes and newlines survives the round trip", () => {
-  let odd: LumenAiToolCall[] = [
+  let odd: AiToolCall[] = [
     makeToolCall("call_x", "say", "{\"input\":\"she said \\\"hi\\\"\\nbye\"}"),
   ];
   let turn = assistantToolCallsTurn("thinking", odd);
@@ -383,7 +383,7 @@ test("a malformed response is handled by the parse helpers the caller relies on"
 });
 
 test("lifting history and re-emitting keeps every role and content intact", () => {
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     systemMessage("You are a weather assistant."),
     userMessage("What is the weather in Paris?"),
   ];

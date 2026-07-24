@@ -43,7 +43,7 @@ import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy,
 // So every toolchat name is imported unaliased, exactly like the sibling-shared
 // vector/tool names above, and the public wrappers below take a different name.
 import { buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./toolchat.ts";
-// mcp.ts declares LumenMcpTool / LumenMcpResult unexported; importing any value
+// mcp.ts declares McpTool / McpResult unexported; importing any value
 // from it brings those types into scope.
 // mcp_stdio.ts and mcp_sse.ts import six of mcp.ts's helpers UNALIASED
 // (mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools,
@@ -63,15 +63,15 @@ type JsonName = {
   name: string,
 };
 
-export function system(content: string): LumenAiMessage {
+export function system(content: string): AiMessage {
   return systemMessage(content);
 }
 
-export function user(content: string): LumenAiMessage {
+export function user(content: string): AiMessage {
   return userMessage(content);
 }
 
-export function assistant(content: string): LumenAiMessage {
+export function assistant(content: string): AiMessage {
   return assistantMessage(content);
 }
 
@@ -91,15 +91,15 @@ export function unusedVariables(template: string, keys: string[]): string[] {
   return readUnusedTemplateVariables(template, keys);
 }
 
-export function systemTemplate(template: string, keys: string[], values: string[]): LumenAiMessage {
+export function systemTemplate(template: string, keys: string[], values: string[]): AiMessage {
   return system(renderPromptTemplate(template, keys, values));
 }
 
-export function userTemplate(template: string, keys: string[], values: string[]): LumenAiMessage {
+export function userTemplate(template: string, keys: string[], values: string[]): AiMessage {
   return user(renderPromptTemplate(template, keys, values));
 }
 
-export function assistantTemplate(template: string, keys: string[], values: string[]): LumenAiMessage {
+export function assistantTemplate(template: string, keys: string[], values: string[]): AiMessage {
   return assistant(renderPromptTemplate(template, keys, values));
 }
 
@@ -115,27 +115,27 @@ export function chatPromptContent(entry: string): string {
   return readChatPromptContent(entry);
 }
 
-export function chatRequest(provider: string, model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): LumenAiChatRequest {
+export function chatRequest(provider: string, model: string, messages: AiMessage[], temperature: number, maxTokens: int): AiChatRequest {
   return buildChatRequest(provider, model, messages, temperature, maxTokens);
 }
 
-export function aiResult(status: int, ok: bool, content: string, raw: string): LumenAiResult {
+export function aiResult(status: int, ok: bool, content: string, raw: string): AiResult {
   return makeAiResult(status, ok, content, raw);
 }
 
-export function providerError(provider: string, status: int, message: string, raw: string): LumenAiProviderError {
+export function providerError(provider: string, status: int, message: string, raw: string): AiProviderError {
   return makeProviderError(provider, status, message, raw);
 }
 
-export function modelOptions(temperature: number, maxTokens: int): LumenAiModelOptions {
+export function modelOptions(temperature: number, maxTokens: int): AiModelOptions {
   return makeModelOptions(temperature, maxTokens);
 }
 
-export function defaultModelOptions(): LumenAiModelOptions {
+export function defaultModelOptions(): AiModelOptions {
   return makeDefaultModelOptions();
 }
 
-export function providerChatBody(provider: string, model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function providerChatBody(provider: string, model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   return buildProviderChatBody(provider, model, messages, temperature, maxTokens);
 }
 
@@ -171,11 +171,11 @@ export function retryPrompt(instruction: string, invalidOutput: string, errorMes
   return retryPromptOutput(instruction, invalidOutput, errorMessage);
 }
 
-export function openAIChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function openAIChatBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   return buildOpenAIChatBody(model, messages, temperature, maxTokens);
 }
 
-export function openAIChatBodyWithStops(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
+export function openAIChatBodyWithStops(model: string, messages: AiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
   return buildOpenAIChatBodyWithStops(model, messages, temperature, maxTokens, stop);
 }
 
@@ -191,31 +191,31 @@ export function parseOpenAIContent(raw: string): string {
   return readOpenAIContent(raw);
 }
 
-export function parseOpenAIResult(status: int, ok: bool, raw: string): LumenAiResult {
+export function parseOpenAIResult(status: int, ok: bool, raw: string): AiResult {
   return readOpenAIResult(status, ok, raw);
 }
 
-export function parseOpenAIError(status: int, raw: string): LumenAiProviderError {
+export function parseOpenAIError(status: int, raw: string): AiProviderError {
   return readOpenAIError(status, raw);
 }
 
-export function parseOpenAITokenUsage(raw: string): LumenAiTokenUsage {
+export function parseOpenAITokenUsage(raw: string): AiTokenUsage {
   return readOpenAITokenUsage(raw);
 }
 
-export function chatOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function chatOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[]): AiResult {
   return runOpenAIChatWithBaseUrl(baseUrl, apiKey, model, messages);
 }
 
-export function chatOpenAI(apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function chatOpenAI(apiKey: string, model: string, messages: AiMessage[]): AiResult {
   return runOpenAIChat(apiKey, model, messages);
 }
 
-export function mistralChatBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function mistralChatBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   return buildMistralChatBody(model, messages, temperature, maxTokens);
 }
 
-export function mistralChatBodyWithStops(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
+export function mistralChatBodyWithStops(model: string, messages: AiMessage[], temperature: number, maxTokens: int, stop: string[]): string {
   return buildMistralChatBodyWithStops(model, messages, temperature, maxTokens, stop);
 }
 
@@ -223,35 +223,35 @@ export function parseMistralContent(raw: string): string {
   return readMistralContent(raw);
 }
 
-export function parseMistralResult(status: int, ok: bool, raw: string): LumenAiResult {
+export function parseMistralResult(status: int, ok: bool, raw: string): AiResult {
   return readMistralResult(status, ok, raw);
 }
 
-export function parseMistralError(status: int, raw: string): LumenAiProviderError {
+export function parseMistralError(status: int, raw: string): AiProviderError {
   return readMistralError(status, raw);
 }
 
-export function parseMistralTokenUsage(raw: string): LumenAiTokenUsage {
+export function parseMistralTokenUsage(raw: string): AiTokenUsage {
   return readMistralTokenUsage(raw);
 }
 
-export function chatMistralWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function chatMistralWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[]): AiResult {
   return runMistralChatWithBaseUrl(baseUrl, apiKey, model, messages);
 }
 
-export function chatMistral(apiKey: string, model: string, messages: LumenAiMessage[]): LumenAiResult {
+export function chatMistral(apiKey: string, model: string, messages: AiMessage[]): AiResult {
   return runMistralChat(apiKey, model, messages);
 }
 
-export function document(id: string, text: string, source: string, metadata: string): LumenAiDocument {
+export function document(id: string, text: string, source: string, metadata: string): AiDocument {
   return makeDocument(id, text, source, metadata);
 }
 
-export function docMetadata(doc: LumenAiDocument, key: string): string {
+export function docMetadata(doc: AiDocument, key: string): string {
   return documentMetadata(doc, key);
 }
 
-export function withDocMetadata(doc: LumenAiDocument, key: string, value: string): LumenAiDocument {
+export function withDocMetadata(doc: AiDocument, key: string, value: string): AiDocument {
   return withMetadata(doc, key, value);
 }
 
@@ -267,7 +267,7 @@ export function splitParagraphs(text: string): string[] {
   return splitParagraphText(text);
 }
 
-export function splitDocuments(text: string, source: string, size: int, overlap: int): LumenAiDocument[] {
+export function splitDocuments(text: string, source: string, size: int, overlap: int): AiDocument[] {
   return splitTextToDocuments(text, source, size, overlap);
 }
 
@@ -326,35 +326,35 @@ export function embedMistral(apiKey: string, model: string, input: string): numb
   return runEmbedMistral(apiKey, model, input);
 }
 
-export function vectorStore(): LumenAiVectorStore {
+export function vectorStore(): AiVectorStore {
   return emptyVectorStore();
 }
 
-export function storeSize(store: LumenAiVectorStore): int {
+export function storeSize(store: AiVectorStore): int {
   return readStoreSize(store);
 }
 
-export function addVector(store: LumenAiVectorStore, doc: LumenAiDocument, vector: number[]): LumenAiVectorStore {
+export function addVector(store: AiVectorStore, doc: AiDocument, vector: number[]): AiVectorStore {
   return addStoreVector(store, doc, vector);
 }
 
-export function addDocs(store: LumenAiVectorStore, docs: LumenAiDocument[], dims: int): LumenAiVectorStore {
+export function addDocs(store: AiVectorStore, docs: AiDocument[], dims: int): AiVectorStore {
   return addDocuments(store, docs, dims);
 }
 
-export function deleteDoc(store: LumenAiVectorStore, id: string): LumenAiVectorStore {
+export function deleteDoc(store: AiVectorStore, id: string): AiVectorStore {
   return deleteStoreDocument(store, id);
 }
 
-export function filterDocs(store: LumenAiVectorStore, key: string, value: string): LumenAiVectorStore {
+export function filterDocs(store: AiVectorStore, key: string, value: string): AiVectorStore {
   return filterStoreByMetadata(store, key, value);
 }
 
-export function searchVector(store: LumenAiVectorStore, query: number[], k: int): LumenAiSearchHit[] {
+export function searchVector(store: AiVectorStore, query: number[], k: int): AiSearchHit[] {
   return runSearchByVector(store, query, k);
 }
 
-export function search(store: LumenAiVectorStore, query: string, dims: int, k: int): LumenAiSearchHit[] {
+export function search(store: AiVectorStore, query: string, dims: int, k: int): AiSearchHit[] {
   return searchByText(store, query, dims, k);
 }
 
@@ -362,43 +362,43 @@ export function queryTerms(text: string): string[] {
   return readQueryTerms(text);
 }
 
-export function keywordScore(doc: LumenAiDocument, terms: string[]): number {
+export function keywordScore(doc: AiDocument, terms: string[]): number {
   return computeKeywordScore(doc, terms);
 }
 
-export function keywordRetrieve(docs: LumenAiDocument[], query: string, k: int): LumenAiSearchHit[] {
+export function keywordRetrieve(docs: AiDocument[], query: string, k: int): AiSearchHit[] {
   return runKeywordRetrieve(docs, query, k);
 }
 
-export function vectorRetrieve(store: LumenAiVectorStore, query: string, dims: int, k: int): LumenAiSearchHit[] {
+export function vectorRetrieve(store: AiVectorStore, query: string, dims: int, k: int): AiSearchHit[] {
   return runVectorRetrieve(store, query, dims, k);
 }
 
-export function retrieve(store: LumenAiVectorStore, docs: LumenAiDocument[], query: string, dims: int, k: int): LumenAiSearchHit[] {
+export function retrieve(store: AiVectorStore, docs: AiDocument[], query: string, dims: int, k: int): AiSearchHit[] {
   return runHybridRetrieve(store, docs, query, dims, k);
 }
 
-export function formatContext(hits: LumenAiSearchHit[]): string {
+export function formatContext(hits: AiSearchHit[]): string {
   return buildRagContext(hits);
 }
 
-export function ragPrompt(question: string, hits: LumenAiSearchHit[]): string {
+export function ragPrompt(question: string, hits: AiSearchHit[]): string {
   return buildRagPrompt(question, hits);
 }
 
-export function ragMessages(question: string, hits: LumenAiSearchHit[]): LumenAiMessage[] {
+export function ragMessages(question: string, hits: AiSearchHit[]): AiMessage[] {
   return buildRagMessages(question, hits);
 }
 
-export function appendMessage(history: LumenAiMessage[], msg: LumenAiMessage): LumenAiMessage[] {
+export function appendMessage(history: AiMessage[], msg: AiMessage): AiMessage[] {
   return pushHistoryMessage(history, msg);
 }
 
-export function windowMemory(history: LumenAiMessage[], turns: int): LumenAiMessage[] {
+export function windowMemory(history: AiMessage[], turns: int): AiMessage[] {
   return applyWindowMemory(history, turns);
 }
 
-export function budgetMemory(history: LumenAiMessage[], maxChars: int): LumenAiMessage[] {
+export function budgetMemory(history: AiMessage[], maxChars: int): AiMessage[] {
   return applyCharBudgetMemory(history, maxChars);
 }
 
@@ -406,19 +406,19 @@ export function estimateTokens(text: string): int {
   return computeEstimateTokens(text);
 }
 
-export function historyChars(history: LumenAiMessage[]): int {
+export function historyChars(history: AiMessage[]): int {
   return computeHistoryChars(history);
 }
 
-export function transcript(history: LumenAiMessage[]): string {
+export function transcript(history: AiMessage[]): string {
   return buildTranscript(history);
 }
 
-export function summaryPrompt(history: LumenAiMessage[], priorSummary: string): string {
+export function summaryPrompt(history: AiMessage[], priorSummary: string): string {
   return buildSummaryPrompt(history, priorSummary);
 }
 
-export function applySummary(summary: string, recent: LumenAiMessage[]): LumenAiMessage[] {
+export function applySummary(summary: string, recent: AiMessage[]): AiMessage[] {
   return buildSummaryHistory(summary, recent);
 }
 
@@ -430,83 +430,83 @@ export function recall(store: string, key: string): string {
   return readMemoryValue(store, key);
 }
 
-export function serializeHistory(history: LumenAiMessage[]): string {
+export function serializeHistory(history: AiMessage[]): string {
   return writeHistoryJson(history);
 }
 
-export function parseHistory(raw: string): LumenAiMessage[] {
+export function parseHistory(raw: string): AiMessage[] {
   return readHistoryJson(raw);
 }
 
-export function saveHistory(path: string, history: LumenAiMessage[]): void {
+export function saveHistory(path: string, history: AiMessage[]): void {
   writeHistoryFile(path, history);
 }
 
-export function loadHistory(path: string): LumenAiMessage[] {
+export function loadHistory(path: string): AiMessage[] {
   return readHistoryFile(path);
 }
 
 // A tool is a name, a description the model reads, a one-line note about the
 // input, and a function from one string to one string. V1 tools take and return
 // text; a tool body must not throw, so report trouble by returning it.
-export function defineTool(name: string, description: string, params: string, run: (input: string) => string): LumenAiTool {
+export function defineTool(name: string, description: string, params: string, run: (input: string) => string): AiTool {
   return makeTool(name, description, params, run);
 }
 
-export function toolRegistry(): LumenAiTool[] {
+export function toolRegistry(): AiTool[] {
   return emptyToolRegistry();
 }
 
-export function registerTool(tools: LumenAiTool[], entry: LumenAiTool): LumenAiTool[] {
+export function registerTool(tools: AiTool[], entry: AiTool): AiTool[] {
   return addToolEntry(tools, entry);
 }
 
-export function findTool(tools: LumenAiTool[], name: string): int {
+export function findTool(tools: AiTool[], name: string): int {
   return findToolIndex(tools, name);
 }
 
-export function hasTool(tools: LumenAiTool[], name: string): bool {
+export function hasTool(tools: AiTool[], name: string): bool {
   return hasToolNamed(tools, name);
 }
 
-export function toolNames(tools: LumenAiTool[]): string[] {
+export function toolNames(tools: AiTool[]): string[] {
   return readToolNames(tools);
 }
 
-export function toolDescriptions(tools: LumenAiTool[]): string {
+export function toolDescriptions(tools: AiTool[]): string {
   return describeTools(tools);
 }
 
-export function runTool(tools: LumenAiTool[], name: string, input: string): LumenAiToolResult {
+export function runTool(tools: AiTool[], name: string, input: string): AiToolResult {
   return dispatchTool(tools, name, input);
 }
 
 // Deny wins over allow, and an empty allow list means everything not denied.
-export function runToolGuarded(tools: LumenAiTool[], allow: string[], deny: string[], name: string, input: string): LumenAiToolResult {
+export function runToolGuarded(tools: AiTool[], allow: string[], deny: string[], name: string, input: string): AiToolResult {
   return runToolWithPolicy(tools, allow, deny, name, input);
 }
 
-export function toolMessage(result: LumenAiToolResult): LumenAiMessage {
+export function toolMessage(result: AiToolResult): AiMessage {
   return toolResultMessage(result);
 }
 
-export function toolCall(id: string, name: string, args: string): LumenAiToolCall {
+export function toolCall(id: string, name: string, args: string): AiToolCall {
   return makeToolCall(id, name, args);
 }
 
-export function toolCalls(raw: string): LumenAiToolCall[] {
+export function toolCalls(raw: string): AiToolCall[] {
   return parseToolCalls(raw);
 }
 
-export function parseMistralToolCalls(raw: string): LumenAiToolCall[] {
+export function parseMistralToolCalls(raw: string): AiToolCall[] {
   return readMistralToolCalls(raw);
 }
 
-export function toolCallArg(call: LumenAiToolCall, key: string): string {
+export function toolCallArg(call: AiToolCall, key: string): string {
   return toolCallArgument(call, key);
 }
 
-export function toolInput(call: LumenAiToolCall): string {
+export function toolInput(call: AiToolCall): string {
   return toolCallInput(call);
 }
 
@@ -518,34 +518,34 @@ export function finishReason(raw: string): string {
   return readFinishReason(raw);
 }
 
-export function serializeToolDefs(tools: LumenAiTool[]): string {
+export function serializeToolDefs(tools: AiTool[]): string {
   return buildToolDefs(tools);
 }
 
-export function serializeToolDefsMistral(tools: LumenAiTool[]): string {
+export function serializeToolDefsMistral(tools: AiTool[]): string {
   return buildToolDefsMistral(tools);
 }
 
-export function agentStep(index: int, name: string, input: string, output: string, ok: bool): LumenAiAgentStep {
+export function agentStep(index: int, name: string, input: string, output: string, ok: bool): AiAgentStep {
   return buildAgentStep(index, name, input, output, ok);
 }
 
-export function agentSystemPrompt(tools: LumenAiTool[], instruction: string): string {
+export function agentSystemPrompt(tools: AiTool[], instruction: string): string {
   return buildAgentSystemPrompt(tools, instruction);
 }
 
 // One step is one model call plus every tool call it asked for, so `maxSteps`
 // bounds model calls and the loop terminates even against a model that asks for
 // a tool forever.
-export function runAgent(model: LumenAiModel, tools: LumenAiTool[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
+export function runAgent(model: AiModel, tools: AiTool[], history: AiMessage[], maxSteps: int): AiAgentResult {
   return runAgentLoop(model, tools, history, maxSteps);
 }
 
-export function runAgentWithPolicy(model: LumenAiModel, tools: LumenAiTool[], allow: string[], deny: string[], history: LumenAiMessage[], maxSteps: int): LumenAiAgentResult {
+export function runAgentWithPolicy(model: AiModel, tools: AiTool[], allow: string[], deny: string[], history: AiMessage[], maxSteps: int): AiAgentResult {
   return runAgentLoopWithPolicy(model, tools, allow, deny, history, maxSteps);
 }
 
-export function agentTrace(result: LumenAiAgentResult): string {
+export function agentTrace(result: AiAgentResult): string {
   return renderAgentTrace(result);
 }
 
@@ -553,7 +553,7 @@ export function agentTrace(result: LumenAiAgentResult): string {
 // bodies in order, then answers "done". Start a fake run from a system/user
 // history, because the turn is counted off the assistant messages already in
 // the conversation.
-export function fakeModel(responses: string[]): LumenAiModel {
+export function fakeModel(responses: string[]): AiModel {
   return makeFakeModel(responses);
 }
 
@@ -569,38 +569,38 @@ export function fakeToolCall(name: string, input: string): string {
 // serialized tool definitions in every request and handles the native tool_calls
 // / tool_call_id round trip, so `runAgent(openAIAgent(key, model, tools), tools,
 // history, maxSteps)` drives a real provider with no change to the loop.
-export function openAIAgent(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
+export function openAIAgent(apiKey: string, model: string, tools: AiTool[]): AiModel {
   return makeOpenAIAgentModel(apiKey, model, tools);
 }
 
-export function mistralAgent(apiKey: string, model: string, tools: LumenAiTool[]): LumenAiModel {
+export function mistralAgent(apiKey: string, model: string, tools: AiTool[]): AiModel {
   return makeMistralAgentModel(apiKey, model, tools);
 }
 
 // Rebuild the native turn history (with native tool_calls and tool_call_id) that
 // a live tool round trip needs from the loop's provider-neutral message history.
-export function agentChatTurns(messages: LumenAiMessage[]): LumenAiChatTurn[] {
+export function agentChatTurns(messages: AiMessage[]): AiChatTurn[] {
   return buildAgentTurns(messages);
 }
 
 // Build a tool-enabled chat request body from native turns: the serialized tool
 // definitions ride in the `tools` field, dropped entirely when the registry is
 // empty.
-export function openAIToolBody(model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[], temperature: number, maxTokens: int): string {
+export function openAIToolBody(model: string, turns: AiChatTurn[], tools: AiTool[], temperature: number, maxTokens: int): string {
   return buildOpenAIToolBody(model, turns, tools, temperature, maxTokens);
 }
 
-export function mistralToolBody(model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[], temperature: number, maxTokens: int): string {
+export function mistralToolBody(model: string, turns: AiChatTurn[], tools: AiTool[], temperature: number, maxTokens: int): string {
   return buildMistralToolBody(model, turns, tools, temperature, maxTokens);
 }
 
 // One tool-enabled round trip: POST the native turns plus tool definitions and
 // return the raw response body for parseToolCalls / finishReason to read.
-export function toolChatOpenAI(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
+export function toolChatOpenAI(apiKey: string, model: string, turns: AiChatTurn[], tools: AiTool[]): string {
   return runOpenAIToolChat(apiKey, model, turns, tools);
 }
 
-export function toolChatMistral(apiKey: string, model: string, turns: LumenAiChatTurn[], tools: LumenAiTool[]): string {
+export function toolChatMistral(apiKey: string, model: string, turns: AiChatTurn[], tools: AiTool[]): string {
   return runMistralToolChat(apiKey, model, turns, tools);
 }
 
@@ -616,31 +616,31 @@ export function mcpRequestBody(id: int, method: string, params: string): string 
 // instead of free text. Schema mode constrains the shape; JSON mode only
 // guarantees the reply parses, so the shape is prompted and validated locally.
 
-export function schemaField(name: string, fieldType: string, description: string, required: bool): LumenAiSchemaField {
+export function schemaField(name: string, fieldType: string, description: string, required: bool): AiSchemaField {
   return makeSchemaField(name, fieldType, description, required);
 }
 
-export function objectSchema(fields: LumenAiSchemaField[]): string {
+export function objectSchema(fields: AiSchemaField[]): string {
   return buildObjectSchema(fields);
 }
 
-export function schemaRequired(fields: LumenAiSchemaField[]): string[] {
+export function schemaRequired(fields: AiSchemaField[]): string[] {
   return readRequiredFields(fields);
 }
 
-export function jsonObjectBody(model: string, messages: LumenAiMessage[], temperature: number, maxTokens: int): string {
+export function jsonObjectBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   return buildJsonObjectBody(model, messages, temperature, maxTokens);
 }
 
-export function jsonSchemaBody(model: string, messages: LumenAiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
+export function jsonSchemaBody(model: string, messages: AiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
   return buildJsonSchemaBody(model, messages, name, schemaJson, temperature, maxTokens);
 }
 
-export function validateStructured(json: string, required: string[]): LumenAiStructured {
+export function validateStructured(json: string, required: string[]): AiStructured {
   return checkStructured(json, required);
 }
 
-export function parseStructuredResponse(raw: string, content: string, required: string[]): LumenAiStructured {
+export function parseStructuredResponse(raw: string, content: string, required: string[]): AiStructured {
   return readStructuredResponse(raw, content, required);
 }
 
@@ -648,31 +648,31 @@ export function structuredRetryPrompt(schemaJson: string, invalid: string, reaso
   return buildStructuredRetryPrompt(schemaJson, invalid, reason);
 }
 
-export function schemaInstruction(schemaJson: string): LumenAiMessage {
+export function schemaInstruction(schemaJson: string): AiMessage {
   return buildSchemaInstruction(schemaJson);
 }
 
 // Provider-neutral: "openai" and "mistral" use native schema mode.
-export function structuredChat(provider: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredChat(provider: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return runStructuredChat(provider, apiKey, model, messages, name, schemaJson, required);
 }
 
-export function structuredOpenAI(apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredOpenAI(apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return runStructuredOpenAI(apiKey, model, messages, name, schemaJson, required);
 }
 
-export function structuredMistral(apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredMistral(apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return runStructuredMistral(apiKey, model, messages, name, schemaJson, required);
 }
 
 // Schema mode against any other OpenAI-compatible endpoint that supports it.
-export function structuredWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], name: string, schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return runStructuredChatWithBaseUrl(baseUrl, apiKey, model, messages, name, schemaJson, required);
 }
 
 // JSON-mode fallback for endpoints without schema mode (Groq, Together,
 // OpenRouter, Ollama, ...): the shape is prompted, then validated locally.
-export function structuredJsonMode(baseUrl: string, apiKey: string, model: string, messages: LumenAiMessage[], schemaJson: string, required: string[]): LumenAiStructured {
+export function structuredJsonMode(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], schemaJson: string, required: string[]): AiStructured {
   return runStructuredJsonMode(baseUrl, apiKey, model, messages, schemaJson, required);
 }
 
@@ -681,29 +681,29 @@ export function structuredJsonMode(baseUrl: string, apiKey: string, model: strin
 // compress only when it is exceeded. A failed model call leaves the history
 // untouched rather than losing it.
 
-export function needsCompression(history: LumenAiMessage[], maxChars: int): bool {
+export function needsCompression(history: AiMessage[], maxChars: int): bool {
   return historyNeedsCompression(history, maxChars);
 }
 
-export function compressHistory(summarize: LumenAiSummarizer, history: LumenAiMessage[], keepRecent: int): LumenAiMessage[] {
+export function compressHistory(summarize: AiSummarizer, history: AiMessage[], keepRecent: int): AiMessage[] {
   return foldHistory(summarize, history, keepRecent);
 }
 
-export function compressIfNeeded(summarize: LumenAiSummarizer, history: LumenAiMessage[], maxChars: int, keepRecent: int): LumenAiMessage[] {
+export function compressIfNeeded(summarize: AiSummarizer, history: AiMessage[], maxChars: int, keepRecent: int): AiMessage[] {
   return foldHistoryIfNeeded(summarize, history, maxChars, keepRecent);
 }
 
 // Summarizers backed by a real provider, ready to hand to the helpers above.
-export function openAISummarizer(apiKey: string, model: string): LumenAiSummarizer {
+export function openAISummarizer(apiKey: string, model: string): AiSummarizer {
   return (prompt: string) => {
-    let msgs: LumenAiMessage[] = [userMessage(prompt)];
+    let msgs: AiMessage[] = [userMessage(prompt)];
     return runOpenAIChat(apiKey, model, msgs).content;
   };
 }
 
-export function mistralSummarizer(apiKey: string, model: string): LumenAiSummarizer {
+export function mistralSummarizer(apiKey: string, model: string): AiSummarizer {
   return (prompt: string) => {
-    let msgs: LumenAiMessage[] = [userMessage(prompt)];
+    let msgs: AiMessage[] = [userMessage(prompt)];
     return runMistralChat(apiKey, model, msgs).content;
   };
 }
@@ -723,11 +723,11 @@ export function mcpCallBody(id: int, name: string, argumentsJson: string): strin
 // `parseMcpTools` / `mcpResponseId` are imported unaliased from mcp.ts (the
 // stdio/SSE transports need them under those names), so the barrel exposes them
 // as mcpParseTools / mcpReplyId to avoid a same-name clash with the imports.
-export function mcpParseTools(raw: string): LumenMcpTool[] {
+export function mcpParseTools(raw: string): McpTool[] {
   return parseMcpTools(raw);
 }
 
-export function parseMcpResult(raw: string): LumenMcpResult {
+export function parseMcpResult(raw: string): McpResult {
   return parseMcpToolResult(raw);
 }
 
@@ -754,21 +754,21 @@ export function mcpConnect(url: string, headers: Map<string, string>): string {
   return runMcpInitialize(url, headers);
 }
 
-export function mcpTools(url: string, headers: Map<string, string>): LumenMcpTool[] {
+export function mcpTools(url: string, headers: Map<string, string>): McpTool[] {
   return runMcpListTools(url, headers);
 }
 
-export function mcpCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): LumenMcpResult {
+export function mcpCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): McpResult {
   return runMcpCallTool(url, headers, name, argumentsJson);
 }
 
-// Adapt an MCP tool descriptor into a first-class LumenAiTool whose `run` POSTs a
+// Adapt an MCP tool descriptor into a first-class AiTool whose `run` POSTs a
 // tools/call request, so an MCP server's tools drop straight into `runAgent`.
-export function mcpAsTool(url: string, headers: Map<string, string>, tool: LumenMcpTool): LumenAiTool {
+export function mcpAsTool(url: string, headers: Map<string, string>, tool: McpTool): AiTool {
   return adaptMcpTool(url, headers, tool);
 }
 
-export function mcpAsTools(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
+export function mcpAsTools(url: string, headers: Map<string, string>, tools: McpTool[]): AiTool[] {
   return adaptMcpTools(url, headers, tools);
 }
 
@@ -776,23 +776,23 @@ export function mcpAsTools(url: string, headers: Map<string, string>, tools: Lum
 // Spawn a local MCP server as a subprocess and exchange newline-delimited
 // JSON-RPC over its stdin/stdout. The session stays live across calls.
 
-export function mcpStdioConnect(command: string, args: string[]): LumenMcpStdioSession {
+export function mcpStdioConnect(command: string, args: string[]): McpStdioSession {
   return runStdioSpawn(command, args);
 }
 
-export function mcpStdioTools(session: LumenMcpStdioSession): LumenMcpTool[] {
+export function mcpStdioTools(session: McpStdioSession): McpTool[] {
   return runStdioListTools(session);
 }
 
-export function mcpStdioCall(session: LumenMcpStdioSession, name: string, argumentsJson: string): LumenMcpResult {
+export function mcpStdioCall(session: McpStdioSession, name: string, argumentsJson: string): McpResult {
   return runStdioCall(session, name, argumentsJson);
 }
 
-export function mcpStdioClose(session: LumenMcpStdioSession): void {
+export function mcpStdioClose(session: McpStdioSession): void {
   runStdioClose(session);
 }
 
-export function mcpStdioAsTools(session: LumenMcpStdioSession, tools: LumenMcpTool[]): LumenAiTool[] {
+export function mcpStdioAsTools(session: McpStdioSession, tools: McpTool[]): AiTool[] {
   return adaptStdioTools(session, tools);
 }
 
@@ -800,15 +800,15 @@ export function mcpStdioAsTools(session: LumenMcpStdioSession, tools: LumenMcpTo
 // Talk to an MCP server whose responses stream as chunked Server-Sent Events,
 // over a raw TCP socket. Plain http:// only (no TLS).
 
-export function mcpSseTools(url: string, headers: Map<string, string>): LumenMcpTool[] {
+export function mcpSseTools(url: string, headers: Map<string, string>): McpTool[] {
   return runSseListTools(url, headers);
 }
 
-export function mcpSseCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): LumenMcpResult {
+export function mcpSseCall(url: string, headers: Map<string, string>, name: string, argumentsJson: string): McpResult {
   return runSseCall(url, headers, name, argumentsJson);
 }
 
-export function mcpSseAsTools(url: string, headers: Map<string, string>, tools: LumenMcpTool[]): LumenAiTool[] {
+export function mcpSseAsTools(url: string, headers: Map<string, string>, tools: McpTool[]): AiTool[] {
   return adaptSseTools(url, headers, tools);
 }
 
@@ -1061,8 +1061,8 @@ test("parse live-shaped mistral content", () => {
   expect(parseMistralContent(raw) == "lumen ok");
 });
 
-function barrelCorpus(): LumenAiDocument[] {
-  let out: LumenAiDocument[] = [
+function barrelCorpus(): AiDocument[] {
+  let out: AiDocument[] = [
     document("lumen", "lumen compiles to a native binary with no runtime", "langs.md", "topic\tlangs"),
     document("python", "python runs on an interpreter and ships a large standard library", "langs.md", "topic\tlangs"),
     document("bread", "sourdough bread needs a starter, flour, water and salt", "recipes.md", "topic\tfood"),
@@ -1189,7 +1189,7 @@ test("rag prompt through the barrel", () => {
 });
 
 test("conversation memory through the barrel", () => {
-  let history: LumenAiMessage[] = [system("You are concise.")];
+  let history: AiMessage[] = [system("You are concise.")];
   history = appendMessage(history, user("Hi"));
   history = appendMessage(history, assistant("Hello"));
   history = appendMessage(history, user("What is Lumen?"));
@@ -1209,7 +1209,7 @@ test("conversation memory through the barrel", () => {
 });
 
 test("summary memory through the barrel", () => {
-  let history: LumenAiMessage[] = [user("Ship the parser"), assistant("Done Tuesday")];
+  let history: AiMessage[] = [user("Ship the parser"), assistant("Done Tuesday")];
   let prompt = summaryPrompt(history, "");
   expect(prompt.includes("(none)"));
   expect(prompt.includes("user: Ship the parser"));
@@ -1229,7 +1229,7 @@ test("key value memory through the barrel", () => {
 });
 
 test("history serialization through the barrel", () => {
-  let history: LumenAiMessage[] = [system("be brief"), user("hi")];
+  let history: AiMessage[] = [system("be brief"), user("hi")];
   let raw = serializeHistory(history);
   expect(raw.includes("\"role\":\"system\""));
   let parsed = parseHistory(raw);
@@ -1250,14 +1250,14 @@ function barrelClockBody(input: string): string {
   return "12:00 in " + input;
 }
 
-function barrelTools(): LumenAiTool[] {
+function barrelTools(): AiTool[] {
   let tools = registerTool(toolRegistry(), defineTool("weather", "Current weather for a city.", "city name", barrelWeatherBody));
   tools = registerTool(tools, defineTool("clock", "The local time in a zone.", "zone name", barrelClockBody));
   return tools;
 }
 
-function barrelAgentHistory(): LumenAiMessage[] {
-  let history: LumenAiMessage[] = [
+function barrelAgentHistory(): AiMessage[] {
+  let history: AiMessage[] = [
     system(agentSystemPrompt(barrelTools(), "You are a weather assistant.")),
     user("What is the weather in Paris?"),
   ];
@@ -1394,7 +1394,7 @@ test("agent step record through the barrel", () => {
 
 test("live tool-calling agent surface through the barrel", () => {
   let tools = barrelTools();
-  let history: LumenAiMessage[] = [
+  let history: AiMessage[] = [
     system("You are a weather assistant."),
     user("weather in Paris?"),
     assistant("[tool_calls] weather({\"input\":\"Paris\"})"),
@@ -1421,8 +1421,8 @@ test("live tool-calling agent surface through the barrel", () => {
   expect(back.length == 1);
   expect(back[0].id == "call_1");
   expect(toolInput(back[0]) == "Paris");
-  // The agent model builders yield LumenAiModel closures with no I/O.
-  let models: LumenAiModel[] = [
+  // The agent model builders yield AiModel closures with no I/O.
+  let models: AiModel[] = [
     openAIAgent("sk-test", "gpt-4o-mini", tools),
     mistralAgent("mk-test", "mistral-large-latest", tools),
   ];

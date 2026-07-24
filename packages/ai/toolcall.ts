@@ -2,7 +2,7 @@
 
 import { makeTool } from "./tools.ts";
 
-type LumenAiToolCall = {
+type AiToolCall = {
   id: string,
   name: string,
   arguments: string,
@@ -79,8 +79,8 @@ function tcStr(value: string, next: int): TcString {
   };
 }
 
-function tcNoCalls(): LumenAiToolCall[] {
-  let empty: LumenAiToolCall[] = [];
+function tcNoCalls(): AiToolCall[] {
+  let empty: AiToolCall[] = [];
   return empty;
 }
 
@@ -299,7 +299,7 @@ function tcFirstMessage(raw: string): int {
   return tcFieldValue(raw, items[0], "message");
 }
 
-function tcMakeCall(id: string, name: string, args: string): LumenAiToolCall {
+function tcMakeCall(id: string, name: string, args: string): AiToolCall {
   return {
     id: id,
     name: name,
@@ -310,13 +310,13 @@ function tcMakeCall(id: string, name: string, args: string): LumenAiToolCall {
 // The typed parse below only accepts a body whose shape is exactly the response
 // record, and real provider bodies always carry extra fields, so this scanner —
 // not the typed path — is what handles live responses.
-function tcScanToolCalls(raw: string): LumenAiToolCall[] {
+function tcScanToolCalls(raw: string): AiToolCall[] {
   let message = tcFirstMessage(raw);
   if (message < 0) { return tcNoCalls(); }
   let calls = tcFieldValue(raw, message, "tool_calls");
   if (calls < 0) { return tcNoCalls(); }
   let items = tcArrayItems(raw, calls);
-  let out: LumenAiToolCall[] = [];
+  let out: AiToolCall[] = [];
   let i: int = 0;
   while (i < items.length) {
     let entry = items[i];
@@ -342,7 +342,7 @@ function tcScanFinishReason(raw: string): string {
   return tcStringField(raw, items[0], "finish_reason");
 }
 
-function tcToolDefEntry(tool: LumenAiTool): ToolCallDefEntry {
+function tcToolDefEntry(tool: AiTool): ToolCallDefEntry {
   let hint = tool.params;
   if (hint == "") { hint = "Input for the " + tool.name + " tool."; }
   return {
@@ -364,13 +364,13 @@ function tcToolDefEntry(tool: LumenAiTool): ToolCallDefEntry {
   };
 }
 
-export function makeToolCall(id: string, name: string, args: string): LumenAiToolCall {
+export function makeToolCall(id: string, name: string, args: string): AiToolCall {
   return tcMakeCall(id, name, args);
 }
 
 // JSON.stringify does the escaping, so a tool name or description holding a
 // quote, a newline, or a brace cannot break out of the request body.
-export function serializeToolDefs(tools: LumenAiTool[]): string {
+export function serializeToolDefs(tools: AiTool[]): string {
   let entries: ToolCallDefEntry[] = [];
   let i: int = 0;
   while (i < tools.length) {
@@ -383,19 +383,19 @@ export function serializeToolDefs(tools: LumenAiTool[]): string {
 // Mistral takes the same OpenAI-compatible `tools` array, so the two
 // serializers share one implementation and can diverge later without moving
 // every caller.
-export function serializeToolDefsMistral(tools: LumenAiTool[]): string {
+export function serializeToolDefsMistral(tools: AiTool[]): string {
   return serializeToolDefs(tools);
 }
 
 // Tool calls from an OpenAI-compatible chat completion. A body with no tool
 // calls, a plain text answer, a malformed body, and an empty body all yield an
 // empty list rather than an error.
-export function parseToolCalls(raw: string): LumenAiToolCall[] {
+export function parseToolCalls(raw: string): AiToolCall[] {
   try {
     const parsed: ToolCallResponse = JSON.parse<ToolCallResponse>(raw);
     if (parsed.choices.length == 0) { return tcNoCalls(); }
     let entries = parsed.choices[0].message.tool_calls;
-    let out: LumenAiToolCall[] = [];
+    let out: AiToolCall[] = [];
     let i: int = 0;
     while (i < entries.length) {
       // Drop a nameless call, exactly as the scanner fallback does (tcScanToolCalls
@@ -415,14 +415,14 @@ export function parseToolCalls(raw: string): LumenAiToolCall[] {
   }
 }
 
-export function parseMistralToolCalls(raw: string): LumenAiToolCall[] {
+export function parseMistralToolCalls(raw: string): AiToolCall[] {
   return parseToolCalls(raw);
 }
 
 // One value out of the call's `arguments` payload — the step that turns
 // {"input":"Paris"} into `Paris` for dispatch. Absent key, non-object payload,
 // and malformed payload all give "".
-export function toolCallArgument(call: LumenAiToolCall, key: string): string {
+export function toolCallArgument(call: AiToolCall, key: string): string {
   let at = tcFieldValue(call.arguments, 0, key);
   if (at < 0) { return ""; }
   return tcValueText(call.arguments, at);
@@ -430,7 +430,7 @@ export function toolCallArgument(call: LumenAiToolCall, key: string): string {
 
 // V1 tools take a single string under `input`, so this is the argument the
 // dispatcher actually wants.
-export function toolCallInput(call: LumenAiToolCall): string {
+export function toolCallInput(call: AiToolCall): string {
   return toolCallArgument(call, "input");
 }
 
@@ -473,10 +473,10 @@ function tcExactShapeResponse(): string {
     + "{\"id\":\"call_z\",\"type\":\"function\",\"function\":{\"name\":\"echo\",\"arguments\":\"{\\\"input\\\":\\\"hi\\\"}\"}}]}}]}";
 }
 
-function tcSampleTools(): LumenAiTool[] {
+function tcSampleTools(): AiTool[] {
   let weather = makeTool("weather", "Look up the weather.", "A city name.", (input: string) => "sunny in " + input);
   let clock = makeTool("clock", "Read the clock.", "", (input: string) => "12:00 " + input);
-  let tools: LumenAiTool[] = [weather, clock];
+  let tools: AiTool[] = [weather, clock];
   return tools;
 }
 
@@ -492,7 +492,7 @@ test("serialize tool definitions", () => {
 });
 
 test("serialize an empty tool list", () => {
-  let none: LumenAiTool[] = [];
+  let none: AiTool[] = [];
   expect(serializeToolDefs(none) == "[]");
   expect(serializeToolDefsMistral(none) == "[]");
 });
@@ -504,7 +504,7 @@ test("mistral tool definitions match the openai-compatible shape", () => {
 
 test("tool definitions escape quotes and newlines", () => {
   let odd = makeTool("say", "Says \"hi\"\nloudly.", "Text to say, e.g. {\"a\":1}", (input: string) => input);
-  let tools: LumenAiTool[] = [odd];
+  let tools: AiTool[] = [odd];
   let raw = serializeToolDefs(tools);
   expect(raw.indexOf("\\\"hi\\\"") > 0);
   expect(raw.indexOf("\\nloudly.") > 0);
