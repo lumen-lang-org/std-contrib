@@ -861,7 +861,10 @@ ship. What is still missing:
 - no provider-specific SDKs
 - no automatic retries
 - no response-header inspection
-- the vector store is in-memory only; there is no persistent vector database
+- the built-in vector store is in-memory only: it is rebuilt on every start, so
+  a service re-embeds its corpus each boot. The `pgvector` package in this
+  repository keeps vectors in PostgreSQL instead, so an index survives a restart
+  and unchanged text is not embedded twice
 - `hashEmbedding` is a hashing bag of words, not a semantic model; real
   similarity needs provider embeddings through `embedText`
 - no stemming, no stop-word list, and no re-ranking in the keyword retriever
