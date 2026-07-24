@@ -1,6 +1,6 @@
 // Retrieval documents and text splitters.
 
-type AiDocument = {
+export type AiDocument = {
   id: string,
   text: string,
   source: string,
