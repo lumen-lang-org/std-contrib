@@ -62,6 +62,8 @@ import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcp
 // modules; no sibling imports their names, so every one is aliased here.
 import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
 import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
+import { splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
+import { loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
 import { streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString } from "./providers/stream.ts";
 import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen as adaptSseTool, sseToolsToRegistry as adaptSseTools } from "./mcp/sse.ts";
 
@@ -650,6 +652,62 @@ export function modelEndpoint(cfg: AiModelConfig): string {
 // Send messages using a config.
 export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   return runConfiguredChat(cfg, messages);
+}
+
+// --- Documents: splitting and loading ---------------------------------------
+// Chunks carry the byte range they came from, so a retrieved chunk can point
+// back at its place in the source. Sizes and overlaps are byte counts.
+
+export function chunks(text: string, size: int, overlap: int): AiChunk[] {
+  return splitTextChunks(text, size, overlap);
+}
+
+export function chunksWith(text: string, separators: string[], size: int, overlap: int): AiChunk[] {
+  return splitTextChunksWith(text, separators, size, overlap);
+}
+
+export function markdownChunks(text: string, size: int, overlap: int): AiChunk[] {
+  return splitMdChunks(text, size, overlap);
+}
+
+export function codeChunks(text: string, size: int, overlap: int): AiChunk[] {
+  return splitSrcChunks(text, size, overlap);
+}
+
+export function splitDocument(doc: AiDocument, size: int, overlap: int): AiDocument[] {
+  return splitDocProse(doc, size, overlap);
+}
+
+export function splitDocumentWith(doc: AiDocument, separators: string[], size: int, overlap: int): AiDocument[] {
+  return splitDocChunks(doc, separators, size, overlap);
+}
+
+export function textSeparators(): string[] {
+  return proseSeparators();
+}
+
+export function markdownSeparators(): string[] {
+  return mdSeparators();
+}
+
+export function codeSeparators(): string[] {
+  return srcSeparators();
+}
+
+export function loadText(text: string, source: string): AiDocument {
+  return readTextDocument(text, source);
+}
+
+export function loadFile(path: string): AiLoadResult {
+  return readFileDocument(path);
+}
+
+export function loadDirectory(path: string, extensions: string[], recursive: bool): AiLoadResult {
+  return readDirectoryDocuments(path, extensions, recursive);
+}
+
+export function fileExtension(path: string): string {
+  return readFileExtension(path);
 }
 
 // --- Streaming --------------------------------------------------------------
