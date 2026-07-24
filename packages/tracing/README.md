@@ -127,9 +127,35 @@ curl -X POST http://127.0.0.1:4318/v1/traces \
   -H 'Content-Type: application/json' --data-binary @trace.json
 ```
 
-Langfuse itself can be self-hosted for an end-to-end check: `docker compose up`
-in their repository, with `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` and
-`LANGFUSE_INIT_PROJECT_SECRET_KEY` set so keys exist without touching the UI.
+### Against Langfuse itself
+
+Verified end to end against a self-hosted Langfuse 3.224.1. The binary posted a
+trace, and reading it back through `GET /api/public/traces/{id}` returned:
+
+```
+name             type        parent           level    tokens
+----------------------------------------------------------------------
+mistral-large    GENERATION  support-agent    DEFAULT  in=160 out=12
+weather          TOOL        support-agent    DEFAULT
+support-agent    CHAIN       (root)           DEFAULT
+mistral-large    GENERATION  support-agent    DEFAULT  in=120 out=18
+flaky-tool       TOOL        support-agent    ERROR
+
+model      : mistral-large -> mistral-large-latest {temperature: 0.2, max_tokens: 512}
+error span : flaky-tool
+  message  : the provider returned 429 "rate limited"
+```
+
+Session and user attribution arrived (`sessionId: sess-live-1`,
+`userId: user-live-1`), inputs and outputs round-tripped — including a JSON
+object that came back parsed as an object, and a reply with an embedded newline
+— and the trace's own input and output were taken from the root span.
+
+To reproduce: `docker compose up` in the Langfuse repository with
+`LANGFUSE_INIT_PROJECT_PUBLIC_KEY` and `LANGFUSE_INIT_PROJECT_SECRET_KEY` set,
+so keys exist without touching the UI. On a host already running PostgreSQL,
+remap their Postgres to 5433 and drop ClickHouse's host port mappings — nothing
+outside the compose network needs either.
 
 ## Limits
 
