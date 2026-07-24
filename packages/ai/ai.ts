@@ -62,6 +62,7 @@ import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcp
 // modules; no sibling imports their names, so every one is aliased here.
 import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
 import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
+import { streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString } from "./providers/stream.ts";
 import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen as adaptSseTool, sseToolsToRegistry as adaptSseTools } from "./mcp/sse.ts";
 
 type JsonName = {
@@ -649,6 +650,39 @@ export function modelEndpoint(cfg: AiModelConfig): string {
 // Send messages using a config.
 export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   return runConfiguredChat(cfg, messages);
+}
+
+// --- Streaming --------------------------------------------------------------
+// Read a completion as it is generated. `streamChat` calls the handler once per
+// event and also returns the assembled reply, so live output and the final text
+// come from one call.
+
+export function streamEvent(line: string): AiStreamEvent {
+  return readStreamEvent(line);
+}
+
+export function streamPayload(line: string): string {
+  return readStreamPayload(line);
+}
+
+export function streamEvents(body: string): AiStreamEvent[] {
+  return readStreamEvents(body);
+}
+
+export function streamText(body: string): string {
+  return readStreamBodyText(body);
+}
+
+export function streamChatBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
+  return makeStreamChatBody(model, messages, temperature, maxTokens);
+}
+
+export function streamChat(cfg: AiModelConfig, messages: AiMessage[], onEvent: AiStreamHandler): AiResult {
+  return runStreamChat(cfg, messages, onEvent);
+}
+
+export function streamChatCollect(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
+  return runStreamChatToString(cfg, messages);
 }
 
 // --- Structured output ------------------------------------------------------

@@ -1,6 +1,6 @@
 // Message constructors for chat-style AI APIs.
 
-type AiMessage = {
+export type AiMessage = {
   role: string,
   content: string,
 };
