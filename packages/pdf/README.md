@@ -57,18 +57,26 @@ console.log(`${info.pages} pages, by ${info.author}`);
 
 ## API
 
-| function | returns |
-| --- | --- |
-| `extractText(path)` | `PdfText` — the whole document |
-| `extractLayout(path)` | `PdfText` — layout preserved, for columns and tables |
-| `extractPage(path, page)` | `PdfText` — one page, numbered from 1 |
-| `extractPages(path, first, last)` | `PdfText` — an inclusive range |
-| `readInfo(path)` | `PdfInfo` — title, author, dates, page count |
-| `pageCount(path)` | `int` — 0 when it cannot be read |
+| function | `pdf_ffi.ts` | `pdf.ts` | returns |
+| --- | --- | --- | --- |
+| `extractText(path)` | yes | yes | the whole document |
+| `extractLayout(path)` | yes | yes | layout preserved, for columns and tables |
+| `extractPage(path, page)` | yes | yes | one page, numbered from 1 |
+| `extractPageLayout(path, page)` | yes | — | one page, layout preserved |
+| `extractPages(path, first, last)` | — | yes | an inclusive range |
+| `extractWithPassword(path, pw)` | yes | — | an encrypted document |
+| `readInfo(path)` | yes | yes | title, author, dates, page count |
+| `pageCount(path)` | yes | yes | 0 when it cannot be read |
+| `popplerVersion()` | yes | — | the linked library's version |
 
-`PdfText` is `{ ok, text, error }`. `PdfInfo` is `{ ok, title, author, subject,
-keywords, creator, producer, creationDate, modificationDate, pages, encrypted,
-error }`. A field the PDF omits is `""` — most PDFs carry few of them.
+`PdfText` is `{ ok, text, error }` in both. `PdfInfo` differs: the FFI form
+reports `created` and `modified` as Unix seconds (0 when absent), the subprocess
+form reports `creationDate` and `modificationDate` as the strings `pdfinfo`
+prints, and carries `encrypted`. A field the PDF omits is `""` — most PDFs carry
+few of them.
+
+The two modules declare the same type names, so a program imports one or the
+other, not both.
 
 Every failure is reported, never raised: a missing file, a file that is not a
 PDF, an encrypted document, and a missing Poppler all return `ok: false` with a
@@ -90,28 +98,50 @@ if (r.ok) {
 Use `extractLayout` when the source has columns: the default mode will run them
 together, and chunks of interleaved columns retrieve poorly.
 
-## Why the command-line tools rather than FFI
+## Two forms: linked, or spawned
 
-Lumen can link C directly — `sqlite` and `quickjs` in this repository do, through
-a small shim and `// @link`. Poppler ships `libpoppler-cpp` with a stable C++
-API, so an FFI binding is possible and would be the faster, quieter option: no
-process per document, no inherited stderr, and access to per-page objects rather
-than re-running a tool for each page.
+The package ships the same API twice.
 
-This package spawns instead, because the tradeoff favours it for a first
-version:
+**`pdf_ffi.ts` links Poppler into the binary.** `poppler_shim.cpp` flattens
+poppler-cpp's objects and `ustring` to the scalars and C strings the FFI carries,
+the way SQLite's shim flattens its out-pointers. A document is opened once and
+then read, so pages cost nothing extra.
 
-- `poppler-utils` is a package manager away on any machine; FFI needs
-  `libpoppler-cpp-dev`, a compiled shim, and a build step per platform.
-- Spawning cannot corrupt this process. A malformed PDF that crashes the parser
-  takes the child down, not the program — worth something when the input is
-  user-uploaded.
-- Poppler's C++ API is objects and exceptions, which the scalar-and-string FFI
-  cannot express directly; it would need a flattening shim, as SQLite's
-  out-pointers did.
+**`pdf.ts` spawns `pdftotext` and `pdfinfo`.** No build step, no headers — if
+Poppler is installed, it works.
 
-An FFI binding is the natural upgrade if per-document process cost shows up in
-profiling, and it can land behind this same API.
+Measured over 200 extractions of a three-page document:
+
+```
+ffi            248ms
+subprocess    3332ms
+```
+
+**13×**, and the gap widens with page count, because the subprocess form reruns
+the tool — reparsing the file — for every page or range.
+
+Take the FFI form unless a build step is unacceptable. Take the subprocess form
+when you want a binary that runs anywhere Poppler happens to be installed, or
+when the input is untrusted enough that you would rather a malformed PDF crash a
+child process than yours.
+
+### Building the shim
+
+```sh
+apt install libpoppler-cpp-dev     # Debian, Ubuntu
+brew install poppler               # macOS
+sh packages/pdf/build.sh
+```
+
+`build.sh` finds the headers and produces `poppler_shim.o`. Because `// @link`
+paths resolve against the working directory, compile a program that imports
+`pdf_ffi.ts` from this directory, or adjust the pragma to an absolute path.
+
+The `// @link` lines name libstdc++ and libgcc_s by absolute path, which is
+correct for Debian and Ubuntu. On another distribution or on macOS, point them
+at that system's C++ runtime and unwinder — a bare `-lstdc++` does not resolve
+under the Zig-hosted linker, and without the unwinder `_Unwind_Resume` is left
+undefined because Poppler's API can throw.
 
 ## Limits
 
@@ -131,7 +161,8 @@ profiling, and it can land behind this same API.
 ## Tests
 
 ```sh
-lumen test packages/pdf/pdf.test.ts
+lumen test packages/pdf/pdf.test.ts          # subprocess form, from anywhere
+cd packages/pdf && lumen test pdf_ffi.test.ts # FFI form, from this directory
 ```
 
 The fixtures are PDFs the test writes itself, cross-reference offsets and all,
