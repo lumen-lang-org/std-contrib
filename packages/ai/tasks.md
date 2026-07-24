@@ -222,6 +222,12 @@ copied from LangChain.
 
 ## M10: Vector Stores And Retrievers
 
+Persistence is covered by the `pgvector` package in this repository rather than
+here: it keeps vectors in PostgreSQL, so an index survives a restart and text
+that has not changed is not embedded again. The in-memory store below stays as
+the dependency-free default.
+
+
 - [x] Add in-memory vector store record.
 - [x] Add document insertion helper.
 - [x] Add vector insertion helper.
