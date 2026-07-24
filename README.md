@@ -40,6 +40,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`csv`](packages/csv) | CSV parser/stringifier with quoted fields, CRLF, row helpers, and flat arrays |
 | [`token-gate`](packages/token-gate) | Token-optimizing command proxy (`tkg`) — per-command output compression, savings ledger, Claude Code hook |
 | [`code-index`](packages/code-index) | Codebase symbol index (`cidx`) — map/find/refs/rank, persistent cache, 8 languages, for AI navigation |
+| [`pdf`](packages/pdf) | PDF text and metadata via Poppler — layout mode, page ranges, document info |
 | [`ai`](packages/ai) | Typed AI helpers for OpenAI-compatible chat APIs |
 
 ## Using a package
