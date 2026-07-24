@@ -1,14 +1,12 @@
-// One chat entry point driven by a model config, instead of a per-provider
-// function with positional arguments and hardcoded generation options.
+// single chat entry point, routed by a model config.
 
 import { makeModelConfig, modelBaseUrl } from "../core/model.ts";
 import { makeAuthHeaders, buildOpenAIChatBody, readOpenAIResult } from "./openai.ts";
 import { makeMistralAuthHeaders, buildMistralChatBody, readMistralResult } from "./mistral.ts";
 import { makeAiResult } from "../core/result.ts";
 
-// Send `messages` using `cfg`. Unlike chatOpenAI / chatMistral this honours the
-// config's temperature and maxTokens. An unroutable config (unknown provider,
-// no baseUrl) comes back as a failed result rather than a guessed endpoint.
+// honours cfg's temperature and maxTokens, which runOpenAIChat / runMistralChat
+// hardcode. an unroutable config fails rather than guessing an endpoint.
 export function runConfiguredChat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   let base = modelBaseUrl(cfg);
   if (base == "") {
@@ -20,7 +18,7 @@ export function runConfiguredChat(cfg: AiModelConfig, messages: AiMessage[]): Ai
     let res = http.request(url, "POST", body, makeMistralAuthHeaders(cfg.apiKey));
     return readMistralResult(res.status, res.ok, res.body);
   }
-  // Everything else speaks the OpenAI wire format: "openai" itself, and any
+  // everything else speaks the OpenAI wire format, including any
   // OpenAI-compatible endpoint reached through baseUrl.
   let body = buildOpenAIChatBody(cfg.model, messages, cfg.temperature, cfg.maxTokens);
   let res = http.request(url, "POST", body, makeAuthHeaders(cfg.apiKey));

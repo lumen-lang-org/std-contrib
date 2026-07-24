@@ -61,8 +61,8 @@ test("keyword score degenerate inputs", () => {
   expect(keywordScore(doc, repeated) > 0.0);
 });
 
-// The blocks a paragraph split of a markdown file produces: a bare heading
-// followed by the paragraph that actually answers the question.
+// what a paragraph split of a markdown file produces: a bare heading followed by
+// the paragraph that answers the question.
 test("keyword score prefers the paragraph over the heading above it", () => {
   let heading = makeDocument("h", "# Retrieval", "notes.md", "");
   let body = makeDocument("b", "Retrieval works by scoring every stored block against the query and returning the blocks with the highest score, newest first.", "notes.md", "");
@@ -176,9 +176,9 @@ test("vector retrieve degenerate inputs", () => {
   expect(vectorRetrieve(emptyVectorStore(), "native binary", 128, 3).length == 0);
 });
 
-// The hashing embedder buckets tokens, so an unrelated query still collides into
-// a few buckets and scores above zero. Keyword retrieval returns nothing for the
-// same query, which is why it is the default path.
+// the hashing embedder buckets tokens, so an unrelated query still collides and
+// scores above zero. keyword retrieval returns nothing for the same query, which
+// is why it is the default path.
 test("vector retrieve on an unrelated query only scores noise", () => {
   let docs = retrTestCorpus();
   let store = emptyVectorStore();

@@ -483,8 +483,8 @@ test("the live model rebuilds native turns from a neutral tool history", () => {
   expect(turns[3].tool_call_id == "call_1");
   expect(turns[3].content == "18C in Paris");
   expect(emitChatMessages(turns).startsWith("["));
-  // The rebuilt assistant tool_calls array is valid JSON and its id matches the
-  // tool turn that answers it, so the whole request is internally consistent.
+  // the rebuilt tool_calls array's id matches the tool turn that answers it, so
+  // the whole request is internally consistent.
   let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + emitChatTurn(turns[2]) + "}]}";
   let back = parseToolCalls(responseLike);
   expect(back.length == 1);
@@ -548,7 +548,7 @@ test("a failed tool result and a stray tool turn both stay valid", () => {
   let turns = agentHistoryToTurns(history);
   expect(turns.length == 2);
   expect(turns[1].role == "tool");
-  // No preceding assistant tool-call turn, but a tool turn still needs an id for
+  // no preceding assistant tool-call turn, but a tool turn still needs an id for
   // the request to be accepted, so one is synthesized.
   expect(turns[1].tool_call_id == "call_1");
   expect(turns[1].content.startsWith("error: unknown tool \"wether\""));

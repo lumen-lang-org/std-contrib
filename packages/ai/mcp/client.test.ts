@@ -24,8 +24,7 @@ function mcToolsListResponse(): string {
     + "]}}";
 }
 
-// Structural validity check for the request-builder tests: the body is one
-// complete JSON value with nothing but whitespace after it.
+// one complete JSON value with nothing but whitespace after it.
 function mcValidJson(raw: string): bool {
   let end = mcSkipValue(raw, 0);
   if (end < 0) { return false; }
@@ -161,8 +160,7 @@ test("a tools/list reply adapts into runnable AiTools", () => {
   expect(registry[0].name == "weather");
   expect(registry[0].description == "Current weather for a city.");
   expect(registry[0].params == tools[0].schema);
-  // The adapter maps a single string input to {"input": <input>}; verify the
-  // request the run would POST without doing any I/O.
+  // check the request run() would POST, without doing any I/O.
   let call = mcpCallToolRequest(1, registry[1].name, "{\"input\":" + JSON.stringify("2 and 3") + "}");
   expect(mcValidJson(call));
   let paramsAt = mcFieldValue(call, 0, "params");

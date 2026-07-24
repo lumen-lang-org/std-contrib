@@ -53,7 +53,6 @@ test("validateStructured reports every missing field", () => {
 
 test("validateStructured is not fooled by a key inside a string value", () => {
   let req: string[] = ["age"];
-  // "age" appears only inside a value, never as a property
   let r = validateStructured("{\"name\":\"my age is secret\"}", req);
   expect(!r.ok);
   expect(r.error.includes("age"));
@@ -61,7 +60,6 @@ test("validateStructured is not fooled by a key inside a string value", () => {
 
 test("validateStructured ignores a nested key of the same name", () => {
   let req: string[] = ["city"];
-  // `city` exists only one level down, so the top-level object is incomplete
   let r = validateStructured("{\"address\":{\"city\":\"Paris\"}}", req);
   expect(!r.ok);
 });

@@ -14,7 +14,6 @@ test("parseChoice tolerates real model phrasing", () => {
 
 test("parseChoice does not match a choice inside a longer word", () => {
   let yn: string[] = ["yes", "no"];
-  // "no" must not match inside "know"
   expect(parseChoiceOutput("I don't know", yn, "unknown") == "unknown");
   expect(parseChoiceOutput("No.", yn, "unknown") == "no");
   expect(parseChoiceOutput("nobody", yn, "unknown") == "unknown");

@@ -8,9 +8,9 @@ type AiToolCall = {
   arguments: string,
 };
 
-// The `tools` array an OpenAI-compatible chat request carries. V1 tools take a
-// single string, so every tool advertises the same one-property object schema
-// and the tool's own `params` text becomes that property's description.
+// the `tools` array of an OpenAI-compatible chat request. v1 tools take a single
+// string, so every tool advertises the same one-property object schema with the
+// tool's `params` text as that property's description.
 type ToolCallInputProperty = {
   type: string,
   description: string,
@@ -65,7 +65,7 @@ type ToolCallResponse = {
   choices: ToolCallChoice[],
 };
 
-// A decoded JSON string plus the index just past its closing quote. `next` is
+// a decoded JSON string plus the index past its closing quote. `next` is
 // negative when the text at that position is not a well-formed JSON string.
 type TcString = {
   value: string,
@@ -122,9 +122,8 @@ function tcHex4(src: string, at: int): int {
   return value;
 }
 
-// Strings are byte-indexed, so a `\uXXXX` escape is re-emitted as its UTF-8
-// bytes. Without this a tool argument like "São Paulo" would reach the
-// tool as the literal text `São Paulo`.
+// strings are byte-indexed, so a `\uXXXX` escape is re-emitted as its utf-8
+// bytes; otherwise "São Paulo" reaches the tool as `São Paulo`.
 function tcEncodeCodePoint(cp: int): string {
   if (cp < 0x80) { return String.fromCharCode(cp); }
   if (cp < 0x800) {
@@ -141,9 +140,8 @@ function tcEncodeCodePoint(cp: int): string {
     + String.fromCharCode(0x80 | (cp & 0x3F));
 }
 
-// Reads the JSON string starting at `at` and returns it decoded. An unpaired
-// surrogate is kept as-is rather than dropped, so a half-escaped argument still
-// reaches the tool instead of vanishing.
+// an unpaired surrogate is kept as-is rather than dropped, so a half-escaped
+// argument still reaches the tool instead of vanishing.
 function tcReadString(src: string, at: int): TcString {
   if (at >= src.length || src.charAt(at) != "\"") { return tcStr("", -1); }
   let out = "";
@@ -180,10 +178,9 @@ function tcReadString(src: string, at: int): TcString {
   return tcStr("", -1);
 }
 
-// Index just past the object or array that starts at `from`. Quoted text is
-// stepped over as a unit, so a brace or bracket inside a string — which is
-// exactly what a serialized `arguments` payload is full of — cannot close the
-// container early.
+// index just past the object or array starting at `from`. quoted text is stepped
+// over as a unit, so a brace inside a string — which a serialized `arguments`
+// payload is full of — cannot close the container early.
 function tcSkipContainer(src: string, from: int): int {
   let depth: int = 0;
   let i: int = from;
@@ -223,10 +220,9 @@ function tcSkipValue(src: string, from: int): int {
   return i;
 }
 
-// Index of the value bound to `key` in the object starting at `objectAt`, or -1
-// when the object does not carry that key. Keys are matched only at this
-// object's own level, so `"name"` inside a nested `arguments` payload is never
-// mistaken for the function name.
+// index of the value bound to `key` in the object at `objectAt`, or -1. keys are
+// matched only at this object's own level, so a `"name"` nested inside an
+// `arguments` payload is never mistaken for the function name.
 function tcFieldValue(src: string, objectAt: int, key: string): int {
   let i = tcSkipWhitespace(src, objectAt);
   if (i >= src.length || src.charAt(i) != "{") { return -1; }
@@ -248,9 +244,8 @@ function tcFieldValue(src: string, objectAt: int, key: string): int {
   return -1;
 }
 
-// Start index of every element of the array at `arrayAt`. An empty list stands
-// for "no array here", "empty array", and "malformed array" alike, which is the
-// degrade every caller in this module wants.
+// start index of every element of the array at `arrayAt`. an empty list covers
+// "no array", "empty array", and "malformed array" alike.
 function tcArrayItems(src: string, arrayAt: int): int[] {
   let i = tcSkipWhitespace(src, arrayAt);
   if (i >= src.length || src.charAt(i) != "[") { return tcNoItems(); }
@@ -276,8 +271,8 @@ function tcStringField(src: string, objectAt: int, key: string): string {
   return tcReadString(src, at).value;
 }
 
-// A string value comes back decoded; any other JSON value comes back as its own
-// source text so a caller can re-parse it. `null` comes back empty.
+// a string comes back decoded; any other JSON value comes back as its own source
+// text so a caller can re-parse it. `null` comes back empty.
 function tcValueText(src: string, at: int): string {
   if (at < 0 || at >= src.length) { return ""; }
   if (src.charAt(at) == "\"") { return tcReadString(src, at).value; }
@@ -288,7 +283,6 @@ function tcValueText(src: string, at: int): string {
   return text;
 }
 
-// Index of the first choice's `message` object, or -1.
 function tcFirstMessage(raw: string): int {
   let root = tcSkipWhitespace(raw, 0);
   if (root >= raw.length || raw.charAt(root) != "{") { return -1; }
@@ -307,9 +301,8 @@ function tcMakeCall(id: string, name: string, args: string): AiToolCall {
   };
 }
 
-// The typed parse below only accepts a body whose shape is exactly the response
-// record, and real provider bodies always carry extra fields, so this scanner —
-// not the typed path — is what handles live responses.
+// JSON.parse<T> throws on any unknown field, and live provider bodies always
+// carry extras, so this scanner — not the typed path — handles real responses.
 function tcScanToolCalls(raw: string): AiToolCall[] {
   let message = tcFirstMessage(raw);
   if (message < 0) { return tcNoCalls(); }
@@ -368,8 +361,8 @@ export function makeToolCall(id: string, name: string, args: string): AiToolCall
   return tcMakeCall(id, name, args);
 }
 
-// JSON.stringify does the escaping, so a tool name or description holding a
-// quote, a newline, or a brace cannot break out of the request body.
+// JSON.stringify does the escaping, so a quote or brace in a tool name or
+// description cannot break out of the request body.
 export function serializeToolDefs(tools: AiTool[]): string {
   let entries: ToolCallDefEntry[] = [];
   let i: int = 0;
@@ -380,16 +373,14 @@ export function serializeToolDefs(tools: AiTool[]): string {
   return JSON.stringify(entries);
 }
 
-// Mistral takes the same OpenAI-compatible `tools` array, so the two
-// serializers share one implementation and can diverge later without moving
-// every caller.
+// mistral takes the same OpenAI-compatible `tools` array; separate entry point
+// so the two can diverge later without moving callers.
 export function serializeToolDefsMistral(tools: AiTool[]): string {
   return serializeToolDefs(tools);
 }
 
-// Tool calls from an OpenAI-compatible chat completion. A body with no tool
-// calls, a plain text answer, a malformed body, and an empty body all yield an
-// empty list rather than an error.
+// tool calls from an OpenAI-compatible chat completion. no calls, plain text, a
+// malformed body, and an empty body all yield an empty list rather than an error.
 export function parseToolCalls(raw: string): AiToolCall[] {
   try {
     const parsed: ToolCallResponse = JSON.parse<ToolCallResponse>(raw);
@@ -398,11 +389,9 @@ export function parseToolCalls(raw: string): AiToolCall[] {
     let out: AiToolCall[] = [];
     let i: int = 0;
     while (i < entries.length) {
-      // Drop a nameless call, exactly as the scanner fallback does (tcScanToolCalls
-      // guards `if (name != "")`). Without this the typed fast path and the scanner
-      // disagree on the same call — one dispatches an unknown-tool "" call and burns
-      // the step budget, the other finalizes — decided only by whether the body
-      // carried an extra top-level field.
+      // drop a nameless call, matching the scanner fallback; otherwise the two
+      // paths disagree on the same call purely on whether the body had an extra
+      // top-level field.
       let name = entries[i].function.name;
       if (name != "") {
         out.push(tcMakeCall(entries[i].id, name, entries[i].function.arguments));
@@ -419,17 +408,15 @@ export function parseMistralToolCalls(raw: string): AiToolCall[] {
   return parseToolCalls(raw);
 }
 
-// One value out of the call's `arguments` payload — the step that turns
-// {"input":"Paris"} into `Paris` for dispatch. Absent key, non-object payload,
-// and malformed payload all give "".
+// one value out of the call's `arguments` payload. absent key, non-object
+// payload, and malformed payload all give "".
 export function toolCallArgument(call: AiToolCall, key: string): string {
   let at = tcFieldValue(call.arguments, 0, key);
   if (at < 0) { return ""; }
   return tcValueText(call.arguments, at);
 }
 
-// V1 tools take a single string under `input`, so this is the argument the
-// dispatcher actually wants.
+// v1 tools take a single string under `input`.
 export function toolCallInput(call: AiToolCall): string {
   return toolCallArgument(call, "input");
 }

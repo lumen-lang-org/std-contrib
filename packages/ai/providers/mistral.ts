@@ -159,8 +159,7 @@ export function makeMistralAuthHeaders(apiKey: string): Map<string, string> {
 }
 
 // JSON.parse<T> throws on malformed bodies and on unknown fields, so an
-// unexpected response shape falls back to the string scanner instead of
-// aborting the caller.
+// unexpected response shape falls back to the string scanner.
 export function readMistralContent(raw: string): string {
   try {
     const parsed: MistralChatResponse = JSON.parse<MistralChatResponse>(raw);

@@ -1,4 +1,5 @@
-// Vector maths and a deterministic offline embedding model.
+// Vector maths and a deterministic offline embedding model (a hashed bag of
+// words, not a semantic one).
 
 export function dotProduct(a: number[], b: number[]): number {
   let sum: number = 0.0;
@@ -10,18 +11,15 @@ export function dotProduct(a: number[], b: number[]): number {
   return sum;
 }
 
-// NaN fails every comparison with itself, and infinity is the one value whose
-// difference with itself is not zero.
+// NaN fails `x != x`; infinity is the one value whose self-difference is not 0.
 function isFiniteNumber(x: number): bool {
   if (x != x) { return false; }
   return x - x == 0.0;
 }
 
-// Two passes: every component is divided by the largest magnitude before being
-// squared, so a vector of tiny components cannot underflow the sum to zero and
-// a vector of huge components cannot overflow it to infinity. Squaring the raw
-// components loses both ends of the range that a real embedding API can return.
-// A non-finite component is propagated rather than hidden.
+// two passes: components are scaled by the largest magnitude before squaring, so
+// tiny components cannot underflow the sum to zero nor huge ones overflow it to
+// infinity. a non-finite component is propagated rather than hidden.
 export function vectorNorm(v: number[]): number {
   let scale: number = 0.0;
   let i: int = 0;
@@ -54,12 +52,10 @@ export function normalizeVector(v: number[]): number[] {
   return out;
 }
 
-// Each side is divided by its own norm before the products are summed, so the
-// dot product and the denominator cannot overflow to infinity on large vectors
-// and cancel into NaN. The result is clamped into [-1, 1]: rounding alone
-// pushes an exact self-similarity a few ulps past 1.0, and callers document
-// that the score is bounded. A vector that is zero or not finite has no usable
-// direction, so it scores 0.0 rather than NaN.
+// each side is divided by its own norm before the products are summed, so large
+// vectors cannot overflow to infinity and cancel into NaN. the result is clamped
+// into [-1, 1] because rounding pushes an exact self-similarity a few ulps past
+// 1.0. a zero or non-finite vector has no usable direction and scores 0.0.
 export function cosineSimilarity(a: number[], b: number[]): number {
   let normA = vectorNorm(a);
   let normB = vectorNorm(b);
@@ -127,7 +123,7 @@ function zeroVector(dims: int): number[] {
   return out;
 }
 
-// Arrays are immutable, so bucket counting returns a fresh vector each time.
+// arrays are immutable, so bucket counting returns a fresh vector each time.
 function addAt(v: number[], index: int, amount: number): number[] {
   if (index < 0 || index >= v.length) { return v; }
   return [...v.slice(0, index), v[index] + amount, ...v.slice(index + 1, v.length)];

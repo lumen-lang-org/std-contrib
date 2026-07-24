@@ -120,11 +120,11 @@ test("malformed and empty bodies degrade", () => {
 });
 
 test("an empty tool name is dropped on both parse paths alike", () => {
-  // Exact response shape -> JSON.parse succeeds -> typed fast path.
+  // exact response shape -> JSON.parse succeeds -> typed fast path.
   let exact = "{\"id\":\"chatcmpl-3\",\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\","
     + "\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
     + "{\"id\":\"call_z\",\"type\":\"function\",\"function\":{\"name\":\"\",\"arguments\":\"{\\\"input\\\":\\\"hi\\\"}\"}}]}}]}";
-  // Byte-identical apart from one extra top-level field -> JSON.parse fails -> scanner.
+  // identical but for one extra top-level field -> JSON.parse fails -> scanner.
   let live = "{\"id\":\"chatcmpl-3\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\","
     + "\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":["
     + "{\"id\":\"call_z\",\"type\":\"function\",\"function\":{\"name\":\"\",\"arguments\":\"{\\\"input\\\":\\\"hi\\\"}\"}}]}}]}";

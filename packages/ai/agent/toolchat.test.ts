@@ -2,12 +2,9 @@
 
 import { assistantToolCallsTurn, buildMistralToolBody, buildOpenAIToolBody, emitChatMessages, emitChatTurn, toChatTurns, toolResultTurn } from "./toolchat.ts";
 
-// A structural validity check for the tests: brackets and braces balanced,
-// strings closed, escapes stepped over. It steps over a quoted run as a unit so
-// a brace inside a string cannot unbalance the count — the same guarantee the
-// tool-call scanner relies on. It is not a full JSON validator, but combined
-// with the exact-shape JSON.parse checks below it proves an emitted body is
-// well-formed.
+// structural check only: braces balanced, strings closed. it steps over a quoted
+// run as a unit so a brace inside a string cannot unbalance the count. not a
+// full JSON validator — the exact-shape JSON.parse checks below cover that.
 function chatBalanced(src: string): bool {
   let depth: int = 0;
   let i: int = 0;
@@ -69,7 +66,7 @@ test("a non-empty registry embeds a valid tools array", () => {
   expect(body.indexOf("\"name\":\"clock\"") > 0);
   expect(body.indexOf("\"description\":\"A city name.\"") > 0);
   expect(chatBalanced(body));
-  // Mistral takes the identical OpenAI-compatible body today.
+  // mistral takes the identical OpenAI-compatible body today.
   expect(buildMistralToolBody("gpt-4o-mini", turns, tools, 0.2, 256) == body);
 });
 
@@ -89,7 +86,6 @@ test("an assistant tool-calls turn and two tool-result turns serialize with matc
   let msgs = emitChatMessages(convo);
   expect(chatBalanced(msgs));
 
-  // Each emitted message is genuinely valid JSON of its provider shape.
   let assistantJson = emitChatTurn(convo[0]);
   let parsedA: ChatAssistantMsgT = JSON.parse<ChatAssistantMsgT>(assistantJson);
   expect(parsedA.role == "assistant");
@@ -107,8 +103,8 @@ test("an assistant tool-calls turn and two tool-result turns serialize with matc
   expect(parsedT2.tool_call_id == "call_b");
   expect(parsedT2.content == "12:00 UTC");
 
-  // The rebuilt tool_calls fragment is lossless: wrapped back into a response
-  // body, parseToolCalls recovers every id, name, and decoded input.
+  // the rebuilt fragment is lossless: wrapped back into a response body,
+  // parseToolCalls recovers every id, name, and decoded input.
   let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + assistantJson + "}]}";
   let back = parseToolCalls(responseLike);
   expect(back.length == 2);

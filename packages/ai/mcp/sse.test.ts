@@ -32,7 +32,7 @@ test("decodeChunked: a hex length above 9 is parsed", () => {
 });
 
 test("decodeChunked: data containing CRLF is copied verbatim, not split", () => {
-  // "ab\r\ncd" is 6 bytes; the inner \r\n must not be read as a frame boundary.
+  // "ab\r\ncd" is 6 bytes; the inner \r\n must not read as a frame boundary.
   expect(decodeChunked("6\r\nab\r\ncd\r\n0\r\n\r\n") == "ab\r\ncd");
 });
 
@@ -182,7 +182,7 @@ test("buildHttpPost carries a caller header but never duplicates a managed one",
 
 test("buildHttpPost Content-Length is the UTF-8 byte length, not code-point count", () => {
   let headers = new Map<string, string>();
-  // "São" is 4 bytes (the ã is 2), so a byte-correct length is 4, not 3.
+  // "São" is 4 bytes (the ã is 2), so the byte-correct length is 4, not 3.
   let req = buildHttpPost("h", "/", headers, "São");
   expect(req.includes("Content-Length: 4\r\n"));
 });

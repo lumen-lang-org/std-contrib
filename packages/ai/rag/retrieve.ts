@@ -21,9 +21,8 @@ export function retrNoHits(): AiSearchHit[] {
   return empty;
 }
 
-// A token character is an ASCII letter or digit, or any byte at or above 128 so
-// UTF-8 words survive. Everything else — whitespace and ASCII punctuation — is a
-// boundary, which is how punctuation gets stripped.
+// ASCII alphanumerics plus any byte at or above 128 so UTF-8 words survive.
+// everything else is a boundary, which is how punctuation gets stripped.
 function retrIsWordChar(c: string): bool {
   let code = c.charCodeAt(0);
   if (code >= "a".charCodeAt(0) && code <= "z".charCodeAt(0)) { return true; }
@@ -47,7 +46,7 @@ function retrUniqueTokens(tokens: string[]): string[] {
   return out;
 }
 
-// Vector belonging to `id`, or an empty vector when the store does not hold it.
+// empty vector when the store does not hold `id`.
 function retrVectorFor(store: AiVectorStore, id: string): number[] {
   let i: int = 0;
   while (i < store.docs.length && i < store.vectors.length) {
@@ -58,7 +57,7 @@ function retrVectorFor(store: AiVectorStore, id: string): number[] {
   return empty;
 }
 
-// Documents from both sides of a hybrid search, first list winning on id.
+// both sides of a hybrid search, the first list winning on id.
 function retrUnionDocuments(primary: AiDocument[], secondary: AiDocument[]): AiDocument[] {
   let out: AiDocument[] = [];
   let ids: string[] = [];
@@ -77,18 +76,17 @@ function retrUnionDocuments(primary: AiDocument[], secondary: AiDocument[]): AiD
   return out;
 }
 
-// A NaN score loses every `>` comparison, including the ones that would push it
-// out of the running, so seeding the search at index 0 would leave a NaN hit
-// sitting at the top of the results ahead of a perfect match. Ordering is
-// stated explicitly instead: NaN never wins, and any real score beats it.
+// a NaN score loses every `>` comparison, including the ones that would push it
+// out of the running, so ordering is stated explicitly: NaN never wins, and any
+// real score beats it.
 function retrBeatsScore(candidate: number, current: number): bool {
   if (candidate != candidate) { return false; }
   if (current != current) { return true; }
   return candidate > current;
 }
 
-// Sorting in place is impossible, so the top k comes out of repeated
-// max-extraction over a shrinking copy. Ties keep insertion order.
+// no in-place sort, so the top k comes out of repeated max-extraction over a
+// shrinking copy. ties keep insertion order.
 export function retrTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
   if (k <= 0) { return retrNoHits(); }
   let rest = scored;
@@ -108,26 +106,22 @@ export function retrTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
   return out;
 }
 
-// The citation label prefers the source path, falls back to the document id,
-// and never renders an empty bracket pair.
 function retrCitationLabel(doc: AiDocument): string {
   if (doc.source != "") { return doc.source; }
   if (doc.id != "") { return doc.id; }
   return "unknown";
 }
 
-// One instruction body shared by ragPrompt and ragMessages so the prompt text
-// and the chat system message never drift apart.
+// shared by ragPrompt and ragMessages so the prompt text and the chat system
+// message cannot drift apart.
 function retrGroundingRules(): string {
   return "You answer questions using only the numbered context below.\n\nRules:\n- Use only facts stated in the context. Do not use outside knowledge.\n- Cite every claim with the bracket number of the block it came from, like [1].\n- If the context does not contain the answer, reply exactly: The context does not contain the answer.\n- Do not guess, and do not invent sources.";
 }
 
-// toLowerCase only folds ASCII, and retrIsWordChar keeps every byte at or above
-// 128, so an accented capital would survive uppercase and never match the same
-// word stored in lowercase — "CAFÉ" would tokenize to "cafÉ". The Latin-1
-// supplement letters U+00C0-U+00DE (encoded as 0xC3 followed by 0x80-0x9E, with
-// 0xD7 being the multiplication sign rather than a letter) fold by adding 0x20
-// to the second byte. Other scripts are left as they are.
+// toLowerCase only folds ASCII, so an accented capital would never match the
+// same word stored in lowercase. Latin-1 supplement letters U+00C0-U+00DE
+// (0xC3 then 0x80-0x9E, minus 0xD7 which is the multiplication sign) fold by
+// adding 0x20 to the second byte. other scripts are left as they are.
 function retrFoldLatin1(text: string): string {
   let out = "";
   let i: int = 0;
@@ -147,8 +141,8 @@ function retrFoldLatin1(text: string): string {
   return out;
 }
 
-// Lowercased, punctuation stripped, split on whitespace. There is no stemming,
-// so "compile" does not match "compiles".
+// lowercased, punctuation stripped, split on whitespace. no stemming, so
+// "compile" does not match "compiles".
 export function tokenizeQuery(text: string): string[] {
   let out: string[] = [];
   if (text == "") { return out; }
@@ -166,10 +160,8 @@ export function tokenizeQuery(text: string): string[] {
   return out;
 }
 
-// A retrieved block is context for a model to answer from, so a block too short
-// to say anything is not a useful result however well its words match. Below
-// this many tokens the score is scaled down in proportion, which is what stops
-// a bare markdown heading from outranking the paragraph underneath it.
+// below this many tokens the score is scaled down in proportion, which stops a
+// bare markdown heading from outranking the paragraph underneath it.
 function retrMinBlockTokens(): number {
   return 16.0;
 }
@@ -182,21 +174,13 @@ function retrCountToken(tokens: string[], token: string): int {
   return n;
 }
 
-// Three factors, each in [0, 1], multiplied together:
-//
-//   coverage — distinct query terms the block mentions, over the distinct terms
-//     asked for. How much of the question this block speaks to.
-//   density  — a Dice coefficient over token OCCURRENCES rather than distinct
-//     tokens: 2 * matching occurrences / (matching occurrences + total tokens).
-//     Repeating a query term raises it, and unrelated filler lowers it, so a
-//     block that is genuinely about the query beats one that mentions it once
-//     in passing.
-//   length   — blocks shorter than retrMinBlockTokens() are scaled by their
-//     length, so a one-token fragment cannot reach the top on a perfect but
-//     meaningless match.
-//
-// The result is in [0, 1], and reaches 1.0 only for a block of at least
-// retrMinBlockTokens() tokens made up entirely of the query's terms.
+// coverage * density * length, each in [0, 1]:
+//   coverage — distinct query terms present over distinct terms asked for.
+//   density  — a Dice coefficient over token OCCURRENCES, not distinct tokens,
+//     so repetition raises it and unrelated filler lowers it.
+//   length   — blocks under retrMinBlockTokens() are scaled by their length.
+// reaches 1.0 only for a block of at least retrMinBlockTokens() tokens made up
+// entirely of the query's terms.
 export function keywordScore(doc: AiDocument, terms: string[]): number {
   let queryTerms = retrUniqueTokens(terms);
   if (queryTerms.length == 0) { return 0.0; }
@@ -221,9 +205,9 @@ export function keywordScore(doc: AiDocument, terms: string[]): number {
   return coverage * density * length;
 }
 
-// The default retrieval path: no embeddings, no API key, no network. Documents
-// that share no term with the query are dropped rather than returned with a
-// zero score, so a query that matches nothing yields no context at all.
+// the default retrieval path: no embeddings, no API key, no network. documents
+// sharing no term with the query are dropped rather than scored 0.0, so a query
+// that matches nothing yields no context at all.
 export function keywordRetrieve(docs: AiDocument[], query: string, k: int): AiSearchHit[] {
   if (k <= 0 || docs.length == 0) { return retrNoHits(); }
   let terms = tokenizeQuery(query);
@@ -238,13 +222,11 @@ export function keywordRetrieve(docs: AiDocument[], query: string, k: int): AiSe
   return retrTopHits(scored, k);
 }
 
-// Cosine similarity over the store's vectors. Unlike searchByText this drops
-// zero-similarity hits, because a zero-scoring block is noise once it is stuffed
-// into a prompt. The store's embedder tokenizes on whitespace and is
-// case-sensitive, so raw query text matches stored text better than a
-// normalized one does. It is also a hashing embedder, so a query sharing no
-// word with the corpus still returns low-scoring collision noise rather than
-// nothing — prefer keywordRetrieve when "no match" must mean no results.
+// cosine similarity over the store's vectors; unlike searchByText this drops
+// zero-similarity hits. the store's embedder is case-sensitive and splits on
+// whitespace, so raw query text is passed through unnormalized. it hashes into
+// buckets, so a query sharing no word with the corpus still returns low-scoring
+// collision noise — prefer keywordRetrieve when "no match" must mean no results.
 export function vectorRetrieve(store: AiVectorStore, query: string, dims: int, k: int): AiSearchHit[] {
   if (k <= 0 || dims <= 0) { return retrNoHits(); }
   let hits = searchByText(store, query, dims, k);
@@ -255,13 +237,10 @@ export function vectorRetrieve(store: AiVectorStore, query: string, dims: int, k
   return out;
 }
 
-// Weighting: 0.6 keyword plus 0.4 vector. Keyword scoring is the more
-// trustworthy signal here because the offline embedder is a hashing bag of
-// words whose buckets collide, so it is given the larger share; the vector term
-// still breaks ties between documents with identical term overlap. Both scores
-// are in [0, 1] for a sane corpus, so the combined score is too. A document
-// present in `docs` but absent from `store` simply scores 0.0 on the vector
-// side rather than being excluded.
+// 0.6 keyword plus 0.4 vector: the offline embedder is a colliding bag of words,
+// so keyword scoring takes the larger share and the vector term only breaks ties
+// between documents with identical term overlap. a document in `docs` but absent
+// from `store` scores 0.0 on the vector side rather than being excluded.
 export function hybridRetrieve(store: AiVectorStore, docs: AiDocument[], query: string, dims: int, k: int): AiSearchHit[] {
   if (k <= 0) { return retrNoHits(); }
   let terms = tokenizeQuery(query);
@@ -283,12 +262,10 @@ export function hybridRetrieve(store: AiVectorStore, docs: AiDocument[], query: 
   return retrTopHits(scored, k);
 }
 
-// Retrieved text is untrusted: it is whatever was in the corpus. A blank line
-// starts a new block and a leading "[" opens its citation, so a document whose
-// text contains "\n\n[2] (trusted.md) ..." would otherwise hand the model a
-// block attributed to a source it never came from. Runs of newlines collapse to
-// one so a block cannot be split, and a line beginning with "[" is indented one
-// space so it cannot be read as a citation header.
+// retrieved text is untrusted. a blank line starts a new block and a leading "["
+// opens its citation, so corpus text containing "\n\n[2] (trusted.md) ..." could
+// forge a block attributed to a source it never came from. runs of newlines
+// collapse to one, and a line beginning with "[" is indented one space.
 function retrEscapeBlockText(text: string): string {
   let out = "";
   let atLineStart: bool = true;
@@ -308,9 +285,8 @@ function retrEscapeBlockText(text: string): string {
   return out;
 }
 
-// Numbered, cited blocks: "[1] (source) text", separated by a blank line. The
-// bracket number is what the model is told to cite, and the label is what a
-// human follows back to the original file. Empty hits produce an empty string.
+// numbered, cited blocks: "[1] (source) text", separated by a blank line. the
+// bracket number is what the model is told to cite.
 export function formatContext(hits: AiSearchHit[]): string {
   let out = "";
   let i: int = 0;
@@ -323,17 +299,15 @@ export function formatContext(hits: AiSearchHit[]): string {
   return out;
 }
 
-// The full grounded-answer instruction. With no hits the context block reads
-// "(no context available)" so the model still has something to refuse against
-// rather than an empty section it might treat as an invitation to guess.
+// with no hits the context reads "(no context available)", so the model has
+// something to refuse against rather than an empty section it may fill by
+// guessing.
 export function ragPrompt(question: string, hits: AiSearchHit[]): string {
   let context = formatContext(hits);
   if (context == "") { context = "(no context available)"; }
   return retrGroundingRules() + "\n\nContext:\n" + context + "\n\nQuestion:\n" + question + "\n\nAnswer:";
 }
 
-// A system message carrying the rules and the context, plus the user question,
-// ready to hand to chatOpenAI or chatMistral.
 export function ragMessages(question: string, hits: AiSearchHit[]): AiMessage[] {
   let context = formatContext(hits);
   if (context == "") { context = "(no context available)"; }
