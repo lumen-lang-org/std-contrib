@@ -136,64 +136,67 @@ copied from LangChain.
 
 ### Recursive splitting
 
-- [ ] Replace `splitRecursive`'s single-level best-break scan with the real
+- [x] Replace `splitRecursive`'s single-level best-break scan with the real
       recursive algorithm: pick the first separator present, split, recurse into
       any piece still over the limit with the remaining separators, emit a piece
       as-is once the separators run out.
-- [ ] Merge adjacent under-size pieces back up toward the size limit.
-- [ ] Apply overlap by byte count whenever overlap is configured and a chunk
+- [x] Merge adjacent under-size pieces back up toward the size limit.
+- [x] Apply overlap by byte count whenever overlap is configured and a chunk
       follows — including when every piece already fits, which LangChain skips
       (langchain#34804).
-- [ ] Keep a separator with the piece it terminates, not the piece that follows
+- [x] Keep a separator with the piece it terminates, not the piece that follows
       (langchain#18770 / langchainjs#5151 are the cost of the other choice).
-- [ ] Walk code point boundaries in the no-separator fallback, so a run of text
+- [x] Walk code point boundaries in the no-separator fallback, so a run of text
       with no break yields valid UTF-8.
-- [ ] Reject a size at or below the overlap.
-- [ ] Report an atomic piece that exceeds the size limit rather than warning and
-      continuing.
-- [ ] Keep `splitFixed` and `splitParagraphs` as they are; only the recursive
+- [x] Reject a size at or below the overlap.
+- [x] Report an atomic piece that could not be divided. Implemented as a
+      `forced` flag on the chunk plus a hard cut at a character boundary, rather
+      than emitting an oversized chunk: an embedding endpoint rejects anything
+      over its limit, so a chunk that respects the budget and admits the broken
+      word is more useful than one that does neither.
+- [x] Keep `splitFixed` and `splitParagraphs` as they are; only the recursive
       path changes.
 
 ### Provenance
 
-- [ ] Record each chunk's byte range as the split is made, not by searching for
+- [x] Record each chunk's byte range as the split is made, not by searching for
       the chunk afterwards.
-- [ ] Carry the parent document's metadata into every chunk.
-- [ ] Record the chunk index and the source id on each chunk.
-- [ ] `splitDocument(doc, size, overlap)` splitting an `AiDocument` into
+- [x] Carry the parent document's metadata into every chunk.
+- [x] Record the chunk index and the source id on each chunk.
+- [x] `splitDocument(doc, size, overlap)` splitting an `AiDocument` into
       `AiDocument`s, beside the existing text-to-documents entry point.
 
 ### Loaders
 
-- [ ] `loadText(text, source)` — the trivial case, so a caller assembling a
+- [x] `loadText(text, source)` — the trivial case, so a caller assembling a
       document by hand does not hand-roll metadata.
-- [ ] `loadFile(path)` — read a file, record its path as the source, report an
+- [x] `loadFile(path)` — read a file, record its path as the source, report an
       unreadable path rather than returning an empty document.
-- [ ] `loadDirectory(path, extensions, recursive)` — one document per matching
+- [x] `loadDirectory(path, extensions, recursive)` — one document per matching
       file, recursion optional, unreadable entries reported. Extension matching
       only; no globbing.
 
 ### Language separators
 
-- [ ] Separator tables as plain data: markdown, and one code table covering
+- [x] Separator tables as plain data: markdown, and one code table covering
       brace languages.
-- [ ] `splitMarkdown` / `splitCode` as the recursive splitter with a table
+- [x] `splitMarkdown` / `splitCode` as the recursive splitter with a table
       selected — a default argument, not a new type.
 
 ### Tests
 
-- [ ] A document of paragraphs splits at paragraph boundaries, with only
+- [x] A document of paragraphs splits at paragraph boundaries, with only
       over-long paragraphs broken down further.
-- [ ] Byte ranges index the original text exactly, for every chunk.
-- [ ] Overlap is present when configured and every piece already fits.
-- [ ] Overlap is the configured byte count, backed off to a character boundary.
-- [ ] Text that is entirely multi-byte yields valid UTF-8 in every chunk.
-- [ ] A single word longer than the size limit is reported, not cut.
-- [ ] Metadata survives a split, and chunk index and source id are present.
-- [ ] Markdown splits at headings; code splits at declarations.
-- [ ] Loading a missing file, and a directory holding an unreadable file, are
+- [x] Byte ranges index the original text exactly, for every chunk.
+- [x] Overlap is present when configured and every piece already fits.
+- [x] Overlap is the configured byte count, backed off to a character boundary.
+- [x] Text that is entirely multi-byte yields valid UTF-8 in every chunk.
+- [x] A single word longer than the size limit is reported, not cut.
+- [x] Metadata survives a split, and chunk index and source id are present.
+- [x] Markdown splits at headings; code splits at declarations.
+- [x] Loading a missing file, and a directory holding an unreadable file, are
       both reported.
-- [ ] An empty file, an empty directory, and a file of only separators.
+- [x] An empty file, an empty directory, and a file of only separators.
 
 ## M9: Embeddings
 
