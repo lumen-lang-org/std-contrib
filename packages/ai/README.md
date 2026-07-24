@@ -748,6 +748,40 @@ OpenAI and Mistral send the same chunk shape, so one parser serves both.
 Tool-call streaming is not covered yet: those arrive as fragments that must be
 reassembled by index, which is its own slice.
 
+## Token budget
+
+Every provider call costs money, and an agent loop makes as many as its
+stopping condition allows. `maxSteps` bounds tool dispatches; nothing bounds
+tokens, and a long conversation or a large retrieved context can cost far more
+than the step count suggests.
+
+A budget is a ceiling plus a running total, checked before a call and charged
+after one:
+
+```ts
+let b = budget(50000);
+
+if (!budgetAllowsMessages(b, msgs)) {
+  console.log(budgetRefusal(b, messagesCost(msgs)));   // says what was spent
+} else {
+  let reply = chat(cfg, msgs);
+  b = chargeCall(b, msgs, reply.content);              // request and reply
+}
+```
+
+`chargeCall` counts the reply as well as the request, since output tokens are
+usually the more expensive half. A limit of 0 means unlimited, so a budget can
+be threaded through code that does not always want one, and `budgetLeft`
+reports `-1` there rather than a number that would look like zero remaining.
+
+There is no wrapper that takes a model and returns a guarded one: a closure
+here may read the values it captures but cannot call a function it received as
+a parameter. The explicit form is three lines and shows where the money goes.
+
+**Counts are estimates.** There is no tokenizer in this package, so
+`estimateTokens` approximates at four characters per token — enough to stop a
+runaway loop, not enough to reconcile against an invoice.
+
 ## Files
 
 The package is grouped by concern; `ai.ts` at the root is the public barrel and

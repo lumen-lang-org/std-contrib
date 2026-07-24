@@ -115,7 +115,10 @@
 - [ ] Add request redaction helper.
 - [x] Add allowlist guard for tool names.
 - [x] Add denylist guard for tool names.
-- [ ] Add token budget guard.
+- [x] Add token budget guard. `AiBudget` with a ceiling and a running total,
+      checked before a call and charged after one. No wrapper that guards a
+      model: a closure may read what it captures but cannot call a function it
+      received as a parameter, so the explicit three-line form is the API.
 - [ ] Add retry policy record.
 - [ ] Add retry wrapper for transient provider errors.
 
