@@ -2,6 +2,7 @@
 
 import { makeAuthHeaders } from "../providers/openai.ts";
 import { makeMistralAuthHeaders } from "../providers/mistral.ts";
+import { modelBaseUrl, AiModelConfig } from "../core/model.ts";
 
 type EmbeddingRequest = {
   model: string,
@@ -139,4 +140,49 @@ export function embedMistral(apiKey: string, model: string, input: string): numb
   const body = embeddingBody(model, input);
   const res = http.request("https://api.mistral.ai/v1/embeddings", "POST", body, makeMistralAuthHeaders(apiKey));
   return parseEmbeddingResponse(res.body);
+}
+
+// --- batch ------------------------------------------------------------------
+// One request for many inputs. An embedding endpoint charges per token, not per
+// call, so batching is mostly about latency and rate limits: indexing a hundred
+// chunks one at a time is a hundred round trips against a per-minute quota.
+//
+// The returned rows are in request order, and a failed call yields an empty
+// list rather than a partial one — a caller that indexed a short list would
+// otherwise silently misalign chunks against vectors.
+
+export function embedBatchWithBaseUrl(baseUrl: string, apiKey: string, model: string, inputs: string[]): number[][] {
+  let none: number[][] = [];
+  if (inputs.length == 0) { return none; }
+  const body = embeddingBodyBatch(model, inputs);
+  const res = http.request(baseUrl + "/embeddings", "POST", body, makeAuthHeaders(apiKey));
+  const rows = parseEmbeddingBatch(res.body);
+  if (rows.length != inputs.length) { return none; }
+  return rows;
+}
+
+export function embedBatchOpenAI(apiKey: string, model: string, inputs: string[]): number[][] {
+  return embedBatchWithBaseUrl("https://api.openai.com/v1", apiKey, model, inputs);
+}
+
+export function embedBatchMistral(apiKey: string, model: string, inputs: string[]): number[][] {
+  let none: number[][] = [];
+  if (inputs.length == 0) { return none; }
+  const body = embeddingBodyBatch(model, inputs);
+  const res = http.request("https://api.mistral.ai/v1/embeddings", "POST", body, makeMistralAuthHeaders(apiKey));
+  const rows = parseEmbeddingBatch(res.body);
+  if (rows.length != inputs.length) { return none; }
+  return rows;
+}
+
+// Embed a batch through a model config, so a caller that already has one does
+// not repeat the provider choice.
+export function embedBatchWithConfig(cfg: AiModelConfig, inputs: string[]): number[][] {
+  let none: number[][] = [];
+  let base = modelBaseUrl(cfg);
+  if (base == "") { return none; }
+  if (cfg.provider == "mistral") {
+    return embedBatchMistral(cfg.apiKey, cfg.model, inputs);
+  }
+  return embedBatchWithBaseUrl(base, cfg.apiKey, cfg.model, inputs);
 }

@@ -29,7 +29,7 @@ import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buil
 // the sibling that imports it under its original name.
 import { dotProduct as computeDotProduct, vectorNorm as computeVectorNorm, normalizeVector as computeNormalizeVector, cosineSimilarity, euclideanDistance as computeEuclideanDistance, fakeEmbedding } from "./rag/vector.ts";
 import { makeDocument, documentMetadata, withMetadata, splitFixed as splitFixedText, splitRecursive as splitRecursiveText, splitParagraphs as splitParagraphText, splitToDocuments as splitTextToDocuments } from "./rag/document.ts";
-import { embeddingBody as buildEmbeddingBody, embeddingBodyBatch as buildEmbeddingBodyBatch, parseEmbeddingResponse as readEmbeddingResponse, parseEmbeddingBatch as readEmbeddingBatch, embedOpenAI as runEmbedOpenAI, embedOpenAIWithBaseUrl as runEmbedOpenAIWithBaseUrl, embedMistral as runEmbedMistral } from "./rag/embed.ts";
+import { embeddingBody as buildEmbeddingBody, embeddingBodyBatch as buildEmbeddingBodyBatch, parseEmbeddingResponse as readEmbeddingResponse, parseEmbeddingBatch as readEmbeddingBatch, embedOpenAI as runEmbedOpenAI, embedOpenAIWithBaseUrl as runEmbedOpenAIWithBaseUrl, embedMistral as runEmbedMistral, embedBatchWithBaseUrl as runEmbedBatchWithBaseUrl, embedBatchOpenAI as runEmbedBatchOpenAI, embedBatchMistral as runEmbedBatchMistral, embedBatchWithConfig as runEmbedBatchWithConfig } from "./rag/embed.ts";
 import { emptyVectorStore, storeSize as readStoreSize, addVector as addStoreVector, addDocuments, deleteById as deleteStoreDocument, filterByMetadata as filterStoreByMetadata, searchByVector as runSearchByVector, searchByText } from "./rag/store.ts";
 import { tokenizeQuery as readQueryTerms, keywordScore as computeKeywordScore, keywordRetrieve as runKeywordRetrieve, vectorRetrieve as runVectorRetrieve, hybridRetrieve as runHybridRetrieve, formatContext as buildRagContext, ragPrompt as buildRagPrompt, ragMessages as buildRagMessages } from "./rag/retrieve.ts";
 import { needsCompression as historyNeedsCompression, compressHistory as foldHistory, compressIfNeeded as foldHistoryIfNeeded, appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory/memory.ts";
@@ -652,6 +652,26 @@ export function modelEndpoint(cfg: AiModelConfig): string {
 // Send messages using a config.
 export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   return runConfiguredChat(cfg, messages);
+}
+
+// --- Batch embeddings -------------------------------------------------------
+// One request for many inputs. A short or failed response yields no vectors
+// rather than a partial list, so chunks and vectors cannot drift out of step.
+
+export function embedBatchWithBaseUrl(baseUrl: string, apiKey: string, model: string, inputs: string[]): number[][] {
+  return runEmbedBatchWithBaseUrl(baseUrl, apiKey, model, inputs);
+}
+
+export function embedBatchOpenAI(apiKey: string, model: string, inputs: string[]): number[][] {
+  return runEmbedBatchOpenAI(apiKey, model, inputs);
+}
+
+export function embedBatchMistral(apiKey: string, model: string, inputs: string[]): number[][] {
+  return runEmbedBatchMistral(apiKey, model, inputs);
+}
+
+export function embedBatchWithConfig(cfg: AiModelConfig, inputs: string[]): number[][] {
+  return runEmbedBatchWithConfig(cfg, inputs);
 }
 
 // --- Documents: splitting and loading ---------------------------------------

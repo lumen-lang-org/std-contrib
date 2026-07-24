@@ -2,7 +2,7 @@
 // The per-provider entry points hardcode temperature and max_tokens; a config
 // makes them settable.
 
-type AiModelConfig = {
+export type AiModelConfig = {
   // "mistral" or "openai". Anything else needs an explicit baseUrl.
   provider: string,
   model: string,

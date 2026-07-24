@@ -343,8 +343,21 @@ Use at least 128 dimensions. `hashEmbedding` is a hashing bag of words, so
 distinct terms collide into the same bucket at low dimension counts. When "no
 match" must mean no results, use `keywordRetrieve`: it drops documents that
 share no term with the query, while the vector path always returns some
-collision noise. For real semantic search, index with `embedText` instead and
-insert the returned vectors with `addVector`.
+collision noise. For real semantic search, embed with a provider model instead. `embedBatchWithConfig`
+takes every chunk in one request, and the returned vectors go into the store
+with `addVector`:
+
+```ts
+let cfg = modelConfig("mistral", "mistral-embed", apiKey);
+let vectors = embedBatchWithConfig(cfg, texts);
+```
+
+A response with fewer rows than inputs yields none rather than a partial list —
+a partial one would pair vectors with the wrong chunks, and the misalignment
+would show up later as retrieval that is merely bad rather than broken.
+`examples/embed-search.ts` is a runnable version; against mistral-embed it ranks
+a passage that shares no words with the question above one that does not, which
+is the whole difference from the hashing embedder.
 
 ## Conversation memory
 
