@@ -273,6 +273,119 @@ Success criteria:
 - A user can split text, embed chunks, store vectors, retrieve top-k documents,
   and feed them to a chat model.
 
+#### 9a. Splitting and loading, in detail
+
+The first pass shipped a document record, metadata encoding, a fixed-size
+splitter with overlap, a break-seeking splitter, and paragraph splitting. Two
+gaps remain, and one shipped piece is weaker than its name suggests.
+
+**The recursive splitter is not recursive.** `splitRecursive` scans backwards
+from the size limit for the last occurrence of a separator, taking the first
+that hits from a fixed list, and cuts there. That is a single-level best-break
+search. The established algorithm — LangChain's
+`RecursiveCharacterTextSplitter`, read from
+`libs/langchain-textsplitters/src/text_splitter.ts` — is different in kind:
+
+1. Choose the first separator in an ordered list that occurs anywhere in the
+   text. The list runs structural to universal: `"\n\n"`, `"\n"`, `" "`, `""`.
+2. Split on it, then walk the pieces. A piece under the size limit accumulates.
+   A piece at or over it flushes what has accumulated, then **recurses into that
+   piece with the remaining, narrower separators**.
+3. A piece still too large once the separator list is exhausted is emitted
+   oversized rather than cut mid-word.
+4. Adjacent accumulated pieces are merged back up toward the size limit.
+
+The difference shows on structured text. Given a document of long paragraphs,
+the current splitter cuts each at the nearest newline to the byte budget; the
+recursive one splits into paragraphs, and only the paragraphs that are still too
+long get broken down further by line, then by word. Chunk boundaries follow the
+document's structure instead of the budget.
+
+**Chunks carry no provenance.** `splitToDocuments` passes `""` for metadata and
+synthesizes `source#index` as the id, so a chunk knows nothing of the document
+it came from and nothing of where inside it. Retrieval can then find the right
+text but cannot say where it came from, which is most of what makes a citation.
+Chunks must carry the parent's metadata plus their own byte range.
+
+**No loaders.** Text and file loading is left to the caller, so every example
+repeats the same `fs.readFileSync` and metadata assembly.
+
+##### What to take from LangChain, and what to leave
+
+Worth taking: the ordered separator list with a universal fallback; the
+three-way branch per piece (fits, recurse, emit oversized); merging adjacent
+pieces with a sliding window for overlap; per-language separator tables, which
+are pure data; and refusing to cut mid-word to meet a budget.
+
+Deliberately not taken:
+
+- **The class hierarchy.** `MarkdownTextSplitter` is `RecursiveCharacterTextSplitter`
+  with a different separator array. That is a default argument, not a subclass.
+  One function plus data tables.
+- **Async everywhere.** `splitText` returns a promise only so a caller may supply
+  an async length function. There is no tokenizer to call here, so splitting is
+  a plain synchronous function.
+- **An injectable length function.** One unit, measured one way. See below.
+- **`keepSeparator` by lookahead regex.** `text.split(/(?=sep)/)` always glues the
+  separator to the *following* piece. That is the documented cause of chunks
+  beginning with `"。"` in Chinese text (langchain#18770) and of separators
+  appearing to vanish at boundaries (langchainjs#5151). Splitting by hand costs
+  nothing extra and lets the separator stay with the piece it terminates.
+- **`console.warn` on an oversized chunk.** A warning that cannot be acted on is
+  noise; users ask how to silence it (langchain discussion #19256). An oversized
+  chunk is reported in the result instead.
+- **Reconstructing offsets by searching for the chunk in the original text.**
+  LangChain derives `loc.lines` with `indexOf` after the fact, which is
+  quadratic and ambiguous when two chunks are identical. The splitter knows each
+  boundary as it makes it; the range is recorded there.
+
+##### Corrections to LangChain's behaviour
+
+Two of their behaviours are bugs to avoid rather than choices to copy.
+
+**Overlap that silently does not happen.** Overlap is applied only inside the
+branch that handles overflowing the size limit. If every piece fits — a document
+of short paragraphs with a generous limit — that branch never runs and no
+overlap is ever applied, despite being configured. Reported repeatedly
+(langchain#34804, #30200) and confirmed by reading `mergeSplits`. Here, when
+overlap is configured and a following chunk exists, overlap applies.
+
+**Overlap of an unpredictable size.** Their overlap is whatever whole pieces
+happen to remain after eviction, so the actual figure depends on the granularity
+of the split and is never the configured number. This package measures overlap
+in bytes and honours the number, backing off to a character boundary.
+
+##### Bytes, not characters
+
+A Lumen string is UTF-8 indexed by byte, and there is no character abstraction to
+hide behind. Sizes and overlaps are therefore byte counts, stated as such.
+
+This matters most at the universal fallback. LangChain's last-resort separator is
+`""`, which in JavaScript splits into UTF-16 code units — never inside a
+character. The byte-indexed equivalent would split inside a multi-byte sequence
+and emit invalid UTF-8. The fallback must therefore walk code point boundaries,
+which the existing `docCharStart`/`docCharEnd`/`docSafeCut` helpers already do
+and the current fixed-size splitter already uses.
+
+Defaults follow LangChain's, in bytes: size 1000, overlap 200. A size at or below
+the overlap is rejected, as they do.
+
+Success criteria for this slice:
+
+- The recursive splitter splits by structure: a document of paragraphs splits at
+  paragraph boundaries, and only over-long paragraphs are broken down further.
+- Every chunk carries its parent's metadata, its index, and its byte range, and
+  the range indexes the original text exactly.
+- Overlap is applied whenever it is configured and a following chunk exists,
+  including when every piece already fits — the case LangChain silently skips.
+- Every chunk is valid UTF-8, including when the fallback splits a run with no
+  separator at all, and including text that is entirely multi-byte.
+- An atomic piece larger than the size limit is reported, not cut mid-character
+  and not silently oversized.
+- Loading a file yields a document whose metadata records its path; loading a
+  directory yields one per file, and an unreadable file is reported rather than
+  skipped in silence.
+
 ### 10. Embeddings
 
 Features:
