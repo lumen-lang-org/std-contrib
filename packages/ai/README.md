@@ -609,40 +609,33 @@ string value. Types and nested constraints are left to the provider's strict mod
 
 ## Files
 
-- `ai.ts` is the public entry point.
-- `messages.ts` contains chat message constructors and the shared message type.
-- `request.ts` contains provider-neutral chat request helpers.
-- `error.ts` contains provider-neutral error helpers.
-- `usage.ts` contains provider-neutral token usage helpers.
-- `options.ts` contains provider-neutral model option helpers.
-- `provider.ts` contains provider selection helpers.
-- `output.ts` contains output parser helpers.
-- `prompt.ts` contains prompt templating.
-- `openai.ts` contains OpenAI-compatible request, response, and HTTP helpers.
-- `mistral.ts` contains Mistral request, response, and HTTP helpers.
-- `headers.ts` and `result.ts` contain shared provider helpers.
-- `document.ts` contains the document record, metadata, and text splitters.
-- `vector.ts` contains vector maths and the offline hashing embedder.
-- `embed.ts` contains embeddings request bodies, parsers, and HTTP helpers.
-- `store.ts` contains the in-memory vector store and similarity search.
-- `retrieve.ts` contains keyword, vector, and hybrid retrievers plus RAG prompts.
-- `memory.ts` contains conversation memory, key/value memory, and history files.
-- `tools.ts` contains the tool record, the registry, dispatch, and the
-  allow/deny policy.
-- `toolcall.ts` contains provider tool-call parsing and tool definition
-  serialization.
-- `toolchat.ts` contains the live tool-calling adapter: native turn records,
-  tool-enabled request bodies, and the tool round-trip HTTP helpers.
-- `agent.ts` contains the agent loop, its trace, the offline fake model driver,
-  and the live `openAIAgent` / `mistralAgent` model sources.
-- `mcp.ts` contains the MCP (Model Context Protocol) client: JSON-RPC framing,
-  the response parsers, the HTTP `initialize` / `tools/list` / `tools/call`
-  calls, and the adapter that turns an MCP tool into a `AiTool`.
-- `examples/mistral-chat.ts` is a live Mistral smoke test.
-- `examples/openai-chat.ts` is a live OpenAI-compatible smoke test.
-- `examples/openai-compatible-chat.ts` is a live local gateway smoke test.
-- `examples/prompt-snapshot.ts` is a deterministic prompt rendering example.
-- `spec.md` and `tasks.md` track the AI package roadmap.
+The package is grouped by concern; `ai.ts` at the root is the public barrel and
+the only entry point consumers import.
+
+```
+ai.ts              public barrel — the package API
+core/              provider-neutral schema: messages, request, result,
+                   error, options, usage, headers, provider selection
+providers/         openai.ts, mistral.ts
+prompt/            prompt templates, output parsers, structured output
+rag/               vector maths, documents, embeddings, store, retrieval
+memory/            conversation memory, persistence, context compression
+agent/             tools, tool-call JSON, the tool round trip, the agent loop
+mcp/               client.ts (HTTP), stdio.ts, sse.ts
+examples/          runnable examples, incl. examples/support-agent/
+```
+
+Tests live beside the code they cover as `*.test.ts` — `rag/vector.test.ts`
+covers `rag/vector.ts`. Run one file, or the whole package:
+
+```sh
+lumen test packages/ai/rag/vector.test.ts   # one module
+sh packages/ai/run-tests.sh                 # all of them
+```
+
+A module exporting a helper only so its test file can reach it is deliberate:
+a module's exports are not the package's API — only what `ai.ts` re-exports is
+public.
 
 ## Design
 
