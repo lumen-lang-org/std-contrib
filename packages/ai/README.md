@@ -212,6 +212,86 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `mcpSseCall(url, headers, name, argumentsJson)` | Call one MCP tool over SSE |
 | `mcpSseAsTools(url, headers, tools)` | Adapt SSE MCP tools into a `AiTool[]` for `runAgent` |
 
+## Documents, splitting and loading
+
+Retrieval starts by cutting a document into pieces small enough to embed. The
+splitter follows the document's own structure rather than a byte count: it
+splits on the widest separator present — a blank line, then a line, then a
+sentence, then a word — and recurses into only the pieces that are still too
+long. Three short paragraphs stay three chunks; one long paragraph among them is
+the only one broken down further.
+
+```ts
+let cs = chunks(text, 1000, 200);
+for (const c of cs) {
+  console.log(`${c.start}..${c.end} ${c.text}`);
+}
+```
+
+**Sizes and overlaps are byte counts**, like everything else about a Lumen
+string. For English that reads as characters; for CJK a byte budget of 1000
+holds about 333 characters, since each is three bytes. Chunks never split a
+character regardless — the budget is a ceiling the splitter stays under, backing
+off to a character boundary.
+
+Every chunk carries the byte range it came from, so `text.substring(c.start,
+c.end)` is exactly `c.text`. That is what lets a retrieved chunk point back at
+its place in the source, which is most of what a citation is. `c.forced` marks a
+chunk whose boundary fell inside a word because the text offered no separator to
+break on — a long URL, or a run of CJK.
+
+Splitting a document carries its metadata into every chunk, and adds the chunk's
+index, byte range, and parent id:
+
+```ts
+let doc = loadText(notes, "notes.md");
+let parts = splitDocument(doc, 1000, 200);
+documentMetadata(parts[3], "chunk");   // "3"
+documentMetadata(parts[3], "parent");  // "notes.md"
+```
+
+`markdownChunks` breaks at headings before prose boundaries and `codeChunks` at
+declarations; `chunksWith` takes an explicit separator list. A separator that
+opens a section heads its chunk, while one that closes a sentence tails the
+piece it ended — so a heading starts a chunk and a full stop finishes one.
+
+Loading reads from the filesystem and reports what it could not read, rather
+than leaving a hole in an index that later just looks incomplete:
+
+```ts
+let r = loadDirectory("./docs", [".md", ".txt"], true);
+if (!r.ok) { console.error(r.error); }
+for (const d of r.docs) { /* d.source is the path */ }
+```
+
+`loadFile` reads one file, `loadText` wraps text already in hand, and
+`loadDirectory` takes an extension filter (including the dot; an empty list
+takes everything) and an optional recursive descent. Matching is by extension
+only — there is no globbing.
+
+### Differences from LangChain
+
+The algorithm is LangChain's `RecursiveCharacterTextSplitter`, with two of its
+behaviours deliberately changed:
+
+- **Overlap always applies.** LangChain runs its overlap logic only while
+  resolving a chunk-size overflow, so a document whose pieces all fit gets no
+  overlap at all despite asking for it (langchain#34804). Here overlap applies
+  whenever a chunk has a predecessor.
+- **Overlap is the number you asked for.** LangChain's overlap is whatever whole
+  pieces survive eviction, so it depends on split granularity and is never
+  exactly the configured figure. Here it is a byte count taken off the chunk's
+  own start.
+
+Not carried over: the class hierarchy (a markdown splitter is this splitter with
+a different separator list — a default argument, not a subclass), async (there
+is no tokenizer to await), and the lookahead-regex separator split, which
+attaches every separator to the *following* piece and is why Chinese chunks
+there begin with a full stop (langchain#18770).
+
+Tool-call-aware and token-based splitting are not implemented: token counts need
+a tokenizer, and this package has none.
+
 ## RAG
 
 Retrieval runs entirely offline: split local text into documents, index them
@@ -658,7 +738,8 @@ core/              provider-neutral schema: messages, request, result,
                    error, options, usage, headers, provider selection
 providers/         openai.ts, mistral.ts, chat.ts, stream.ts
 prompt/            prompt templates, output parsers, structured output
-rag/               vector maths, documents, embeddings, store, retrieval
+rag/               vector maths, documents, splitting, loading,
+                   embeddings, store, retrieval
 memory/            conversation memory, persistence, context compression
 agent/             tools, tool-call JSON, the tool round trip, the agent loop
 mcp/               client.ts (HTTP), stdio.ts, sse.ts
@@ -701,8 +782,8 @@ JavaScript runtime.
 
 ## Limits in V1
 
-Retrieval, embeddings, memory, tools, and the agent loop now ship. What is still
-missing:
+Retrieval, embeddings, memory, tools, splitting, loading, and the agent loop now
+ship. What is still missing:
 
 - token streaming ships, but tool-call streaming does not: a streamed tool call
   arrives as fragments that must be reassembled by index
@@ -716,6 +797,11 @@ missing:
 - no model retry policy and no tool retry policy
 - no checkpoint, resume, or rewind of a partly finished agent run
 - no human-in-the-loop pause before a sensitive tool
+- splitting measures in bytes; token-based splitting would need a tokenizer,
+  which this package does not have, so a byte budget is a proxy for the token
+  limit an embedding endpoint actually enforces
+- loaders read plain text only: no PDF, DOCX, HTML or CSV parsing, and directory
+  matching is by extension with no globbing
 - no dynamic schema validation
 - no provider-specific SDKs
 - no automatic retries
