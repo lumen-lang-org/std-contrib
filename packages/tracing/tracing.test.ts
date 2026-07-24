@@ -1,0 +1,298 @@
+// The wire format, offline. Nothing here sends a request; what matters is that
+// the document is valid JSON, that the OTLP shapes are exactly what a collector
+// expects, and that ids are the widths the protocol fixes.
+
+import { makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, base64Encode, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN } from "./tracing.ts";
+
+function tracer(): Tracer {
+  return makeTracer("http://127.0.0.1:9/v1/traces", "pk-lf-test", "sk-lf-test", "lumen-test");
+}
+
+// A minimal well-formedness check: every brace, bracket and quote balances,
+// with escapes respected. A hand-built document that fails this is rejected by
+// a collector before anything else is considered.
+function balanced(s: string): bool {
+  let depth: int = 0;
+  let brackets: int = 0;
+  let inString: bool = false;
+  let escaped: bool = false;
+  let i: int = 0;
+  while (i < s.length) {
+    let c = s.charAt(i);
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (c == "\\") {
+        escaped = true;
+      } else if (c == "\"") {
+        inString = false;
+      }
+    } else {
+      if (c == "\"") { inString = true; }
+      if (c == "{") { depth = depth + 1; }
+      if (c == "}") { depth = depth - 1; }
+      if (c == "[") { brackets = brackets + 1; }
+      if (c == "]") { brackets = brackets - 1; }
+      if (depth < 0 || brackets < 0) { return false; }
+    }
+    i = i + 1;
+  }
+  return depth == 0 && brackets == 0 && !inString;
+}
+
+// --- JSON escaping ------------------------------------------------------------
+
+test("a plain string needs only quotes", () => {
+  expect(jsonString("hello") == "\"hello\"");
+});
+
+test("quotes and backslashes are escaped", () => {
+  expect(jsonString("a\"b") == "\"a\\\"b\"");
+  expect(jsonString("a\\b") == "\"a\\\\b\"");
+});
+
+test("a newline is escaped, not passed through", () => {
+  // A model reply carrying a raw newline is the usual way to produce an
+  // invalid document.
+  expect(jsonString("a\nb") == "\"a\\nb\"");
+  expect(jsonString("a\tb") == "\"a\\tb\"");
+  expect(jsonString("a\rb") == "\"a\\rb\"");
+});
+
+test("an escaped string stays balanced", () => {
+  expect(balanced(jsonString("a\"b{c}[d]")));
+  expect(balanced(jsonString("}}}]]]")));
+});
+
+// --- base64 --------------------------------------------------------------------
+
+test("base64 matches the known vectors", () => {
+  expect(base64Encode("") == "");
+  expect(base64Encode("f") == "Zg==");
+  expect(base64Encode("fo") == "Zm8=");
+  expect(base64Encode("foo") == "Zm9v");
+  expect(base64Encode("foob") == "Zm9vYg==");
+  expect(base64Encode("fooba") == "Zm9vYmE=");
+  expect(base64Encode("foobar") == "Zm9vYmFy");
+});
+
+test("a credential pair encodes as basic auth expects", () => {
+  expect(base64Encode("pk:sk") == "cGs6c2s=");
+});
+
+// --- identifiers ------------------------------------------------------------------
+
+test("a trace id is 32 hex characters and a span id is 16", () => {
+  // OTLP fixes these widths; a collector rejects anything else.
+  expect(newTraceId().length == 32);
+  expect(newSpanId().length == 16);
+});
+
+test("ids are hexadecimal", () => {
+  let id = newTraceId();
+  let i: int = 0;
+  while (i < id.length) {
+    let c = id.charCodeAt(i);
+    let isDigit = c >= 48 && c <= 57;
+    let isLower = c >= 97 && c <= 102;
+    expect(isDigit || isLower);
+    i = i + 1;
+  }
+});
+
+test("ids differ between calls", () => {
+  expect(newTraceId() != newTraceId());
+  expect(newSpanId() != newSpanId());
+});
+
+test("nanoseconds are far larger than milliseconds", () => {
+  // A millisecond clock scaled to nanoseconds: the value must be in the
+  // 10^18 range, not 10^12, or the collector places the span in 1970.
+  expect(nowNanos() > 1700000000000000000);
+});
+
+// --- spans ---------------------------------------------------------------------
+
+test("a fresh tracer has a trace id and no spans", () => {
+  let t = tracer();
+  expect(traceId(t).length == 32);
+  expect(spanCount(t) == 0);
+});
+
+test("recording a span leaves the tracer it was given alone", () => {
+  let t = tracer();
+  let s = startSpan("step", TRACE_SPAN, "");
+  let t2 = endSpan(t, s, "in", "out");
+  expect(spanCount(t) == 0);
+  expect(spanCount(t2) == 1);
+});
+
+test("a span carries its trace, its own id and its timings", () => {
+  let t = tracer();
+  let s = startSpan("retrieve", TRACE_SPAN, "");
+  let body = traceBody(endSpan(t, s, "q", "docs"));
+  expect(body.indexOf(traceId(t)) >= 0);
+  expect(body.indexOf(s.id) >= 0);
+  expect(body.indexOf("startTimeUnixNano") >= 0);
+  expect(body.indexOf("endTimeUnixNano") >= 0);
+  expect(body.indexOf("\"name\":\"retrieve\"") >= 0);
+});
+
+test("a child names its parent and a root does not", () => {
+  let t = tracer();
+  let root = startSpan("run", TRACE_CHAIN, "");
+  let child = startSpan("call", TRACE_GENERATION, root.id);
+  let body = traceBody(endSpan(endSpan(t, root, "", ""), child, "", ""));
+  expect(body.indexOf("\"parentSpanId\":\"" + root.id + "\"") >= 0);
+  // The root's own span carries no parent.
+  expect(body.indexOf("\"parentSpanId\":\"\"") < 0);
+});
+
+test("the document is well formed with several spans", () => {
+  let t = tracer();
+  let root = startSpan("run", TRACE_CHAIN, "");
+  let gen = startSpan("chat", TRACE_GENERATION, root.id);
+  let tool = startSpan("weather", TRACE_TOOL, root.id);
+  let t2 = endGeneration(t, gen, "mistral-large", 0.2, 512, "hi", "hello", 10, 4);
+  let t3 = endTool(t2, tool, "Paris", "18C", true);
+  let t4 = endSpan(t3, root, "q", "a");
+  expect(spanCount(t4) == 3);
+  expect(balanced(traceBody(t4)));
+});
+
+test("output containing braces and quotes keeps the document valid", () => {
+  // A model that answers with JSON is the case that breaks a naive builder.
+  let t = tracer();
+  let s = startSpan("chat", TRACE_GENERATION, "");
+  let nasty = "{\"answer\": \"it's \\\"quoted\\\"\"}\n[1,2]";
+  expect(balanced(traceBody(endSpan(t, s, nasty, nasty))));
+});
+
+// --- kinds and levels -------------------------------------------------------------
+
+test("a generation carries model, parameters and usage", () => {
+  let t = tracer();
+  let s = startSpan("chat", TRACE_GENERATION, "");
+  let body = traceBody(endGeneration(t, s, "mistral-large-latest", 0.7, 1024, "in", "out", 120, 45));
+  expect(body.indexOf("langfuse.observation.model.name") >= 0);
+  expect(body.indexOf("mistral-large-latest") >= 0);
+  expect(body.indexOf("\\\"temperature\\\":0.7") >= 0);
+  expect(body.indexOf("usage_details") >= 0);
+  expect(body.indexOf("\\\"input\\\":120") >= 0);
+  expect(body.indexOf("\\\"total\\\":165") >= 0);
+});
+
+test("a generation also carries the standard opentelemetry attributes", () => {
+  // These are what a collector that knows nothing of Langfuse classifies on.
+  let t = tracer();
+  let s = startSpan("chat", TRACE_GENERATION, "");
+  let body = traceBody(endGeneration(t, s, "gpt-4o", 0.5, 256, "in", "out", 7, 3));
+  expect(body.indexOf("\"gen_ai.operation.name\"") >= 0);
+  expect(body.indexOf("\"chat\"") >= 0);
+  expect(body.indexOf("gen_ai.usage.input_tokens") >= 0);
+  // An integer attribute is carried as a string in OTLP's JSON mapping.
+  expect(body.indexOf("\"intValue\":\"7\"") >= 0);
+});
+
+test("a failed span is marked error and says why", () => {
+  let t = tracer();
+  let s = startSpan("chat", TRACE_GENERATION, "");
+  let body = traceBody(endSpanFailed(t, s, "in", "the provider returned 429"));
+  // The message goes in OTLP's own status field as well as a Langfuse
+  // attribute, so a collector that knows nothing of Langfuse still shows why.
+  expect(body.indexOf("\"status\":{\"code\":2,\"message\":") >= 0);
+  expect(body.indexOf("ERROR") >= 0);
+  expect(body.indexOf("429") >= 0);
+});
+
+test("a successful span leaves its status unset", () => {
+  let t = tracer();
+  let s = startSpan("step", TRACE_SPAN, "");
+  expect(traceBody(endSpan(t, s, "", "")).indexOf("\"status\"") < 0);
+});
+
+test("a failed tool is marked error, a successful one is not", () => {
+  let t = tracer();
+  let good = startSpan("weather", TRACE_TOOL, "");
+  let bad = startSpan("weather", TRACE_TOOL, "");
+  expect(traceBody(endTool(t, good, "Paris", "18C", true)).indexOf("\"code\":2") < 0);
+  expect(traceBody(endTool(t, bad, "Paris", "no such city", false)).indexOf("\"code\":2") >= 0);
+});
+
+test("the observation type reaches the document", () => {
+  let t = tracer();
+  let s = startSpan("x", TRACE_TOOL, "");
+  let body = traceBody(endTool(t, s, "", "", true));
+  expect(body.indexOf("langfuse.observation.type") >= 0);
+  expect(body.indexOf("\"tool\"") >= 0);
+});
+
+// --- resource and session ----------------------------------------------------------
+
+test("the service name and environment ride on the resource", () => {
+  let t = tracerWithEnvironment(tracer(), "staging");
+  let s = startSpan("x", TRACE_SPAN, "");
+  let body = traceBody(endSpan(t, s, "", ""));
+  expect(body.indexOf("service.name") >= 0);
+  expect(body.indexOf("lumen-test") >= 0);
+  expect(body.indexOf("staging") >= 0);
+});
+
+test("session and user are repeated on every span", () => {
+  // A collector filters span by span, so a value set only on the root would
+  // not be found.
+  let t = tracerWithSession(tracer(), "sess-1", "user-1");
+  let a = startSpan("one", TRACE_SPAN, "");
+  let b = startSpan("two", TRACE_SPAN, "");
+  let body = traceBody(endSpan(endSpan(t, a, "", ""), b, "", ""));
+  let first = body.indexOf("sess-1");
+  expect(first >= 0);
+  // Present twice, once per span.
+  expect(body.indexOf("sess-1", first + 1) > first);
+  expect(body.indexOf("user-1") >= 0);
+});
+
+test("an unset session is omitted rather than sent empty", () => {
+  let t = tracer();
+  let s = startSpan("x", TRACE_SPAN, "");
+  expect(traceBody(endSpan(t, s, "", "")).indexOf("session.id") < 0);
+});
+
+// --- envelope and flush ---------------------------------------------------------
+
+test("the envelope nests resource, scope and spans", () => {
+  let t = tracer();
+  let s = startSpan("x", TRACE_SPAN, "");
+  let body = traceBody(endSpan(t, s, "", ""));
+  expect(body.indexOf("\"resourceSpans\"") >= 0);
+  expect(body.indexOf("\"scopeSpans\"") >= 0);
+  expect(body.indexOf("\"spans\"") >= 0);
+  expect(body.indexOf("\"kind\":1") >= 0);
+});
+
+test("flushing nothing makes no request", () => {
+  // The endpoint is unroutable, so a request would fail — succeeding proves
+  // none was made.
+  let r = flush(tracer());
+  expect(r.ok);
+  expect(r.status == 0);
+});
+
+test("a failed flush reports the collector's answer", () => {
+  let t = tracer();
+  let s = startSpan("x", TRACE_SPAN, "");
+  let r = flush(endSpan(t, s, "", ""));
+  expect(!r.ok);
+  expect(r.error.length > 0);
+});
+
+test("resetting keeps the settings and takes a new trace id", () => {
+  let t = tracer();
+  let s = startSpan("x", TRACE_SPAN, "");
+  let used = endSpan(t, s, "", "");
+  let fresh = resetTracer(used);
+  expect(spanCount(fresh) == 0);
+  expect(traceId(fresh) != traceId(used));
+  expect(fresh.serviceName == used.serviceName);
+  expect(fresh.auth == used.auth);
+});
