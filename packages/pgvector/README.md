@@ -145,3 +145,7 @@ with `PGVECTOR_TEST_CONNINFO`.
   would be a flag on the search functions.
 - Vectors are sent as text rather than binary, so a large batch spends time in
   formatting that a binary path would not.
+- Both shims must sit in the compile working directory when one program links
+  two FFI packages, because `// @link` paths resolve against it rather than
+  against the source file. `examples/rag-pdf.ts` links this and `pdf`, and says
+  so in its header.
