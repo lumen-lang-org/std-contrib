@@ -34,9 +34,8 @@ function findEmbeddingFrom(src: string, pattern: string, start: int): int {
   return -1;
 }
 
-// A token that is not a number fails the whole vector. Substituting 0.0 would
-// hand the caller a plausible but meaningless embedding it cannot tell apart
-// from a real one, so malformed input degrades to an empty vector instead.
+// a non-numeric token fails the whole vector: substituting 0.0 would hand back a
+// plausible but meaningless embedding, so malformed input yields an empty one.
 function readEmbeddingNumberArray(raw: string, open: int): number[] {
   let rejected: number[] = [];
   let out: number[] = [];
@@ -100,6 +99,8 @@ export function embeddingBodyBatch(model: string, inputs: string[]): string {
   return JSON.stringify(req);
 }
 
+// JSON.parse<T> throws on unknown fields, so a live provider body that carries
+// more than EmbeddingListResponse falls back to the string scanner.
 export function parseEmbeddingBatch(raw: string): number[][] {
   let empty: number[][] = [];
   if (raw == "") { return empty; }

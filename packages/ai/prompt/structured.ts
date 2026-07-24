@@ -1,23 +1,21 @@
-// Provider-native structured output: ask the model for JSON that conforms to a
-// schema, and get back a validated result rather than free text.
+// Provider-native structured output: ask for JSON conforming to a schema and
+// get back a validated result rather than free text.
 //
-// Two provider modes, and the difference matters:
-//   - JSON mode (`{"type":"json_object"}`) guarantees the reply PARSES as JSON,
-//     but not that it has your shape. Probed against Mistral, asking for
-//     name/age/city in JSON mode returned {"person":{...}} — valid JSON, wrong
-//     shape. Use it only as a fallback.
-//   - Schema mode (`{"type":"json_schema", ..., "strict":true}`) constrains the
-//     shape. The same prompt returned a flat {name, age, city}. Prefer this.
+// two provider modes:
+//   - `{"type":"json_object"}` guarantees the reply PARSES as JSON but not that
+//     it has the requested shape (a flat request can come back nested). Fallback
+//     only.
+//   - `{"type":"json_schema", ..., "strict":true}` constrains the shape. Prefer.
 //
-// Lumen has no runtime reflection, so a schema is described with explicit
-// fields rather than derived from a record type.
+// there is no runtime reflection, so a schema is described with explicit fields
+// rather than derived from a record type.
 
 import { makeAuthHeaders } from "../providers/openai.ts";
 import { makeMistralAuthHeaders } from "../providers/mistral.ts";
 import { firstJsonObjectOutput, typedJsonInputOutput, retryPromptOutput } from "./output.ts";
 
-// One property of an object schema. `type` is a JSON Schema primitive name:
-// "string", "integer", "number", "boolean".
+// `type` is a JSON Schema primitive name: "string", "integer", "number",
+// "boolean".
 type AiSchemaField = {
   name: string,
   type: string,
@@ -25,16 +23,15 @@ type AiSchemaField = {
   required: bool,
 };
 
-// The outcome of a structured request. `json` is the extracted object source on
-// success and "" otherwise; `error` explains a failure in one line.
+// `json` is the extracted object source on success, "" otherwise.
 type AiStructured = {
   ok: bool,
   json: string,
   error: string,
 };
 
-// Scalars are serialized through JSON.stringify so a float temperature is
-// formatted exactly as the other provider modules format it.
+// serialized via JSON.stringify so a float temperature is formatted the same
+// way the other provider modules format it.
 type StructuredScalars = {
   model: string,
   temperature: number,
@@ -69,9 +66,8 @@ export function schemaField(name: string, fieldType: string, description: string
   return f;
 }
 
-// Build a JSON Schema object from explicit fields. `additionalProperties` is
-// false and every required field is listed, which is what strict schema mode
-// expects.
+// strict schema mode requires `additionalProperties:false` and an explicit
+// `required` list.
 export function objectSchema(fields: AiSchemaField[]): string {
   let props = "";
   let required = "";
@@ -93,7 +89,6 @@ export function objectSchema(fields: AiSchemaField[]): string {
   return "{\"type\":\"object\",\"properties\":{" + props + "},\"required\":[" + required + "],\"additionalProperties\":false}";
 }
 
-// The names of every required field, for validating a reply.
 export function requiredFields(fields: AiSchemaField[]): string[] {
   let out: string[] = [];
   for (const f of fields) {
@@ -102,7 +97,6 @@ export function requiredFields(fields: AiSchemaField[]): string[] {
   return out;
 }
 
-// Shared body builder: the scalars, the messages, then a response_format.
 function structuredBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int, responseFormat: string): string {
   let scalars: StructuredScalars = {
     model: model,
@@ -117,22 +111,21 @@ function structuredBody(model: string, messages: AiMessage[], temperature: numbe
   return body;
 }
 
-// JSON mode: the reply is valid JSON, but its shape is NOT constrained.
+// json mode: the reply is valid JSON, but its shape is NOT constrained.
 export function jsonObjectBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
   return structuredBody(model, messages, temperature, maxTokens, "{\"type\":\"json_object\"}");
 }
 
-// Schema mode: the reply is constrained to `schemaJson` (build it with
-// objectSchema). `name` labels the schema for the provider.
+// schema mode: the reply is constrained to `schemaJson` (build it with
+// objectSchema).
 export function jsonSchemaBody(model: string, messages: AiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
   let rf = "{\"type\":\"json_schema\",\"json_schema\":{\"name\":" + JSON.stringify(name)
     + ",\"strict\":true,\"schema\":" + schemaJson + "}}";
   return structuredBody(model, messages, temperature, maxTokens, rf);
 }
 
-// Is `key` present as a top-level property of the object source `json`? Quoted
-// text is stepped over, so a key name appearing inside a string value does not
-// count as the property being present.
+// quoted text is stepped over, so a key name appearing inside a string value
+// does not count as the property being present.
 function hasTopLevelKey(json: string, key: string): bool {
   let want = JSON.stringify(key);
   let depth: int = 0;
@@ -140,7 +133,7 @@ function hasTopLevelKey(json: string, key: string): bool {
   while (i < json.length) {
     let c = json.charAt(i);
     if (c == "\"") {
-      // A key at depth 1 is a candidate; compare then skip the whole string.
+      // a string at depth 1 is a candidate key; compare, then skip all of it
       let start = i;
       i = i + 1;
       while (i < json.length) {
@@ -164,8 +157,7 @@ function hasTopLevelKey(json: string, key: string): bool {
   return false;
 }
 
-// Check that a reply is a JSON object carrying every required field. This is a
-// presence check, not full JSON Schema validation — types and nested
+// presence check only, not full JSON Schema validation — types and nested
 // constraints are left to the provider's strict mode.
 export function validateStructured(json: string, required: string[]): AiStructured {
   let text = json.trim();
@@ -183,8 +175,8 @@ export function validateStructured(json: string, required: string[]): AiStructur
   return structOk(obj);
 }
 
-// Pull the JSON out of a raw provider response body and validate it. Tolerates
-// a model that wrapped its JSON in a code fence despite being asked not to.
+// tolerates a model that wrapped its JSON in a code fence despite being asked
+// not to.
 export function parseStructuredResponse(raw: string, content: string, required: string[]): AiStructured {
   if (content.trim() == "") {
     return structErr("no content in response: " + raw.slice(0, 160));
@@ -192,14 +184,11 @@ export function parseStructuredResponse(raw: string, content: string, required: 
   return validateStructured(typedJsonInputOutput(content), required);
 }
 
-// A correction prompt to send after an invalid structured reply.
 export function structuredRetryPrompt(schemaJson: string, invalid: string, reason: string): string {
   return retryPromptOutput("Return only a JSON object matching this schema:\n" + schemaJson, invalid, reason);
 }
 
 // --- Live calls -------------------------------------------------------------
-// Thin, like the other provider entry points: build the body, POST it, hand the
-// content to the pure validator above.
 
 function postStructured(url: string, headers: Map<string, string>, body: string, required: string[]): AiStructured {
   let res = http.request(url, "POST", body, headers);
@@ -207,8 +196,8 @@ function postStructured(url: string, headers: Map<string, string>, body: string,
   return parseStructuredResponse(res.body, content, required);
 }
 
-// Extract `choices[0].message.content` without a typed parse (a real provider
-// body carries fields a typed JSON.parse<T> would reject).
+// extracts `choices[0].message.content` by scanning: a real provider body
+// carries extra fields, and JSON.parse<T> throws on unknown fields.
 function structuredContent(raw: string): string {
   let at = raw.indexOf("\"content\"");
   if (at < 0) { return ""; }
@@ -229,7 +218,6 @@ function structuredContent(raw: string): string {
   return structDecodeString(quoted);
 }
 
-// Decode a quoted JSON string literal into its text.
 function structDecodeString(quoted: string): string {
   if (quoted.length < 2) { return ""; }
   let out = "";
@@ -262,28 +250,25 @@ export function structuredMistral(apiKey: string, model: string, messages: AiMes
 }
 
 // --- Provider-neutral entry points -----------------------------------------
-// Schema mode is not universal. OpenAI and Mistral both constrain the shape with
-// `json_schema` (both verified). Many OpenAI-compatible endpoints (Groq,
-// Together, OpenRouter, Ollama, ...) accept only `json_object`, which guarantees
-// valid JSON but NOT your shape — so the JSON-mode path states the schema in the
-// prompt and leans on validateStructured to catch a wrong shape.
+// schema mode is not universal: OpenAI and Mistral support `json_schema`, but
+// many OpenAI-compatible endpoints (Groq, Together, OpenRouter, Ollama, ...)
+// accept only `json_object`. The json-mode path therefore states the schema in
+// the prompt and relies on validateStructured to catch a wrong shape.
 
-// Restate a schema as an instruction, for providers without schema mode.
 export function schemaInstruction(schemaJson: string): AiMessage {
   return { role: "system", content: "Reply with a single JSON object and nothing else. It must match this JSON Schema:\n" + schemaJson };
 }
 
-// JSON-mode structured output against any OpenAI-compatible endpoint: the shape
-// is prompted rather than enforced, then validated locally.
+// shape is prompted rather than enforced, then validated locally.
 export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], schemaJson: string, required: string[]): AiStructured {
   let guided: AiMessage[] = [schemaInstruction(schemaJson), ...messages];
   let body = jsonObjectBody(model, guided, 0.2, 1024);
   return postStructured(baseUrl + "/chat/completions", makeAuthHeaders(apiKey), body, required);
 }
 
-// Dispatch by provider name, matching buildProviderChatBody's vocabulary.
-// "openai" and "mistral" use native schema mode; "openai-compatible" uses the
-// JSON-mode fallback, since schema support varies across those endpoints.
+// provider names match buildProviderChatBody's vocabulary. Only the two with
+// verified schema mode dispatch here; other endpoints go through the
+// *WithBaseUrl or json-mode forms.
 export function structuredChat(provider: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   if (provider == "mistral") {
     return structuredMistral(apiKey, model, messages, name, schemaJson, required);
@@ -294,7 +279,7 @@ export function structuredChat(provider: string, apiKey: string, model: string, 
   return structErr("unknown provider \"" + provider + "\": use openai, mistral, or the *WithBaseUrl form for another endpoint");
 }
 
-// Schema mode against any OpenAI-compatible endpoint that supports it.
+// schema mode against any OpenAI-compatible endpoint that supports it.
 export function structuredChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
   return structuredOpenAIWithBaseUrl(baseUrl, apiKey, model, messages, name, schemaJson, required);
 }

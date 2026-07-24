@@ -23,12 +23,10 @@ function memoryLineValue(line: string): string {
   return line.substring(tab + 1, line.length);
 }
 
-// The key/value store is one `key\tvalue` line per entry, so a raw tab or
-// newline inside a key or a value would truncate it, orphan a continuation
-// line, or forge a whole second entry. Both delimiters (and the escape
-// character itself) are backslash-escaped on write and restored on read, which
-// makes multi-line values round-trip and makes an entry unforgeable. Text
-// without them is stored verbatim.
+// the key/value store is one `key\tvalue` line per entry, so a raw tab or
+// newline would truncate an entry or forge a second one. both delimiters and
+// the backslash itself are escaped on write and restored on read, so
+// multi-line values round-trip and an entry cannot be forged.
 function memoryEscapeField(s: string): string {
   let out = "";
   let i: int = 0;
@@ -73,10 +71,9 @@ function memoryUnescapeField(s: string): string {
   return out;
 }
 
-// Continuation lines of a message body are indented, so a turn boundary is
-// exactly a line that starts in column zero. Without it, content carrying
-// "\nassistant: ..." renders as an extra turn and content carrying
-// "\nUpdated summary:" forges the summary prompt's own terminator.
+// indents continuation lines so a turn boundary is exactly a line starting in
+// column zero; otherwise content carrying "\nassistant: ..." forges an extra
+// turn and "\nUpdated summary:" forges the summary prompt's terminator.
 function memoryIndentBody(content: string): string {
   let out = "";
   let i: int = 0;
@@ -180,35 +177,28 @@ export function applySummary(summary: string, recent: AiMessage[]): AiMessage[] 
   return [...head, ...recent];
 }
 
-// --- Context compression ----------------------------------------------------
-// A long conversation eventually costs more than it is worth to resend. These
-// fold the older turns into a running summary ON DEMAND, so an app can check a
-// budget and compress only when it actually needs to.
-//
-// The summarizer is injected rather than called directly, so this module stays
-// free of I/O and is testable with a deterministic fake. `openAISummarizer` /
-// `mistralSummarizer` in the barrel build one backed by a real provider.
+// --- context compression ----------------------------------------------------
+// folds older turns into a running summary on demand. the summarizer is
+// injected so this module stays free of I/O.
 
 type AiSummarizer = (prompt: string) => string;
 
-// The marker `applySummary` writes, so a compressed history can be recognised
-// and its prior summary folded forward instead of being summarised again.
+// the marker `applySummary` writes; lets a compressed history be recognised and
+// its prior summary folded forward instead of summarised again.
 const SUMMARY_MARKER = "Summary of the conversation so far:\n";
 
 function isSummaryMessage(msg: AiMessage): bool {
   return msg.role == "system" && msg.content.startsWith(SUMMARY_MARKER);
 }
 
-// Whether the history has outgrown its character budget.
 export function needsCompression(history: AiMessage[], maxChars: int): bool {
   return historyChars(history) > maxChars;
 }
 
-// Fold everything older than the last `keepRecent` messages into one summary
-// message, preserving the app's own leading system prompt and folding any
-// previous summary forward. Returns the history UNCHANGED when there is nothing
-// old enough to compress, or when the summarizer returns nothing — a failed or
-// rate-limited model call must never silently destroy the conversation.
+// folds everything older than the last `keepRecent` messages into one summary,
+// keeping the leading system prompt and folding any previous summary forward.
+// returns the history unchanged when nothing is old enough, or when the
+// summarizer returns nothing — a failed model call must not destroy history.
 export function compressHistory(summarize: AiSummarizer, history: AiMessage[], keepRecent: int): AiMessage[] {
   let keep = keepRecent;
   if (keep < 0) { keep = 0; }
@@ -236,7 +226,6 @@ export function compressHistory(summarize: AiSummarizer, history: AiMessage[], k
   return [...head, ...marker, ...recent];
 }
 
-// The "call it when needed" form: compress only once the budget is exceeded.
 export function compressIfNeeded(summarize: AiSummarizer, history: AiMessage[], maxChars: int, keepRecent: int): AiMessage[] {
   if (!needsCompression(history, maxChars)) { return history; }
   return compressHistory(summarize, history, keepRecent);

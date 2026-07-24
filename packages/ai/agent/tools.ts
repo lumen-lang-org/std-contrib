@@ -39,13 +39,8 @@ function toolFailure(name: string, input: string, message: string): AiToolResult
   return res;
 }
 
-// An allow/deny entry and the name actually being dispatched are compared under
-// a canonical form (surrounding whitespace stripped, ASCII case folded), not by
-// raw string equality. Otherwise a deny only blocks the exact spelling it was
-// written with, and any registered tool whose name differs from the deny entry
-// by case or padding — "Shell" or "shell " against deny ["shell"] — runs despite
-// a deny meant to cover it. Dispatch (findTool) still matches the registry
-// exactly; this only governs whether policy applies to that dispatch.
+// policy compares names canonically (trimmed, case folded) so a deny entry also
+// blocks "Shell" and "shell ". dispatch (findTool) still matches exactly.
 function toolCanonical(name: string): string {
   return name.trim().toLowerCase();
 }
@@ -58,11 +53,8 @@ function toolListHas(names: string[], name: string): bool {
   return false;
 }
 
-// The tool description block is one line per tool, so a newline inside a name,
-// a params note, or a description would forge a whole extra tool line and let a
-// user-authored tool advertise capabilities the registry does not have. Every
-// field is flattened to a single line before it is rendered. Tabs go too, so a
-// pasted description cannot fake column alignment.
+// the description block is one line per tool, so a newline or tab in any field
+// would forge an extra tool line advertising a tool the registry does not have.
 function toolFlattenLine(text: string): string {
   let out = "";
   let i: int = 0;
@@ -78,8 +70,6 @@ function toolFlattenLine(text: string): string {
   return out;
 }
 
-// The names a dispatch failure may mention, so the model is told what it could
-// have called instead of only that it guessed wrong.
 function toolNameList(tools: AiTool[]): string {
   let out = "";
   let i: int = 0;
@@ -105,9 +95,8 @@ export function toolRegistry(): AiTool[] {
   return empty;
 }
 
-// Registering a name that is already present replaces it in place rather than
-// appending, because two tools sharing a name would make every later lookup
-// pick whichever one happened to be first and silently ignore the other.
+// a name already present is replaced in place; two tools sharing a name would
+// leave every later lookup silently picking the first.
 export function registerTool(tools: AiTool[], tool: AiTool): AiTool[] {
   let at = findTool(tools, tool.name);
   if (at < 0) { return [...tools, tool]; }
@@ -137,9 +126,8 @@ export function toolNames(tools: AiTool[]): string[] {
   return out;
 }
 
-// The block a system prompt carries so the model knows what it may call. An
-// empty registry renders as an empty string, which lets the caller drop the
-// whole section instead of telling the model about a list that is not there.
+// the tool block a system prompt carries. an empty registry renders as "", so
+// the caller can drop the whole section.
 export function describeTools(tools: AiTool[]): string {
   let out = "";
   let i: int = 0;
@@ -153,9 +141,8 @@ export function describeTools(tools: AiTool[]): string {
   return out;
 }
 
-// A model asking for a tool that does not exist is an ordinary event, not a
-// crash: the failure comes back as a result the agent loop can hand straight
-// back to the model so it can pick a real name on the next step.
+// an unknown tool is an ordinary failed result, not a crash: the loop hands it
+// back to the model so it can pick a real name next step.
 export function runTool(tools: AiTool[], name: string, input: string): AiToolResult {
   let at = findTool(tools, name);
   if (at < 0) {
@@ -164,10 +151,8 @@ export function runTool(tools: AiTool[], name: string, input: string): AiToolRes
     }
     return toolFailure(name, input, "unknown tool \"" + toolFlattenLine(name) + "\": available tools are " + toolNameList(tools));
   }
-  // A tool function cannot be declared throwing today — the compiler rejects
-  // assigning one to the `run` field — so a tool reports trouble by returning
-  // text. The guard stays so a future throwing tool degrades into a result
-  // instead of unwinding through the agent loop.
+  // a tool cannot be declared throwing today (the compiler rejects it on `run`),
+  // so tools report trouble as text; the guard is for a future throwing tool.
   try {
     return toolOk(name, input, tools[at].run(input));
   } catch (err) {
@@ -175,10 +160,9 @@ export function runTool(tools: AiTool[], name: string, input: string): AiToolRes
   }
 }
 
-// Policy is checked before the registry is even consulted, so a denied name is
-// never dispatched and the caller learns nothing about whether it exists. Deny
-// wins over allow: a name on both lists is blocked. An empty allow list means
-// everything that is not denied.
+// policy is checked before the registry is consulted, so a denied name is never
+// dispatched and leaks nothing about whether it exists. deny wins over allow; an
+// empty allow list means everything not denied.
 export function runToolWithPolicy(tools: AiTool[], allow: string[], deny: string[], name: string, input: string): AiToolResult {
   if (toolListHas(deny, name)) {
     return toolFailure(name, input, "tool \"" + toolFlattenLine(name) + "\" is blocked by policy: denied");
@@ -189,9 +173,8 @@ export function runToolWithPolicy(tools: AiTool[], allow: string[], deny: string
   return runTool(tools, name, input);
 }
 
-// The message that carries a tool result back into the conversation. A failure
-// is reported to the model in the same shape as a success so the loop has one
-// path: the model reads the error and decides what to do next.
+// carries a tool result back into the conversation. a failure takes the same
+// shape as a success so the loop has one path.
 export function toolResultMessage(result: AiToolResult): AiMessage {
   let body = result.output;
   if (!result.ok) { body = "error: " + result.error; }
@@ -202,8 +185,7 @@ export function toolResultMessage(result: AiToolResult): AiMessage {
   return msg;
 }
 
-// A tool body is an ordinary named function as readily as a lambda; the
-// registry only cares about the shape.
+// test fixture: a tool body may be a named function, not only a lambda.
 function toolShoutBody(input: string): string {
   return input.toUpperCase();
 }

@@ -271,7 +271,6 @@ test("compressHistory folds old turns and keeps the system prompt and recent tur
   h = appendMessage(h, userMessage("What am I building?"));
 
   let c = compressHistory(fake, h, 2);
-  // [original system, summary, last 2]
   expect(c.length == 4);
   expect(c[0].content == "You are terse.");
   expect(c[1].role == "system");

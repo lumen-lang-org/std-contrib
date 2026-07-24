@@ -67,9 +67,8 @@ export function parseStringListOutput(raw: string): string[] {
   return out.split("\n");
 }
 
-// True when `text` holds `needle` as a whole word — the characters on either
-// side must not be letters or digits. Substring matching alone would let the
-// choice "no" match inside "I don't know".
+// whole-word match: plain substring matching would let the choice "no" match
+// inside "I don't know".
 function choiceWordAt(text: string, needle: string): bool {
   if (needle.length == 0) { return false; }
   let i: int = 0;
@@ -96,14 +95,12 @@ function isChoiceWordChar(c: string): bool {
   return code >= 128;
 }
 
-// Pick one allowed choice out of a model's reply. Models rarely answer with the
-// bare token: "Compiled", "Compiled." and "Lumen is compiled." are all the same
-// answer, so matching is case-insensitive and looks for the choice as a whole
-// word rather than demanding an exact string. Longer choices are preferred so
-// overlapping options ("yes" vs "yes, always") resolve to the specific one.
+// picks a choice out of a reply that rarely contains the bare token. Matching is
+// case-insensitive and whole-word; the longest match wins so overlapping options
+// ("yes" vs "yes, always") resolve to the specific one.
 export function parseChoiceOutput(raw: string, choices: string[], fallback: string): string {
   let value = trimOutputSpaces(raw).toLowerCase();
-  // Exact match first, so an unambiguous reply never depends on word scanning.
+  // exact match first, so an unambiguous reply never depends on word scanning
   for (const choice of choices) {
     if (value == choice.toLowerCase()) { return choice; }
   }

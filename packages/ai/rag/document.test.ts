@@ -152,8 +152,7 @@ test("metadata keys with delimiters stay distinct", () => {
   expect(documentMetadata(literal, "raw") == "not\\ta tab");
 });
 
-// Every byte sequence in the chunk decodes as a complete code point: no lone
-// lead byte at the end, no orphaned continuation byte at the start.
+// no lone lead byte at the end, no orphaned continuation byte at the start.
 function docIsValidUtf8(s: string): bool {
   let i: int = 0;
   while (i < s.length) {

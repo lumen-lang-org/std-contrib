@@ -32,8 +32,8 @@ function noSearchHits(): AiSearchHit[] {
   return empty;
 }
 
-// The store keeps docs and vectors as parallel lists, so a vector is only
-// usable when the doc at the same index exists.
+// docs and vectors are parallel lists: a vector is only usable when the doc at
+// the same index exists.
 function storeVectorAt(store: AiVectorStore, index: int): number[] {
   if (index < 0 || index >= store.vectors.length) {
     let empty: number[] = [];
@@ -52,7 +52,7 @@ export function storeSize(store: AiVectorStore): int {
   return store.docs.length;
 }
 
-// Values are immutable, so every write returns a fresh store.
+// values are immutable, so every write returns a fresh store.
 export function addVector(store: AiVectorStore, doc: AiDocument, vector: number[]): AiVectorStore {
   return makeVectorStore([...store.docs, doc], [...store.vectors, vector]);
 }
@@ -95,18 +95,17 @@ export function filterByMetadata(store: AiVectorStore, key: string, value: strin
   return makeVectorStore(docs, vectors);
 }
 
-// A NaN score loses every `>` comparison, including the ones that would push it
-// out of the running, so seeding the search at index 0 would leave a NaN hit
-// sitting at the top of the results ahead of a perfect match. Ordering is
-// stated explicitly instead: NaN never wins, and any real score beats it.
+// a NaN score loses every `>` comparison, including the ones that would push it
+// out of the running, so ordering is stated explicitly: NaN never wins, and any
+// real score beats it.
 function storeBeatsScore(candidate: number, current: number): bool {
   if (candidate != candidate) { return false; }
   if (current != current) { return true; }
   return candidate > current;
 }
 
-// Sorting in place is impossible, so the top k comes out of repeated
-// max-extraction over a shrinking copy. Ties keep insertion order.
+// no in-place sort, so the top k comes out of repeated max-extraction over a
+// shrinking copy. ties keep insertion order.
 export function storeTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
   let rest = scored;
   let out: AiSearchHit[] = [];

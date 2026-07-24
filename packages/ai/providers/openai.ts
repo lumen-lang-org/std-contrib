@@ -65,9 +65,8 @@ export function makeAuthHeaders(apiKey: string): Map<string, string> {
   return bearerJsonHeaders(apiKey);
 }
 
-// JSON.parse<T> throws on malformed bodies and on unknown fields, so a provider
-// response that is not the expected shape yields an empty string instead of
-// aborting the caller.
+// JSON.parse<T> throws on malformed bodies and on unknown fields, so an
+// unexpected response shape yields "" instead of aborting the caller.
 export function readOpenAIContent(raw: string): string {
   try {
     const parsed: OpenAIChatResponse = JSON.parse<OpenAIChatResponse>(raw);

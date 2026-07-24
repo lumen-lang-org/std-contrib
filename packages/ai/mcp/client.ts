@@ -1,7 +1,6 @@
-// MCP (Model Context Protocol) client over HTTP. MCP is JSON-RPC 2.0: a POST
-// carries one request object, the response body carries one result-or-error
-// object. Transport here is HTTP only — one request, one complete JSON reply —
-// so every call below is a synchronous http.request round trip.
+// MCP (Model Context Protocol) client over HTTP. MCP is JSON-RPC 2.0: one POST
+// carries one request object, the reply body carries one result-or-error object.
+// Every call here is a synchronous http.request round trip.
 
 import { makeTool } from "../agent/tools.ts";
 
@@ -17,8 +16,8 @@ type McpResult = {
   error: string,
 };
 
-// A decoded JSON string plus the index just past its closing quote. `next` is
-// negative when the text at that position is not a well-formed JSON string.
+// a decoded JSON string plus the index just past its closing quote; `next` is
+// negative when the text there is not a well-formed JSON string.
 type McString = {
   value: string,
   next: int,
@@ -41,8 +40,8 @@ function mcNoItems(): int[] {
   return empty;
 }
 
-// The record with an `ok: bool` + `error: string` pair cannot be returned as a
-// literal, so both constructors bind an annotated local first.
+// a record literal with an `ok: bool` + `error: string` pair cannot be returned
+// directly, so both constructors bind an annotated local first.
 function mcpResultOk(content: string): McpResult {
   let r: McpResult = {
     ok: true,
@@ -95,9 +94,8 @@ function mcHex4(src: string, at: int): int {
   return value;
 }
 
-// A `\uXXXX` escape is re-emitted as its UTF-8 bytes, so a tool description or
-// text part carrying "São Paulo" reaches the caller as the accented text, not
-// the literal escape.
+// re-emit a code point as its UTF-8 bytes, so a `\uXXXX` escape in a
+// description or text part decodes to the accented text.
 function mcEncodeCodePoint(cp: int): string {
   if (cp < 0x80) { return String.fromCharCode(cp); }
   if (cp < 0x800) {
@@ -114,9 +112,8 @@ function mcEncodeCodePoint(cp: int): string {
     + String.fromCharCode(0x80 | (cp & 0x3F));
 }
 
-// Reads the JSON string starting at `at` and returns it decoded. A lone
-// surrogate is kept as-is rather than dropped, so a half-escaped value still
-// reaches the caller instead of vanishing.
+// decode the JSON string starting at `at`. a lone surrogate is kept as-is
+// rather than dropped, so a half-escaped value still reaches the caller.
 function mcReadString(src: string, at: int): McString {
   if (at < 0 || at >= src.length || src.charAt(at) != "\"") { return mcStr("", -1); }
   let out = "";
@@ -153,10 +150,9 @@ function mcReadString(src: string, at: int): McString {
   return mcStr("", -1);
 }
 
-// Index just past the object or array that starts at `from`. Quoted text is
-// stepped over as a unit, so a brace or bracket inside a string — which a
-// serialized inputSchema or a tool's text output is full of — cannot close the
-// container early.
+// index just past the object or array starting at `from`. quoted text is
+// stepped over as a unit, so a brace or bracket inside a string cannot close
+// the container early.
 function mcSkipContainer(src: string, from: int): int {
   let depth: int = 0;
   let i: int = from;
@@ -196,10 +192,9 @@ function mcSkipValue(src: string, from: int): int {
   return i;
 }
 
-// Index of the value bound to `key` in the object at `objectAt`, or -1 when the
-// object does not carry that key. Keys are matched only at this object's own
-// level, so a nested `"name"` inside an inputSchema is never mistaken for the
-// tool name.
+// index of the value bound to `key` in the object at `objectAt`, else -1. keys
+// match only at this object's own level, so a nested `"name"` inside an
+// inputSchema is never mistaken for the tool name.
 export function mcFieldValue(src: string, objectAt: int, key: string): int {
   if (objectAt < 0) { return -1; }
   let i = mcSkipWhitespace(src, objectAt);
@@ -222,9 +217,8 @@ export function mcFieldValue(src: string, objectAt: int, key: string): int {
   return -1;
 }
 
-// Start index of every element of the array at `arrayAt`. An empty list stands
-// for "no array here", "empty array", and "malformed array" alike — the degrade
-// every parser below wants.
+// start index of every element of the array at `arrayAt`. an empty list stands
+// for "no array here", "empty array", and "malformed array" alike.
 function mcArrayItems(src: string, arrayAt: int): int[] {
   if (arrayAt < 0) { return mcNoItems(); }
   let i = mcSkipWhitespace(src, arrayAt);
@@ -251,7 +245,7 @@ export function mcStringField(src: string, objectAt: int, key: string): string {
   return mcReadString(src, at).value;
 }
 
-// A string value comes back decoded; any other JSON value comes back as its own
+// a string value comes back decoded; any other JSON value comes back as its own
 // source text so a caller can re-parse it. `null` comes back empty.
 export function mcValueText(src: string, at: int): string {
   if (at < 0 || at >= src.length) { return ""; }
@@ -263,8 +257,8 @@ export function mcValueText(src: string, at: int): string {
   return text;
 }
 
-// Top-level integer field, e.g. the response `id`. A leading minus is honored so
-// a negative id round-trips; a missing or non-numeric field reads as 0.
+// integer field, e.g. the response `id`. a leading minus is honored so a
+// negative id round-trips; a missing or non-numeric field reads as 0.
 export function mcIntField(src: string, objectAt: int, key: string): int {
   let at = mcFieldValue(src, objectAt, key);
   if (at < 0) { return 0; }
@@ -287,32 +281,27 @@ export function mcIntField(src: string, objectAt: int, key: string): int {
 
 // --- JSON-RPC framing -------------------------------------------------------
 
-// A JSON-RPC 2.0 request. `params` is a raw JSON object string embedded
-// verbatim (e.g. "{}"); the method goes through JSON.stringify so a method name
-// holding a quote cannot break the body.
+// `params` is a raw JSON object string embedded verbatim (e.g. "{}"); the
+// method is escaped so a name holding a quote cannot break the body.
 export function mcpRequest(id: int, method: string, params: string): string {
   return "{\"jsonrpc\":\"2.0\",\"id\":" + `${id}`
     + ",\"method\":" + JSON.stringify(method)
     + ",\"params\":" + params + "}";
 }
 
-// The source text of the top-level `result` object, or "" when the body carries
-// no result (an error reply, a malformed body).
+// source text of the top-level `result`, or "" when the body carries none.
 export function mcpResultField(raw: string): string {
   let at = mcFieldValue(raw, 0, "result");
   if (at < 0) { return ""; }
   return mcValueText(raw, at);
 }
 
-// The human-readable error detail, or "" when there is none. Handles both the
-// spec's object form (`"error":{"message":"..."}`) and the string form some
-// servers emit (`"error":"database offline"`).
+// handles both the spec's object form (`"error":{"message":"..."}`) and the
+// string form some servers emit (`"error":"database offline"`).
 export function mcpErrorMessage(raw: string): string {
   let at = mcFieldValue(raw, 0, "error");
   if (at < 0) { return ""; }
-  // String-form error: the value itself is the message.
   if (raw.charAt(at) == "\"") { return mcValueText(raw, at); }
-  // Object-form error: read its `message` field.
   return mcStringField(raw, at, "message");
 }
 
@@ -320,8 +309,8 @@ export function mcpIsError(raw: string): bool {
   let at = mcFieldValue(raw, 0, "error");
   if (at < 0) { return false; }
   let text = mcValueText(raw, at);
-  // A present-but-falsy `error` (null/false/0) is a success signal some servers
-  // send alongside `result`; only a truthy error value is a real error.
+  // a present-but-falsy `error` (null/false/0) rides alongside `result` on some
+  // servers; only a truthy error value is a real error.
   return text != "" && text != "null" && text != "false" && text != "0";
 }
 
@@ -341,10 +330,9 @@ export function mcpListToolsRequest(id: int): string {
   return mcpRequest(id, "tools/list", "{}");
 }
 
-// `argumentsJson` is a raw JSON value embedded verbatim under "arguments"; the
-// tool name is escaped so a name holding a quote or newline cannot break out.
-// An empty/blank `argumentsJson` would produce invalid JSON-RPC, so it defaults
-// to an empty object — the caller is still responsible for passing valid JSON.
+// `argumentsJson` is embedded verbatim under "arguments" (the caller owns its
+// validity); the tool name is escaped. blank defaults to "{}" because an empty
+// value would produce invalid JSON-RPC.
 export function mcpCallToolRequest(id: int, name: string, argumentsJson: string): string {
   let args = argumentsJson;
   if (args.trim() == "") { args = "{}"; }
@@ -355,10 +343,9 @@ export function mcpCallToolRequest(id: int, name: string, argumentsJson: string)
 
 // --- Response parsers -------------------------------------------------------
 
-// Every tool under result.tools[], each carrying its name, description, and the
-// raw inputSchema JSON. A real body carries far more fields than a typed parse
-// would accept, so this walks the string; any malformed or error body degrades
-// to an empty list.
+// every tool under result.tools[] with its raw inputSchema JSON. a real body
+// carries more fields than JSON.parse<T> accepts (it throws on unknown fields),
+// so this walks the string; a malformed or error body degrades to an empty list.
 export function parseMcpTools(raw: string): McpTool[] {
   let resultAt = mcFieldValue(raw, 0, "result");
   if (resultAt < 0) { return mcNoTools(); }
@@ -384,9 +371,8 @@ export function parseMcpTools(raw: string): McpTool[] {
   return out;
 }
 
-// The text of a tools/call reply: every text part in result.content[] joined
-// into one string. A JSON-RPC error body comes back ok:false with the error
-// message. Never throws — a garbage body yields ok:true with empty content.
+// every text part in result.content[] joined into one string. an error body
+// comes back ok:false; never throws — garbage yields ok:true, empty content.
 export function parseMcpToolResult(raw: string): McpResult {
   if (mcpIsError(raw)) {
     return mcpResultErr(mcpErrorMessage(raw));
@@ -405,9 +391,9 @@ export function parseMcpToolResult(raw: string): McpResult {
   return mcpResultOk(text);
 }
 
-// --- HTTP-backed calls (thin, untested — the only I/O here) -----------------
+// --- HTTP-backed calls (the only I/O here) ----------------------------------
 
-// Content-Type is forced on; any auth headers the caller supplied ride along.
+// Content-Type is forced on; caller-supplied auth headers ride along.
 function mcpHeaders(headers: Map<string, string>): Map<string, string> {
   headers.set("Content-Type", "application/json");
   return headers;
@@ -428,12 +414,11 @@ export function mcpCallTool(url: string, headers: Map<string, string>, name: str
   return parseMcpToolResult(res.body);
 }
 
-// --- Adapter into a first-class AiTool ---------------------------------
+// --- Adapter into a first-class AiTool --------------------------------------
 
-// A McpTool becomes an AiTool whose run POSTs a tools/call request.
 // run wraps its single string input as {"input": <input>} — this package's
-// one-string-arg tool convention — and never throws: http.request does not
-// throw and parseMcpToolResult does not throw, so trouble comes back as text.
+// one-string-arg tool convention — and never throws: neither http.request nor
+// parseMcpToolResult throws, so trouble comes back as text.
 export function mcpToolToLumen(url: string, headers: Map<string, string>, tool: McpTool): AiTool {
   let toolName = tool.name;
   return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
@@ -453,5 +438,3 @@ export function mcpToolsToRegistry(url: string, headers: Map<string, string>, to
   }
   return out;
 }
-
-// --- Tests (offline, hand-written JSON-RPC literals only) -------------------
