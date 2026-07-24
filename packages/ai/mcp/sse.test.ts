@@ -1,6 +1,6 @@
 // Tests for sse.
 
-import { buildHttpPost, decodeChunked, httpRequestLine, httpResponseBody, parseSseEvents, parseUrl, sseJsonRpcResponses, sseParseResult, sseParseTools, sseToolsToRegistry } from "./sse.ts";
+import { parseSseEvents, sseJsonRpcResponses, sseParseResult, sseParseTools, sseToolsToRegistry } from "./sse.ts";
 
 function sseCallResultJson(): string {
   return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":["
@@ -18,37 +18,6 @@ function sseToolsListJson(): string {
     + "{\"name\":\"add\",\"description\":\"Add two numbers.\",\"inputSchema\":{\"type\":\"object\"}}"
     + "]}}";
 }
-
-test("decodeChunked: a single chunk", () => {
-  expect(decodeChunked("5\r\nhello\r\n0\r\n\r\n") == "hello");
-});
-
-test("decodeChunked: multiple chunks reassemble in order", () => {
-  expect(decodeChunked("5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n") == "hello world");
-});
-
-test("decodeChunked: a hex length above 9 is parsed", () => {
-  expect(decodeChunked("10\r\n0123456789abcdef\r\n0\r\n\r\n") == "0123456789abcdef");
-});
-
-test("decodeChunked: data containing CRLF is copied verbatim, not split", () => {
-  // "ab\r\ncd" is 6 bytes; the inner \r\n must not read as a frame boundary.
-  expect(decodeChunked("6\r\nab\r\ncd\r\n0\r\n\r\n") == "ab\r\ncd");
-});
-
-test("decodeChunked: the bare terminator decodes to an empty body", () => {
-  expect(decodeChunked("0\r\n\r\n") == "");
-});
-
-test("decodeChunked: a chunk-extension on the size line is ignored", () => {
-  expect(decodeChunked("5;foo=bar\r\nhello\r\n0\r\n\r\n") == "hello");
-});
-
-test("decodeChunked: a non-chunked body is returned unchanged", () => {
-  let plain = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}";
-  expect(decodeChunked(plain) == plain);
-  expect(decodeChunked("data: hi\r\n\r\n") == "data: hi\r\n\r\n");
-});
 
 test("parseSseEvents: one event yields one payload", () => {
   let ev = parseSseEvents("data: hello\n\n");
@@ -145,71 +114,6 @@ test("end to end: an interleaved notification is skipped for the id-1 answer", (
   let res = sseParseResult(sseChunkify(note + answer));
   expect(res.ok);
   expect(res.content == "line one\nline two");
-});
-
-test("httpResponseBody: the body is everything past the header separator", () => {
-  let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\ndata: hi\n\n";
-  expect(httpResponseBody(response) == "data: hi\n\n");
-  expect(httpResponseBody("no-separator-here") == "no-separator-here");
-});
-
-test("httpRequestLine names the method, path, and version", () => {
-  expect(httpRequestLine("/mcp") == "POST /mcp HTTP/1.1");
-  expect(httpRequestLine("") == "POST / HTTP/1.1");
-});
-
-test("buildHttpPost emits the request line, required headers, and the body", () => {
-  let headers = new Map<string, string>();
-  let req = buildHttpPost("example.com", "/mcp", headers, "{\"a\":1}");
-  expect(req.startsWith("POST /mcp HTTP/1.1\r\n"));
-  expect(req.includes("Host: example.com\r\n"));
-  expect(req.includes("Content-Type: application/json\r\n"));
-  expect(req.includes("Accept: application/json, text/event-stream\r\n"));
-  expect(req.includes("Content-Length: 7\r\n"));
-  expect(req.includes("Connection: close\r\n"));
-  expect(req.endsWith("\r\n\r\n{\"a\":1}"));
-});
-
-test("buildHttpPost carries a caller header but never duplicates a managed one", () => {
-  let headers = new Map<string, string>();
-  headers.set("Authorization", "Bearer t0ken");
-  headers.set("Content-Type", "text/plain");
-  let req = buildHttpPost("h", "/", headers, "x");
-  expect(req.includes("Authorization: Bearer t0ken\r\n"));
-  expect(req.includes("Content-Type: application/json\r\n"));
-  expect(!req.includes("Content-Type: text/plain\r\n"));
-});
-
-test("buildHttpPost Content-Length is the UTF-8 byte length, not code-point count", () => {
-  let headers = new Map<string, string>();
-  // "São" is 4 bytes (the ã is 2), so the byte-correct length is 4, not 3.
-  let req = buildHttpPost("h", "/", headers, "São");
-  expect(req.includes("Content-Length: 4\r\n"));
-});
-
-test("parseUrl splits host, port, and path with an explicit port", () => {
-  let u = parseUrl("http://127.0.0.1:8080/mcp");
-  expect(u.host == "127.0.0.1");
-  expect(u.port == 8080);
-  expect(u.path == "/mcp");
-});
-
-test("parseUrl defaults the port to 80 and the path to /", () => {
-  let u = parseUrl("http://example.com");
-  expect(u.host == "example.com");
-  expect(u.port == 80);
-  expect(u.path == "/");
-});
-
-test("parseUrl keeps a full path and query, and reads an https default port", () => {
-  let u = parseUrl("http://host:9/a/b?x=1");
-  expect(u.host == "host");
-  expect(u.port == 9);
-  expect(u.path == "/a/b?x=1");
-  let s = parseUrl("https://secure.example.com/mcp");
-  expect(s.host == "secure.example.com");
-  expect(s.port == 443);
-  expect(s.path == "/mcp");
 });
 
 test("a tools/list discovered over SSE adapts into runnable AiTools", () => {

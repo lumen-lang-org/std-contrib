@@ -5,7 +5,21 @@ import { documentMetadata } from "./document.ts";
 
 const LOAD_DIR = "/tmp/lumen-ai-loader-test";
 
+// Remove a fixture, restoring permissions first: the unreadable-file tests
+// leave a chmod-000 file behind, and if one of them fails before restoring,
+// every later run inherits a file it can neither read nor overwrite.
+//
+// `fs.rmSync` does not recurse into a non-empty directory, so the files are
+// cleared by name rather than by removing the tree.
+function resetFixture(path: string): void {
+  if (!fs.existsSync(path)) { return; }
+  fs.chmodSync(path, 420);
+  fs.unlinkSync(path);
+}
+
 function seed(): void {
+  resetFixture(LOAD_DIR + "/locked.txt");
+  resetFixture(LOAD_DIR + "/locked2.txt");
   fs.mkdirSync(LOAD_DIR);
   fs.mkdirSync(LOAD_DIR + "/sub");
   fs.writeFileSync(LOAD_DIR + "/a.txt", "alpha text");
