@@ -62,6 +62,7 @@ import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcp
 // modules; no sibling imports their names, so every one is aliased here.
 import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
 import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
+import { makeSubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer } from "./agent/subagent.ts";
 import { makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
 import { splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
 import { loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
@@ -653,6 +654,28 @@ export function modelEndpoint(cfg: AiModelConfig): string {
 // Send messages using a config.
 export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   return runConfiguredChat(cfg, messages);
+}
+
+// --- Subagents ----------------------------------------------------------------
+// Delegate a task to a child agent and get one answer back. The child starts
+// from a written task description, not the parent's history, and only its
+// final message returns — a child that makes twenty tool calls costs the
+// parent one message.
+
+export function subAgent(name: string, description: string, provider: string, apiKey: string, model: string, systemPrompt: string, tools: AiTool[], maxSteps: int): AiSubAgent {
+  return defineSubAgent(name, description, provider, apiKey, model, systemPrompt, tools, maxSteps);
+}
+
+export function subAgentTool(sub: AiSubAgent): AiTool {
+  return wrapSubAgent(sub);
+}
+
+export function subAgentTools(subs: AiSubAgent[]): AiTool[] {
+  return wrapSubAgents(subs);
+}
+
+export function delegateToSubAgent(sub: AiSubAgent, task: string): string {
+  return dispatchSubAgent(sub, task);
 }
 
 // --- Token budget -----------------------------------------------------------
