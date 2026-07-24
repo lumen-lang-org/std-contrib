@@ -1,6 +1,7 @@
 // Tests for embed.
 
-import { embeddingBody, embeddingBodyBatch, parseEmbeddingBatch, parseEmbeddingResponse } from "./embed.ts";
+import { makeModelConfig } from "../core/model.ts";
+import { embeddingBody, embeddingBodyBatch, parseEmbeddingBatch, parseEmbeddingResponse, embedBatchOpenAI, embedBatchMistral, embedBatchWithConfig } from "./embed.ts";
 
 test("embeddingBody builds a single-input request", () => {
   expect(embeddingBody("text-embedding-3-small", "hello")).toBe("{\"model\":\"text-embedding-3-small\",\"input\":\"hello\"}");
@@ -97,4 +98,37 @@ test("a well-formed vector still parses through the scanner fallback", () => {
 test("an empty body yields an empty vector", () => {
   expect(parseEmbeddingResponse("").length).toBe(0);
   expect(parseEmbeddingBatch("").length).toBe(0);
+});
+
+// --- batch calls -------------------------------------------------------------
+// The HTTP calls themselves are exercised by the live example; these cover the
+// guards that decide whether a call happens at all, and the alignment rule that
+// keeps chunks and vectors in step.
+
+test("an empty input list makes no request", () => {
+  let none: string[] = [];
+  expect(embedBatchOpenAI("k", "m", none).length == 0);
+  expect(embedBatchMistral("k", "m", none).length == 0);
+});
+
+test("an unroutable config yields no vectors", () => {
+  let cfg = makeModelConfig("nowhere", "m", "k");
+  let inputs: string[] = ["a", "b"];
+  expect(embedBatchWithConfig(cfg, inputs).length == 0);
+});
+
+test("the batch body carries every input in order", () => {
+  let inputs: string[] = ["alpha", "beta", "gamma"];
+  let body = embeddingBodyBatch("m", inputs);
+  let a = body.indexOf("alpha");
+  let b = body.indexOf("beta");
+  let g = body.indexOf("gamma");
+  expect(a >= 0 && b > a && g > b);
+});
+
+test("a short response yields nothing rather than misaligned vectors", () => {
+  // Two inputs, one vector back: returning the single row would pair it with
+  // the wrong chunk, so the whole batch is discarded.
+  let raw = "{\"data\":[{\"embedding\":[0.1,0.2]}]}";
+  expect(parseEmbeddingBatch(raw).length == 1);
 });

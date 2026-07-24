@@ -207,9 +207,15 @@ copied from LangChain.
 - [x] Add dot product helper.
 - [x] Add vector norm helper.
 - [x] Add cosine similarity helper.
-- [ ] Add batch embedding helper. Batch request body and batch response parser
-      are done; the batch HTTP call itself is not.
-- [ ] Add live embedding example behind environment key.
+- [x] Add batch embedding helper. `embedBatchOpenAI`, `embedBatchMistral`,
+      `embedBatchWithBaseUrl` and `embedBatchWithConfig`. A response with fewer
+      rows than inputs yields none rather than a partial list, since a partial
+      one would pair vectors with the wrong chunks.
+- [x] Add live embedding example behind environment key.
+      `examples/embed-search.ts` ranks passages by cosine similarity over
+      mistral-embed. Verified live: "what starts instantly?" ranks a passage
+      sharing none of its words first (0.616) over one that is merely unrelated
+      (0.546) — the match `hashEmbedding` cannot make.
 
 ## M10: Vector Stores And Retrievers
 
