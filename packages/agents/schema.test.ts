@@ -53,8 +53,8 @@ function seeded(): void {
   wipe();
   migrate(database, schemaPlan(database));
 
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", enabled: true };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", enabled: true };
+  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, enabled: true };
+  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, enabled: true };
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
 

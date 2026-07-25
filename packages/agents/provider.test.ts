@@ -10,7 +10,7 @@ import { ModelRow, ModelConfigRow } from "./schema.ts";
 import { Completion, complete, chatEndpoint } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
-  let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, enabled: enabled };
+  let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, enabled: enabled };
   return m;
 }
 

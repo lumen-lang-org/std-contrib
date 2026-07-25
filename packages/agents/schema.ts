@@ -23,6 +23,13 @@ export type ModelRow = {
   label: string,
   apiName: string,
   provider: string,
+  // "chat" or "embedding". A provider offers both and they are not
+  // interchangeable, so which one a row is is part of what the row says.
+  kind: string,
+  // How wide this model's vectors are, 0 for a chat model. Stored rather than
+  // asked for on every use: it is a fact about the model, it never changes,
+  // and a document table is created this wide.
+  dimensions: int,
   enabled: bool,
 };
 
@@ -93,6 +100,8 @@ export function modelsMapping(): DbRepository {
     field("label", "label", "text"),
     field("apiName", "api_name", "text"),
     field("provider", "provider", "text"),
+    field("kind", "kind", "text"),
+    field("dimensions", "dimensions", "int"),
     field("enabled", "enabled", "bool"),
   ];
   return repository("models", "id", "id", fs);

@@ -11,13 +11,9 @@ import { migrate, forgetMigrations } from "../../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "../schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor } from "../credentials.ts";
 import { Embedding, embedText } from "../provider.ts";
-import { Retrieved, Retrieval, createDocuments, indexDocument, retrieve, asContext } from "../knowledge.ts";
+import { Retrieved, Retrieval, embeddingModel, createDocuments, indexDocument, retrieve, asContext } from "../knowledge.ts";
 import { AgentRun, runAgent } from "../run.ts";
 
-function embeddingModel(): ModelRow {
-  let m: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", enabled: true };
-  return m;
-}
 
 function main(): void {
   let master = masterKey();
@@ -37,23 +33,26 @@ function main(): void {
   if (key != "") { storeCredential(db, "mistral", key, master, "2026-07-25"); }
   let stored = credentialFor(db, "mistral", master);
 
-  // How wide the embedding model's vectors are is the model's business, so ask
-  // it once rather than hardcoding a number that would be wrong for the next
-  // model.
-  let probe = embedText(embeddingModel(), "probe", stored);
-  if (!probe.ok) { console.error("embedding: " + probe.error); return; }
-  console.log("embedding width " + `${probe.dimensions}`);
-  let problem = createDocuments(db, probe.dimensions);
+  // The embedding model is a row like every other, and it carries its own
+  // width — so pointing the corpus at a different one is an INSERT and an
+  // UPDATE, not an edit here.
+  let embedRow: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, enabled: true };
+  persist(db, modelsMapping(), JSON.stringify(embedRow));
+
+  let embedder = embeddingModel(db, "e1");
+  if (embedder.id == "") { console.error("no embedding model e1"); return; }
+  console.log("embedding with " + embedder.label + " at " + `${embedder.dimensions}` + " dimensions");
+  let problem = createDocuments(db, embedder);
   if (problem != "") { console.error(problem); return; }
 
   // A small corpus of things the model cannot know.
-  indexDocument(db, embeddingModel(), "d1", "plume", "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name.", stored);
-  indexDocument(db, embeddingModel(), "d2", "plume", "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order.", stored);
-  indexDocument(db, embeddingModel(), "d3", "rest", "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds.", stored);
+  indexDocument(db, embedder, "d1", "plume", "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name.", stored);
+  indexDocument(db, embedder, "d2", "plume", "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order.", stored);
+  indexDocument(db, embedder, "d3", "rest", "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds.", stored);
   console.log("indexed 3 documents");
 
   let question = "Why does plume refuse an unordered page?";
-  let found = retrieve(db, embeddingModel(), question, 2, stored);
+  let found = retrieve(db, embedder, question, 2, stored);
   if (!found.ok) { console.error(found.error); return; }
   console.log("");
   let i: int = 0;
@@ -64,7 +63,7 @@ function main(): void {
   }
 
   // The agent is configured from rows; the context is prepended to its prompt.
-  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", enabled: true };
+  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, enabled: true };
   persist(db, modelsMapping(), JSON.stringify(chat));
   let conf: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 120, topP: 1.0, extra: "{}" };
   persist(db, modelConfigsMapping(db), JSON.stringify(conf));

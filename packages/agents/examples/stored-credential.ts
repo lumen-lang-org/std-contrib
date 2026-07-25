@@ -35,7 +35,7 @@ function main(): void {
   dropTable(db, promptsMapping()); dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  let small: ModelRow = { id: "m3", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", enabled: true };
+  let small: ModelRow = { id: "m3", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, enabled: true };
   persist(db, modelsMapping(), JSON.stringify(small));
   let conf: ModelConfigRow = { id: "c3", modelId: "m3", temperature: 0.3, maxTokens: 32, topP: 1.0, extra: "{}" };
   persist(db, modelConfigsMapping(db), JSON.stringify(conf));

@@ -203,10 +203,24 @@ Plume refuses an unordered page because two requests for the first twenty rows
 can overlap or skip records when the database answers in any order.
 ```
 
-The vector width comes from the model rather than a constant, and the column is
-created that wide — a corpus embedded by one model cannot be searched by
-another, which is a property of the vectors and worth failing on rather than
-silently mixing.
+The embedding model is a row like every other. `models` carries `kind` —
+`"chat"` or `"embedding"` — and `dimensions`, the width of the vectors it
+produces. Pointing a corpus at a different embedding model is an INSERT and an
+UPDATE, not an edit to any file.
+
+That makes three things checkable that were not:
+
+- **A chat model cannot embed.** A provider offers both and they answer
+  different endpoints; refusing here beats a 404 from the provider.
+- **A corpus needs a width.** `createDocuments` refuses a model that does not
+  say how wide its vectors are, rather than creating a column of some default.
+- **A search only sees its own model's chunks.** `documents.model_id` records
+  which model embedded each one, and `retrieve` filters on it. Two models'
+  vectors sit at the same width and are not comparable; mixing them returns
+  confident nonsense rather than an error.
+
+And what the model says it produces is checked against what it returned, so a
+mismatch is a sentence rather than a wire error about column widths.
 
 The query vector is bound, not interpolated: it came from a provider's reply
 and is data like any other. `distance` is returned so a caller can decide what
@@ -221,6 +235,7 @@ lumen test mcp.test.ts        # 3, the refusals — the live half is an example
 lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
 lumen test run.test.ts        # 11, every refusal on the run path
+lumen test knowledge.test.ts  # 11, what retrieval refuses before embedding
 ```
 
 The live halves are `examples/mount-mcp.ts` and `examples/call-model.ts`. A test
