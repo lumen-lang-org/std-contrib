@@ -6,7 +6,7 @@
 //
 //   cd packages/plume && lumen test foreignkeys.test.ts
 
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { sqlite } from "./sqlite.ts";
 import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, connectDatabase, createTable, createTableSql, createTableSqlWithKeys, foreignKeys, foreignKeyName, dropTable, execute, persist, countWhere } from "./plume.ts";
 import { Migration, migration, migrate, forgetMigrations } from "./migrate.ts";
@@ -16,8 +16,9 @@ let database: Db = sqlite();
 type Team = { id: string, teamName: string };
 type AgentRow = { id: string, agentName: string, teamId: string };
 
-function connectionTarget(): string {
-  return "/tmp/plume_fk_test.db";
+function connectionConfig(): DbConfig {
+  let named: DbConfig = { filename: "/tmp/plume_fk_test.db" };
+  return named;
 }
 
 function teamsRepo(): DbRepository {
@@ -39,7 +40,7 @@ function agentsRepo(): DbRepository {
 }
 
 function clean(): void {
-  connectDatabase(database, connectionTarget());
+  connectDatabase(database, connectionConfig());
   forgetMigrations(database);
   dropTable(database, agentsRepo());
   dropTable(database, teamsRepo());
@@ -103,7 +104,7 @@ test("the schema a migration builds comes from the same declaration", () => {
   expect(persist(database, teamsRepo(), JSON.stringify(t)).ok);
   let a: AgentRow = { id: "a1", agentName: "researcher", teamId: "t1" };
   expect(persist(database, agentsRepo(), JSON.stringify(a)).ok);
-  expect(countWhere(database, agentsRepo(), "", "") == 1);
+  expect(countWhere(database, agentsRepo(), "", []) == 1);
 });
 
 test("the constraint is really in the schema, not just in the string", () => {
@@ -114,7 +115,7 @@ test("the constraint is really in the schema, not just in the string", () => {
   ];
   expect(migrate(database, plan).ok);
   // Ask the database what it built.
-  expect(database.queryNoArgs("SELECT sql FROM sqlite_master WHERE name = 'fk_agents'"));
+  expect(database.query("SELECT sql FROM sqlite_master WHERE name = 'fk_agents'", []));
   expect(database.value(0, 0).indexOf("REFERENCES fk_teams") >= 0);
 });
 
@@ -148,7 +149,7 @@ test("the suite leaves nothing behind", () => {
   clean();
   // -1, not 0: a count against a table that is not there is a failed query,
   // and plume distinguishes that from a table holding no rows.
-  expect(countWhere(database, agentsRepo(), "", "") == -1);
-  expect(countWhere(database, teamsRepo(), "", "") == -1);
+  expect(countWhere(database, agentsRepo(), "", []) == -1);
+  expect(countWhere(database, teamsRepo(), "", []) == -1);
   database.close();
 });

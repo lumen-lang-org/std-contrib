@@ -8,7 +8,7 @@
 //   cd packages/plume && lumen test entity_live.test.ts
 
 import { Description, FieldDescription, DecoratorUse, entity } from "./entity.ts";
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { sqlite } from "./sqlite.ts";
 import { DbRepository, DbField, field, repository, connectDatabase, createTable, dropTable, persist, persistMany, findById, listWhere, countWhere, deleteById, findProjected } from "./plume.ts";
 
@@ -61,13 +61,18 @@ function generated(): DbRepository {
   return entity(agentDescription());
 }
 
+function entityConfig(): DbConfig {
+  let named: DbConfig = { filename: "/tmp/plume_entity_test.db" };
+  return named;
+}
+
 function agentJson(id: string, name: string, steps: int, temp: number): string {
   let a: Agent = { id: id, agentName: name, maxSteps: steps, temperature: temp };
   return JSON.stringify(a);
 }
 
 function fresh(): DbRepository {
-  connectDatabase(database, "/tmp/plume_entity_test.db");
+  connectDatabase(database, entityConfig());
   let repo = generated();
   dropTable(database, repo);
   createTable(database, repo);
@@ -92,7 +97,7 @@ test("the generated mapping equals the hand-written one, field by field", () => 
 
 test("a table is created from the generated mapping", () => {
   let repo = fresh();
-  expect(countWhere(database, repo, "", "") == 0);
+  expect(countWhere(database, repo, "", []) == 0);
 });
 
 test("a record round-trips through the generated mapping", () => {
@@ -122,15 +127,15 @@ test("every operation works against the generated mapping", () => {
     agentJson("a3", "critic", 8, 0.1),
   ];
   expect(persistMany(database, repo, "[" + rows.join(",") + "]").ok);
-  expect(countWhere(database, repo, "", "") == 3);
-  expect(countWhere(database, repo, "max_steps > " + database.placeholder, "4") == 2);
-  expect(listWhere(database, repo, "", "").indexOf("critic") >= 0);
+  expect(countWhere(database, repo, "", []) == 3);
+  expect(countWhere(database, repo, "max_steps > " + database.placeholder, ["4"]) == 2);
+  expect(listWhere(database, repo, "", []).indexOf("critic") >= 0);
   expect(deleteById(database, repo, "a2").ok);
-  expect(countWhere(database, repo, "", "") == 2);
+  expect(countWhere(database, repo, "", []) == 2);
 });
 
 test("the suite leaves nothing behind", () => {
-  connectDatabase(database, "/tmp/plume_entity_test.db");
+  connectDatabase(database, entityConfig());
   expect(dropTable(database, generated()).ok);
   database.close();
 });

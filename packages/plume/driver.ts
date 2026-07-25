@@ -9,21 +9,63 @@
 // A driver's functions capture nothing and call the FFI declarations in their
 // own module by name, which is what a closure here may do.
 
+// What a connection is asked for. A record with optional fields rather than a
+// string: a `host=... user=...` list is untyped, spelled differently by every
+// library, and a typo in it is a runtime failure rather than a compile error.
+// The names are node-postgres's, verbatim, so a config reads the same here as
+// in the ecosystem they came from.
+//
+// A caller writes only the fields that matter:
+//
+//   let config: DbConfig = { host: "127.0.0.1", database: "app", user: "lumen" };
+//   let local: DbConfig = { filename: "/tmp/app.db" };
+//
+// Rendering a config into whatever a library takes is the driver's own
+// business; nothing outside one should build a target string.
+export type DbConfig = {
+  host?: string,
+  // Absent means the driver's default: 5432 for PostgreSQL, 3306 for MySQL.
+  port?: int,
+  user?: string,
+  password?: string,
+  database?: string,
+  // SQLite, which has a file rather than a server. ":memory:" for a database
+  // that lives as long as the process.
+  filename?: string,
+  // Anything a driver's library takes that the fields above do not cover —
+  // sslmode, a socket path, a libpq service name — appended verbatim. Also the
+  // escape hatch: a config carrying only options is a raw target, which is how
+  // an exotic DSN or a service file entry gets through.
+  options?: string,
+};
+
+// One value of a `key=value` target list, always quoted.
+//
+// Always, not only when it needs it: a password carrying a space would
+// otherwise end its value early and the rest of the list would be read as
+// further keys, so a program would connect somewhere other than where it said
+// and find out at the first query. Quoting and escaping is the same convention
+// libpq documents, and the MySQL shim's parser follows it.
+//
+// For driver authors. A program that uses plume never calls this.
+export function targetValue(text: string): string {
+  return "'" + text.replaceAll("\\", "\\\\").replaceAll("'", "\\'") + "'";
+}
+
 export type Db = {
   // --- talking to it -----------------------------------------------------
-  // `connect` takes whatever the driver's library takes: a libpq conninfo
-  // string, a file path, a host/user/password triple encoded as the driver
-  // documents.
-  connect: (target: string) => bool,
+  // `connect` renders the config the way its own library wants it. It fails
+  // rather than guessing when the config names nothing to connect to.
+  connect: (config: DbConfig) => bool,
   connected: () => bool,
   close: () => void,
   // Run a statement, returning false on failure.
   exec: (sql: string) => bool,
-  // Run a query holding its rows, with up to one bound parameter — every
-  // statement plume builds needs at most one, because a document goes in
-  // whole rather than field by field.
-  query: (sql: string, a: string) => bool,
-  queryNoArgs: (sql: string) => bool,
+  // Run a query holding its rows. The driver binds each argument in turn and
+  // then executes, so a value never reaches the statement as text. An empty
+  // array is a query with no parameters, which is why there is no second
+  // no-argument form.
+  query: (sql: string, args: string[]) => bool,
   rows: () => int,
   value: (row: int, col: int) => string,
   lastError: () => string,
@@ -31,8 +73,13 @@ export type Db = {
   // --- where dialects differ ---------------------------------------------
   // The name shown in a diagnostic.
   name: string,
-  // `$1` for PostgreSQL, `?` for SQLite and MySQL.
+  // The marker for the first bound parameter: `$1` for PostgreSQL, `?` for
+  // SQLite and MySQL.
   placeholder: string,
+  // Whether the marker carries the parameter's number. PostgreSQL's does, so
+  // the second parameter is `$2`; the others take their `?` in order and every
+  // one is spelled the same. `placeholderAt` reads this.
+  numberedPlaceholders: bool,
   // Whether an INSERT ... SELECT needs `WHERE true` before `ON CONFLICT`.
   // SQLite's parser cannot otherwise tell the upsert clause from a join
   // condition; found by trying it, not by reading a manual.
@@ -91,17 +138,17 @@ export type Db = {
 // and SQL inspected without a database. Every call fails; nothing raises.
 export function noDatabase(): Db {
   let d: Db = {
-    connect: (target: string) => { return false; },
+    connect: (config: DbConfig) => { return false; },
     connected: () => { return false; },
     close: () => { },
     exec: (sql: string) => { return false; },
-    query: (sql: string, a: string) => { return false; },
-    queryNoArgs: (sql: string) => { return false; },
+    query: (sql: string, args: string[]) => { return false; },
     rows: () => { return 0; },
     value: (row: int, col: int) => { return ""; },
     lastError: () => { return "no database driver is connected"; },
     name: "none",
     placeholder: "$1",
+    numberedPlaceholders: true,
     upsertNeedsWhereTrue: false,
     rowToJson: "row_to_json",
     jsonAgg: "json_agg",

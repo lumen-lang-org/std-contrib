@@ -9,19 +9,20 @@
 // PLUME_TEST_CONNINFO to run the same suite against PostgreSQL — see
 // migrate_pg.test.ts, which is this file with one line changed.
 
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { sqlite } from "./sqlite.ts";
 import { execute } from "./plume.ts";
 import { Migration, MigrationState, migration, repeatable, migrate, migrateAllowingOutOfOrder, migrationInfo, validateMigrations, missingMigrations, planValid, planOrder, checksum, compareVersions, versionValid, historyTable, createHistory, repairChecksums, baseline, migrationApplied, forgetMigrations, appliedHighWater, quoted } from "./migrate.ts";
 
 let database: Db = sqlite();
 
-function dbPath(): string {
-  return "/tmp/plume_migrate_test.db";
+function dbConfig(): DbConfig {
+  let named: DbConfig = { filename: "/tmp/plume_migrate_test.db" };
+  return named;
 }
 
 function clean(): void {
-  database.connect(dbPath());
+  database.connect(dbConfig());
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS mig_a");
   execute(database, "DROP TABLE IF EXISTS mig_b");
@@ -209,7 +210,7 @@ test("a description cannot append a row of its own to the history", () => {
     migration("5", hostile, "CREATE TABLE mig_a (id text PRIMARY KEY)"),
   ];
   expect(migrate(database, plan).ok);
-  database.queryNoArgs("SELECT count(*) FROM " + historyTable());
+  database.query("SELECT count(*) FROM " + historyTable(), []);
   expect(database.value(0, 0) == "1");
   // Stored as the text it is.
   expect(migrationApplied(database, "5"));
@@ -320,7 +321,7 @@ test("a repeatable step re-runs when its statement changes and not otherwise", (
   expect(third.applied == 1);
 
   // One row, not two.
-  database.queryNoArgs("SELECT count(*) FROM " + historyTable() + " WHERE description = 'mig_view'");
+  database.query("SELECT count(*) FROM " + historyTable() + " WHERE description = 'mig_view'", []);
   expect(database.value(0, 0) == "1");
   execute(database, "DROP VIEW IF EXISTS mig_view");
 });

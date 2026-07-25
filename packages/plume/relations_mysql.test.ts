@@ -6,7 +6,7 @@
 //
 //   cd packages/plume && lumen test relations_mysql.test.ts
 
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { mysql } from "./mysql.ts";
 import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, relationValid, connectDatabase, createTable, dropTable, persist, findById, listWhere, countWhere } from "./plume.ts";
 
@@ -25,10 +25,14 @@ type AgentDeep = {
   tasks: Task[],
 };
 
-function connectionTarget(): string {
+function connectionConfig(): DbConfig {
+  // An env override arrives as a key=value target; `options` takes it whole,
+  // which is the escape hatch a config keeps for a target the fields cannot
+  // describe.
   let fromEnv = process.env("PLUME_MYSQL_CONNINFO") ?? "";
-  if (fromEnv != "") { return fromEnv; }
-  return "host=127.0.0.1 port=13306 user=root password=lumen dbname=lumentest";
+  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
+  let named: DbConfig = { host: "127.0.0.1", port: 13306, database: "lumentest", user: "root", password: "lumen" };
+  return named;
 }
 
 function teamsRepo(): DbRepository {
@@ -69,7 +73,7 @@ function agentsFlat(): DbRepository {
 }
 
 function seeded(): DbRepository {
-  connectDatabase(database, connectionTarget());
+  connectDatabase(database, connectionConfig());
   dropTable(database, agentsRepo());
   dropTable(database, teamsRepo());
   dropTable(database, tasksRepo());
@@ -158,7 +162,7 @@ test("a to-one that matches nothing is null, and a to-many is empty", () => {
 
 test("a list carries every row's relations", () => {
   let repo = seeded();
-  let json = listWhere(database, repo, "", "");
+  let json = listWhere(database, repo, "", []);
   expect(json.indexOf("research") >= 0);
   expect(json.indexOf("read") >= 0);
   expect(json.indexOf("write") >= 0);
@@ -169,8 +173,8 @@ test("a list carries every row's relations", () => {
 test("relations do not multiply the parent rows, which is why this is not a join", () => {
   let repo = seeded();
   // a1 has two tasks. A join would return a1 twice.
-  expect(countWhere(database, repo, "", "") == 2);
-  let json = listWhere(database, repo, "id = " + database.placeholder, "a1");
+  expect(countWhere(database, repo, "", []) == 2);
+  let json = listWhere(database, repo, "id = " + database.placeholder, ["a1"]);
   expect(json.indexOf("researcher") >= 0);
   // One occurrence of the parent's name, two of its tasks.
   expect(json.indexOf("researcher") == json.lastIndexOf("researcher"));
@@ -178,7 +182,7 @@ test("relations do not multiply the parent rows, which is why this is not a join
 
 test("a filter still applies to the parent, not to the relation", () => {
   let repo = seeded();
-  let json = listWhere(database, repo, "agent_name = " + database.placeholder, "loner");
+  let json = listWhere(database, repo, "agent_name = " + database.placeholder, ["loner"]);
   expect(json.indexOf("loner") >= 0);
   expect(json.indexOf("researcher") < 0);
 });
@@ -188,13 +192,13 @@ test("a malformed relation refuses the read rather than sending it", () => {
   let bad: DbRelation[] = [ hasOne("team", "rel_teams", "team_id", "id", "id AS \"a'b\"") ];
   let broken = repositoryWith("rel_agents", "id", "id", agentsFlat().fields, bad);
   expect(findById(database, broken, "a1") == "");
-  expect(listWhere(database, broken, "", "") == "[]");
+  expect(listWhere(database, broken, "", []) == "[]");
   // And the table is untouched.
-  expect(countWhere(database, agentsFlat(), "", "") == 2);
+  expect(countWhere(database, agentsFlat(), "", []) == 2);
 });
 
 test("the suite leaves nothing behind", () => {
-  connectDatabase(database, connectionTarget());
+  connectDatabase(database, connectionConfig());
   expect(dropTable(database, agentsFlat()).ok);
   expect(dropTable(database, teamsRepo()).ok);
   expect(dropTable(database, tasksRepo()).ok);

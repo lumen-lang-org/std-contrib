@@ -6,7 +6,7 @@
 //
 //   cd packages/plume && lumen test foreignkeys_mysql.test.ts
 
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { mysql } from "./mysql.ts";
 import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, connectDatabase, createTable, createTableSql, createTableSqlWithKeys, foreignKeys, foreignKeyName, dropTable, execute, persist, countWhere } from "./plume.ts";
 import { Migration, migration, migrate, forgetMigrations } from "./migrate.ts";
@@ -16,10 +16,14 @@ let database: Db = mysql();
 type Team = { id: string, teamName: string };
 type AgentRow = { id: string, agentName: string, teamId: string };
 
-function connectionTarget(): string {
+function connectionConfig(): DbConfig {
+  // An env override arrives as a key=value target; `options` takes it whole,
+  // which is the escape hatch a config keeps for a target the fields cannot
+  // describe.
   let fromEnv = process.env("PLUME_MYSQL_CONNINFO") ?? "";
-  if (fromEnv != "") { return fromEnv; }
-  return "host=127.0.0.1 port=13306 user=root password=lumen dbname=lumentest";
+  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
+  let named: DbConfig = { host: "127.0.0.1", port: 13306, database: "lumentest", user: "root", password: "lumen" };
+  return named;
 }
 
 function teamsRepo(): DbRepository {
@@ -41,7 +45,7 @@ function agentsRepo(): DbRepository {
 }
 
 function clean(): void {
-  connectDatabase(database, connectionTarget());
+  connectDatabase(database, connectionConfig());
   forgetMigrations(database);
   dropTable(database, agentsRepo());
   dropTable(database, teamsRepo());
@@ -105,7 +109,7 @@ test("the schema a migration builds comes from the same declaration", () => {
   expect(persist(database, teamsRepo(), JSON.stringify(t)).ok);
   let a: AgentRow = { id: "a1", agentName: "researcher", teamId: "t1" };
   expect(persist(database, agentsRepo(), JSON.stringify(a)).ok);
-  expect(countWhere(database, agentsRepo(), "", "") == 1);
+  expect(countWhere(database, agentsRepo(), "", []) == 1);
 });
 
 test("the ALTER route adds the constraint after the fact", () => {
@@ -144,7 +148,7 @@ test("the suite leaves nothing behind", () => {
   clean();
   // -1, not 0: a count against a table that is not there is a failed query,
   // and plume distinguishes that from a table holding no rows.
-  expect(countWhere(database, agentsRepo(), "", "") == -1);
-  expect(countWhere(database, teamsRepo(), "", "") == -1);
+  expect(countWhere(database, agentsRepo(), "", []) == -1);
+  expect(countWhere(database, teamsRepo(), "", []) == -1);
   database.close();
 });
