@@ -371,6 +371,17 @@ function listSql(db: Db, repo: DbRepository, where: string, tail: string): strin
   return "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + tail + ") r";
 }
 
+// A column as it goes into a document. Only a float needs anything: SQLite
+// renders a REAL to text at 15 significant digits, so a double carrying more
+// comes back changed, and a mapper that quietly alters a number is worse than
+// one that refuses.
+function jsonValue(db: Db, f: DbField): string {
+  if (db.floatJsonPrefix != "" && dialectType(db, f.sqlType) == db.floatType) {
+    return db.floatJsonPrefix + f.column + db.floatJsonSuffix;
+  }
+  return f.column;
+}
+
 // A row as a document. PostgreSQL wraps a subquery with row_to_json and takes
 // its keys from the aliases; SQLite names each key beside its column, since
 // json_object takes pairs rather than a row.
@@ -380,7 +391,7 @@ function rowJson(db: Db, repo: DbRepository): string {
     let i: int = 0;
     while (i < repo.fields.length) {
       if (i > 0) { pairs = pairs + ", "; }
-      pairs = pairs + "'" + repo.fields[i].field + "', " + repo.fields[i].column;
+      pairs = pairs + "'" + repo.fields[i].field + "', " + jsonValue(db, repo.fields[i]);
       i = i + 1;
     }
     return db.rowToJson + "(" + pairs + ")";

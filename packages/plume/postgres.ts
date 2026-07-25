@@ -44,6 +44,8 @@ export function postgres(): Db {
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     readStyle: "record",
+    floatJsonPrefix: "",
+    floatJsonSuffix: "",
     textType: "text",
     intType: "int",
     floatType: "float8",

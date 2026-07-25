@@ -253,6 +253,17 @@ test("a projected list narrows every row", () => {
   expect(json.indexOf("agentName") >= 0);
 });
 
+test("a double keeps every digit it went in with", () => {
+  // SQLite renders a REAL to text at 15 significant digits, so this value came
+  // back as 1234567890.12346 — a mapper quietly altering a number is worse
+  // than one that refuses.
+  let repo = fresh();
+  let precise = 1234567890.123456;
+  persist(database, repo, agentJson("a1", "researcher", 5, precise));
+  let back: Agent = JSON.parse<Agent>(findById(database, repo, "a1"));
+  expect(back.temperature == precise);
+});
+
 test("a projection whose expression contains a comma is read correctly", () => {
   // Splitting a select list on every comma broke `coalesce(a, b) AS x` into
   // two nonsense pieces, and a pairs-style driver returned a document keyed
