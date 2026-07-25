@@ -419,9 +419,9 @@ export function mcpCallTool(url: string, headers: Map<string, string>, name: str
 // run wraps its single string input as {"input": <input>} — this package's
 // one-string-arg tool convention — and never throws: neither http.request nor
 // parseMcpToolResult throws, so trouble comes back as text.
-export function mcpToolToLumen(url: string, headers: Map<string, string>, tool: McpTool): Tool {
-  let toolName = tool.name;
-  return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
+export function mcpToolToLumen(url: string, headers: Map<string, string>, entry: McpTool): Tool {
+  let toolName = entry.name;
+  return makeTool(entry.name, entry.description, entry.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
     let result = mcpCallTool(url, headers, toolName, args);
     if (result.ok) { return result.content; }

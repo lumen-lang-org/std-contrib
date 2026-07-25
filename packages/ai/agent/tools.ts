@@ -2,14 +2,14 @@
 
 import { systemMessage } from "../core/messages.ts";
 
-type Tool = {
+export type Tool = {
   name: string,
   description: string,
   params: string,
   run: (input: string) => string,
 };
 
-type ToolResult = {
+export type ToolResult = {
   name: string,
   input: string,
   output: string,
@@ -97,10 +97,13 @@ export function toolRegistry(): Tool[] {
 
 // a name already present is replaced in place; two tools sharing a name would
 // leave every later lookup silently picking the first.
-export function registerTool(tools: Tool[], tool: Tool): Tool[] {
-  let at = findTool(tools, tool.name);
-  if (at < 0) { return [...tools, tool]; }
-  return [...tools.slice(0, at), tool, ...tools.slice(at + 1, tools.length)];
+// `entry` rather than `tool`: a parameter shares one namespace with every
+// top-level name in the program, so calling it `tool` would collide with any
+// module that exports a function of that name — the @tool decorator does.
+export function registerTool(tools: Tool[], entry: Tool): Tool[] {
+  let at = findTool(tools, entry.name);
+  if (at < 0) { return [...tools, entry]; }
+  return [...tools.slice(0, at), entry, ...tools.slice(at + 1, tools.length)];
 }
 
 export function findTool(tools: Tool[], name: string): int {

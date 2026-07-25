@@ -335,14 +335,14 @@ function tcScanFinishReason(raw: string): string {
   return tcStringField(raw, items[0], "finish_reason");
 }
 
-function tcToolDefEntry(tool: Tool): ToolCallDefEntry {
-  let hint = tool.params;
-  if (hint == "") { hint = "Input for the " + tool.name + " tool."; }
+function tcToolDefEntry(entry: Tool): ToolCallDefEntry {
+  let hint = entry.params;
+  if (hint == "") { hint = "Input for the " + entry.name + " entry."; }
   return {
     type: "function",
     function: {
-      name: tool.name,
-      description: tool.description,
+      name: entry.name,
+      description: entry.description,
       parameters: {
         type: "object",
         properties: {

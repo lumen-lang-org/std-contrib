@@ -268,10 +268,10 @@ function agentLoop(model: Model, tools: Tool[], allow: string[], deny: string[],
   return agResult(answer, steps, "max_steps", turns);
 }
 
-export function makeAgentStep(index: int, tool: string, input: string, output: string, ok: bool): AgentStep {
+export function makeAgentStep(index: int, toolName: string, input: string, output: string, ok: bool): AgentStep {
   let step: AgentStep = {
     index: index,
-    tool: tool,
+    tool: toolName,
     input: input,
     output: output,
     ok: ok,

@@ -1037,8 +1037,8 @@ export function mcpCall(url: string, headers: Map<string, string>, name: string,
 
 // Adapt an MCP tool descriptor into a first-class Tool whose `run` POSTs a
 // tools/call request, so an MCP server's tools drop straight into `runAgent`.
-export function mcpAsTool(url: string, headers: Map<string, string>, tool: McpTool): Tool {
-  return adaptMcpTool(url, headers, tool);
+export function mcpAsTool(url: string, headers: Map<string, string>, entry: McpTool): Tool {
+  return adaptMcpTool(url, headers, entry);
 }
 
 export function mcpAsTools(url: string, headers: Map<string, string>, tools: McpTool[]): Tool[] {
