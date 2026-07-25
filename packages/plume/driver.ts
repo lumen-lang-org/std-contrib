@@ -40,6 +40,9 @@ export type Db = {
   // How a row becomes JSON, and how many rows become a JSON array.
   rowToJson: string,
   jsonAgg: string,
+  // Whether a constraint can be added to a table that already exists. SQLite
+  // cannot: a foreign key has to be part of the CREATE TABLE.
+  canAddForeignKey: bool,
   // An empty array of the kind jsonAgg produces, for a relation that matched
   // nothing. A JSON column will not take a text '[]' on MySQL.
   emptyJsonArray: string,
@@ -102,6 +105,7 @@ export function noDatabase(): Db {
     upsertNeedsWhereTrue: false,
     rowToJson: "row_to_json",
     jsonAgg: "json_agg",
+    canAddForeignKey: true,
     emptyJsonArray: "'[]'::json",
     nestedJsonWrap: false,
     docStyle: "row",

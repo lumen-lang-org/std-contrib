@@ -656,8 +656,11 @@ export function dialectType(db: Db, sqlType: string): string {
   return sqlType;
 }
 
-export function createTable(db: Db, repo: DbRepository): DbResult {
-  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
+// The CREATE TABLE statement for a mapping, as text. `createTable` runs this;
+// a migration can hold it instead, so the schema a program expects and the
+// schema a migration builds come from one declaration.
+export function createTableSql(db: Db, repo: DbRepository): string {
+  if (!repositoryValid(repo)) { return ""; }
   let cols = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -671,7 +674,70 @@ export function createTable(db: Db, repo: DbRepository): DbResult {
     }
     i = i + 1;
   }
-  return execute(db, "CREATE TABLE IF NOT EXISTS " + repo.table + " (" + cols + ")");
+  return "CREATE TABLE IF NOT EXISTS " + repo.table + " (" + cols + ")";
+}
+
+// The same, with a REFERENCES clause for every to-one relation.
+//
+// SQLite cannot add a constraint to a table that exists, so this is the only
+// way to get foreign keys there — and the referenced tables must already
+// exist when it runs. On PostgreSQL and MySQL `foreignKeys` is the gentler
+// route, since it does not constrain creation order.
+export function createTableSqlWithKeys(db: Db, repo: DbRepository): string {
+  let base = createTableSql(db, repo);
+  if (base == "") { return ""; }
+  let refs = "";
+  let i: int = 0;
+  while (i < repo.relations.length) {
+    let rel = repo.relations[i];
+    // A to-many's column lives on the other table, so its constraint belongs
+    // to that table's own mapping, not to this one.
+    if (rel.kind == "one") {
+      if (!relationValid(rel)) { return ""; }
+      refs = refs + ", FOREIGN KEY (" + rel.localColumn + ") REFERENCES "
+        + rel.table + " (" + rel.foreignColumn + ")";
+    }
+    i = i + 1;
+  }
+  if (refs == "") { return base; }
+  return base.substring(0, base.length - 1) + refs + ")";
+}
+
+// One ALTER statement per to-one relation, for a migration.
+//
+// A relation already says which column points at which column of which table,
+// which is a foreign key written out. plume does not add the constraint
+// itself: a schema change belongs in a migration, where it is recorded and
+// checksummed like every other one.
+//
+// Empty on a database that cannot add a constraint after creation — SQLite —
+// where `createTableSqlWithKeys` is the route instead.
+export function foreignKeys(db: Db, repo: DbRepository): string[] {
+  let out: string[] = [];
+  if (!db.canAddForeignKey || !repositoryValid(repo)) { return out; }
+  let i: int = 0;
+  while (i < repo.relations.length) {
+    let rel = repo.relations[i];
+    if (rel.kind == "one" && relationValid(rel)) {
+      out.push("ALTER TABLE " + repo.table + " ADD CONSTRAINT "
+        + foreignKeyName(repo, rel) + " FOREIGN KEY (" + rel.localColumn
+        + ") REFERENCES " + rel.table + " (" + rel.foreignColumn + ")");
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// The constraint's name, derived so that re-running a migration against a
+// database that already has it fails on the name rather than adding a second.
+export function foreignKeyName(repo: DbRepository, rel: DbRelation): string {
+  return "fk_" + repo.table + "_" + rel.localColumn;
+}
+
+export function createTable(db: Db, repo: DbRepository): DbResult {
+  let sql = createTableSql(db, repo);
+  if (sql == "") { return dbErr("invalid mapping for " + repo.table); }
+  return execute(db, sql);
 }
 
 export function dropTable(db: Db, repo: DbRepository): DbResult {

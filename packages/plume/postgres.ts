@@ -38,6 +38,7 @@ export function postgres(): Db {
     upsertNeedsWhereTrue: false,
     rowToJson: "row_to_json",
     jsonAgg: "json_agg",
+    canAddForeignKey: true,
     emptyJsonArray: "'[]'::json",
     nestedJsonWrap: false,
     docStyle: "row",
