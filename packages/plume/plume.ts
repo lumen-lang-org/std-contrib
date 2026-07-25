@@ -540,9 +540,28 @@ function listSql(db: Db, repo: DbRepository, where: string, tail: string): strin
 // renders a REAL to text at 15 significant digits, so a double carrying more
 // comes back changed, and a mapper that quietly alters a number is worse than
 // one that refuses.
+// The expression that writes a bool column into a document as `true` or
+// `false`, for a caller assembling a relation's projection by hand.
+//
+// A relation's column list is SQL the caller wrote, so plume does not know
+// which of its columns are booleans and cannot convert them the way it does a
+// mapping's own fields. This gives the caller the piece it would have used:
+//
+//   "id, name, " + boolColumn(db, "enabled") + " AS \"enabled\""
+//
+// On a database with a real boolean this is the column itself.
+export function boolColumn(db: Db, column: string): string {
+  if (!safeIdentifier(column)) { return ""; }
+  if (db.boolJson == "") { return column; }
+  return db.boolJson.replaceAll("{c}", column);
+}
+
 function jsonValue(db: Db, f: DbField): string {
   if (db.floatJson != "" && dialectType(db, f.sqlType) == db.floatType) {
     return db.floatJson.replaceAll("{c}", f.column);
+  }
+  if (db.boolJson != "" && f.sqlType == "bool") {
+    return db.boolJson.replaceAll("{c}", f.column);
   }
   return f.column;
 }

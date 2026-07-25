@@ -100,6 +100,8 @@ function mysqlOn(handle: int): Db {
     jsonNeedsUnquote: true,
     upsertStyle: "on-duplicate-key",
     floatJson: "",
+    // tinyint(1) under the hood, so 0 and 1 unless told otherwise.
+    boolJson: "CAST({c} AS JSON)",
     textType: "varchar(255)",
     intType: "int",
     floatType: "double",
