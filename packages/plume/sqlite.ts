@@ -7,37 +7,70 @@
 // @link ./sqlite_shim.o
 // @link sqlite3
 // @link c
-declare function sq_connect(path: string): int;
-declare function sq_connected(): int;
-declare function sq_exec(sql: string): int;
-declare function sq_query0(sql: string): int;
-declare function sq_query1(sql: string, a: string): int;
-declare function sq_rows(): int;
-declare function sq_value(row: int, col: int): string;
-declare function sq_error(): string;
+declare function sq_acquire(): int;
+declare function sq_open(handle: int, path: string): int;
+declare function sq_connected(handle: int): int;
+declare function sq_exec(handle: int, sql: string): int;
+declare function sq_bind(handle: int, i: int, value: string): int;
+declare function sq_query(handle: int, sql: string, argc: int): int;
+declare function sq_rows(handle: int): int;
+declare function sq_value(handle: int, row: int, col: int): string;
+declare function sq_error(handle: int): string;
 declare function sq_version(): string;
-declare function sq_close(): void;
+declare function sq_fail(handle: int, message: string): void;
+declare function sq_release(handle: int): void;
 
-import { Db } from "./driver.ts";
+import { Db, DbConfig, targetValue } from "./driver.ts";
 
-// `target` is a file path, or ":memory:" for a database that lives as long as
-// the process.
-export function sqlite(): Db {
+// SQLite takes a path, not a list, so nothing here needs quoting and a name
+// carrying a space arrives whole. `options` is the escape hatch, for a `file:`
+// URI with its own query string.
+function sqTarget(config: DbConfig): string {
+  let fileName = config.filename ?? "";
+  if (fileName != "") { return fileName; }
+  return config.options ?? "";
+}
+
+// A config naming no file is refused rather than attempted: sqlite3_open of an
+// empty path succeeds and gives back a private temporary database, so the
+// writes of a mistyped config would go somewhere and then vanish.
+function sqConnect(handle: int, config: DbConfig): bool {
+  let target = sqTarget(config);
+  if (target == "") {
+    sq_fail(handle, "the configuration names neither a filename nor options");
+    return false;
+  }
+  return sq_open(handle, target) == 0;
+}
+
+// Bind every value, then execute. The FFI passes one string per call, so an
+// argument list is sent a value at a time and the count tells the shim how
+// many of them the statement is to use.
+function sqRun(handle: int, sql: string, args: string[]): bool {
+  let i: int = 0;
+  while (i < args.length) {
+    if (sq_bind(handle, i, args[i]) != 0) { return false; }
+    i = i + 1;
+  }
+  return sq_query(handle, sql, args.length) >= 0;
+}
+
+// A `Db` for one slot of the shim's connection table. The handle is captured
+// when the record is built, which is right: a `Db` is a connection, not a
+// thing that might later have one.
+function sqliteOn(handle: int): Db {
   let d: Db = {
-    connect: (target: string) => { return sq_connect(target) == 0; },
-    connected: () => { return sq_connected() == 1; },
-    close: () => { sq_close(); },
-    exec: (sql: string) => { return sq_exec(sql) == 0; },
-    query: (sql: string, a: string) => { return sq_query1(sql, a) >= 0; },
-    queryNoArgs: (sql: string) => { return sq_query0(sql) >= 0; },
-    rows: () => { return sq_rows(); },
-    value: (row: int, col: int) => { return sq_value(row, col); },
-    lastError: () => { return sq_error(); },
+    connect: (config: DbConfig) => { return sqConnect(handle, config); },
+    connected: () => { return sq_connected(handle) == 1; },
+    close: () => { sq_release(handle); },
+    exec: (sql: string) => { return sq_exec(handle, sql) == 0; },
+    query: (sql: string, args: string[]) => { return sqRun(handle, sql, args); },
+    rows: () => { return sq_rows(handle); },
+    value: (row: int, col: int) => { return sq_value(handle, row, col); },
+    lastError: () => { return sq_error(handle); },
     name: "sqlite",
-    // Numbered, not bare `?`: a document is read field by field, so the one
-    // bound parameter appears several times in a statement, and SQLite counts
-    // each bare `?` as a parameter of its own.
-    placeholder: "?1",
+    placeholder: "?",
+    numberedPlaceholders: false,
     // SQLite cannot tell an upsert clause from a join condition after an
     // INSERT ... SELECT without this; found by running it, not by reading a
     // manual.
@@ -67,6 +100,24 @@ export function sqlite(): Db {
     nowExpr: "CURRENT_TIMESTAMP",
   };
   return d;
+}
+
+// The process-wide connection, slot 0. `connectDatabase` opens it; a program
+// that only ever wants one database wants this.
+export function sqlite(): Db {
+  return sqliteOn(0);
+}
+
+// A connection of its own, opened straight away. A `{ filename: ":memory:" }`
+// opened this way is the slot's own database, not shared with any other
+// handle.
+//
+//   let local: DbConfig = { filename: "/tmp/app.db" };
+//   let database = sqliteConnection(local);
+export function sqliteConnection(config: DbConfig): Db {
+  let handle = sq_acquire();
+  if (handle >= 0) { sqConnect(handle, config); }
+  return sqliteOn(handle);
 }
 
 export function sqliteVersion(): string {

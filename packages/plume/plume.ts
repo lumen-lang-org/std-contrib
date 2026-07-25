@@ -16,7 +16,7 @@
 // ./sqlite.ts supplies both the connection and the handful of places the
 // dialects disagree, so a SQLite program never needs libpq installed.
 //
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 
 // One field of a mapping: the record's field name, the table's column name,
 // and the column's SQL type. Nothing here is derived from anything else.
@@ -133,6 +133,15 @@ export function safeIdentifier(name: string): bool {
     i = i + 1;
   }
   return true;
+}
+
+// The marker for the nth bound parameter, counting from 1, in the driver's own
+// spelling. A where clause with two values is written
+// `a = placeholderAt(db, 1) + " AND b > " + placeholderAt(db, 2)` and runs
+// unchanged on all three, which a literal `$1` or `?` would not.
+export function placeholderAt(db: Db, n: int): string {
+  if (!db.numberedPlaceholders) { return db.placeholder; }
+  return "$" + `${n}`;
 }
 
 export function safeSqlType(name: string): bool {
@@ -522,10 +531,14 @@ function readOne(db: Db, repo: DbRepository): string {
     let i: int = 0;
     while (i < repo.fields.length) {
       if (i > 0) { picks = picks + ", "; }
-      picks = picks + jsonPick(db, db.placeholder, repo.fields[i]);
+      picks = picks + jsonPick(db, "plume_doc.doc", repo.fields[i]);
       i = i + 1;
     }
-    return "SELECT " + picks;
+    // The document is named once and every field read from that name. An
+    // unnumbered `?` is a parameter of its own wherever it appears, so
+    // repeating the marker would ask for one bound copy of the document per
+    // field — which is what the numbered `?1` was working around.
+    return "SELECT " + picks + " FROM (SELECT " + db.placeholder + " AS doc) AS plume_doc";
   }
   if (db.readStyle == "json-table") {
     // JSON_TABLE declares the shape like json_to_record does, but reads from
@@ -615,10 +628,11 @@ function jsonTableColumns(db: Db, repo: DbRepository): string {
 
 // --- connection ---------------------------------------------------------------------
 
-// `target` is whatever the driver's library takes: a libpq conninfo string
-// for postgres, a file path or ":memory:" for sqlite.
-export function connectDatabase(db: Db, target: string): DbResult {
-  if (!db.connect(target)) {
+// The config is a plain record — `{ host: "127.0.0.1", database: "app" }`, or
+// `{ filename: "/tmp/app.db" }` for SQLite — and each driver renders it into
+// whatever its own library takes.
+export function connectDatabase(db: Db, config: DbConfig): DbResult {
+  if (!db.connect(config)) {
     return dbErr(lastError(db, "could not connect through the " + db.name + " driver"));
   }
   return dbOk(0);
@@ -755,7 +769,7 @@ export function persist(db: Db, repo: DbRepository, json: string): DbResult {
   if (json == "") { return dbErr("refusing to persist an empty document"); }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
     + readOne(db, repo) + upsertClause(db, repo);
-  if (!db.query(sql, json)) {
+  if (!db.query(sql, [json])) {
     return dbErr(lastError(db, "could not persist into " + repo.table));
   }
   return dbOk(1);
@@ -768,7 +782,7 @@ export function persistMany(db: Db, repo: DbRepository, jsonArray: string): DbRe
   if (jsonArray == "" || jsonArray == "[]") { return dbOk(0); }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
     + readMany(db, repo) + upsertClause(db, repo);
-  if (!db.query(sql, jsonArray)) {
+  if (!db.query(sql, [jsonArray])) {
     return dbErr(lastError(db, "could not persist into " + repo.table));
   }
   return dbOk(1);
@@ -776,15 +790,15 @@ export function persistMany(db: Db, repo: DbRepository, jsonArray: string): DbRe
 
 export function deleteById(db: Db, repo: DbRepository, id: string): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
-  if (!db.query("DELETE FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, id)) {
+  if (!db.query("DELETE FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, [id])) {
     return dbErr(lastError(db, "could not delete from " + repo.table));
   }
   return dbOk(1);
 }
 
-export function deleteWhere(db: Db, repo: DbRepository, where: string, a: string): DbResult {
+export function deleteWhere(db: Db, repo: DbRepository, where: string, args: string[]): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
-  if (!db.query("DELETE FROM " + repo.table + " WHERE " + where, a)) {
+  if (!db.query("DELETE FROM " + repo.table + " WHERE " + where, args)) {
     return dbErr(lastError(db, "could not delete from " + repo.table));
   }
   return dbOk(1);
@@ -798,7 +812,7 @@ export function findById(db: Db, repo: DbRepository, id: string): string {
   if (!repositoryValid(repo)) { return ""; }
   let sql = oneSql(db, repo, repo.idColumn + " = " + db.placeholder);
   if (sql == "") { return ""; }
-  if (!db.query(sql, id)) { return ""; }
+  if (!db.query(sql, [id])) { return ""; }
   if (db.rows() == 0) { return ""; }
   return db.value(0, 0);
 }
@@ -811,7 +825,7 @@ export function findProjected(db: Db, repo: DbRepository, columns: string, id: s
   if (!projectionValid(columns)) { return ""; }
   let sql = projectedSql(db, repo, columns, repo.idColumn + " = " + db.placeholder);
   if (sql == "") { return ""; }
-  if (!db.query(sql, id)) { return ""; }
+  if (!db.query(sql, [id])) { return ""; }
   if (db.rows() == 0) { return ""; }
   return db.value(0, 0);
 }
@@ -821,22 +835,18 @@ function rowsAsArray(db: Db): string {
   return db.value(0, 0);
 }
 
-// Every record as a JSON array. `where` is a fragment with $1 for its
-// parameter, or "" for all rows.
-export function listWhere(db: Db, repo: DbRepository, where: string, a: string): string {
+// Every record as a JSON array. `where` is a fragment carrying one marker per
+// value in `args`, or "" with no args for all rows.
+export function listWhere(db: Db, repo: DbRepository, where: string, args: string[]): string {
   if (!repositoryValid(repo)) { return "[]"; }
   let sql = listSql(db, repo, where, "");
   if (sql == "") { return "[]"; }
-  if (where == "") {
-    if (!db.queryNoArgs(sql)) { return "[]"; }
-  } else {
-    if (!db.query(sql, a)) { return "[]"; }
-  }
+  if (!db.query(sql, args)) { return "[]"; }
   return rowsAsArray(db);
 }
 
 // A projected list, for DTOs.
-export function listProjected(db: Db, repo: DbRepository, columns: string, where: string, a: string): string {
+export function listProjected(db: Db, repo: DbRepository, columns: string, where: string, args: string[]): string {
   if (!safeIdentifier(repo.table)) { return "[]"; }
   if (!projectionValid(columns)) { return "[]"; }
   let sql = "";
@@ -852,43 +862,31 @@ export function listProjected(db: Db, repo: DbRepository, columns: string, where
     if (where != "") { inner = inner + " WHERE " + where; }
     sql = "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + ") r";
   }
-  if (where == "") {
-    if (!db.queryNoArgs(sql)) { return "[]"; }
-  } else {
-    if (!db.query(sql, a)) { return "[]"; }
-  }
+  if (!db.query(sql, args)) { return "[]"; }
   return rowsAsArray(db);
 }
 
 // A page, ordered by a column you name.
-export function pageWhere(db: Db, repo: DbRepository, where: string, a: string, orderBy: string, limit: int, offset: int): string {
+export function pageWhere(db: Db, repo: DbRepository, where: string, args: string[], orderBy: string, limit: int, offset: int): string {
   if (!repositoryValid(repo) || !safeIdentifier(orderBy)) { return "[]"; }
   let sql = listSql(db, repo, where, " ORDER BY " + orderBy + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`);
   if (sql == "") { return "[]"; }
-  if (where == "") {
-    if (!db.queryNoArgs(sql)) { return "[]"; }
-  } else {
-    if (!db.query(sql, a)) { return "[]"; }
-  }
+  if (!db.query(sql, args)) { return "[]"; }
   return rowsAsArray(db);
 }
 
-export function countWhere(db: Db, repo: DbRepository, where: string, a: string): int {
+export function countWhere(db: Db, repo: DbRepository, where: string, args: string[]): int {
   if (!safeIdentifier(repo.table)) { return -1; }
   let sql = "SELECT count(*) FROM " + repo.table;
   if (where != "") { sql = sql + " WHERE " + where; }
-  if (where == "") {
-    if (!db.queryNoArgs(sql)) { return -1; }
-  } else {
-    if (!db.query(sql, a)) { return -1; }
-  }
+  if (!db.query(sql, args)) { return -1; }
   if (db.rows() == 0) { return 0; }
   return parseInt(db.value(0, 0)) ?? 0;
 }
 
 export function existsById(db: Db, repo: DbRepository, id: string): bool {
   if (!repositoryValid(repo)) { return false; }
-  if (!db.query("SELECT 1 FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, id)) {
+  if (!db.query("SELECT 1 FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, [id])) {
     return false;
   }
   return db.rows() > 0;
