@@ -1,4 +1,4 @@
-// plume -- a typed data-mapper over PostgreSQL, through the C FFI.
+// plume -- a typed data-mapper, over any database a driver speaks.
 //
 // Java's Panache reads @Entity and @Column by reflection at runtime. There is
 // no reflection here, and no annotations — so a mapping is declared outright,
@@ -12,29 +12,11 @@
 // type. A mapping that disagrees with the table fails at the first query with
 // the database's own message, not silently.
 //
-// Dependencies:
-//   apt install postgresql-17 libpq-dev   # Debian, Ubuntu
-//   brew install postgresql@17            # macOS
-//   sh packages/plume/build.sh
+// This file carries no FFI and links nothing: a `Db` from ./postgres.ts or
+// ./sqlite.ts supplies both the connection and the handful of places the
+// dialects disagree, so a SQLite program never needs libpq installed.
 //
-// @link ./plume_shim.o
-// @link pq
-// @link c
-declare function pl_connect(conninfo: string): int;
-declare function pl_connected(): int;
-declare function pl_exec(sql: string): int;
-declare function pl_query0(sql: string): int;
-declare function pl_query1(sql: string, a: string): int;
-declare function pl_query2(sql: string, a: string, b: string): int;
-declare function pl_query3(sql: string, a: string, b: string, c: string): int;
-declare function pl_query4(sql: string, a: string, b: string, c: string, d: string): int;
-declare function pl_query5(sql: string, a: string, b: string, c: string, d: string, e: string): int;
-declare function pl_rows(): int;
-declare function pl_cols(): int;
-declare function pl_value(row: int, col: int): string;
-declare function pl_error(): string;
-declare function pl_version(): string;
-declare function pl_close(): void;
+import { Db } from "./driver.ts";
 
 // One field of a mapping: the record's field name, the table's column name,
 // and the column's SQL type. Nothing here is derived from anything else.
@@ -80,8 +62,8 @@ function dbErr(message: string): DbResult {
   return r;
 }
 
-function lastError(fallback: string): string {
-  let e = pl_error();
+function lastError(db: Db, fallback: string): string {
+  let e = db.lastError();
   if (e == "") { return fallback; }
   return e;
 }
@@ -174,12 +156,13 @@ function columnList(repo: DbRepository): string {
   return out;
 }
 
-function fieldList(repo: DbRepository): string {
+function fieldList(db: Db, repo: DbRepository): string {
+  let q = db.identQuote;
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
     if (i > 0) { out = out + ", "; }
-    out = out + "\"" + repo.fields[i].field + "\"";
+    out = out + q + repo.fields[i].field + q;
     i = i + 1;
   }
   return out;
@@ -200,32 +183,222 @@ function updateSet(repo: DbRepository): string {
   return out;
 }
 
+// One row as a document, from the mapping's own columns.
+function oneSql(db: Db, repo: DbRepository, where: string): string {
+  if (db.docStyle == "pairs") {
+    return "SELECT " + rowJson(db, repo) + " FROM " + repo.table + " WHERE " + where;
+  }
+  return "SELECT " + db.rowToJson + "(r) FROM (SELECT " + selectList(repo)
+    + " FROM " + repo.table + " WHERE " + where + ") r";
+}
+
+// One row as a document, from a select list the caller wrote. SQLite's
+// json_object wants key/value pairs and cannot take a row, so the projection
+// goes through a named subquery either way and SQLite re-wraps it with
+// json_object over `*` — which it spells as a correlated select.
+function projectedSql(db: Db, repo: DbRepository, columns: string, where: string): string {
+  if (db.docStyle == "pairs") {
+    return "SELECT " + db.rowToJson + "(" + pairsFromColumns(columns) + ") FROM " + repo.table
+      + " WHERE " + where;
+  }
+  return "SELECT " + db.rowToJson + "(r) FROM (SELECT " + columns
+    + " FROM " + repo.table + " WHERE " + where + ") r";
+}
+
+// Turn a select list into json_object pairs, so `a, b AS "c"` becomes
+// `'a', a, 'c', b`. An alias names the key; without one the expression's own
+// text does, which is what row_to_json would have used too.
+export function pairsFromColumns(columns: string): string {
+  let parts = columns.split(",");
+  let out = "";
+  let i: int = 0;
+  while (i < parts.length) {
+    let part = parts[i].trim();
+    if (part != "") {
+      let expr = part;
+      let key = part;
+      let at = part.toLowerCase().indexOf(" as ");
+      if (at >= 0) {
+        expr = part.substring(0, at).trim();
+        key = part.substring(at + 4, part.length).trim();
+        if (key.startsWith("\"") && key.endsWith("\"")) {
+          key = key.substring(1, key.length - 1);
+        }
+      }
+      if (out != "") { out = out + ", "; }
+      out = out + "'" + key + "', " + expr;
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// A list of documents. PostgreSQL aggregates whole rows of an aliased
+// subquery; SQLite aggregates a json_object built per row.
+function listSql(db: Db, repo: DbRepository, where: string, tail: string): string {
+  if (db.docStyle == "pairs") {
+    // The ordering and the bounds belong to the rows, not to the array they
+    // aggregate into, so they go in a subquery even when there are none.
+    let inner = "SELECT * FROM " + repo.table;
+    if (where != "") { inner = inner + " WHERE " + where; }
+    // MySQL requires every derived table to be named, and the others accept a
+    // name they do not need.
+    return "SELECT coalesce(" + db.jsonAgg + "(" + rowJson(db, repo) + "), '[]') FROM ("
+      + inner + tail + ") AS r";
+  }
+  let inner = "SELECT " + selectList(repo) + " FROM " + repo.table;
+  if (where != "") { inner = inner + " WHERE " + where; }
+  return "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + tail + ") r";
+}
+
+// A row as a document. PostgreSQL wraps a subquery with row_to_json and takes
+// its keys from the aliases; SQLite names each key beside its column, since
+// json_object takes pairs rather than a row.
+function rowJson(db: Db, repo: DbRepository): string {
+  if (db.docStyle == "pairs") {
+    let pairs = "";
+    let i: int = 0;
+    while (i < repo.fields.length) {
+      if (i > 0) { pairs = pairs + ", "; }
+      pairs = pairs + "'" + repo.fields[i].field + "', " + repo.fields[i].column;
+      i = i + 1;
+    }
+    return db.rowToJson + "(" + pairs + ")";
+  }
+  return db.rowToJson + "(r)";
+}
+
+// The FROM a document query needs: PostgreSQL reads from an aliased subquery,
+// SQLite straight from the table.
+function jsonFrom(db: Db, repo: DbRepository): string {
+  if (db.readStyle == "extract") { return " FROM " + repo.table; }
+  return " FROM (SELECT " + selectList(repo) + " FROM " + repo.table;
+}
+
+// How a driver reads one document. PostgreSQL declares the shape once with
+// json_to_record; SQLite pulls each field out with json_extract, which needs
+// no declaration but repeats the path per column.
+function readOne(db: Db, repo: DbRepository): string {
+  if (db.readStyle == "extract") {
+    let picks = "";
+    let i: int = 0;
+    while (i < repo.fields.length) {
+      if (i > 0) { picks = picks + ", "; }
+      picks = picks + jsonPick(db, db.placeholder, repo.fields[i]);
+      i = i + 1;
+    }
+    return "SELECT " + picks;
+  }
+  if (db.readStyle == "json-table") {
+    // JSON_TABLE declares the shape like json_to_record does, but reads from
+    // the document rather than being applied to it, so a single object is
+    // walked as a one-element array.
+    return "SELECT " + fieldList(db, repo) + " FROM JSON_TABLE(" + db.placeholder
+      + ", '$' COLUMNS (" + jsonTableColumns(db, repo) + ")) AS x";
+  }
+  return "SELECT " + fieldList(db, repo) + " FROM json_to_record(" + db.placeholder + "::json) AS x(" + recordDefinition(repo) + ")";
+}
+
+// The same for an array of documents. SQLite walks it with json_each, whose
+// `value` is each element.
+function readMany(db: Db, repo: DbRepository): string {
+  if (db.readStyle == "extract") {
+    let picks = "";
+    let i: int = 0;
+    while (i < repo.fields.length) {
+      if (i > 0) { picks = picks + ", "; }
+      picks = picks + jsonPick(db, "value", repo.fields[i]);
+      i = i + 1;
+    }
+    return "SELECT " + picks + " FROM json_each(" + db.placeholder + ")";
+  }
+  if (db.readStyle == "json-table") {
+    return "SELECT " + fieldList(db, repo) + " FROM JSON_TABLE(" + db.placeholder
+      + ", '$[*]' COLUMNS (" + jsonTableColumns(db, repo) + ")) AS x";
+  }
+  return "SELECT " + fieldList(db, repo) + " FROM json_to_recordset(" + db.placeholder + "::json) AS x(" + recordDefinition(repo) + ")";
+}
+
+function upsertClause(db: Db, repo: DbRepository): string {
+  if (db.upsertStyle == "on-duplicate-key") {
+    // MySQL names no conflict target: the clause fires for whichever unique
+    // key was violated. A mapping with only a key column has nothing to set,
+    // so it re-sets the key to itself, which is MySQL's own no-op idiom.
+    let sets = updateSetMysql(repo);
+    if (sets == "") { sets = repo.idColumn + " = " + repo.idColumn; }
+    return " ON DUPLICATE KEY UPDATE " + sets;
+  }
+  // SQLite cannot tell an upsert clause from a join condition after an
+  // INSERT ... SELECT; `WHERE true` settles it.
+  let head = "";
+  if (db.upsertNeedsWhereTrue) { head = " WHERE true"; }
+  let updates = updateSet(repo);
+  if (updates == "") {
+    return head + " ON CONFLICT (" + repo.idColumn + ") DO NOTHING";
+  }
+  return head + " ON CONFLICT (" + repo.idColumn + ") DO UPDATE SET " + updates;
+}
+
+// MySQL's form of the same thing. `VALUES(col)` is deprecated in 8.0.20 but
+// still the only spelling MariaDB and older MySQL both accept.
+function updateSetMysql(repo: DbRepository): string {
+  let out = "";
+  let i: int = 0;
+  while (i < repo.fields.length) {
+    let col = repo.fields[i].column;
+    if (col != repo.idColumn) {
+      if (out != "") { out = out + ", "; }
+      out = out + col + " = VALUES(" + col + ")";
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// One field pulled out of a JSON document held in `source`.
+function jsonPick(db: Db, source: string, f: DbField): string {
+  let pick = "json_extract(" + source + ", '$." + f.field + "')";
+  if (db.jsonNeedsUnquote) { return "JSON_UNQUOTE(" + pick + ")"; }
+  return pick;
+}
+
+// JSON_TABLE's column declarations: a name, a type, and the path to read.
+function jsonTableColumns(db: Db, repo: DbRepository): string {
+  let out = "";
+  let i: int = 0;
+  while (i < repo.fields.length) {
+    if (i > 0) { out = out + ", "; }
+    out = out + "`" + repo.fields[i].field + "` " + dialectType(db, repo.fields[i].sqlType)
+      + " PATH '$." + repo.fields[i].field + "'";
+    i = i + 1;
+  }
+  return out;
+}
+
 // --- connection ---------------------------------------------------------------------
 
-export function connectDatabase(conninfo: string): DbResult {
-  if (pl_connect(conninfo) != 0) {
-    return dbErr(lastError("could not connect"));
+// `target` is whatever the driver's library takes: a libpq conninfo string
+// for postgres, a file path or ":memory:" for sqlite.
+export function connectDatabase(db: Db, target: string): DbResult {
+  if (!db.connect(target)) {
+    return dbErr(lastError(db, "could not connect through the " + db.name + " driver"));
   }
   return dbOk(0);
 }
 
-export function databaseConnected(): bool {
-  return pl_connected() == 1;
+export function databaseConnected(db: Db): bool {
+  return db.connected();
 }
 
-export function closeDatabase(): void {
-  pl_close();
-}
-
-export function databaseVersion(): int {
-  return parseInt(pl_version()) ?? 0;
+export function closeDatabase(db: Db): void {
+  db.close();
 }
 
 // Run a statement that returns no rows — DDL, or SQL this package does not
 // build for you.
-export function execute(sql: string): DbResult {
-  if (pl_exec(sql) != 0) {
-    return dbErr(lastError("statement failed"));
+export function execute(db: Db, sql: string): DbResult {
+  if (!db.exec(sql)) {
+    return dbErr(lastError(db, "statement failed"));
   }
   return dbOk(0);
 }
@@ -235,14 +408,24 @@ export function execute(sql: string): DbResult {
 // Create the table the mapping describes, if it is absent. The key column is
 // the primary key; every other column is NOT NULL, since a record's field
 // cannot be absent.
-export function createTable(repo: DbRepository): DbResult {
+// A mapping states portable type names; each driver spells them its own way.
+// A name the portable set does not cover passes through untouched, so a
+// column can still be declared in the database's own vocabulary.
+export function dialectType(db: Db, sqlType: string): string {
+  if (sqlType == "text") { return db.textType; }
+  if (sqlType == "int") { return db.intType; }
+  if (sqlType == "float8") { return db.floatType; }
+  return sqlType;
+}
+
+export function createTable(db: Db, repo: DbRepository): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
   let cols = "";
   let i: int = 0;
   while (i < repo.fields.length) {
     let f = repo.fields[i];
     if (i > 0) { cols = cols + ", "; }
-    cols = cols + f.column + " " + f.sqlType;
+    cols = cols + f.column + " " + dialectType(db, f.sqlType);
     if (f.column == repo.idColumn) {
       cols = cols + " PRIMARY KEY";
     } else {
@@ -250,12 +433,12 @@ export function createTable(repo: DbRepository): DbResult {
     }
     i = i + 1;
   }
-  return execute("CREATE TABLE IF NOT EXISTS " + repo.table + " (" + cols + ")");
+  return execute(db, "CREATE TABLE IF NOT EXISTS " + repo.table + " (" + cols + ")");
 }
 
-export function dropTable(repo: DbRepository): DbResult {
+export function dropTable(db: Db, repo: DbRepository): DbResult {
   if (!safeIdentifier(repo.table)) { return dbErr("unsafe table name"); }
-  return execute("DROP TABLE IF EXISTS " + repo.table);
+  return execute(db, "DROP TABLE IF EXISTS " + repo.table);
 }
 
 // --- writing ------------------------------------------------------------------------------
@@ -263,54 +446,42 @@ export function dropTable(repo: DbRepository): DbResult {
 // Insert or replace one record, given its JSON. The document's keys are the
 // mapping's field names; the database reads them with json_to_record under the
 // declared types and writes them to the declared columns.
-export function persist(repo: DbRepository, json: string): DbResult {
+export function persist(db: Db, repo: DbRepository, json: string): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
   if (json == "") { return dbErr("refusing to persist an empty document"); }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
-    + "SELECT " + fieldList(repo) + " FROM json_to_record($1::json) AS x(" + recordDefinition(repo) + ")";
-  let updates = updateSet(repo);
-  if (updates != "") {
-    sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO UPDATE SET " + updates;
-  } else {
-    sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO NOTHING";
-  }
-  if (pl_query1(sql, json) < 0) {
-    return dbErr(lastError("could not persist into " + repo.table));
+    + readOne(db, repo) + upsertClause(db, repo);
+  if (!db.query(sql, json)) {
+    return dbErr(lastError(db, "could not persist into " + repo.table));
   }
   return dbOk(1);
 }
 
 // Insert or replace many, in one statement: the document is a JSON array, read
 // with json_to_recordset.
-export function persistMany(repo: DbRepository, jsonArray: string): DbResult {
+export function persistMany(db: Db, repo: DbRepository, jsonArray: string): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
   if (jsonArray == "" || jsonArray == "[]") { return dbOk(0); }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
-    + "SELECT " + fieldList(repo) + " FROM json_to_recordset($1::json) AS x(" + recordDefinition(repo) + ")";
-  let updates = updateSet(repo);
-  if (updates != "") {
-    sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO UPDATE SET " + updates;
-  } else {
-    sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO NOTHING";
-  }
-  if (pl_query1(sql, jsonArray) < 0) {
-    return dbErr(lastError("could not persist into " + repo.table));
+    + readMany(db, repo) + upsertClause(db, repo);
+  if (!db.query(sql, jsonArray)) {
+    return dbErr(lastError(db, "could not persist into " + repo.table));
   }
   return dbOk(1);
 }
 
-export function deleteById(repo: DbRepository, id: string): DbResult {
+export function deleteById(db: Db, repo: DbRepository, id: string): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
-  if (pl_query1("DELETE FROM " + repo.table + " WHERE " + repo.idColumn + " = $1", id) < 0) {
-    return dbErr(lastError("could not delete from " + repo.table));
+  if (!db.query("DELETE FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, id)) {
+    return dbErr(lastError(db, "could not delete from " + repo.table));
   }
   return dbOk(1);
 }
 
-export function deleteWhere(repo: DbRepository, where: string, a: string): DbResult {
+export function deleteWhere(db: Db, repo: DbRepository, where: string, a: string): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
-  if (pl_query1("DELETE FROM " + repo.table + " WHERE " + where, a) < 0) {
-    return dbErr(lastError("could not delete from " + repo.table));
+  if (!db.query("DELETE FROM " + repo.table + " WHERE " + where, a)) {
+    return dbErr(lastError(db, "could not delete from " + repo.table));
   }
   return dbOk(1);
 }
@@ -319,149 +490,115 @@ export function deleteWhere(repo: DbRepository, where: string, a: string): DbRes
 
 // One record as JSON, or "" when absent. Hand the result to JSON.parse<T>: the
 // keys are the mapping's field names, so the compiler checks the shape.
-export function findById(repo: DbRepository, id: string): string {
+export function findById(db: Db, repo: DbRepository, id: string): string {
   if (!repositoryValid(repo)) { return ""; }
-  let sql = "SELECT row_to_json(r) FROM (SELECT " + selectList(repo)
-    + " FROM " + repo.table + " WHERE " + repo.idColumn + " = $1) r";
-  if (pl_query1(sql, id) < 0) { return ""; }
-  if (pl_rows() == 0) { return ""; }
-  return pl_value(0, 0);
+  let sql = oneSql(db, repo, repo.idColumn + " = " + db.placeholder);
+  if (!db.query(sql, id)) { return ""; }
+  if (db.rows() == 0) { return ""; }
+  return db.value(0, 0);
 }
 
 // The same, projected: `columns` is a select list you write, so a DTO is a
 // query rather than a generated mapper. Aliases rename — `max_steps AS
 // "maxSteps"` is what MapStruct spells with an annotation.
-export function findProjected(repo: DbRepository, columns: string, id: string): string {
+export function findProjected(db: Db, repo: DbRepository, columns: string, id: string): string {
   if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn)) { return ""; }
-  let sql = "SELECT row_to_json(r) FROM (SELECT " + columns
-    + " FROM " + repo.table + " WHERE " + repo.idColumn + " = $1) r";
-  if (pl_query1(sql, id) < 0) { return ""; }
-  if (pl_rows() == 0) { return ""; }
-  return pl_value(0, 0);
+  let sql = projectedSql(db, repo, columns, repo.idColumn + " = " + db.placeholder);
+  if (!db.query(sql, id)) { return ""; }
+  if (db.rows() == 0) { return ""; }
+  return db.value(0, 0);
 }
 
-function rowsAsArray(): string {
-  if (pl_rows() == 0) { return "[]"; }
-  return pl_value(0, 0);
+function rowsAsArray(db: Db): string {
+  if (db.rows() == 0) { return "[]"; }
+  return db.value(0, 0);
 }
 
 // Every record as a JSON array. `where` is a fragment with $1 for its
 // parameter, or "" for all rows.
-export function listWhere(repo: DbRepository, where: string, a: string): string {
+export function listWhere(db: Db, repo: DbRepository, where: string, a: string): string {
   if (!repositoryValid(repo)) { return "[]"; }
-  let inner = "SELECT " + selectList(repo) + " FROM " + repo.table;
-  if (where != "") { inner = inner + " WHERE " + where; }
-  let sql = "SELECT coalesce(json_agg(r), '[]'::json) FROM (" + inner + ") r";
+  let sql = listSql(db, repo, where, "");
   if (where == "") {
-    if (pl_query0(sql) < 0) { return "[]"; }
+    if (!db.queryNoArgs(sql)) { return "[]"; }
   } else {
-    if (pl_query1(sql, a) < 0) { return "[]"; }
+    if (!db.query(sql, a)) { return "[]"; }
   }
-  return rowsAsArray();
+  return rowsAsArray(db);
 }
 
 // A projected list, for DTOs.
-export function listProjected(repo: DbRepository, columns: string, where: string, a: string): string {
+export function listProjected(db: Db, repo: DbRepository, columns: string, where: string, a: string): string {
   if (!safeIdentifier(repo.table)) { return "[]"; }
-  let inner = "SELECT " + columns + " FROM " + repo.table;
-  if (where != "") { inner = inner + " WHERE " + where; }
-  let sql = "SELECT coalesce(json_agg(r), '[]'::json) FROM (" + inner + ") r";
-  if (where == "") {
-    if (pl_query0(sql) < 0) { return "[]"; }
+  let sql = "";
+  if (db.docStyle == "pairs") {
+    // The caller's aliases name the keys; the expressions stay as written.
+    sql = "SELECT coalesce(" + db.jsonAgg + "(" + db.rowToJson + "("
+      + pairsFromColumns(columns) + ")), '[]') FROM " + repo.table;
+    if (where != "") { sql = sql + " WHERE " + where; }
   } else {
-    if (pl_query1(sql, a) < 0) { return "[]"; }
+    let inner = "SELECT " + columns + " FROM " + repo.table;
+    if (where != "") { inner = inner + " WHERE " + where; }
+    sql = "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + ") r";
   }
-  return rowsAsArray();
+  if (where == "") {
+    if (!db.queryNoArgs(sql)) { return "[]"; }
+  } else {
+    if (!db.query(sql, a)) { return "[]"; }
+  }
+  return rowsAsArray(db);
 }
 
 // A page, ordered by a column you name.
-export function pageWhere(repo: DbRepository, where: string, a: string, orderBy: string, limit: int, offset: int): string {
+export function pageWhere(db: Db, repo: DbRepository, where: string, a: string, orderBy: string, limit: int, offset: int): string {
   if (!repositoryValid(repo) || !safeIdentifier(orderBy)) { return "[]"; }
-  let inner = "SELECT " + selectList(repo) + " FROM " + repo.table;
-  if (where != "") { inner = inner + " WHERE " + where; }
-  inner = inner + " ORDER BY " + orderBy + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`;
-  let sql = "SELECT coalesce(json_agg(r), '[]'::json) FROM (" + inner + ") r";
+  let sql = listSql(db, repo, where, " ORDER BY " + orderBy + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`);
   if (where == "") {
-    if (pl_query0(sql) < 0) { return "[]"; }
+    if (!db.queryNoArgs(sql)) { return "[]"; }
   } else {
-    if (pl_query1(sql, a) < 0) { return "[]"; }
+    if (!db.query(sql, a)) { return "[]"; }
   }
-  return rowsAsArray();
+  return rowsAsArray(db);
 }
 
-export function countWhere(repo: DbRepository, where: string, a: string): int {
+export function countWhere(db: Db, repo: DbRepository, where: string, a: string): int {
   if (!safeIdentifier(repo.table)) { return -1; }
   let sql = "SELECT count(*) FROM " + repo.table;
   if (where != "") { sql = sql + " WHERE " + where; }
   if (where == "") {
-    if (pl_query0(sql) < 0) { return -1; }
+    if (!db.queryNoArgs(sql)) { return -1; }
   } else {
-    if (pl_query1(sql, a) < 0) { return -1; }
+    if (!db.query(sql, a)) { return -1; }
   }
-  if (pl_rows() == 0) { return 0; }
-  return parseInt(pl_value(0, 0)) ?? 0;
+  if (db.rows() == 0) { return 0; }
+  return parseInt(db.value(0, 0)) ?? 0;
 }
 
-export function existsById(repo: DbRepository, id: string): bool {
+export function existsById(db: Db, repo: DbRepository, id: string): bool {
   if (!repositoryValid(repo)) { return false; }
-  if (pl_query1("SELECT 1 FROM " + repo.table + " WHERE " + repo.idColumn + " = $1", id) < 0) {
+  if (!db.query("SELECT 1 FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, id)) {
     return false;
   }
-  return pl_rows() > 0;
+  return db.rows() > 0;
 }
 
 // --- transactions --------------------------------------------------------------------------------
 
 // Explicit, not a block that takes a closure: a closure here cannot call a
 // function it was handed, so `withTransaction(body)` cannot be written.
-export function beginTransaction(): DbResult {
-  return execute("BEGIN");
+export function beginTransaction(db: Db): DbResult {
+  return execute(db, "BEGIN");
 }
 
-export function commitTransaction(): DbResult {
-  return execute("COMMIT");
+export function commitTransaction(db: Db): DbResult {
+  return execute(db, "COMMIT");
 }
 
-export function rollbackTransaction(): DbResult {
-  return execute("ROLLBACK");
+export function rollbackTransaction(db: Db): DbResult {
+  return execute(db, "ROLLBACK");
 }
 
 // --- migrations -----------------------------------------------------------------------------------
-
-// Applied in order and recorded, so a second run is a no-op. Flyway's idea
-// without its machinery: a migration is a name and a statement.
-export function migrate(names: string[], statements: string[]): DbResult {
-  if (names.length != statements.length) {
-    return dbErr("every migration needs a name: " + `${names.length}` + " names for " + `${statements.length}` + " statements");
-  }
-  let created = execute("CREATE TABLE IF NOT EXISTS plume_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
-  if (!created.ok) { return created; }
-
-  let applied: int = 0;
-  let i: int = 0;
-  while (i < names.length) {
-    if (pl_query1("SELECT 1 FROM plume_migrations WHERE name = $1", names[i]) < 0) {
-      return dbErr(lastError("could not read the migration log"));
-    }
-    if (pl_rows() == 0) {
-      let ran = execute(statements[i]);
-      if (!ran.ok) {
-        return dbErr("migration \"" + names[i] + "\" failed: " + ran.error);
-      }
-      if (pl_query1("INSERT INTO plume_migrations (name) VALUES ($1)", names[i]) < 0) {
-        return dbErr(lastError("applied \"" + names[i] + "\" but could not record it"));
-      }
-      applied = applied + 1;
-    }
-    i = i + 1;
-  }
-  return dbOk(applied);
-}
-
-export function migrationApplied(name: string): bool {
-  if (pl_query1("SELECT 1 FROM plume_migrations WHERE name = $1", name) < 0) { return false; }
-  return pl_rows() > 0;
-}
 
 // --- mapping in memory ---------------------------------------------------------------------------------
 
