@@ -40,6 +40,12 @@ export type Db = {
   // How a row becomes JSON, and how many rows become a JSON array.
   rowToJson: string,
   jsonAgg: string,
+  // An empty array of the kind jsonAgg produces, for a relation that matched
+  // nothing. A JSON column will not take a text '[]' on MySQL.
+  emptyJsonArray: string,
+  // Whether a subquery's JSON has to be named as JSON before it can nest
+  // inside a document. SQLite would otherwise embed it as a string.
+  nestedJsonWrap: bool,
   // Whether rowToJson takes a whole row ("row", PostgreSQL's row_to_json) or
   // alternating keys and columns ("pairs", the json_object of SQLite and
   // MySQL). This is separate from readStyle because a driver can read one way
@@ -96,6 +102,8 @@ export function noDatabase(): Db {
     upsertNeedsWhereTrue: false,
     rowToJson: "row_to_json",
     jsonAgg: "json_agg",
+    emptyJsonArray: "'[]'::json",
+    nestedJsonWrap: false,
     docStyle: "row",
     identQuote: "\"",
     readStyle: "record",
