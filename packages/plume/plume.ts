@@ -458,26 +458,27 @@ export function pairsFromColumns(columns: string): string {
 
 // A list of documents. PostgreSQL aggregates whole rows of an aliased
 // subquery; SQLite aggregates a json_object built per row.
+// Every matching record as one document per row.
+//
+// Not aggregated in SQL. MySQL's JSON_ARRAYAGG does not preserve the order of
+// what it aggregates — a subquery's ORDER BY is honoured for which rows come
+// back and ignored for the order they sit in — so a page could contain the
+// right records in the wrong order, and did. Selecting a document per row and
+// assembling the array here is the one shape all three databases order the
+// same way, and it costs a join in Lumen instead of one in the database.
 function listSql(db: Db, repo: DbRepository, where: string, tail: string): string {
   if (db.docStyle == "pairs") {
-    // The ordering and the bounds belong to the rows, not to the array they
-    // aggregate into, so they go in a subquery even when there are none.
-    let inner = "SELECT * FROM " + repo.table;
-    if (where != "") { inner = inner + " WHERE " + where; }
     let doc = rowJson(db, repo);
     if (doc == "") { return ""; }
-    // Named for the table it selects from, not `r`: a relation's subquery
-    // refers to the parent by table name, and inside a derived table called
-    // anything else that reference has nothing to bind to. MySQL requires the
-    // name; the others accept one they do not need.
-    return "SELECT coalesce(" + db.jsonAgg + "(" + doc + "), '[]') FROM ("
-      + inner + tail + ") AS " + repo.table;
+    let sql = "SELECT " + doc + " FROM " + repo.table;
+    if (where != "") { sql = sql + " WHERE " + where; }
+    return sql + tail;
   }
   let cols = selectListWithRelations(db, repo);
   if (cols == "") { return ""; }
   let inner = "SELECT " + cols + " FROM " + repo.table;
   if (where != "") { inner = inner + " WHERE " + where; }
-  return "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + tail + ") r";
+  return "SELECT " + db.rowToJson + "(" + repo.table + ") FROM (" + inner + tail + ") " + repo.table;
 }
 
 // A column as it goes into a document. Only a float needs anything: SQLite
@@ -830,9 +831,19 @@ export function findProjected(db: Db, repo: DbRepository, columns: string, id: s
   return db.value(0, 0);
 }
 
+// The rows of a document-per-row query as one JSON array, in the order the
+// database returned them.
 function rowsAsArray(db: Db): string {
-  if (db.rows() == 0) { return "[]"; }
-  return db.value(0, 0);
+  let count = db.rows();
+  if (count == 0) { return "[]"; }
+  let out = "[";
+  let i: int = 0;
+  while (i < count) {
+    if (i > 0) { out = out + ","; }
+    out = out + db.value(i, 0);
+    i = i + 1;
+  }
+  return out + "]";
 }
 
 // Every record as a JSON array. `where` is a fragment carrying one marker per
@@ -862,6 +873,76 @@ export function listProjected(db: Db, repo: DbRepository, columns: string, where
     if (where != "") { inner = inner + " WHERE " + where; }
     sql = "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + ") r";
   }
+  if (!db.query(sql, args)) { return "[]"; }
+  return rowsAsArray(db);
+}
+
+// --- ordering ----------------------------------------------------------------
+//
+// A sort key is a column and a direction, and a list of them is an ORDER BY.
+// `asc` and `desc` are what every SQL builder calls these, so they are what
+// these are called.
+//
+//   listOrdered(db, agents, "", [], [desc("max_steps"), asc("agent_name")])
+//
+// A column name cannot be bound as a parameter — SQL has no placeholder for
+// one — so it is checked rather than trusted, and a key that is not a plain
+// name refuses the whole query.
+
+export type DbOrder = {
+  column: string,
+  descending: bool,
+};
+
+export function asc(column: string): DbOrder {
+  let o: DbOrder = { column: column, descending: false };
+  return o;
+}
+
+export function desc(column: string): DbOrder {
+  let o: DbOrder = { column: column, descending: true };
+  return o;
+}
+
+// `ORDER BY a DESC, b`, or an empty string when there is nothing to order by.
+// Returns "!" for a key that is not a plain identifier, which the callers
+// treat as a refusal — distinguishing "no ordering asked for" from "an
+// ordering I will not send".
+export function orderClause(keys: DbOrder[]): string {
+  if (keys.length == 0) { return ""; }
+  let out = "";
+  let i: int = 0;
+  while (i < keys.length) {
+    if (!safeIdentifier(keys[i].column)) { return "!"; }
+    if (i > 0) { out = out + ", "; }
+    out = out + keys[i].column;
+    if (keys[i].descending) { out = out + " DESC"; }
+    i = i + 1;
+  }
+  return " ORDER BY " + out;
+}
+
+// A list in an order you name. `listWhere` is this with no keys.
+export function listOrdered(db: Db, repo: DbRepository, where: string, args: string[], keys: DbOrder[]): string {
+  if (!repositoryValid(repo)) { return "[]"; }
+  let order = orderClause(keys);
+  if (order == "!") { return "[]"; }
+  let sql = listSql(db, repo, where, order);
+  if (sql == "") { return "[]"; }
+  if (!db.query(sql, args)) { return "[]"; }
+  return rowsAsArray(db);
+}
+
+// A page in an order you name, over several keys rather than one column.
+export function pageOrdered(db: Db, repo: DbRepository, where: string, args: string[], keys: DbOrder[], limit: int, offset: int): string {
+  if (!repositoryValid(repo)) { return "[]"; }
+  let order = orderClause(keys);
+  if (order == "!") { return "[]"; }
+  // A page without an order is a page in whatever order the database felt
+  // like, which is not a page at all — two requests can overlap or skip rows.
+  if (order == "") { return "[]"; }
+  let sql = listSql(db, repo, where, order + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`);
+  if (sql == "") { return "[]"; }
   if (!db.query(sql, args)) { return "[]"; }
   return rowsAsArray(db);
 }

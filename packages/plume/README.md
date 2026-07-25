@@ -153,6 +153,25 @@ listWhere(database, agents(), where, ["critic", "4"]);
 
 `pickFields` does the same narrowing in memory, without a round trip.
 
+### Ordering
+
+```ts
+listOrdered(database, agents, "", [], [desc("max_steps"), asc("agent_name")]);
+pageOrdered(database, agents, "", [], [asc("max_steps"), asc("id")], 20, 40);
+```
+
+`asc` and `desc` are what every SQL builder calls these. A key that is not a
+plain identifier refuses the whole query rather than being escaped into it, and
+`pageOrdered` refuses a page with no ordering at all — two requests for "the
+first twenty" can overlap or skip rows when the database is free to answer in
+any order, so an unordered page is not a page.
+
+The array is assembled from one document per row rather than aggregated in SQL,
+because MySQL's `JSON_ARRAYAGG` does not preserve the order of what it
+aggregates: a subquery's `ORDER BY` decides which rows come back and not the
+order they sit in. `pageWhere` was silently unordered on MySQL until this, and
+its test passed only because `LIMIT 1` makes order unobservable.
+
 An alias must be a plain name, on every driver. PostgreSQL would accept any
 quoted identifier, but a driver that builds the document's keys itself cannot,
 and a projection that works in development and is refused in production has not
@@ -395,6 +414,9 @@ lumen test foreignkeys.test.ts          # generated keys, SQLite
 lumen test foreignkeys_pg.test.ts       # generated keys, PostgreSQL
 lumen test foreignkeys_mysql.test.ts    # generated keys, MySQL
 lumen test migratenames.test.ts         # the V1__name.sql convention
+lumen test ordering.test.ts             # ordering, SQLite
+lumen test ordering_pg.test.ts          # ordering, PostgreSQL
+lumen test ordering_mysql.test.ts       # ordering, MySQL
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections; a
