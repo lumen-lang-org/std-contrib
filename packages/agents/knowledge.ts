@@ -9,17 +9,36 @@
 // only retrieve against Postgres.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbRepository, field, repository, execute, executeWith, placeholderAt, safeIdentifier } from "../plume/plume.ts";
-import { ModelRow } from "./schema.ts";
+import { DbField, DbRepository, field, repository, execute, executeWith, findById, placeholderAt, safeIdentifier } from "../plume/plume.ts";
+import { ModelRow, modelsMapping } from "./schema.ts";
 import { Embedding, embedText } from "./provider.ts";
 
 // A chunk of text an agent can be given. `source` groups chunks that came from
 // one place, so a corpus can be replaced without touching the rest.
+//
+// `modelId` records which embedding model produced the vector. Two models'
+// vectors are not comparable even at the same width, and a search that mixed
+// them would return confident nonsense rather than an error.
 export type DocumentRow = {
   id: string,
   source: string,
   body: string,
+  modelId: string,
 };
+
+// The embedding model a corpus was built with, read from its own row.
+//
+// Refuses a chat model: a provider offers both and they answer different
+// endpoints, so pointing a corpus at the wrong one should fail here rather
+// than at the provider.
+export function embeddingModel(db: Db, modelId: string): ModelRow {
+  let absent: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, enabled: false };
+  let document = findById(db, modelsMapping(), modelId);
+  if (document == "") { return absent; }
+  let model: ModelRow = JSON.parse<ModelRow>(document);
+  if (model.kind != "embedding") { return absent; }
+  return model;
+}
 
 export type Retrieved = {
   id: string,
@@ -49,12 +68,17 @@ export function documentsMapping(): DbRepository {
 // The width is fixed at creation, so a corpus embedded by one model cannot be
 // searched by another — which is a property of the vectors, not a limitation
 // here, and is worth failing on rather than silently mixing.
-export function createDocuments(db: Db, dimensions: int): string {
-  if (dimensions <= 0) { return "an embedding width is required"; }
+export function createDocuments(db: Db, model: ModelRow): string {
+  if (model.id == "") { return "no embedding model"; }
+  if (model.dimensions <= 0) {
+    return model.label + " does not say how wide its vectors are";
+  }
+  let dimensions = model.dimensions;
   let made = execute(db, "CREATE TABLE IF NOT EXISTS documents ("
     + "id " + db.textType + " PRIMARY KEY, "
     + "source " + db.textType + " NOT NULL, "
     + "body " + db.textType + " NOT NULL, "
+    + "model_id " + db.textType + " NOT NULL, "
     + "embedding vector(" + `${dimensions}` + "))");
   if (!made.ok) { return made.error; }
   return "";
@@ -64,14 +88,22 @@ export function createDocuments(db: Db, dimensions: int): string {
 // re-indexing a corpus is idempotent.
 export function indexDocument(db: Db, model: ModelRow, id: string, source: string, body: string, apiKey: string): string {
   if (!safeIdentifier(id)) { return "a document id must be a plain name"; }
+  if (model.kind != "embedding") { return model.label + " is not an embedding model"; }
   let vector = embedText(model, body, apiKey);
   if (!vector.ok) { return vector.error; }
+  // What the model said it produces and what it produced must agree, or the
+  // column is the wrong width and the insert fails with a wire error instead
+  // of this sentence.
+  if (vector.dimensions != model.dimensions) {
+    return model.label + " says " + `${model.dimensions}` + " dimensions and returned " + `${vector.dimensions}`;
+  }
   executeWith(db, "DELETE FROM documents WHERE id = " + placeholderAt(db, 1), [id]);
   let written = executeWith(db,
-    "INSERT INTO documents (id, source, body, embedding) VALUES ("
+    "INSERT INTO documents (id, source, body, model_id, embedding) VALUES ("
     + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ", "
-    + placeholderAt(db, 3) + ", " + placeholderAt(db, 4) + ")",
-    [id, source, body, vector.vector]);
+    + placeholderAt(db, 3) + ", " + placeholderAt(db, 4) + ", "
+    + placeholderAt(db, 5) + ")",
+    [id, source, body, model.id, vector.vector]);
   if (!written.ok) { return written.error; }
   return "";
 }
@@ -87,6 +119,10 @@ export function retrieve(db: Db, model: ModelRow, question: string, k: int, apiK
     let bad: Retrieval = { ok: false, found: none, error: "k must be between 1 and 100" };
     return bad;
   }
+  if (model.kind != "embedding") {
+    let wrong: Retrieval = { ok: false, found: none, error: model.label + " is not an embedding model" };
+    return wrong;
+  }
   let vector = embedText(model, question, apiKey);
   if (!vector.ok) {
     let failed: Retrieval = { ok: false, found: none, error: vector.error };
@@ -94,9 +130,13 @@ export function retrieve(db: Db, model: ModelRow, question: string, k: int, apiK
   }
   // Numbered, not repeated: on PostgreSQL `$1` twice declares one parameter,
   // and binding two to it is an error rather than a convenience.
+  // Only chunks this model embedded. Another model's vectors sit in the same
+  // column at the same width and are not comparable; leaving them in would
+  // return confident nonsense.
   let sql = "SELECT id, source, body, (embedding <=> " + placeholderAt(db, 1) + ") AS distance"
-    + " FROM documents ORDER BY embedding <=> " + placeholderAt(db, 2) + " LIMIT " + `${k}`;
-  if (!db.query(sql, [vector.vector, vector.vector])) {
+    + " FROM documents WHERE model_id = " + placeholderAt(db, 2)
+    + " ORDER BY embedding <=> " + placeholderAt(db, 3) + " LIMIT " + `${k}`;
+  if (!db.query(sql, [vector.vector, model.id, vector.vector])) {
     let refused: Retrieval = { ok: false, found: none, error: "the search was refused: " + db.lastError() };
     return refused;
   }
