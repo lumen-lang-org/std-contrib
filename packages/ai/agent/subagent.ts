@@ -123,3 +123,108 @@ export function subAgentsAsTools(subs: AiSubAgent[]): AiTool[] {
   }
   return out;
 }
+
+// --- approval through a child -------------------------------------------------
+// A child's sensitive tool pauses the whole tree. The child checkpoints itself
+// into a store, its tool result carries the approval sentinel, and the
+// parent's approval loop checkpoints in turn. The verdict travels back down
+// through the same store on re-dispatch — the one channel a tool's
+// string-to-string contract leaves open.
+//
+// The store decides where pause state lives — files, a database table, or a
+// test's map — because a checkpoint is a string and a verdict is one word.
+
+import { runAgentWithApproval, resumeAgent, APPROVAL_SENTINEL } from "./approval.ts";
+import { AiCheckpointStore } from "./checkpointstore.ts";
+
+function subCheckpointKey(name: string): string {
+  return name + ".checkpoint.json";
+}
+
+function subDecisionKey(name: string): string {
+  return name + ".decision";
+}
+
+// Record a human's verdict on a paused child, before resuming the parent.
+export function decideChildPause(store: AiCheckpointStore, subName: string, approved: bool): void {
+  let verdict = "deny";
+  if (approved) { verdict = "approve"; }
+  store.put(subDecisionKey(subName), verdict);
+}
+
+// Whether a child in the store is waiting on a verdict.
+export function childPausePending(store: AiCheckpointStore, subName: string): bool {
+  return store.has(subCheckpointKey(subName)) && !store.has(subDecisionKey(subName));
+}
+
+// The gated child runner, seamed on the model for tests. Fresh task -> gated
+// run; existing checkpoint + verdict -> resume; existing checkpoint and no
+// verdict -> still waiting, say so again.
+export function subAgentGatedAnswer(model: AiModel, systemPrompt: string, tools: AiTool[], sensitive: string[], store: AiCheckpointStore, name: string, task: string, maxSteps: int): string {
+  let cpKey = subCheckpointKey(name);
+  let decisionKey = subDecisionKey(name);
+
+  if (store.has(cpKey)) {
+    if (!store.has(decisionKey)) {
+      return APPROVAL_SENTINEL + " subagent " + name + " is still waiting for a decision";
+    }
+    let verdict = store.get(decisionKey);
+    let checkpoint = store.get(cpKey);
+    store.del(decisionKey);
+    store.del(cpKey);
+    let resumed = resumeAgent(model, tools, sensitive, checkpoint, verdict == "approve");
+    return subGatedOutcome(resumed, store, name);
+  }
+
+  let history: AiMessage[] = [
+    systemMessage(systemPrompt + "\n\n" + SUBAGENT_CONTRACT),
+    userMessage(task),
+  ];
+  let run = runAgentWithApproval(model, tools, sensitive, history, maxSteps);
+  return subGatedOutcome(run, store, name);
+}
+
+function subGatedOutcome(run: AiApprovalRun, store: AiCheckpointStore, name: string): string {
+  if (run.stopReason == "approval") {
+    store.put(subCheckpointKey(name), run.checkpoint);
+    return APPROVAL_SENTINEL + " subagent " + name + " wants " + run.pendingTool + "(" + run.pendingInput + ")";
+  }
+  if (run.stopReason == "final" && run.answer != "") {
+    return run.answer;
+  }
+  if (run.stopReason == "max_steps") {
+    return "subagent stopped at its step limit without a final answer";
+  }
+  if (run.answer != "") { return run.answer; }
+  return "subagent ended without an answer (" + run.stopReason + ")";
+}
+
+// The live gated runner and its tool wrapper, mirroring runSubAgent.
+export function runSubAgentGated(sub: AiSubAgent, sensitive: string[], store: AiCheckpointStore, task: string): string {
+  if (sub.provider == "mistral") {
+    let mm: AiModel = (messages: AiMessage[]) => {
+      return runMistralToolChat(sub.apiKey, sub.model, agentHistoryToTurns(messages), sub.tools);
+    };
+    return subAgentGatedAnswer(mm, sub.systemPrompt, sub.tools, sensitive, store, sub.name, task, sub.maxSteps);
+  }
+  if (sub.provider == "openai") {
+    let om: AiModel = (messages: AiMessage[]) => {
+      return runOpenAIToolChat(sub.apiKey, sub.model, agentHistoryToTurns(messages), sub.tools);
+    };
+    return subAgentGatedAnswer(om, sub.systemPrompt, sub.tools, sensitive, store, sub.name, task, sub.maxSteps);
+  }
+  return "subagent \"" + sub.name + "\" has unknown provider \"" + sub.provider + "\"";
+}
+
+// Wrap a gated subagent as a tool. `sensitive` names the child's tools that
+// need a human; `store` is where its pause state lives between invocations.
+export function subAgentAsGatedTool(sub: AiSubAgent, sensitive: string[], store: AiCheckpointStore): AiTool {
+  return makeTool(
+    sub.name,
+    sub.description + " Give it a complete, self-contained task description — it does not see this conversation.",
+    "a full description of the task to delegate",
+    (task: string) => {
+      return runSubAgentGated(sub, sensitive, store, task);
+    },
+  );
+}

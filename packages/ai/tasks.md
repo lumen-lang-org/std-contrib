@@ -252,14 +252,21 @@ the dependency-free default.
 
 ## M12: Persistence And Checkpointing
 
-- [ ] Add checkpoint record.
-- [ ] Add checkpoint JSON serializer.
-- [ ] Add checkpoint JSON parser.
-- [ ] Add save checkpoint helper.
-- [ ] Add load checkpoint helper.
-- [ ] Add resume agent from checkpoint.
-- [ ] Add rewind-to-step helper.
-- [ ] Add checkpoint example.
+- [x] Add checkpoint record. A JSON wire format holding the conversation, the
+      steps so far, the pending call and the loop position.
+- [x] Add checkpoint JSON serializer and parser.
+- [x] Add save checkpoint helper, and a pluggable `AiCheckpointStore` — four
+      functions over keys and strings, so files, a database table, or a test's
+      map all serve. File and memory backends ship here; a database backend
+      belongs with the database package.
+- [x] Add load checkpoint helper.
+- [x] Add resume agent from checkpoint. `resumeAgent(model, tools, sensitive,
+      checkpoint, approved)` — the model and tools are rebuilt by the caller,
+      since closures do not serialize, which is also how the reference
+      implementations work.
+- [ ] Add rewind-to-step helper. Deferred: the checkpoint holds the step
+      arrays, so rewinding is truncation, but nothing needs it yet.
+- [x] Add checkpoint example (the approval tests round-trip one through a file).
 
 ## M13: Streaming
 
@@ -280,13 +287,22 @@ the dependency-free default.
 
 ## M14: Human In The Loop
 
-- [ ] Add approval request record.
-- [ ] Add sensitive tool marker.
-- [ ] Add pause-before-tool behavior.
-- [ ] Add resume with approval.
-- [ ] Add resume with denial.
-- [ ] Add file-backed pause state.
-- [ ] Add human-in-the-loop example.
+- [x] Add approval request record. `AiApprovalRun` carries the pending tool,
+      its input, whether the pause is direct or bubbled from a child, and the
+      checkpoint to save.
+- [x] Add sensitive tool marker. A name list beside the registry, not a field
+      on the tool: sensitivity is the caller's policy, not the tool's nature.
+- [x] Add pause-before-tool behavior. The gate checkpoints before executing,
+      so nothing has happened when the human looks.
+- [x] Add resume with approval. The held call runs and the loop continues.
+- [x] Add resume with denial. The model gets a tool message saying a human
+      refused, and plans around it; the tool never executes.
+- [x] Add file-backed pause state, behind the pluggable store.
+- [x] Add human-in-the-loop example — through a subagent: a child's sensitive
+      call pauses the whole tree via a sentinel in its tool result, and the
+      verdict travels back down through the store on re-dispatch. Eleven tests
+      cover both levels, including a resume without a verdict pausing again
+      rather than guessing.
 
 ## M15: Observability And Evaluation
 
