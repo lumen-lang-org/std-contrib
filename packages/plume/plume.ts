@@ -730,6 +730,16 @@ export function execute(db: Db, sql: string): DbResult {
   return dbOk(0);
 }
 
+// A statement with values bound to its markers. `execute` sends SQL as text,
+// which is right for DDL and wrong the moment a value is involved: without
+// this a caller has to interpolate, which is the route every injection takes.
+export function executeWith(db: Db, sql: string, args: string[]): DbResult {
+  if (!db.query(sql, args)) {
+    return dbErr(lastError(db, "statement failed"));
+  }
+  return dbOk(db.rows());
+}
+
 // --- schema ----------------------------------------------------------------------------
 
 // Create the table the mapping describes, if it is absent. The key column is

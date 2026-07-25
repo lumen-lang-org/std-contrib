@@ -82,7 +82,9 @@ export function modelsMapping(): DbRepository {
   return repository("models", "id", "id", fs);
 }
 
-export function modelConfigsMapping(): DbRepository {
+// Takes the connection for the same reason agentsFull does: its relation
+// projects a bool, and SQLite and MySQL store those as 0 and 1.
+export function modelConfigsMapping(db: Db): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("modelId", "model_id", "text"),
@@ -92,7 +94,8 @@ export function modelConfigsMapping(): DbRepository {
     field("extra", "extra", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne("model", "models", "model_id", "id", "id, label, api_name AS \"apiName\", provider, enabled"),
+    hasOne("model", "models", "model_id", "id",
+           "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\""),
   ];
   return repositoryWith("model_configs", "id", "id", fs, rs);
 }
@@ -174,7 +177,7 @@ export function agentsFull(db: Db): DbRepository {
 export function schemaPlan(db: Db): Migration[] {
   let plan: Migration[] = [
     migration("1", "models", createTableSql(db, modelsMapping())),
-    migration("2", "model configs", createTableSql(db, modelConfigsMapping())),
+    migration("2", "model configs", createTableSql(db, modelConfigsMapping(db))),
     migration("3", "prompts", createTableSql(db, promptsMapping())),
     migration("4", "mcp servers", createTableSql(db, mcpServersMapping())),
     migration("5", "agents", createTableSql(db, agentsMapping())),

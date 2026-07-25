@@ -49,11 +49,68 @@ rather than an infinite query — and the suite inserts one to prove it.
 schema a migration builds cannot drift. Only the two link tables are written by
 hand, because they hold keys rather than an entity.
 
+## Serving it
+
+`api.ts` is the schema behind a `rest` controller:
+
+```
+GET    /agents            every agent, ordered, with ?enabled=true
+GET    /agents/:id        the whole agent in one query
+POST   /agents            create
+PUT    /agents/:id/model  point at a different model config
+PUT    /agents/:id/prompt point at a different prompt version
+POST   /agents/:id/servers  attach an MCP server
+DELETE /agents/:id
+```
+
+Every read goes to the database. Nothing is cached and nothing is compiled in,
+so a change — through this API or from anything else touching the same tables —
+is visible to the very next request. That is met by not doing the thing that
+would break it, rather than by machinery.
+
+## Talking to what the rows describe
+
+`mcp.ts` mounts an MCP server from its row, and `provider.ts` calls a model
+from its row. Neither file names a server or a model.
+
+```
+mounting  demo-mcp at http://127.0.0.1:8200
+initialize ok=true
+tools     add, echo
+add(2,40) 42
+disabled  ok=false demo-mcp is disabled
+```
+
+```
+model     Mistral Small -> mistral-small-latest
+ok=true status=200
+disabled  Mistral Small is disabled
+```
+
+In both, the last line is the point: `enabled` was flipped in the database and
+the next call refused, with no restart.
+
+**MCP is HTTP-transport only.** The other transport is stdio, which needs to
+spawn a process, and Lumen has no subprocess API — so a stdio server has to be
+fronted by something speaking HTTP. The client says exactly that rather than
+failing obscurely.
+
+**A credential is not in the database.** The API key comes from the
+environment. Encrypting keys at rest with a key stored beside them would be
+theatre; encryption of the stored key is waiting on a cipher in the language
+(Lumen has `randomBytes` and `createHash` and no AEAD yet).
+
 ## Testing
 
 ```sh
 cd packages/agents
 lumen test schema.test.ts     # 10, against SQLite
+lumen test mcp.test.ts        # 3, the refusals — the live half is an example
+lumen test provider.test.ts   # 5, provider selection and refusals
 ```
+
+The live halves are `examples/mount-mcp.ts` and `examples/call-model.ts`. A test
+that needs a credential or a listening port is a test that gets skipped, so
+those stay examples and the refusals stay tests.
 
 Requires `sh ../plume/build.sh` first.
