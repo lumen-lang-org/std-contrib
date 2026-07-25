@@ -113,7 +113,7 @@ test("a relation with an unsafe name or select list is refused", () => {
   expect(!relationValid(hasOne("team", "rel_teams", "team_id; --", "id", "id")));
   expect(!relationValid(hasOne("t", "rel_teams", "team_id", "id", "id AS \"a'b\"")));
   // A kind that is neither is not a relation.
-  let odd: DbRelation = { field: "t", kind: "some", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id" };
+  let odd: DbRelation = { field: "t", kind: "some", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id", linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
   expect(!relationValid(odd));
 });
 
