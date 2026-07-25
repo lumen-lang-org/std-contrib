@@ -50,8 +50,13 @@ export function sqlite(): Db {
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     readStyle: "extract",
-    floatJsonPrefix: "json(printf('%!.17g', ",
-    floatJsonSuffix: "))",
+    // The shortest spelling that reads back as the same double: 15 digits
+    // where they suffice, 17 where they do not — so 0.2 stays "0.2" and
+    // 1234567890.123456 keeps every digit. SQLite's own rendering stops at 15
+    // and silently drops the rest.
+    floatJson: "json(CASE WHEN CAST(printf('%!.15g',{c}) AS REAL) = {c} THEN printf('%!.15g',{c})"
+      + " WHEN CAST(printf('%!.16g',{c}) AS REAL) = {c} THEN printf('%!.16g',{c})"
+      + " ELSE printf('%!.17g',{c}) END)",
     textType: "text",
     intType: "integer",
     floatType: "real",

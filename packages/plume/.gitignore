@@ -1,3 +1,5 @@
 *.o
-# Compiled programs: lumen writes the binary beside its source.
+# Compiled programs: lumen writes the binary into the working directory,
+# named for its source and with no extension to tell it apart.
 zz*
+decorated-entity

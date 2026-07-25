@@ -376,8 +376,8 @@ function listSql(db: Db, repo: DbRepository, where: string, tail: string): strin
 // comes back changed, and a mapper that quietly alters a number is worse than
 // one that refuses.
 function jsonValue(db: Db, f: DbField): string {
-  if (db.floatJsonPrefix != "" && dialectType(db, f.sqlType) == db.floatType) {
-    return db.floatJsonPrefix + f.column + db.floatJsonSuffix;
+  if (db.floatJson != "" && dialectType(db, f.sqlType) == db.floatType) {
+    return db.floatJson.replaceAll("{c}", f.column);
   }
   return f.column;
 }
