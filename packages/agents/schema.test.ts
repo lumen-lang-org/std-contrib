@@ -38,6 +38,7 @@ function connect(): void {
 function wipe(): void {
   connect();
   forgetMigrations(database);
+  execute(database, "DROP TABLE IF EXISTS provider_credentials");
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
@@ -89,7 +90,10 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  expect(r.applied == 8);
+  // Nine: five tables from mappings, two link tables, the credentials table,
+  // and the index. Asserting the number rather than "some" is what catches a
+  // migration silently dropped from the plan.
+  expect(r.applied == 9);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -97,7 +101,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 8);
+  expect(migrate(database, schemaPlan(database)).applied == 9);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 
