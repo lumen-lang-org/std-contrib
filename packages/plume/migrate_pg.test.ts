@@ -9,21 +9,25 @@
 // than parameterised because the point is that both drivers give the same
 // answers, and only running both proves it.
 
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { postgres } from "./postgres.ts";
 import { execute } from "./plume.ts";
 import { Migration, MigrationState, migration, repeatable, migrate, migrateAllowingOutOfOrder, migrationInfo, validateMigrations, missingMigrations, planValid, planOrder, checksum, compareVersions, versionValid, historyTable, createHistory, repairChecksums, baseline, migrationApplied, forgetMigrations, appliedHighWater, quoted } from "./migrate.ts";
 
 let database: Db = postgres();
 
-function dbPath(): string {
+function dbConfig(): DbConfig {
+  // An env override arrives as a libpq conninfo string; `options` takes it
+  // whole, which is the escape hatch a config keeps for a target the fields
+  // cannot describe.
   let fromEnv = process.env("PLUME_TEST_CONNINFO") ?? "";
-  if (fromEnv != "") { return fromEnv; }
-  return "host=127.0.0.1 user=lumen password=lumen dbname=lumenvec";
+  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
+  let named: DbConfig = { host: "127.0.0.1", database: "lumenvec", user: "lumen", password: "lumen" };
+  return named;
 }
 
 function clean(): void {
-  database.connect(dbPath());
+  database.connect(dbConfig());
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS mig_a");
   execute(database, "DROP TABLE IF EXISTS mig_b");
@@ -211,7 +215,7 @@ test("a description cannot append a row of its own to the history", () => {
     migration("5", hostile, "CREATE TABLE mig_a (id text PRIMARY KEY)"),
   ];
   expect(migrate(database, plan).ok);
-  database.queryNoArgs("SELECT count(*) FROM " + historyTable());
+  database.query("SELECT count(*) FROM " + historyTable(), []);
   expect(database.value(0, 0) == "1");
   // Stored as the text it is.
   expect(migrationApplied(database, "5"));
@@ -322,7 +326,7 @@ test("a repeatable step re-runs when its statement changes and not otherwise", (
   expect(third.applied == 1);
 
   // One row, not two.
-  database.queryNoArgs("SELECT count(*) FROM " + historyTable() + " WHERE description = 'mig_view'");
+  database.query("SELECT count(*) FROM " + historyTable() + " WHERE description = 'mig_view'", []);
   expect(database.value(0, 0) == "1");
   execute(database, "DROP VIEW IF EXISTS mig_view");
 });

@@ -17,7 +17,7 @@
 // assembled from anywhere — a directory read, a constant, a generated list.
 
 import { Db } from "./driver.ts";
-import { execute, safeIdentifier, DbResult } from "./plume.ts";
+import { execute, safeIdentifier, placeholderAt, DbResult } from "./plume.ts";
 
 // One step. `version` orders it and identifies it; an empty version marks a
 // repeatable step, which re-runs whenever its SQL changes and always sorts
@@ -326,33 +326,30 @@ function historyKey(m: Migration): string {
   return m.version;
 }
 
+// The two-column key of the history table, both values bound. A description is
+// free text a person writes, and until the driver could bind more than one
+// value it had to be escaped into the statement instead.
+function historyKeyWhere(db: Db): string {
+  return " WHERE version = " + placeholderAt(db, 1)
+    + " AND description = " + placeholderAt(db, 2);
+}
+
 // Whether the history already holds this step. Separate from its checksum
 // because a checksum of any value is a legitimate one, so no sentinel can
 // stand in for "not recorded".
 function historyHas(db: Db, version: string, description: string): bool {
-  // Two-column key, one bound parameter: the description is escaped into the
-  // statement because the driver binds a single value.
-  let sql = "SELECT 1 FROM " + historyTable()
-    + " WHERE version = " + db.placeholder
-    + " AND description = " + quoted(db, description);
-  if (!db.query(sql, version)) { return false; }
+  if (!db.query("SELECT 1 FROM " + historyTable() + historyKeyWhere(db), [version, description])) { return false; }
   return db.rows() > 0;
 }
 
 function recordedChecksum(db: Db, version: string, description: string): int {
-  let sql = "SELECT checksum FROM " + historyTable()
-    + " WHERE version = " + db.placeholder
-    + " AND description = " + quoted(db, description);
-  if (!db.query(sql, version)) { return 0; }
+  if (!db.query("SELECT checksum FROM " + historyTable() + historyKeyWhere(db), [version, description])) { return 0; }
   if (db.rows() == 0) { return 0; }
   return parseIntOr(db.value(0, 0), 0);
 }
 
 function rankOf(db: Db, version: string, description: string): int {
-  let sql = "SELECT installed_rank FROM " + historyTable()
-    + " WHERE version = " + db.placeholder
-    + " AND description = " + quoted(db, description);
-  if (!db.query(sql, version)) { return 0; }
+  if (!db.query("SELECT installed_rank FROM " + historyTable() + historyKeyWhere(db), [version, description])) { return 0; }
   if (db.rows() == 0) { return 0; }
   return parseIntOr(db.value(0, 0), 0);
 }
@@ -360,7 +357,7 @@ function rankOf(db: Db, version: string, description: string): int {
 // The highest version the database has already seen, so a plan that inserts a
 // step below it can be reported as out of order.
 export function appliedHighWater(db: Db): string {
-  if (!db.queryNoArgs("SELECT version FROM " + historyTable() + " WHERE version <> ''")) {
+  if (!db.query("SELECT version FROM " + historyTable() + " WHERE version <> ''", [])) {
     return "";
   }
   let best = "";
@@ -374,7 +371,7 @@ export function appliedHighWater(db: Db): string {
 }
 
 function nextRank(db: Db): int {
-  if (!db.queryNoArgs("SELECT coalesce(max(installed_rank), 0) FROM " + historyTable())) {
+  if (!db.query("SELECT coalesce(max(installed_rank), 0) FROM " + historyTable(), [])) {
     return 1;
   }
   if (db.rows() == 0) { return 1; }
@@ -470,7 +467,7 @@ export function migrationInfo(db: Db, plan: Migration[]): MigrationState[] {
 export function missingMigrations(db: Db, plan: Migration[]): string[] {
   let out: string[] = [];
   if (!createHistory(db).ok) { return out; }
-  if (!db.queryNoArgs("SELECT version, description FROM " + historyTable() + " ORDER BY installed_rank")) {
+  if (!db.query("SELECT version, description FROM " + historyTable() + " ORDER BY installed_rank", [])) {
     return out;
   }
   let rows = db.rows();
@@ -670,7 +667,7 @@ export function baseline(db: Db, plan: Migration[], version: string): MigrateRes
 // Whether a step with this version has run. The name rather than the version
 // identifies a repeatable one, so pass its description as the version.
 export function migrationApplied(db: Db, version: string): bool {
-  if (!db.query("SELECT 1 FROM " + historyTable() + " WHERE version = " + db.placeholder, version)) {
+  if (!db.query("SELECT 1 FROM " + historyTable() + " WHERE version = " + db.placeholder, [version])) {
     return false;
   }
   return db.rows() > 0;

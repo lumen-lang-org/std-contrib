@@ -17,7 +17,7 @@
 // that — ordering by version, the checksum over the contents, and the refusal
 // to run a plan that has drifted from what the database recorded.
 
-import { Db } from "../driver.ts";
+import { Db, DbConfig } from "../driver.ts";
 import { sqlite } from "../sqlite.ts";
 import { DbField, DbRepository, field, repository, connectDatabase, closeDatabase, persist, findById, countWhere } from "../plume.ts";
 import { Migration, SqlFile, migrationsFrom, migrationNameProblem, migrate, migrationInfo, forgetMigrations } from "../migrate.ts";
@@ -54,7 +54,8 @@ function migrationPlan(): Migration[] {
 }
 
 function main(): void {
-  connectDatabase(database, "/tmp/plume_migrations_from_files.db");
+  let local: DbConfig = { filename: "/tmp/plume_migrations_from_files.db" };
+  connectDatabase(database, local);
 
   // Start over, so the example is the same every run.
   forgetMigrations(database);
@@ -87,7 +88,7 @@ function main(): void {
   persist(database, agentsRepo(), JSON.stringify(a));
 
   console.log("");
-  console.log("agents   " + `${countWhere(database, agentsRepo(), "", "")}`);
+  console.log("agents   " + `${countWhere(database, agentsRepo(), "", [])}`);
   console.log("read     " + findById(database, agentsRepo(), "a1"));
 
   // Running again applies nothing: the history already holds all three.
