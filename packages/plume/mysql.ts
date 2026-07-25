@@ -50,6 +50,8 @@ export function mysql(): Db {
     backslashEscapes: true,
     jsonNeedsUnquote: true,
     upsertStyle: "on-duplicate-key",
+    floatJsonPrefix: "",
+    floatJsonSuffix: "",
     textType: "varchar(255)",
     intType: "int",
     floatType: "double",

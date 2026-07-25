@@ -50,6 +50,8 @@ export function sqlite(): Db {
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     readStyle: "extract",
+    floatJsonPrefix: "json(printf('%!.17g', ",
+    floatJsonSuffix: "))",
     textType: "text",
     intType: "integer",
     floatType: "real",
