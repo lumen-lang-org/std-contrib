@@ -135,6 +135,37 @@ assembled from anywhere, so nothing depends on how a file happens to be named.
 Migration bodies are your SQL, not plume's, so they are spelled for the
 database they run against.
 
+## The `@entity` decorator
+
+`entity.ts` derives a mapping from a decorated class, so the fields are stated
+once instead of twice:
+
+```ts
+@entity("agents")
+class Agent {
+  @id @column("id", "text")
+  id: string;
+
+  @column("agent_name", "text")
+  agentName: string;
+}
+
+persist(database, entityAgent, JSON.stringify(a));
+```
+
+A decorator in Lumen is a pure function from a description of the declaration
+to a value — here, a `DbRepository`. That is why `entity` is an ordinary
+function of an ordinary type, tested by calling it, and why `entity.test.ts`
+exists before the compiler can run a decorator at all (spec 455 is not landed).
+
+Still nothing is inferred: a field without `@column` is not mapped, a class
+without `@id` has no key and `entityProblem` says so. The one exception is a
+`@column("id")` with no type, which falls back to the declared type — the
+column type can always be stated outright.
+
+`entity_live.test.ts` checks that the generated mapping is identical to the
+hand-written one and that every operation works against it.
+
 ## Testing
 
 ```sh
@@ -150,6 +181,8 @@ lumen test mysql.test.ts                # the same, on MySQL
 lumen test migrate.test.ts              # migrations, SQLite
 lumen test migrate_pg.test.ts           # migrations, PostgreSQL
 lumen test migrate_mysql.test.ts        # migrations, MySQL
+lumen test entity.test.ts               # the @entity decorator, offline
+lumen test entity_live.test.ts          # its mapping against a database
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections.
