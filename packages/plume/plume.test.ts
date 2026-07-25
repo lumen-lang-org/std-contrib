@@ -8,9 +8,9 @@
 //
 // Override the connection with PLUME_TEST_CONNINFO.
 
-import { connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
-import { Db } from "./driver.ts";
-import { postgres, postgresVersion } from "./postgres.ts";
+import { connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
+import { Db, DbConfig } from "./driver.ts";
+import { postgres, postgresConnection, postgresVersion } from "./postgres.ts";
 
 // One driver for the whole suite. The name avoids `db`, which every plume
 // operation uses as a parameter name.
@@ -30,10 +30,14 @@ type AgentSummary = {
   agentName: string,
 };
 
-function testConninfo(): string {
+function testConfig(): DbConfig {
+  // An env override arrives as a libpq conninfo string; `options` takes it
+  // whole, which is the escape hatch a config keeps for a target the fields
+  // cannot describe.
   let fromEnv = process.env("PLUME_TEST_CONNINFO") ?? "";
-  if (fromEnv != "") { return fromEnv; }
-  return "host=127.0.0.1 user=lumen password=lumen dbname=lumenvec";
+  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
+  let named: DbConfig = { host: "127.0.0.1", database: "lumenvec", user: "lumen", password: "lumen" };
+  return named;
 }
 
 function agentRepo(): DbRepository {
@@ -52,7 +56,7 @@ function agentJson(id: string, name: string, steps: int, temp: number): string {
 }
 
 function fresh(): DbRepository {
-  connectDatabase(database, testConninfo());
+  connectDatabase(database, testConfig());
   let repo = agentRepo();
   dropTable(database, repo);
   createTable(database, repo);
@@ -103,25 +107,26 @@ test("the select list renames columns to fields", () => {
 // --- connection and schema ----------------------------------------------------------
 
 test("a connection opens", () => {
-  let r = connectDatabase(database, testConninfo());
+  let r = connectDatabase(database, testConfig());
   expect(r.ok);
   expect(databaseConnected(database));
   expect(postgresVersion().length > 0);
 });
 
 test("a bad connection is reported, not raised", () => {
-  let r = connectDatabase(database, "host=127.0.0.1 port=1 dbname=nope user=nobody");
+  let nowhere: DbConfig = { host: "127.0.0.1", port: 1, user: "nobody", database: "nope" };
+  let r = connectDatabase(database, nowhere);
   expect(!r.ok);
   expect(r.error.length > 0);
-  expect(connectDatabase(database, testConninfo()).ok);
+  expect(connectDatabase(database, testConfig()).ok);
 });
 
 test("a table is created from the mapping and dropped", () => {
-  connectDatabase(database, testConninfo());
+  connectDatabase(database, testConfig());
   let repo = agentRepo();
   expect(dropTable(database, repo).ok);
   expect(createTable(database, repo).ok);
-  expect(countWhere(database, repo, "", "") == 0);
+  expect(countWhere(database, repo, "", []) == 0);
   // Creating twice is not an error.
   expect(createTable(database, repo).ok);
   expect(dropTable(database, repo).ok);
@@ -160,7 +165,7 @@ test("persisting the same key replaces rather than duplicates", () => {
   let repo = fresh();
   persist(database, repo, agentJson("a1", "researcher", 5, 0.2));
   expect(persist(database, repo, agentJson("a1", "renamed", 9, 0.9)).ok);
-  expect(countWhere(database, repo, "", "") == 1);
+  expect(countWhere(database, repo, "", []) == 1);
   let back: Agent = JSON.parse<Agent>(findById(database, repo, "a1"));
   expect(back.agentName == "renamed");
   expect(back.maxSteps == 9);
@@ -176,7 +181,7 @@ test("many records persist in one statement", () => {
   let repo = fresh();
   let batch = "[" + agentJson("b1", "one", 1, 0.1) + "," + agentJson("b2", "two", 2, 0.2) + "]";
   expect(persistMany(database, repo, batch).ok);
-  expect(countWhere(database, repo, "", "") == 2);
+  expect(countWhere(database, repo, "", []) == 2);
   expect(persistMany(database, repo, "[]").ok);
 });
 
@@ -187,14 +192,14 @@ test("text containing a quote is data, not syntax", () => {
   let back: Agent = JSON.parse<Agent>(findById(database, repo, "q"));
   expect(back.agentName == nasty);
   // The table is still there, which it would not be if the text had been pasted in.
-  expect(countWhere(database, repo, "", "") == 1);
+  expect(countWhere(database, repo, "", []) == 1);
 });
 
 // --- querying -------------------------------------------------------------------------
 
 test("a list comes back as a JSON array of mapped records", () => {
   let repo = seeded();
-  let all = listWhere(database, repo, "", "");
+  let all = listWhere(database, repo, "", []);
   expect(all.indexOf("agentName") >= 0);
   expect(all.indexOf("researcher") >= 0);
   expect(all.indexOf("writer") >= 0);
@@ -202,27 +207,27 @@ test("a list comes back as a JSON array of mapped records", () => {
 
 test("a where clause binds its parameter", () => {
   let repo = seeded();
-  let some = listWhere(database, repo, "agent_name = " + database.placeholder, "writer");
+  let some = listWhere(database, repo, "agent_name = " + database.placeholder, ["writer"]);
   expect(some.indexOf("writer") >= 0);
   expect(some.indexOf("researcher") < 0);
 });
 
 test("an empty result is an empty array, not nothing", () => {
   let repo = seeded();
-  expect(listWhere(database, repo, "agent_name = " + database.placeholder, "absent") == "[]");
+  expect(listWhere(database, repo, "agent_name = " + database.placeholder, ["absent"]) == "[]");
 });
 
 test("counting honours the filter", () => {
   let repo = seeded();
-  expect(countWhere(database, repo, "", "") == 3);
-  expect(countWhere(database, repo, "max_steps > " + database.placeholder, "4") == 2);
-  expect(countWhere(database, repo, "agent_name = " + database.placeholder, "absent") == 0);
+  expect(countWhere(database, repo, "", []) == 3);
+  expect(countWhere(database, repo, "max_steps > " + database.placeholder, ["4"]) == 2);
+  expect(countWhere(database, repo, "agent_name = " + database.placeholder, ["absent"]) == 0);
 });
 
 test("a page is ordered and bounded", () => {
   let repo = seeded();
-  let first = pageWhere(database, repo, "", "", "max_steps", 1, 0);
-  let second = pageWhere(database, repo, "", "", "max_steps", 1, 1);
+  let first = pageWhere(database, repo, "", [], "max_steps", 1, 0);
+  let second = pageWhere(database, repo, "", [], "max_steps", 1, 1);
   // Ordered by max_steps: critic 8 is last, writer 3 first.
   expect(first.indexOf("writer") >= 0);
   expect(second.indexOf("researcher") >= 0);
@@ -231,8 +236,8 @@ test("a page is ordered and bounded", () => {
 
 test("an unsafe order column is refused", () => {
   let repo = seeded();
-  expect(pageWhere(database, repo, "", "", "x; DROP TABLE plume_test_agents", 10, 0) == "[]");
-  expect(countWhere(database, repo, "", "") == 3);
+  expect(pageWhere(database, repo, "", [], "x; DROP TABLE plume_test_agents", 10, 0) == "[]");
+  expect(countWhere(database, repo, "", []) == 3);
 });
 
 // --- projections, the mapper -----------------------------------------------------------------
@@ -248,7 +253,7 @@ test("a projection narrows a record into a DTO", () => {
 
 test("a projected list narrows every row", () => {
   let repo = seeded();
-  let json = listProjected(database, repo, "id AS \"id\", agent_name AS \"agentName\"", "", "");
+  let json = listProjected(database, repo, "id AS \"id\", agent_name AS \"agentName\"", "", []);
   expect(json.indexOf("maxSteps") < 0);
   expect(json.indexOf("agentName") >= 0);
 });
@@ -271,7 +276,7 @@ test("a projection whose expression contains a comma is read correctly", () => {
   // identical call. Ordinary SQL, not a hostile input.
   let repo = seeded();
   let cols = "id AS \"id\", coalesce(agent_name, 'none') AS \"agentName\"";
-  let json = listProjected(database, repo, cols, "", "");
+  let json = listProjected(database, repo, cols, "", []);
   expect(json.indexOf("\"agentName\"") >= 0);
   expect(json.indexOf("coalesce") < 0);
   expect(json.indexOf("researcher") >= 0);
@@ -281,16 +286,16 @@ test("an alias that is not a plain name is refused, not sent", () => {
   // The alias becomes a JSON key between single quotes, so a quote in it would
   // end the literal. Refusing beats repairing.
   let repo = seeded();
-  expect(listProjected(database, repo, "agent_name AS \"x',(1)\"", "", "") == "[]");
+  expect(listProjected(database, repo, "agent_name AS \"x',(1)\"", "", []) == "[]");
   expect(findProjected(database, repo, "agent_name AS \"x'\"", "a1") == "");
   // And the table is still there, so nothing was executed.
-  expect(countWhere(database, repo, "", "") == 3);
+  expect(countWhere(database, repo, "", []) == 3);
 });
 
 test("a select list with an unbalanced quote or paren is refused", () => {
   let repo = seeded();
-  expect(listProjected(database, repo, "coalesce(agent_name, 'none' AS \"a\"", "", "") == "[]");
-  expect(listProjected(database, repo, "agent_name AS \"a", "", "") == "[]");
+  expect(listProjected(database, repo, "coalesce(agent_name, 'none' AS \"a\"", "", []) == "[]");
+  expect(listProjected(database, repo, "agent_name AS \"a", "", []) == "[]");
 });
 
 test("picking narrows a document in memory", () => {
@@ -330,14 +335,14 @@ test("a nested key of the same name is not mistaken for a top-level one", () => 
 test("a record is deleted by key", () => {
   let repo = seeded();
   expect(deleteById(database, repo, "a1").ok);
-  expect(countWhere(database, repo, "", "") == 2);
+  expect(countWhere(database, repo, "", []) == 2);
   expect(!existsById(database, repo, "a1"));
 });
 
 test("records are deleted by a filter", () => {
   let repo = seeded();
-  expect(deleteWhere(database, repo, "max_steps > " + database.placeholder, "4").ok);
-  expect(countWhere(database, repo, "", "") == 1);
+  expect(deleteWhere(database, repo, "max_steps > " + database.placeholder, ["4"]).ok);
+  expect(countWhere(database, repo, "", []) == 1);
 });
 
 // --- transactions -----------------------------------------------------------------------------
@@ -346,9 +351,9 @@ test("a rolled-back write leaves nothing behind", () => {
   let repo = fresh();
   expect(beginTransaction(database).ok);
   persist(database, repo, agentJson("t1", "temp", 1, 0.0));
-  expect(countWhere(database, repo, "", "") == 1);
+  expect(countWhere(database, repo, "", []) == 1);
   expect(rollbackTransaction(database).ok);
-  expect(countWhere(database, repo, "", "") == 0);
+  expect(countWhere(database, repo, "", []) == 0);
 });
 
 test("a committed write stays", () => {
@@ -356,11 +361,114 @@ test("a committed write stays", () => {
   expect(beginTransaction(database).ok);
   persist(database, repo, agentJson("t2", "kept", 1, 0.0));
   expect(commitTransaction(database).ok);
-  expect(countWhere(database, repo, "", "") == 1);
+  expect(countWhere(database, repo, "", []) == 1);
+});
+
+
+// --- more than one bound value ------------------------------------------------------------------
+
+// The statement a single-parameter driver could not express. The second value
+// used to be pasted into the SQL, which is the route the MySQL backslash
+// injection came in by.
+test("a where clause binds two different values", () => {
+  let repo = seeded();
+  let where = "agent_name = " + placeholderAt(database, 1)
+    + " AND max_steps > " + placeholderAt(database, 2);
+  let hit = listWhere(database, repo, where, ["critic", "4"]);
+  expect(hit.indexOf("critic") >= 0);
+  expect(hit.indexOf("writer") < 0);
+  expect(hit.indexOf("researcher") < 0);
+  // A second value the rows do not satisfy matches nothing, which is what
+  // shows it is read rather than ignored.
+  expect(listWhere(database, repo, where, ["critic", "9"]) == "[]");
+  expect(countWhere(database, repo, where, ["researcher", "4"]) == 1);
+  expect(countWhere(database, repo, where, ["researcher", "5"]) == 0);
+});
+
+test("a bound value carrying a quote, a backslash and a newline survives", () => {
+  let repo = fresh();
+  let nasty = "it's a \\ backslash\nand a newline";
+  expect(persist(database, repo, agentJson("n1", nasty, 7, 0.5)).ok);
+  let back: Agent = JSON.parse<Agent>(findById(database, repo, "n1"));
+  expect(back.agentName == nasty);
+  // And it matches itself when bound into a where clause, so it went in and
+  // came back as the same bytes rather than as something the escaper mangled.
+  expect(countWhere(database, repo, "agent_name = " + placeholderAt(database, 1), [nasty]) == 1);
+  // The table is still there, which it would not be had the text become SQL.
+  expect(countWhere(database, repo, "", []) == 1);
+});
+
+// --- connections of their own -------------------------------------------------------------------
+
+test("two connections each hold their own rows", () => {
+  let repo = seeded();
+  let writer = postgresConnection(testConfig());
+  let reader = postgresConnection(testConfig());
+  expect(writer.connected());
+  expect(reader.connected());
+
+  // Written through one and read through the other: two connections to one
+  // database, not one connection behind two records.
+  expect(persist(writer, repo, agentJson("c1", "handled", 6, 0.4)).ok);
+
+  expect(reader.query("SELECT agent_name FROM " + repo.table + " ORDER BY agent_name", []));
+  expect(reader.rows() == 4);
+  expect(reader.value(0, 0) == "critic");
+
+  // A query on the other connection, between two reads of this one. A result
+  // set held per shim rather than per connection is what this would clobber.
+  expect(writer.query("SELECT count(*) FROM " + repo.table, []));
+  expect(writer.value(0, 0) == "4");
+
+  expect(reader.rows() == 4);
+  expect(reader.value(0, 0) == "critic");
+  expect(reader.value(3, 0) == "writer");
+
+  writer.close();
+  reader.close();
+  // Releasing a slot leaves the process-wide connection alone.
+  expect(databaseConnected(database));
+  expect(countWhere(database, repo, "", []) == 4);
+});
+
+// --- configuration ------------------------------------------------------------------------------
+
+test("a config naming nothing to reach is refused, not attempted", () => {
+  let nothing: DbConfig = { user: "lumen" };
+  let spare = postgresConnection(nothing);
+  expect(!spare.connected());
+  expect(spare.lastError().length > 0);
+  spare.close();
+});
+
+test("a failed connection does not put the password in its diagnostic", () => {
+  // Named outright rather than through the suite's config: this is about what
+  // the driver renders, and PLUME_TEST_CONNINFO would supply a raw target with
+  // nothing to override.
+  let wrong: DbConfig = { host: "127.0.0.1", database: "lumenvec", user: "lumen", password: "hunter2 swordfish" };
+  let spare = postgresConnection(wrong);
+  expect(!spare.connected());
+  let why = spare.lastError();
+  expect(why.length > 0);
+  expect(why.indexOf("hunter2") < 0);
+  expect(why.indexOf("swordfish") < 0);
+  spare.close();
+});
+
+test("a config value carrying a space is quoted, not truncated", () => {
+  // The database does not exist, so the connection fails — and it fails naming
+  // the whole value. Truncated at the space it would have complained about a
+  // database called "plume", and the rest of the list would have been read as
+  // further keys.
+  let spaced: DbConfig = { host: "127.0.0.1", database: "plume no such db", user: "lumen", password: "lumen" };
+  let spare = postgresConnection(spaced);
+  expect(!spare.connected());
+  expect(spare.lastError().indexOf("plume no such db") >= 0);
+  spare.close();
 });
 
 test("the suite leaves nothing behind", () => {
-  connectDatabase(database, testConninfo());
+  connectDatabase(database, testConfig());
   dropTable(database, agentRepo());
     closeDatabase(database);
   expect(true);

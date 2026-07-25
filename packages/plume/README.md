@@ -9,7 +9,7 @@ type. The mapping is a value you construct, so it can be built, inspected and
 tested like any other value.
 
 ```ts
-import { Db } from "./driver.ts";
+import { Db, DbConfig } from "./driver.ts";
 import { postgres } from "./postgres.ts";
 import { field, repository, connectDatabase, createTable, persist, findById } from "./plume.ts";
 
@@ -27,7 +27,8 @@ function agents(): DbRepository {
   return repository("agents", "id", "id", fields);
 }
 
-connectDatabase(database, "host=127.0.0.1 user=lumen dbname=app");
+let config: DbConfig = { host: "127.0.0.1", database: "app", user: "lumen" };
+connectDatabase(database, config);
 createTable(database, agents());
 
 let a: Agent = { id: "a1", agentName: "researcher", maxSteps: 5, temperature: 0.2 };
@@ -46,20 +47,67 @@ the database does the conversion, using functions it already has.
 |---|---|---|---|
 | module | `postgres.ts` | `sqlite.ts` | `mysql.ts` |
 | links | `pq` | `sqlite3` | `mariadb` |
-| target | libpq conninfo | a file path or `:memory:` | `host=… user=… dbname=…` |
+| config | `host`, `port`, `user`, `password`, `database` | `filename` | `host`, `port`, `user`, `password`, `database` |
+| default port | 5432 | — | 3306 |
 | verified against | PostgreSQL 17 | SQLite 3 | MySQL 8, MariaDB 11.8 |
-| placeholder | `$1` | `?1` | `?` |
+| placeholder | `$1`, `$2`, … | `?` | `?` |
 
 Each driver is its own module, so a program that uses SQLite does not need
 libpq installed and vice versa. The core links nothing.
 
 The same test suite runs against all three — `plume.test.ts`, `sqlite.test.ts`
-and `mysql.test.ts` are the same 30 assertions with one import changed, which
-is what makes "portable" a claim rather than an intention.
+and `mysql.test.ts` are the same suite with one import changed, which is what
+makes "portable" a claim rather than an intention.
 
 Where a caller writes SQL of their own — a `where` clause, a projection — it is
-that database's SQL. Use `database.placeholder` rather than a literal `$1` and
-the same call works everywhere.
+that database's SQL. Use `placeholderAt(database, 1)` rather than a literal
+`$1` or `?` and the same call works everywhere; `database.placeholder` is the
+first marker, for the common case of one value.
+
+## Connecting
+
+A connection is asked for with a record, not a string. A `host=… user=…` list
+is untyped, spelled differently by every library, and a typo in it is a runtime
+failure; the field names here are node-postgres's, verbatim.
+
+```ts
+let config: DbConfig = { host: "127.0.0.1", database: "app", user: "lumen", password: "secret" };
+connectDatabase(database, config);
+
+let local: DbConfig = { filename: "/tmp/app.db" };      // SQLite
+let memory: DbConfig = { filename: ":memory:" };
+```
+
+Every field is optional; each driver applies its own defaults and renders the
+config into whatever its library takes. Nothing outside a driver builds a target
+string, and no diagnostic carries any part of the config — a failed connection
+cannot put a password in a log. Values are quoted where the rendered form is a
+`key=value` list, so a password containing a space connects where it says rather
+than being cut short at the space. A config naming neither a `host` nor a
+`filename` is reported rather than attempted, since libpq and SQLite would both
+happily connect to something else.
+
+`options` is the escape hatch: anything the fields do not cover — `sslmode`, a
+socket path, a libpq service name — appended verbatim, and a config carrying
+only `options` is a raw target.
+
+### A connection of its own
+
+`postgres()`, `sqlite()` and `mysql()` are the process-wide connection, which is
+what a CLI or a migration runner wants. `postgresConnection(config)`,
+`sqliteConnection(config)` and `mysqlConnection(config)` each open a connection
+of their own, out of a table of 64 slots per driver, and each owns its own
+result set — so two of them interleaved cannot read each other's rows.
+
+```ts
+let pool: Db[] = [];
+let i: int = 0;
+while (i < size) { pool.push(postgresConnection(config)); i = i + 1; }
+```
+
+That is a pool. Handing one out is the program's business: a program with an
+event loop, a thread pool or one connection per request wants three different
+answers and none of them belong in a mapper. `close()` releases the slot.
 
 ## Building
 
@@ -91,6 +139,16 @@ an annotation:
 
 ```ts
 let summary = findProjected(database, agents(), "id, agent_name AS \"agentName\"", "a1");
+```
+
+`listWhere`, `listProjected`, `pageWhere`, `countWhere` and `deleteWhere` take
+an array of values, one per marker in the clause, and the driver binds each in
+its own place:
+
+```ts
+let where = "agent_name = " + placeholderAt(database, 1)
+  + " AND max_steps > " + placeholderAt(database, 2);
+listWhere(database, agents(), where, ["critic", "4"]);
 ```
 
 `pickFields` does the same narrowing in memory, without a round trip.
@@ -339,7 +397,9 @@ lumen test foreignkeys_mysql.test.ts    # generated keys, MySQL
 lumen test migratenames.test.ts         # the V1__name.sql convention
 ```
 
-`PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections. The
+`PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections; a
+suite passes whatever they hold through `options`, so setting one exercises the
+raw-target hatch as well. The
 MySQL suites pass unmodified against MariaDB — point `PLUME_MYSQL_CONNINFO` at
 port 13307 above to see it, which is the only evidence that "and MariaDB" is a
 fact rather than an assumption about wire compatibility.

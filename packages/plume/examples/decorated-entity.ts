@@ -9,7 +9,7 @@
 
 import { entity } from "../entity.ts";
 import { DbRepository, connectDatabase, closeDatabase, createTable, dropTable, persist, findById, listWhere, countWhere } from "../plume.ts";
-import { Db } from "../driver.ts";
+import { Db, DbConfig } from "../driver.ts";
 import { sqlite } from "../sqlite.ts";
 
 // The declaration is the mapping. `@column` states the column and its SQL
@@ -73,7 +73,8 @@ function main(): void {
     i = i + 1;
   }
 
-  connectDatabase(database, "/tmp/decorated-entity.db");
+  let local: DbConfig = { filename: "/tmp/decorated-entity.db" };
+  connectDatabase(database, local);
   dropTable(database, agents);
   createTable(database, agents);
 
@@ -82,9 +83,9 @@ function main(): void {
   persist(database, agents, agentJson("a3", "critic", 8, 0.1));
 
   console.log("");
-  console.log("count      " + `${countWhere(database, agents, "", "")}`);
+  console.log("count      " + `${countWhere(database, agents, "", [])}`);
   console.log("findById   " + findById(database, agents, "a1"));
-  console.log("listWhere  " + listWhere(database, agents, "max_steps > " + database.placeholder, "4"));
+  console.log("listWhere  " + listWhere(database, agents, "max_steps > " + database.placeholder, ["4"]));
 
   let back: AgentRow = JSON.parse<AgentRow>(findById(database, agents, "a2"));
   console.log("as record  " + back.agentName + " at " + `${back.temperature}`);
