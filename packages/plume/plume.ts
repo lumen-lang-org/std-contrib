@@ -38,7 +38,7 @@ declare function pl_close(): void;
 
 // One field of a mapping: the record's field name, the table's column name,
 // and the column's SQL type. Nothing here is derived from anything else.
-export type PlField = {
+export type DbField = {
   field: string,
   column: string,
   sqlType: string,
@@ -46,41 +46,41 @@ export type PlField = {
 
 // A mapping between a record type and a table. `idField` and `idColumn` name
 // the key used by find, persist and delete.
-export type PlRepo = {
+export type DbRepository = {
   table: string,
   idField: string,
   idColumn: string,
-  fields: PlField[],
+  fields: DbField[],
 };
 
 // The outcome of a call that changes something, or of one that reads nothing.
-export type PlResult = {
+export type DbResult = {
   ok: bool,
   rows: int,
   error: string,
 };
 
-export function plField(field: string, column: string, sqlType: string): PlField {
-  let f: PlField = { field: field, column: column, sqlType: sqlType };
+export function field(name: string, column: string, sqlType: string): DbField {
+  let f: DbField = { field: name, column: column, sqlType: sqlType };
   return f;
 }
 
-export function plRepo(table: string, idField: string, idColumn: string, fields: PlField[]): PlRepo {
-  let r: PlRepo = { table: table, idField: idField, idColumn: idColumn, fields: fields };
+export function repository(table: string, idField: string, idColumn: string, fields: DbField[]): DbRepository {
+  let r: DbRepository = { table: table, idField: idField, idColumn: idColumn, fields: fields };
   return r;
 }
 
-function plOk(rows: int): PlResult {
-  let r: PlResult = { ok: true, rows: rows, error: "" };
+function dbOk(rows: int): DbResult {
+  let r: DbResult = { ok: true, rows: rows, error: "" };
   return r;
 }
 
-function plErr(message: string): PlResult {
-  let r: PlResult = { ok: false, rows: 0, error: message };
+function dbErr(message: string): DbResult {
+  let r: DbResult = { ok: false, rows: 0, error: message };
   return r;
 }
 
-function plLastError(fallback: string): string {
+function lastError(fallback: string): string {
   let e = pl_error();
   if (e == "") { return fallback; }
   return e;
@@ -90,7 +90,7 @@ function plLastError(fallback: string): string {
 // names cannot be bound as parameters — SQL has no placeholder for them — so
 // they are checked instead of trusted. Types allow spaces and parentheses so
 // `timestamp with time zone` and `numeric(10,2)` pass.
-export function plSafeName(name: string): bool {
+export function safeIdentifier(name: string): bool {
   if (name.length == 0 || name.length > 63) { return false; }
   let i: int = 0;
   while (i < name.length) {
@@ -106,7 +106,7 @@ export function plSafeName(name: string): bool {
   return true;
 }
 
-export function plSafeType(name: string): bool {
+export function safeSqlType(name: string): bool {
   if (name.length == 0 || name.length > 63) { return false; }
   let i: int = 0;
   while (i < name.length) {
@@ -122,14 +122,14 @@ export function plSafeType(name: string): bool {
 }
 
 // Every name in a mapping, checked once so a query can interpolate freely.
-export function plRepoValid(repo: PlRepo): bool {
-  if (!plSafeName(repo.table) || !plSafeName(repo.idColumn) || !plSafeName(repo.idField)) { return false; }
+export function repositoryValid(repo: DbRepository): bool {
+  if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn) || !safeIdentifier(repo.idField)) { return false; }
   if (repo.fields.length == 0) { return false; }
   let sawId: bool = false;
   let i: int = 0;
   while (i < repo.fields.length) {
     let f = repo.fields[i];
-    if (!plSafeName(f.field) || !plSafeName(f.column) || !plSafeType(f.sqlType)) { return false; }
+    if (!safeIdentifier(f.field) || !safeIdentifier(f.column) || !safeSqlType(f.sqlType)) { return false; }
     if (f.field == repo.idField) { sawId = true; }
     i = i + 1;
   }
@@ -139,7 +139,7 @@ export function plRepoValid(repo: PlRepo): bool {
 // --- clause building ------------------------------------------------------------
 
 // `col AS "field", ...` — the read mapping, applied by the database.
-export function plSelectList(repo: PlRepo): string {
+export function selectList(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -152,7 +152,7 @@ export function plSelectList(repo: PlRepo): string {
 
 // `"field" sqltype, ...` — the column definition json_to_record needs to read
 // the incoming document.
-function plRecordDef(repo: PlRepo): string {
+function recordDefinition(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -163,7 +163,7 @@ function plRecordDef(repo: PlRepo): string {
   return out;
 }
 
-function plColumnList(repo: PlRepo): string {
+function columnList(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -174,7 +174,7 @@ function plColumnList(repo: PlRepo): string {
   return out;
 }
 
-function plFieldList(repo: PlRepo): string {
+function fieldList(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -186,7 +186,7 @@ function plFieldList(repo: PlRepo): string {
 }
 
 // `col = EXCLUDED.col, ...` for every column but the key.
-function plUpdateSet(repo: PlRepo): string {
+function updateSet(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -202,32 +202,32 @@ function plUpdateSet(repo: PlRepo): string {
 
 // --- connection ---------------------------------------------------------------------
 
-export function plConnect(conninfo: string): PlResult {
+export function connectDatabase(conninfo: string): DbResult {
   if (pl_connect(conninfo) != 0) {
-    return plErr(plLastError("could not connect"));
+    return dbErr(lastError("could not connect"));
   }
-  return plOk(0);
+  return dbOk(0);
 }
 
-export function plConnected(): bool {
+export function databaseConnected(): bool {
   return pl_connected() == 1;
 }
 
-export function plClose(): void {
+export function closeDatabase(): void {
   pl_close();
 }
 
-export function plServerVersion(): int {
+export function databaseVersion(): int {
   return parseInt(pl_version()) ?? 0;
 }
 
 // Run a statement that returns no rows — DDL, or SQL this package does not
 // build for you.
-export function plExec(sql: string): PlResult {
+export function execute(sql: string): DbResult {
   if (pl_exec(sql) != 0) {
-    return plErr(plLastError("statement failed"));
+    return dbErr(lastError("statement failed"));
   }
-  return plOk(0);
+  return dbOk(0);
 }
 
 // --- schema ----------------------------------------------------------------------------
@@ -235,8 +235,8 @@ export function plExec(sql: string): PlResult {
 // Create the table the mapping describes, if it is absent. The key column is
 // the primary key; every other column is NOT NULL, since a record's field
 // cannot be absent.
-export function plCreateTable(repo: PlRepo): PlResult {
-  if (!plRepoValid(repo)) { return plErr("invalid mapping for " + repo.table); }
+export function createTable(repo: DbRepository): DbResult {
+  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
   let cols = "";
   let i: int = 0;
   while (i < repo.fields.length) {
@@ -250,12 +250,12 @@ export function plCreateTable(repo: PlRepo): PlResult {
     }
     i = i + 1;
   }
-  return plExec("CREATE TABLE IF NOT EXISTS " + repo.table + " (" + cols + ")");
+  return execute("CREATE TABLE IF NOT EXISTS " + repo.table + " (" + cols + ")");
 }
 
-export function plDropTable(repo: PlRepo): PlResult {
-  if (!plSafeName(repo.table)) { return plErr("unsafe table name"); }
-  return plExec("DROP TABLE IF EXISTS " + repo.table);
+export function dropTable(repo: DbRepository): DbResult {
+  if (!safeIdentifier(repo.table)) { return dbErr("unsafe table name"); }
+  return execute("DROP TABLE IF EXISTS " + repo.table);
 }
 
 // --- writing ------------------------------------------------------------------------------
@@ -263,65 +263,65 @@ export function plDropTable(repo: PlRepo): PlResult {
 // Insert or replace one record, given its JSON. The document's keys are the
 // mapping's field names; the database reads them with json_to_record under the
 // declared types and writes them to the declared columns.
-export function plPersist(repo: PlRepo, json: string): PlResult {
-  if (!plRepoValid(repo)) { return plErr("invalid mapping for " + repo.table); }
-  if (json == "") { return plErr("refusing to persist an empty document"); }
-  let sql = "INSERT INTO " + repo.table + " (" + plColumnList(repo) + ") "
-    + "SELECT " + plFieldList(repo) + " FROM json_to_record($1::json) AS x(" + plRecordDef(repo) + ")";
-  let updates = plUpdateSet(repo);
+export function persist(repo: DbRepository, json: string): DbResult {
+  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
+  if (json == "") { return dbErr("refusing to persist an empty document"); }
+  let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
+    + "SELECT " + fieldList(repo) + " FROM json_to_record($1::json) AS x(" + recordDefinition(repo) + ")";
+  let updates = updateSet(repo);
   if (updates != "") {
     sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO UPDATE SET " + updates;
   } else {
     sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO NOTHING";
   }
   if (pl_query1(sql, json) < 0) {
-    return plErr(plLastError("could not persist into " + repo.table));
+    return dbErr(lastError("could not persist into " + repo.table));
   }
-  return plOk(1);
+  return dbOk(1);
 }
 
 // Insert or replace many, in one statement: the document is a JSON array, read
 // with json_to_recordset.
-export function plPersistMany(repo: PlRepo, jsonArray: string): PlResult {
-  if (!plRepoValid(repo)) { return plErr("invalid mapping for " + repo.table); }
-  if (jsonArray == "" || jsonArray == "[]") { return plOk(0); }
-  let sql = "INSERT INTO " + repo.table + " (" + plColumnList(repo) + ") "
-    + "SELECT " + plFieldList(repo) + " FROM json_to_recordset($1::json) AS x(" + plRecordDef(repo) + ")";
-  let updates = plUpdateSet(repo);
+export function persistMany(repo: DbRepository, jsonArray: string): DbResult {
+  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
+  if (jsonArray == "" || jsonArray == "[]") { return dbOk(0); }
+  let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
+    + "SELECT " + fieldList(repo) + " FROM json_to_recordset($1::json) AS x(" + recordDefinition(repo) + ")";
+  let updates = updateSet(repo);
   if (updates != "") {
     sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO UPDATE SET " + updates;
   } else {
     sql = sql + " ON CONFLICT (" + repo.idColumn + ") DO NOTHING";
   }
   if (pl_query1(sql, jsonArray) < 0) {
-    return plErr(plLastError("could not persist into " + repo.table));
+    return dbErr(lastError("could not persist into " + repo.table));
   }
-  return plOk(1);
+  return dbOk(1);
 }
 
-export function plDelete(repo: PlRepo, id: string): PlResult {
-  if (!plRepoValid(repo)) { return plErr("invalid mapping for " + repo.table); }
+export function deleteById(repo: DbRepository, id: string): DbResult {
+  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
   if (pl_query1("DELETE FROM " + repo.table + " WHERE " + repo.idColumn + " = $1", id) < 0) {
-    return plErr(plLastError("could not delete from " + repo.table));
+    return dbErr(lastError("could not delete from " + repo.table));
   }
-  return plOk(1);
+  return dbOk(1);
 }
 
-export function plDeleteWhere(repo: PlRepo, where: string, a: string): PlResult {
-  if (!plRepoValid(repo)) { return plErr("invalid mapping for " + repo.table); }
+export function deleteWhere(repo: DbRepository, where: string, a: string): DbResult {
+  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
   if (pl_query1("DELETE FROM " + repo.table + " WHERE " + where, a) < 0) {
-    return plErr(plLastError("could not delete from " + repo.table));
+    return dbErr(lastError("could not delete from " + repo.table));
   }
-  return plOk(1);
+  return dbOk(1);
 }
 
 // --- reading --------------------------------------------------------------------------------
 
 // One record as JSON, or "" when absent. Hand the result to JSON.parse<T>: the
 // keys are the mapping's field names, so the compiler checks the shape.
-export function plFind(repo: PlRepo, id: string): string {
-  if (!plRepoValid(repo)) { return ""; }
-  let sql = "SELECT row_to_json(r) FROM (SELECT " + plSelectList(repo)
+export function findById(repo: DbRepository, id: string): string {
+  if (!repositoryValid(repo)) { return ""; }
+  let sql = "SELECT row_to_json(r) FROM (SELECT " + selectList(repo)
     + " FROM " + repo.table + " WHERE " + repo.idColumn + " = $1) r";
   if (pl_query1(sql, id) < 0) { return ""; }
   if (pl_rows() == 0) { return ""; }
@@ -331,8 +331,8 @@ export function plFind(repo: PlRepo, id: string): string {
 // The same, projected: `columns` is a select list you write, so a DTO is a
 // query rather than a generated mapper. Aliases rename — `max_steps AS
 // "maxSteps"` is what MapStruct spells with an annotation.
-export function plFindAs(repo: PlRepo, columns: string, id: string): string {
-  if (!plSafeName(repo.table) || !plSafeName(repo.idColumn)) { return ""; }
+export function findProjected(repo: DbRepository, columns: string, id: string): string {
+  if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn)) { return ""; }
   let sql = "SELECT row_to_json(r) FROM (SELECT " + columns
     + " FROM " + repo.table + " WHERE " + repo.idColumn + " = $1) r";
   if (pl_query1(sql, id) < 0) { return ""; }
@@ -340,16 +340,16 @@ export function plFindAs(repo: PlRepo, columns: string, id: string): string {
   return pl_value(0, 0);
 }
 
-function plRowsAsArray(): string {
+function rowsAsArray(): string {
   if (pl_rows() == 0) { return "[]"; }
   return pl_value(0, 0);
 }
 
 // Every record as a JSON array. `where` is a fragment with $1 for its
 // parameter, or "" for all rows.
-export function plList(repo: PlRepo, where: string, a: string): string {
-  if (!plRepoValid(repo)) { return "[]"; }
-  let inner = "SELECT " + plSelectList(repo) + " FROM " + repo.table;
+export function listWhere(repo: DbRepository, where: string, a: string): string {
+  if (!repositoryValid(repo)) { return "[]"; }
+  let inner = "SELECT " + selectList(repo) + " FROM " + repo.table;
   if (where != "") { inner = inner + " WHERE " + where; }
   let sql = "SELECT coalesce(json_agg(r), '[]'::json) FROM (" + inner + ") r";
   if (where == "") {
@@ -357,12 +357,12 @@ export function plList(repo: PlRepo, where: string, a: string): string {
   } else {
     if (pl_query1(sql, a) < 0) { return "[]"; }
   }
-  return plRowsAsArray();
+  return rowsAsArray();
 }
 
 // A projected list, for DTOs.
-export function plListAs(repo: PlRepo, columns: string, where: string, a: string): string {
-  if (!plSafeName(repo.table)) { return "[]"; }
+export function listProjected(repo: DbRepository, columns: string, where: string, a: string): string {
+  if (!safeIdentifier(repo.table)) { return "[]"; }
   let inner = "SELECT " + columns + " FROM " + repo.table;
   if (where != "") { inner = inner + " WHERE " + where; }
   let sql = "SELECT coalesce(json_agg(r), '[]'::json) FROM (" + inner + ") r";
@@ -371,13 +371,13 @@ export function plListAs(repo: PlRepo, columns: string, where: string, a: string
   } else {
     if (pl_query1(sql, a) < 0) { return "[]"; }
   }
-  return plRowsAsArray();
+  return rowsAsArray();
 }
 
 // A page, ordered by a column you name.
-export function plPage(repo: PlRepo, where: string, a: string, orderBy: string, limit: int, offset: int): string {
-  if (!plRepoValid(repo) || !plSafeName(orderBy)) { return "[]"; }
-  let inner = "SELECT " + plSelectList(repo) + " FROM " + repo.table;
+export function pageWhere(repo: DbRepository, where: string, a: string, orderBy: string, limit: int, offset: int): string {
+  if (!repositoryValid(repo) || !safeIdentifier(orderBy)) { return "[]"; }
+  let inner = "SELECT " + selectList(repo) + " FROM " + repo.table;
   if (where != "") { inner = inner + " WHERE " + where; }
   inner = inner + " ORDER BY " + orderBy + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`;
   let sql = "SELECT coalesce(json_agg(r), '[]'::json) FROM (" + inner + ") r";
@@ -386,11 +386,11 @@ export function plPage(repo: PlRepo, where: string, a: string, orderBy: string, 
   } else {
     if (pl_query1(sql, a) < 0) { return "[]"; }
   }
-  return plRowsAsArray();
+  return rowsAsArray();
 }
 
-export function plCount(repo: PlRepo, where: string, a: string): int {
-  if (!plSafeName(repo.table)) { return -1; }
+export function countWhere(repo: DbRepository, where: string, a: string): int {
+  if (!safeIdentifier(repo.table)) { return -1; }
   let sql = "SELECT count(*) FROM " + repo.table;
   if (where != "") { sql = sql + " WHERE " + where; }
   if (where == "") {
@@ -402,8 +402,8 @@ export function plCount(repo: PlRepo, where: string, a: string): int {
   return parseInt(pl_value(0, 0)) ?? 0;
 }
 
-export function plExists(repo: PlRepo, id: string): bool {
-  if (!plRepoValid(repo)) { return false; }
+export function existsById(repo: DbRepository, id: string): bool {
+  if (!repositoryValid(repo)) { return false; }
   if (pl_query1("SELECT 1 FROM " + repo.table + " WHERE " + repo.idColumn + " = $1", id) < 0) {
     return false;
   }
@@ -414,51 +414,51 @@ export function plExists(repo: PlRepo, id: string): bool {
 
 // Explicit, not a block that takes a closure: a closure here cannot call a
 // function it was handed, so `withTransaction(body)` cannot be written.
-export function plBegin(): PlResult {
-  return plExec("BEGIN");
+export function beginTransaction(): DbResult {
+  return execute("BEGIN");
 }
 
-export function plCommit(): PlResult {
-  return plExec("COMMIT");
+export function commitTransaction(): DbResult {
+  return execute("COMMIT");
 }
 
-export function plRollback(): PlResult {
-  return plExec("ROLLBACK");
+export function rollbackTransaction(): DbResult {
+  return execute("ROLLBACK");
 }
 
 // --- migrations -----------------------------------------------------------------------------------
 
 // Applied in order and recorded, so a second run is a no-op. Flyway's idea
 // without its machinery: a migration is a name and a statement.
-export function plMigrate(names: string[], statements: string[]): PlResult {
+export function migrate(names: string[], statements: string[]): DbResult {
   if (names.length != statements.length) {
-    return plErr("every migration needs a name: " + `${names.length}` + " names for " + `${statements.length}` + " statements");
+    return dbErr("every migration needs a name: " + `${names.length}` + " names for " + `${statements.length}` + " statements");
   }
-  let created = plExec("CREATE TABLE IF NOT EXISTS plume_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
+  let created = execute("CREATE TABLE IF NOT EXISTS plume_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
   if (!created.ok) { return created; }
 
   let applied: int = 0;
   let i: int = 0;
   while (i < names.length) {
     if (pl_query1("SELECT 1 FROM plume_migrations WHERE name = $1", names[i]) < 0) {
-      return plErr(plLastError("could not read the migration log"));
+      return dbErr(lastError("could not read the migration log"));
     }
     if (pl_rows() == 0) {
-      let ran = plExec(statements[i]);
+      let ran = execute(statements[i]);
       if (!ran.ok) {
-        return plErr("migration \"" + names[i] + "\" failed: " + ran.error);
+        return dbErr("migration \"" + names[i] + "\" failed: " + ran.error);
       }
       if (pl_query1("INSERT INTO plume_migrations (name) VALUES ($1)", names[i]) < 0) {
-        return plErr(plLastError("applied \"" + names[i] + "\" but could not record it"));
+        return dbErr(lastError("applied \"" + names[i] + "\" but could not record it"));
       }
       applied = applied + 1;
     }
     i = i + 1;
   }
-  return plOk(applied);
+  return dbOk(applied);
 }
 
-export function plMigrationApplied(name: string): bool {
+export function migrationApplied(name: string): bool {
   if (pl_query1("SELECT 1 FROM plume_migrations WHERE name = $1", name) < 0) { return false; }
   return pl_rows() > 0;
 }
@@ -469,12 +469,12 @@ export function plMigrationApplied(name: string): bool {
 // without a round trip. `JSON.parse<T>` rejects a document carrying fields the
 // target does not declare, so a narrowing step is required; the database does
 // this with a projection, and this does it here.
-export function plPick(json: string, keys: string[]): string {
+export function pickFields(json: string, keys: string[]): string {
   let out = "{";
   let written: int = 0;
   let i: int = 0;
   while (i < keys.length) {
-    let piece = plMember(json, keys[i]);
+    let piece = jsonMember(json, keys[i]);
     if (piece != "") {
       if (written > 0) { out = out + ","; }
       out = out + "\"" + keys[i] + "\":" + piece;
@@ -488,9 +488,9 @@ export function plPick(json: string, keys: string[]): string {
 // The raw JSON text of one top-level member's value, or "" when absent.
 // Strings are skipped whole and nesting is counted, so a brace inside a value
 // does not end it early.
-export function plMember(json: string, key: string): string {
+export function jsonMember(json: string, key: string): string {
   let marker = "\"" + key + "\":";
-  let at = plFindMember(json, marker);
+  let at = findJsonMember(json, marker);
   if (at < 0) { return ""; }
   let i = at;
   while (i < json.length && json.charAt(i) == " ") { i = i + 1; }
@@ -526,7 +526,7 @@ export function plMember(json: string, key: string): string {
 
 // The index just past a top-level `"key":`, skipping matches inside strings
 // and nested objects.
-function plFindMember(json: string, marker: string): int {
+function findJsonMember(json: string, marker: string): int {
   let depth: int = 0;
   let inString: bool = false;
   let escaped: bool = false;
