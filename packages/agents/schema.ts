@@ -59,6 +59,22 @@ export type McpServerRow = {
   enabled: bool,
 };
 
+// A provider's API key, encrypted at rest.
+//
+// The ciphertext is a row; the key that opens it is not. A master key stored
+// beside what it protects is decoration, so it comes from the environment and
+// the database never sees it.
+//
+// `envelope` is what crypto.encrypt returned: base64(nonce ‖ ciphertext ‖ tag),
+// authenticated, so a row edited in the database refuses to open rather than
+// decrypting to something plausible.
+export type CredentialRow = {
+  id: string,
+  provider: string,
+  envelope: string,
+  updatedAt: string,
+};
+
 export type AgentRow = {
   id: string,
   agentName: string,
@@ -123,6 +139,16 @@ export function mcpServersMapping(): DbRepository {
 }
 
 // The agent as a flat row, for writing.
+export function credentialsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("provider", "provider", "text"),
+    field("envelope", "envelope", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("provider_credentials", "id", "id", fs);
+}
+
 export function agentsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -191,7 +217,8 @@ export function schemaPlan(db: Db): Migration[] {
       + "child_id " + db.textType + " NOT NULL)"),
     // One prompt name has many versions, and a lookup by name is the common
     // read, so it is worth an index rather than a scan.
-    migration("8", "prompts by name",
+    migration("8", "provider credentials", createTableSql(db, credentialsMapping())),
+    migration("9", "prompts by name",
       "CREATE INDEX IF NOT EXISTS prompts_by_name ON prompts (prompt_name)"),
   ];
   return plan;

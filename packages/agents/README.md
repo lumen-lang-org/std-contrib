@@ -95,10 +95,41 @@ spawn a process, and Lumen has no subprocess API — so a stdio server has to be
 fronted by something speaking HTTP. The client says exactly that rather than
 failing obscurely.
 
-**A credential is not in the database.** The API key comes from the
-environment. Encrypting keys at rest with a key stored beside them would be
-theatre; encryption of the stored key is waiting on a cipher in the language
-(Lumen has `randomBytes` and `createHash` and no AEAD yet).
+## Credentials
+
+A provider's API key is a row, encrypted:
+
+```ts
+storeCredential(db, "mistral", "sk-...", masterKey(), now);
+complete(model, config, prompt, text, credentialFor(db, "mistral", masterKey()));
+```
+
+```
+stored for  mistral
+envelope    yV23Bn0vGDrN3+lEt04PhvRyL4jYo1JVWajaKcaW7m3J…
+plaintext in the row? false
+call        ok=true status=200
+wrong master ok=false no API key for mistral
+```
+
+**The ciphertext is a row; the key that opens it is not.** `LUMEN_MASTER_KEY`
+comes from the environment, so the database never sees it. Encrypting a
+credential with a key stored beside it protects nothing. The trade is real and
+intended: losing the environment loses the credentials.
+
+AES-256-GCM, so it is authenticated — a row edited in the database refuses to
+open rather than decrypting to something plausible that would then be sent to a
+provider. A test does exactly that edit.
+
+**Every failure to open answers the same way**: absent, wrong master key, and
+tampered all return `""`. A caller that could tell them apart could use this
+table to test master keys against.
+
+An empty key is refused at the door, because an empty plaintext encrypts to a
+valid envelope that decrypts to `""` — indistinguishable from a failure.
+
+`providersWithCredentials` returns names only; nothing in this module returns an
+envelope, so a listing endpoint cannot leak one by accident.
 
 ## Testing
 
@@ -107,6 +138,7 @@ cd packages/agents
 lumen test schema.test.ts     # 10, against SQLite
 lumen test mcp.test.ts        # 3, the refusals — the live half is an example
 lumen test provider.test.ts   # 5, provider selection and refusals
+lumen test credentials.test.ts # 13, encryption at rest
 ```
 
 The live halves are `examples/mount-mcp.ts` and `examples/call-model.ts`. A test
