@@ -8,7 +8,7 @@
 //   sh packages/plume/build.sh
 //   cd packages/plume && lumen test sqlite.test.ts
 
-import { connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
+import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { sqlite, sqliteConnection, sqliteVersion } from "./sqlite.ts";
 

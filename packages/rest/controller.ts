@@ -30,7 +30,11 @@ import { Route, route } from "./router.ts";
 // --- the description the compiler passes in ----------------------------------
 //
 // Declared here rather than imported because the compiler does not yet provide
-// it as a type. The shape is spec 455's, with `methods` added.
+// it as a type, and named `Description` because the decorator protocol
+// requires that exact name — a decorator is `(d: Description) => T`.
+//
+// A decorator is handed only the keys its own Description declares (spec 459),
+// so this may name what it uses and no more.
 
 export type ControllerDecoratorUse = {
   name: string,
@@ -56,7 +60,7 @@ export type ControllerField = {
   decorators: ControllerDecoratorUse[],
 };
 
-export type ControllerDescription = {
+export type Description = {
   protocol: int,
   kind: string,
   name: string,
@@ -133,7 +137,7 @@ export function joinPaths(prefix: string, tail: string): string {
 
 // --- the decorator -----------------------------------------------------------
 
-export function controller(d: ControllerDescription): Route[] {
+export function controller(d: Description): Route[] {
   let out: Route[] = [];
   let prefix = "";
   if (d.args.length > 0) { prefix = d.args[0]; }
@@ -153,7 +157,7 @@ export function controller(d: ControllerDescription): Route[] {
 
 // Why a class would not make a controller. A method with no route decorator is
 // not an error — a controller may have helpers — but everything else is.
-export function controllerProblem(d: ControllerDescription): string {
+export function controllerProblem(d: Description): string {
   if (d.protocol != 1) {
     return "this decorator understands description protocol 1, not " + `${d.protocol}`;
   }

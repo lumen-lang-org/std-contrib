@@ -178,6 +178,35 @@ and a projection that works in development and is refused in production has not
 made anything portable. Expressions are otherwise free: `coalesce(a, b) AS "x"`
 is read correctly, commas and all.
 
+## A repository
+
+`store.ts` binds a mapping to a connection, which is what Panache calls a
+repository and what you inject:
+
+```ts
+let agents = store(database, agentsMapping());
+
+agents.findById("a1");
+agents.list();
+agents.listOrdered("max_steps <= " + agents.db.placeholder, ["4"], [asc("agent_name")]);
+agents.persist(JSON.stringify(a));
+agents.count();
+```
+
+plume's operations take `(db, mapping, ...)` because that keeps them ordinary
+functions — testable, composable, nothing hidden. But threading the same two
+values through every call is doing bookkeeping by hand, and a class holding
+both is holding one thing twice.
+
+A `Store` adds no capability: every method is the same function with the first
+two arguments supplied. It carries `db` and `mapping`, so anything it does not
+cover is one plume call away.
+
+It is named `Store` rather than `Repository` because `DbRepository` is already
+the mapping here. That is arguably the wrong name for a mapping — Panache would
+call the bound thing the repository — and renaming the older type is a change
+worth making deliberately rather than in passing.
+
 ## Relations
 
 A related row, or rows, fetched with the record that points at them:
@@ -417,6 +446,7 @@ lumen test migratenames.test.ts         # the V1__name.sql convention
 lumen test ordering.test.ts             # ordering, SQLite
 lumen test ordering_pg.test.ts          # ordering, PostgreSQL
 lumen test ordering_mysql.test.ts       # ordering, MySQL
+lumen test store.test.ts                # the bound repository
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections; a
