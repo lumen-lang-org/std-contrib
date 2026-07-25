@@ -68,6 +68,23 @@ so a change — through this API or from anything else touching the same tables 
 is visible to the very next request. That is met by not doing the thing that
 would break it, rather than by machinery.
 
+### Credentials, over the API
+
+```
+GET    /providers              which providers have a key — names only
+GET    /providers/:provider    {"provider":"mistral","configured":true}
+PUT    /providers/:provider/key  {"apiKey":"sk-..."} — stored encrypted
+DELETE /providers/:provider/key
+```
+
+A key can be written and named; it can never be read back. Nothing in this
+module returns an envelope or a plaintext, so a listing endpoint cannot leak one
+by accident, and `configured` answers the only question a caller actually has.
+
+The server refuses to start without a usable `LUMEN_MASTER_KEY`, rather than
+serving with credentials it cannot open and failing every provider call later,
+far from the cause.
+
 ## Talking to what the rows describe
 
 `mcp.ts` mounts an MCP server from its row, and `provider.ts` calls a model

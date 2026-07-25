@@ -14,18 +14,77 @@
 // it rather than by machinery.
 
 import { controller } from "../rest/controller.ts";
-import { Route } from "../rest/router.ts";
+import { Route, route } from "../rest/router.ts";
 import { Request, Reply, Handler, serve, ok, created, noContent, notFound, badRequest, param, queryParam } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { DbOrder, DbRepository, asc, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, schemaPlan } from "./schema.ts";
+import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
+import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
 
 // A change to which model or prompt an agent uses, as a body.
 type ModelChange = { modelConfigId: string };
 type PromptChange = { promptId: string };
 type ServerLink = { serverId: string };
+type KeyBody = { apiKey: string };
+
+// Credentials, over the API. A key can be written and named; it can never be
+// read back. Anything that returns one is a leak waiting for a log line, and
+// the caller who set it already knows what they set.
+@controller("/providers")
+class ProviderApi {
+  db: Db;
+  master: string;
+
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    let names = providersWithCredentials(this.db);
+    let out = "[";
+    let i: int = 0;
+    while (i < names.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + JSON.stringify(names[i]);
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
+  // Whether a provider has a usable key, without saying what it is. A caller
+  // needs to know a deployment is configured; it does not need the secret to
+  // find that out.
+  @get("/:provider")
+  status(req: Request): Reply {
+    let usable = credentialFor(this.db, param(req, "provider"), this.master) != "";
+    return ok("{\"provider\":" + JSON.stringify(param(req, "provider"))
+      + ",\"configured\":" + `${usable}` + "}");
+  }
+
+  @put("/:provider/key")
+  setKey(req: Request): Reply {
+    let problem = masterKeyProblem(this.master);
+    if (problem != "") { return badRequest(problem); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: KeyBody = JSON.parse<KeyBody>(req.body);
+    let stored = storeCredential(this.db, param(req, "provider"), body.apiKey, this.master, "now");
+    if (stored != "") { return badRequest(stored); }
+    return ok("{\"provider\":" + JSON.stringify(param(req, "provider")) + ",\"configured\":true}");
+  }
+
+  @del("/:provider/key")
+  clearKey(req: Request): Reply {
+    if (!existsById(this.db, credentialsMapping(), "cred-" + param(req, "provider"))) {
+      return notFound("no key for " + param(req, "provider"));
+    }
+    deleteById(this.db, credentialsMapping(), "cred-" + param(req, "provider"));
+    return noContent();
+  }
+}
 
 @controller("/agents")
 class AgentApi {
@@ -152,8 +211,8 @@ function seed(db: Db): void {
   persist(db, modelsMapping(), JSON.stringify(haiku));
   let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}" };
   let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}" };
-  persist(db, modelConfigsMapping(this.db), JSON.stringify(careful));
-  persist(db, modelConfigsMapping(this.db), JSON.stringify(quick));
+  persist(db, modelConfigsMapping(db), JSON.stringify(careful));
+  persist(db, modelConfigsMapping(db), JSON.stringify(quick));
   let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
   let p2: PromptRow = { id: "p2", promptName: "lead", version: 2, body: "You lead, briefly.", createdAt: "2026-07-25" };
   persist(db, promptsMapping(), JSON.stringify(p1));
@@ -173,7 +232,16 @@ function seed(db: Db): void {
 function main(): void {
   let db = openDatabase();
   seed(db);
+  let master = masterKey();
+  let keyProblem = masterKeyProblem(master);
+  if (keyProblem != "") {
+    // Refusing to start beats serving with credentials that cannot be read:
+    // every provider call would fail later, far from the cause.
+    console.error(keyProblem);
+    return;
+  }
   let api = new AgentApi(db);
+  let providers = new ProviderApi(db, master);
 
   let bound = new Map<string, Handler>();
   bound.set("list", (req: Request) => { return api.list(req); });
@@ -184,14 +252,30 @@ function main(): void {
   bound.set("addServer", (req: Request) => { return api.addServer(req); });
   bound.set("remove", (req: Request) => { return api.remove(req); });
 
+  bound.set("plist", (req: Request) => { return providers.list(req); });
+  bound.set("pstatus", (req: Request) => { return providers.status(req); });
+  bound.set("psetKey", (req: Request) => { return providers.setKey(req); });
+  bound.set("pclearKey", (req: Request) => { return providers.clearKey(req); });
+
+  // Two controllers, one table. The provider handlers are prefixed because a
+  // table is keyed by handler name and both classes have a `list`.
+  let table: Route[] = [];
+  let a: int = 0;
+  while (a < controllerAgentApi.length) { table.push(controllerAgentApi[a]); a = a + 1; }
+  let p: int = 0;
+  while (p < controllerProviderApi.length) {
+    let r = controllerProviderApi[p];
+    table.push(route(r.method, r.pattern, "p" + r.handler));
+    p = p + 1;
+  }
+
   let i: int = 0;
-  while (i < controllerAgentApi.length) {
-    console.log("route  " + controllerAgentApi[i].method + " " + controllerAgentApi[i].pattern
-      + " -> " + controllerAgentApi[i].handler);
+  while (i < table.length) {
+    console.log("route  " + table[i].method + " " + table[i].pattern + " -> " + table[i].handler);
     i = i + 1;
   }
 
-  let problem = serve(8100, controllerAgentApi, bound);
+  let problem = serve(8100, table, bound);
   if (problem != "") { console.error(problem); }
 }
 
