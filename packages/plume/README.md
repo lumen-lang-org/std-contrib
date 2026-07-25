@@ -148,6 +148,40 @@ class Agent {
 }
 ```
 
+### Foreign keys
+
+A relation already says which column points at which column of which table,
+which is a foreign key written out. plume will generate the constraint but
+never adds it for you: a schema change belongs in a migration, where it is
+recorded and checksummed like every other one.
+
+```ts
+let plan: Migration[] = [
+  migration("1", "teams",  createTableSql(database, teams)),
+  migration("2", "agents", createTableSqlWithKeys(database, agents)),
+];
+```
+
+`createTable` is unchanged — a relation adds nothing to it, so no existing
+schema moves. `createTableSql` is the statement it runs, and
+`createTableSqlWithKeys` is that statement with a `REFERENCES` clause per
+to-one relation. A to-many adds nothing here: its column lives on the other
+table, so the constraint belongs to that table's mapping.
+
+On PostgreSQL and MySQL, `foreignKeys(db, repo)` returns `ALTER TABLE ... ADD
+CONSTRAINT` statements instead, which do not constrain creation order:
+
+```ts
+migration("3", "agent keys", foreignKeys(database, agents)[0]),
+// ALTER TABLE agents ADD CONSTRAINT fk_agents_team_id
+//   FOREIGN KEY (team_id) REFERENCES teams (id)
+```
+
+SQLite cannot add a constraint to a table that exists, so `foreignKeys` is
+empty there and `createTableSqlWithKeys` is the route — and SQLite enforces
+foreign keys only after `PRAGMA foreign_keys = ON`, which is its choice and
+one the tests state rather than leave to be discovered.
+
 What is still missing: `FROM a JOIN b` proper, so no fetching two whole entities
 in one query, and no relation that spans a link table.
 
@@ -245,6 +279,9 @@ lumen test entity_live.test.ts          # its mapping against a database
 lumen test relations.test.ts            # relations, SQLite
 lumen test relations_pg.test.ts         # relations, PostgreSQL
 lumen test relations_mysql.test.ts      # relations, MySQL
+lumen test foreignkeys.test.ts          # generated keys, SQLite
+lumen test foreignkeys_pg.test.ts       # generated keys, PostgreSQL
+lumen test foreignkeys_mysql.test.ts    # generated keys, MySQL
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections. The
