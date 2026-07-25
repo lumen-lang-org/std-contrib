@@ -1,20 +1,20 @@
-// plume against a live database. The mapping, the round trip, projections and
-// projections are the parts worth knowing are real, and none survive a mock:
-// the database is half of the mapper.
+// The same suite as plume.test.ts, against MySQL instead of PostgreSQL.
+//
+// Every assertion here is a copy of the PostgreSQL one, deliberately: the
+// point of the driver split is that the same mapping and the same operations
+// produce the same answers on both, and only a duplicated suite proves that.
+// What differs is the connection target and nothing else.
 //
 //   sh packages/plume/build.sh
-//   createdb lumenvec
-//   cd packages/plume && lumen test plume.test.ts
-//
-// Override the connection with PLUME_TEST_CONNINFO.
+//   cd packages/plume && lumen test mysql.test.ts
 
 import { connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
 import { Db } from "./driver.ts";
-import { postgres, postgresVersion } from "./postgres.ts";
+import { mysql, mysqlVersion } from "./mysql.ts";
 
 // One driver for the whole suite. The name avoids `db`, which every plume
 // operation uses as a parameter name.
-let database: Db = postgres();
+let database: Db = mysql();
 
 // A record whose field names deliberately disagree with its columns, so every
 // test exercises the mapping rather than a coincidence.
@@ -31,9 +31,9 @@ type AgentSummary = {
 };
 
 function testConninfo(): string {
-  let fromEnv = process.env("PLUME_TEST_CONNINFO") ?? "";
+  let fromEnv = process.env("PLUME_MYSQL_CONNINFO") ?? "";
   if (fromEnv != "") { return fromEnv; }
-  return "host=127.0.0.1 user=lumen password=lumen dbname=lumenvec";
+  return "host=127.0.0.1 port=13306 user=root password=lumen dbname=lumentest";
 }
 
 function agentRepo(): DbRepository {
@@ -106,11 +106,11 @@ test("a connection opens", () => {
   let r = connectDatabase(database, testConninfo());
   expect(r.ok);
   expect(databaseConnected(database));
-  expect(postgresVersion().length > 0);
+  expect(mysqlVersion().length > 0);
 });
 
 test("a bad connection is reported, not raised", () => {
-  let r = connectDatabase(database, "host=127.0.0.1 port=1 dbname=nope user=nobody");
+  let r = connectDatabase(database, "host=127.0.0.1 port=1 user=nobody dbname=nope");
   expect(!r.ok);
   expect(r.error.length > 0);
   expect(connectDatabase(database, testConninfo()).ok);
