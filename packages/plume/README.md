@@ -47,6 +47,7 @@ the database does the conversion, using functions it already has.
 | module | `postgres.ts` | `sqlite.ts` | `mysql.ts` |
 | links | `pq` | `sqlite3` | `mariadb` |
 | target | libpq conninfo | a file path or `:memory:` | `host=… user=… dbname=…` |
+| verified against | PostgreSQL 17 | SQLite 3 | MySQL 8, MariaDB 11.8 |
 | placeholder | `$1` | `?1` | `?` |
 
 Each driver is its own module, so a program that uses SQLite does not need
@@ -173,6 +174,8 @@ sh packages/plume/build.sh
 createdb lumenvec                       # PostgreSQL
 docker run -d --name plume-mysql -e MYSQL_ROOT_PASSWORD=lumen \
   -e MYSQL_DATABASE=lumentest -p 13306:3306 mysql:8
+docker run -d --name plume-mariadb -e MARIADB_ROOT_PASSWORD=lumen \
+  -e MARIADB_DATABASE=lumentest -p 13307:3306 mariadb:11
 
 cd packages/plume
 lumen test plume.test.ts                # PostgreSQL operations
@@ -185,7 +188,10 @@ lumen test entity.test.ts               # the @entity decorator, offline
 lumen test entity_live.test.ts          # its mapping against a database
 ```
 
-`PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections.
+`PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections. The
+MySQL suites pass unmodified against MariaDB — point `PLUME_MYSQL_CONNINFO` at
+port 13307 above to see it, which is the only evidence that "and MariaDB" is a
+fact rather than an assumption about wire compatibility.
 
 A suite can be run from anywhere — the shims are linked relative to the driver
 that names them, not to the working directory.
