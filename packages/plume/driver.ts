@@ -62,12 +62,11 @@ export type Db = {
   // How the database spells an upsert: "on-conflict" for the standard
   // PostgreSQL and SQLite form, "on-duplicate-key" for MySQL's.
   upsertStyle: string,
-  // How a float column is written into a document. SQLite renders a REAL as
-  // text with 15 significant digits, which silently loses the last two of a
-  // double, so it needs the value formatted at full precision and handed back
-  // as raw JSON. Empty on a driver that gets this right by itself.
-  floatJsonPrefix: string,
-  floatJsonSuffix: string,
+  // How a float column is written into a document, as an expression with
+  // `{c}` standing for the column. SQLite renders a REAL as text with 15
+  // significant digits, which silently loses the last two of a double, so it
+  // needs the value formatted itself. Empty on a driver that gets this right.
+  floatJson: string,
   // Type names for the portable set, since `float8` is not `REAL` is not
   // `DOUBLE`.
   textType: string,
@@ -103,8 +102,7 @@ export function noDatabase(): Db {
     backslashEscapes: false,
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
-    floatJsonPrefix: "",
-    floatJsonSuffix: "",
+    floatJson: "",
     textType: "text",
     intType: "int",
     floatType: "float8",
