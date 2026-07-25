@@ -154,5 +154,8 @@ lumen test migrate_mysql.test.ts        # migrations, MySQL
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections.
 
+A suite can be run from anywhere — the shims are linked relative to the driver
+that names them, not to the working directory.
+
 Every suite runs against a real server. None of these claims survive a mock:
 the database is half of the mapper.
