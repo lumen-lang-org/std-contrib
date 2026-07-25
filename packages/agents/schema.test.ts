@@ -44,7 +44,7 @@ function wipe(): void {
   dropTable(database, agentsMapping());
   dropTable(database, mcpServersMapping());
   dropTable(database, promptsMapping());
-  dropTable(database, modelConfigsMapping());
+  dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
 }
 
@@ -59,8 +59,8 @@ function seeded(): void {
 
   let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}" };
   let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}" };
-  persist(database, modelConfigsMapping(), JSON.stringify(careful));
-  persist(database, modelConfigsMapping(), JSON.stringify(quick));
+  persist(database, modelConfigsMapping(database), JSON.stringify(careful));
+  persist(database, modelConfigsMapping(database), JSON.stringify(quick));
 
   let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
   let p2: PromptRow = { id: "p2", promptName: "lead", version: 2, body: "You lead, briefly.", createdAt: "2026-07-25" };

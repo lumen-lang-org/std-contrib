@@ -1,0 +1,7 @@
+# Compiled programs: lumen writes the binary into the working directory,
+# named for its source and with no extension to tell it apart.
+api
+mount-mcp
+call-model
+zz*
+.lumen-*
