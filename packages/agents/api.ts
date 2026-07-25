@@ -18,16 +18,19 @@ import { Route, route } from "../rest/router.ts";
 import { Request, Reply, Handler, serve, ok, created, noContent, notFound, badRequest, param, queryParam } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { DbOrder, DbRepository, asc, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
+import { DbOrder, DbRepository, asc, desc, placeholderAt, connectDatabase, persist, findById, listOrdered, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
+import { AgentRun, runAgent } from "./run.ts";
+import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 
 // A change to which model or prompt an agent uses, as a body.
 type ModelChange = { modelConfigId: string };
 type PromptChange = { promptId: string };
 type ServerLink = { serverId: string };
 type KeyBody = { apiKey: string };
+type RunBody = { text: string };
 
 // Credentials, over the API. A key can be written and named; it can never be
 // read back. Anything that returns one is a leak waiting for a log line, and
@@ -91,11 +94,13 @@ class AgentApi {
   db: Db;
   flat: DbRepository;
   full: DbRepository;
+  master: string;
 
-  constructor(db: Db) {
+  constructor(db: Db, master: string) {
     this.db = db;
     this.flat = agentsMapping();
     this.full = agentsFull(db);
+    this.master = master;
   }
 
   @get("/")
@@ -170,6 +175,54 @@ class AgentApi {
     return ok(findById(this.db, this.full, param(req, "id")));
   }
 
+  // Run the agent against a user's text. The reply is the conversation's side
+  // of the run — the answer and what served it. The context's side (every tool
+  // call and result) is written to the run log and answered by /runs/:id,
+  // because the two are different things and a chat client should not have to
+  // filter one out of the other.
+  @post("/:id/run")
+  run(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
+    let body: RunBody = JSON.parse<RunBody>(req.body);
+    if (body.text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+
+    let answered = runAgent(this.db, param(req, "id"), body.text, this.master);
+
+    // Logged either way: the runs an operator needs to read are mostly the
+    // ones that went wrong.
+    let runId = recordRun(this.db, param(req, "id"), body.text, answered);
+
+    let out = "{\"runId\":" + JSON.stringify(runId)
+      + ",\"ok\":" + `${answered.ok}`
+      + ",\"text\":" + JSON.stringify(answered.text)
+      + ",\"agentName\":" + JSON.stringify(answered.agentName)
+      + ",\"promptVersion\":" + `${answered.promptVersion}`
+      + ",\"modelApiName\":" + JSON.stringify(answered.modelApiName)
+      + ",\"stopReason\":" + JSON.stringify(answered.stopReason)
+      + ",\"toolCalls\":" + `${answered.steps.length}`
+      + ",\"error\":" + JSON.stringify(answered.error) + "}";
+    if (!answered.ok && answered.agentName == "") {
+      // The one refusal that is the caller's mistake rather than the run's:
+      // the agent existed a moment ago and does not now, or a row it needs is
+      // dangling. Either way the name of what is missing is the answer.
+      return badRequest(answered.error);
+    }
+    return ok(out);
+  }
+
+  // The agent's recent runs, newest first — the transcript side only. The
+  // steps are behind /runs/:id, so a list view never pays for them.
+  @get("/:id/runs")
+  runs(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    return ok(runsOf(this.db, param(req, "id"), 50));
+  }
+
   @del("/:id")
   remove(req: Request): Reply {
     if (!existsById(this.db, this.flat, param(req, "id"))) {
@@ -179,6 +232,205 @@ class AgentApi {
     executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder, [param(req, "id")]);
     deleteById(this.db, this.flat, param(req, "id"));
     return noContent();
+  }
+}
+
+// The catalog: models, model configs, prompts and MCP servers, over HTTP.
+// This is the rest of "no code": with these, an agent is assembled entirely
+// by API calls, and nothing was ever written in a file.
+//
+// One class per table would repeat the same four methods with different
+// mappings; one class with the table in the path would put plume mappings
+// behind a string. Four small classes, sharing shape but not machinery, is
+// the least clever thing that works.
+
+@controller("/models")
+class ModelApi {
+  db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  list(req: Request): Reply {
+    let keys: DbOrder[] = [asc("label")];
+    return ok(listOrdered(this.db, modelsMapping(), "", [], keys));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let written = persist(this.db, modelsMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, modelsMapping(), jsonId(req.body)));
+  }
+
+  // Enabled is the kill switch: flipping it refuses the next call to every
+  // agent on this model, which is the point of it being a column.
+  @put("/:id/enabled")
+  setEnabled(req: Request): Reply {
+    if (!existsById(this.db, modelsMapping(), param(req, "id"))) {
+      return notFound("model " + param(req, "id"));
+    }
+    let flag = "0";
+    if (req.body.indexOf("true") >= 0) { flag = "1"; }
+    executeWith(this.db, "UPDATE models SET enabled = " + this.db.placeholder
+      + " WHERE id = " + placeholderAt(this.db, 2), [flag, param(req, "id")]);
+    return ok(findById(this.db, modelsMapping(), param(req, "id")));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, modelsMapping(), param(req, "id"))) {
+      return notFound("model " + param(req, "id"));
+    }
+    if (countWhere(this.db, modelConfigsMapping(this.db), "model_id = " + this.db.placeholder, [param(req, "id")]) > 0) {
+      return badRequest("model " + param(req, "id") + " is used by a model config; delete or repoint those first");
+    }
+    deleteById(this.db, modelsMapping(), param(req, "id"));
+    return noContent();
+  }
+}
+
+@controller("/model-configs")
+class ConfigApi {
+  db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  list(req: Request): Reply {
+    let keys: DbOrder[] = [asc("id")];
+    return ok(listOrdered(this.db, modelConfigsMapping(this.db), "", [], keys));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: ModelConfigRow = JSON.parse<ModelConfigRow>(req.body);
+    if (!existsById(this.db, modelsMapping(), body.modelId)) {
+      return badRequest("no model " + body.modelId + "; create it first");
+    }
+    let written = persist(this.db, modelConfigsMapping(this.db), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, modelConfigsMapping(this.db), jsonId(req.body)));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, modelConfigsMapping(this.db), param(req, "id"))) {
+      return notFound("model config " + param(req, "id"));
+    }
+    if (countWhere(this.db, agentsMapping(), "model_config_id = " + this.db.placeholder, [param(req, "id")]) > 0) {
+      return badRequest("config " + param(req, "id") + " is used by an agent; repoint it first");
+    }
+    deleteById(this.db, modelConfigsMapping(this.db), param(req, "id"));
+    return noContent();
+  }
+}
+
+@controller("/prompts")
+class PromptApi {
+  db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  // All versions, or one name's versions newest first — the roll-back view.
+  @get("/")
+  list(req: Request): Reply {
+    let name = queryParam(req, "name", "");
+    if (name == "") {
+      let keys: DbOrder[] = [asc("prompt_name"), asc("version")];
+      return ok(listOrdered(this.db, promptsMapping(), "", [], keys));
+    }
+    let newest: DbOrder[] = [desc("version")];
+    return ok(listOrdered(this.db, promptsMapping(), "prompt_name = " + this.db.placeholder, [name], newest));
+  }
+
+  // A prompt row is never edited, so the only write is a new version. The
+  // version is assigned here — max + 1 for the name — because letting the
+  // caller pick one is how two writers both create version 4.
+  @post("/")
+  create(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: PromptRow = JSON.parse<PromptRow>(req.body);
+    if (body.promptName == "") { return badRequest("promptName is required"); }
+    if (body.body == "") { return badRequest("an empty prompt is not a version"); }
+    let next = 1 + maxVersion(this.db, body.promptName);
+    let row: PromptRow = { id: body.id, promptName: body.promptName, version: next, body: body.body, createdAt: body.createdAt };
+    let written = persist(this.db, promptsMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, promptsMapping(), body.id));
+  }
+}
+
+@controller("/servers")
+class ServerApi {
+  db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  list(req: Request): Reply {
+    let keys: DbOrder[] = [asc("server_name")];
+    return ok(listOrdered(this.db, mcpServersMapping(), "", [], keys));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: McpServerRow = JSON.parse<McpServerRow>(req.body);
+    if (body.transport != "http" && body.transport != "stdio") {
+      return badRequest("transport must be \"http\" or \"stdio\", not \"" + body.transport + "\"");
+    }
+    let written = persist(this.db, mcpServersMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, mcpServersMapping(), jsonId(req.body)));
+  }
+
+  @put("/:id/enabled")
+  setEnabled(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    let flag = "0";
+    if (req.body.indexOf("true") >= 0) { flag = "1"; }
+    executeWith(this.db, "UPDATE mcp_servers SET enabled = " + this.db.placeholder
+      + " WHERE id = " + placeholderAt(this.db, 2), [flag, param(req, "id")]);
+    return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE server_id = " + this.db.placeholder, [param(req, "id")]);
+    deleteById(this.db, mcpServersMapping(), param(req, "id"));
+    return noContent();
+  }
+}
+
+// The highest version a prompt name has, 0 when it has none.
+function maxVersion(db: Db, name: string): int {
+  let newest: DbOrder[] = [desc("version")];
+  let page = pageOrdered(db, promptsMapping(), "prompt_name = " + db.placeholder, [name], newest, 1, 0);
+  if (page == "" || page == "[]") { return 0; }
+  let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);
+  if (rows.length == 0) { return 0; }
+  return rows[0].version;
+}
+
+// The trace side. One route, because a run is written once and read whole:
+// the row and every step, one query.
+@controller("/runs")
+class RunApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/:id")
+  find(req: Request): Reply {
+    let document = findById(this.db, runsFull(this.db), param(req, "id"));
+    if (document == "") { return notFound("run " + param(req, "id")); }
+    return ok(document);
   }
 }
 
@@ -199,7 +451,14 @@ function openDatabase(): Db {
   let db = sqlite();
   let cfg: DbConfig = { filename: "/tmp/agents_api.db" };
   connectDatabase(db, cfg);
-  migrate(db, schemaPlan(db));
+  // One plan, extended — not two plans. A second migrate() call would be
+  // handed a plan that lacks the versions already recorded, and refuse.
+  let plan = schemaPlan(db);
+  let extra = runLogPlan(db);
+  let e: int = 0;
+  while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  let ran = migrate(db, plan);
+  if (!ran.ok) { console.error(ran.error); }
   return db;
 }
 
@@ -240,8 +499,9 @@ function main(): void {
     console.error(keyProblem);
     return;
   }
-  let api = new AgentApi(db);
+  let api = new AgentApi(db, master);
   let providers = new ProviderApi(db, master);
+  let traces = new RunApi(db);
 
   let bound = new Map<string, Handler>();
   bound.set("list", (req: Request) => { return api.list(req); });
@@ -250,6 +510,8 @@ function main(): void {
   bound.set("setModel", (req: Request) => { return api.setModel(req); });
   bound.set("setPrompt", (req: Request) => { return api.setPrompt(req); });
   bound.set("addServer", (req: Request) => { return api.addServer(req); });
+  bound.set("run", (req: Request) => { return api.run(req); });
+  bound.set("runs", (req: Request) => { return api.runs(req); });
   bound.set("remove", (req: Request) => { return api.remove(req); });
 
   bound.set("plist", (req: Request) => { return providers.list(req); });
@@ -257,8 +519,32 @@ function main(): void {
   bound.set("psetKey", (req: Request) => { return providers.setKey(req); });
   bound.set("pclearKey", (req: Request) => { return providers.clearKey(req); });
 
-  // Two controllers, one table. The provider handlers are prefixed because a
-  // table is keyed by handler name and both classes have a `list`.
+  bound.set("rfind", (req: Request) => { return traces.find(req); });
+
+  let models = new ModelApi(db);
+  bound.set("mlist", (req: Request) => { return models.list(req); });
+  bound.set("mcreate", (req: Request) => { return models.create(req); });
+  bound.set("msetEnabled", (req: Request) => { return models.setEnabled(req); });
+  bound.set("mremove", (req: Request) => { return models.remove(req); });
+
+  let configs = new ConfigApi(db);
+  bound.set("clist", (req: Request) => { return configs.list(req); });
+  bound.set("ccreate", (req: Request) => { return configs.create(req); });
+  bound.set("cremove", (req: Request) => { return configs.remove(req); });
+
+  let prompts = new PromptApi(db);
+  bound.set("promptlist", (req: Request) => { return prompts.list(req); });
+  bound.set("promptcreate", (req: Request) => { return prompts.create(req); });
+
+  let servers = new ServerApi(db);
+  bound.set("slist", (req: Request) => { return servers.list(req); });
+  bound.set("screate", (req: Request) => { return servers.create(req); });
+  bound.set("ssetEnabled", (req: Request) => { return servers.setEnabled(req); });
+  bound.set("sremove", (req: Request) => { return servers.remove(req); });
+
+  // Three controllers, one table. The provider and run handlers are prefixed
+  // because a table is keyed by handler name and the classes share a `find`
+  // and a `list`.
   let table: Route[] = [];
   let a: int = 0;
   while (a < controllerAgentApi.length) { table.push(controllerAgentApi[a]); a = a + 1; }
@@ -267,6 +553,36 @@ function main(): void {
     let r = controllerProviderApi[p];
     table.push(route(r.method, r.pattern, "p" + r.handler));
     p = p + 1;
+  }
+  let t: int = 0;
+  while (t < controllerRunApi.length) {
+    let r = controllerRunApi[t];
+    table.push(route(r.method, r.pattern, "r" + r.handler));
+    t = t + 1;
+  }
+  let m: int = 0;
+  while (m < controllerModelApi.length) {
+    let r = controllerModelApi[m];
+    table.push(route(r.method, r.pattern, "m" + r.handler));
+    m = m + 1;
+  }
+  let c: int = 0;
+  while (c < controllerConfigApi.length) {
+    let r = controllerConfigApi[c];
+    table.push(route(r.method, r.pattern, "c" + r.handler));
+    c = c + 1;
+  }
+  let pr: int = 0;
+  while (pr < controllerPromptApi.length) {
+    let r = controllerPromptApi[pr];
+    table.push(route(r.method, r.pattern, "prompt" + r.handler));
+    pr = pr + 1;
+  }
+  let sv: int = 0;
+  while (sv < controllerServerApi.length) {
+    let r = controllerServerApi[sv];
+    table.push(route(r.method, r.pattern, "s" + r.handler));
+    sv = sv + 1;
   }
 
   let i: int = 0;
