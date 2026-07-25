@@ -7,7 +7,7 @@ import { messageTurn, assistantToolCallsTurn, toolResultTurn, runOpenAIToolChat,
 
 // one dispatched tool call. `index` is the position in the whole run, so two
 // calls made in the same model turn still get distinct trace numbers.
-type AiAgentStep = {
+type AgentStep = {
   index: int,
   tool: string,
   input: string,
@@ -18,16 +18,16 @@ type AiAgentStep = {
 // `stopReason` is one of "final" (the model answered), "max_steps", or "error"
 // (a body with no usable message). `stepCount` counts model calls, not tool
 // calls; `steps` holds the tool calls.
-type AiAgentResult = {
+type AgentResult = {
   answer: string,
-  steps: AiAgentStep[],
+  steps: AgentStep[],
   stopReason: string,
   stepCount: int,
 };
 
 // the model is a parameter so a test can drive the loop with canned bodies. the
 // string is the raw provider response body, which the tool-call parser reads.
-type AiModel = (messages: AiMessage[]) => string;
+type Model = (messages: Message[]) => string;
 
 // fixture shapes: a response body carrying a plain answer.
 type AgentFakeMessage = {
@@ -86,13 +86,13 @@ type AgentFakeArgs = {
   input: string,
 };
 
-function agNoSteps(): AiAgentStep[] {
-  let empty: AiAgentStep[] = [];
+function agNoSteps(): AgentStep[] {
+  let empty: AgentStep[] = [];
   return empty;
 }
 
-function agResult(answer: string, steps: AiAgentStep[], stopReason: string, stepCount: int): AiAgentResult {
-  let res: AiAgentResult = {
+function agResult(answer: string, steps: AgentStep[], stopReason: string, stepCount: int): AgentResult {
+  let res: AgentResult = {
     answer: answer,
     steps: steps,
     stopReason: stopReason,
@@ -165,7 +165,7 @@ function agPlural(n: int, word: string): string {
 
 // a failed dispatch has an empty output and its text in `error`, so the trace
 // shows the reason rather than a blank.
-function agStepOutput(result: AiToolResult): string {
+function agStepOutput(result: ToolResult): string {
   if (result.ok) { return result.output; }
   return "error: " + result.error;
 }
@@ -174,7 +174,7 @@ function agStepOutput(result: AiToolResult): string {
 // provider rejects the request. the content is provider-neutral text that an
 // adapter re-serializes into the provider's own `tool_calls` shape; it also
 // gives one assistant message per model turn, which is what `fakeModel` counts.
-function agCallSummary(text: string, calls: AiToolCall[]): string {
+function agCallSummary(text: string, calls: ToolCall[]): string {
   let line = "[tool_calls]";
   let i: int = 0;
   while (i < calls.length) {
@@ -186,7 +186,7 @@ function agCallSummary(text: string, calls: AiToolCall[]): string {
   return text + "\n" + line;
 }
 
-function agTraceLine(step: AiAgentStep): string {
+function agTraceLine(step: AgentStep): string {
   return `${step.index + 1}` + ". " + agFlattenLine(step.tool)
     + "(" + agClip(agFlattenLine(step.input), 80) + ")"
     + " -> " + agClip(agFlattenLine(step.output), 160);
@@ -233,9 +233,9 @@ export function agFakeCallBody(names: string[], inputs: string[]): string {
 // a turn is one model call plus every tool call it asked for. `maxSteps` bounds
 // turns, so the loop makes at most `maxSteps` model calls and terminates even
 // when the model asks for a tool forever.
-function agentLoop(model: AiModel, tools: AiTool[], allow: string[], deny: string[], history: AiMessage[], maxSteps: int): AiAgentResult {
-  let steps: AiAgentStep[] = agNoSteps();
-  let convo: AiMessage[] = history.slice(0, history.length);
+function agentLoop(model: Model, tools: Tool[], allow: string[], deny: string[], history: Message[], maxSteps: int): AgentResult {
+  let steps: AgentStep[] = agNoSteps();
+  let convo: Message[] = history.slice(0, history.length);
   let answer = "";
   let turns: int = 0;
   while (turns < maxSteps) {
@@ -268,8 +268,8 @@ function agentLoop(model: AiModel, tools: AiTool[], allow: string[], deny: strin
   return agResult(answer, steps, "max_steps", turns);
 }
 
-export function makeAgentStep(index: int, tool: string, input: string, output: string, ok: bool): AiAgentStep {
-  let step: AiAgentStep = {
+export function makeAgentStep(index: int, tool: string, input: string, output: string, ok: bool): AgentStep {
+  let step: AgentStep = {
     index: index,
     tool: tool,
     input: input,
@@ -281,7 +281,7 @@ export function makeAgentStep(index: int, tool: string, input: string, output: s
 
 // the system message a run starts from. an empty registry drops the tool section
 // and an empty instruction drops its paragraph, so neither leaves a blank line.
-export function agentSystemPrompt(tools: AiTool[], instruction: string): string {
+export function agentSystemPrompt(tools: Tool[], instruction: string): string {
   let out = instruction;
   let block = describeTools(tools);
   if (block != "") {
@@ -293,7 +293,7 @@ export function agentSystemPrompt(tools: AiTool[], instruction: string): string 
   return out + "Call a tool when you need something you do not already know. When you have enough to answer, reply with the final answer and call no tool.";
 }
 
-export function runAgent(model: AiModel, tools: AiTool[], history: AiMessage[], maxSteps: int): AiAgentResult {
+export function runAgent(model: Model, tools: Tool[], history: Message[], maxSteps: int): AgentResult {
   let allow: string[] = [];
   let deny: string[] = [];
   return agentLoop(model, tools, allow, deny, history, maxSteps);
@@ -302,7 +302,7 @@ export function runAgent(model: AiModel, tools: AiTool[], history: AiMessage[], 
 // policy is enforced per dispatch inside the loop, not by filtering the registry
 // up front, so a denied name comes back as a failed step the model can recover
 // from.
-export function runAgentWithPolicy(model: AiModel, tools: AiTool[], allow: string[], deny: string[], history: AiMessage[], maxSteps: int): AiAgentResult {
+export function runAgentWithPolicy(model: Model, tools: Tool[], allow: string[], deny: string[], history: Message[], maxSteps: int): AgentResult {
   return agentLoop(model, tools, allow, deny, history, maxSteps);
 }
 
@@ -327,8 +327,8 @@ function agToolBody(content: string): string {
 
 // an already-rendered body is placed on a success-shaped result so toolResultTurn
 // emits it verbatim; a body reading "error: ..." survives unchanged.
-function agToolTurn(id: string, body: string): AiChatTurn {
-  let result: AiToolResult = {
+function agToolTurn(id: string, body: string): ChatTurn {
+  let result: ToolResult = {
     name: "",
     input: "",
     output: body,
@@ -342,8 +342,8 @@ function agToolTurn(id: string, body: string): AiChatTurn {
 // records, ids `call_{base+1}` upward. `args` is read as a paren-balanced run
 // that steps over quoted text as a unit, so a `)` or `,` inside the JSON payload
 // cannot end an entry early.
-function agParseSummaryCalls(seg: string, base: int): AiToolCall[] {
-  let out: AiToolCall[] = [];
+function agParseSummaryCalls(seg: string, base: int): ToolCall[] {
+  let out: ToolCall[] = [];
   let i: int = 0;
   while (i < seg.length) {
     while (i < seg.length && (seg.charAt(i) == " " || seg.charAt(i) == ",")) { i = i + 1; }
@@ -387,8 +387,8 @@ function agParseSummaryCalls(seg: string, base: int): AiToolCall[] {
 // rebuilds the native turn history a live round trip needs from the loop's
 // neutral-text history. ids run in reading order so an assistant turn's calls
 // and the tool turns answering them always agree.
-export function agentHistoryToTurns(messages: AiMessage[]): AiChatTurn[] {
-  let out: AiChatTurn[] = [];
+export function agentHistoryToTurns(messages: Message[]): ChatTurn[] {
+  let out: ChatTurn[] = [];
   let pendingIds: string[] = [];
   let cursor: int = 0;
   let idBase: int = 0;
@@ -432,22 +432,22 @@ export function agentHistoryToTurns(messages: AiMessage[]): AiChatTurn[] {
 // a model backed by a live OpenAI-compatible endpoint. the closure rebuilds
 // native turn records from the loop's history, POSTs a tool-enabled body, and
 // returns the raw response body the loop already knows how to read.
-export function openAIAgentModel(apiKey: string, model: string, tools: AiTool[]): AiModel {
-  return (messages: AiMessage[]) => {
+export function openAIAgentModel(apiKey: string, model: string, tools: Tool[]): Model {
+  return (messages: Message[]) => {
     return runOpenAIToolChat(apiKey, model, agentHistoryToTurns(messages), tools);
   };
 }
 
 // the same against mistral's chat endpoint.
-export function mistralAgentModel(apiKey: string, model: string, tools: AiTool[]): AiModel {
-  return (messages: AiMessage[]) => {
+export function mistralAgentModel(apiKey: string, model: string, tools: Tool[]): Model {
+  return (messages: Message[]) => {
     return runMistralToolChat(apiKey, model, agentHistoryToTurns(messages), tools);
   };
 }
 
 // every tool call in order, then why the run ended. the closing line always
 // renders, so a run that called no tool still explains itself.
-export function agentTrace(result: AiAgentResult): string {
+export function agentTrace(result: AgentResult): string {
   let out = "";
   let i: int = 0;
   while (i < result.steps.length) {
@@ -492,8 +492,8 @@ export function agentFakeToolCall(name: string, input: string): string {
 // off the conversation by counting `[tool_calls]` summaries — the tag the loop
 // puts on every tool-call turn it emits. a resumed history's plain assistant
 // answers carry no such tag and so are not miscounted.
-export function fakeModel(responses: string[]): AiModel {
-  return (messages: AiMessage[]) => {
+export function fakeModel(responses: string[]): Model {
+  return (messages: Message[]) => {
     let turn: int = 0;
     for (const msg of messages) {
       if (msg.role == "assistant" && msg.content.indexOf("[tool_calls]") >= 0) { turn = turn + 1; }

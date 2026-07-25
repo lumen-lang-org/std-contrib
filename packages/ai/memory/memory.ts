@@ -2,11 +2,11 @@
 
 import { systemMessage, userMessage, assistantMessage } from "../core/messages.ts";
 
-type AiHistoryFile = {
-  messages: AiMessage[],
+type HistoryFile = {
+  messages: Message[],
 };
 
-function isSystemLead(history: AiMessage[]): bool {
+function isSystemLead(history: Message[]): bool {
   if (history.length == 0) { return false; }
   return history[0].role == "system";
 }
@@ -97,7 +97,7 @@ export function estimateTokens(text: string): int {
   return n;
 }
 
-export function historyChars(history: AiMessage[]): int {
+export function historyChars(history: Message[]): int {
   let total: int = 0;
   for (const msg of history) {
     total = total + msg.content.length;
@@ -105,19 +105,19 @@ export function historyChars(history: AiMessage[]): int {
   return total;
 }
 
-export function appendMessage(history: AiMessage[], msg: AiMessage): AiMessage[] {
+export function appendMessage(history: Message[], msg: Message): Message[] {
   return [...history, msg];
 }
 
-export function windowMemory(history: AiMessage[], turns: int): AiMessage[] {
+export function windowMemory(history: Message[], turns: int): Message[] {
   if (history.length == 0) {
-    let empty: AiMessage[] = [];
+    let empty: Message[] = [];
     return empty;
   }
   let lead = isSystemLead(history);
   if (turns <= 0) {
     if (lead) { return history.slice(0, 1); }
-    let none: AiMessage[] = [];
+    let none: Message[] = [];
     return none;
   }
   if (turns >= history.length) { return history.slice(0, history.length); }
@@ -128,14 +128,14 @@ export function windowMemory(history: AiMessage[], turns: int): AiMessage[] {
   return tail;
 }
 
-export function charBudgetMemory(history: AiMessage[], maxChars: int): AiMessage[] {
+export function charBudgetMemory(history: Message[], maxChars: int): Message[] {
   if (history.length == 0) {
-    let empty: AiMessage[] = [];
+    let empty: Message[] = [];
     return empty;
   }
   let lead = isSystemLead(history);
-  let head: AiMessage[] = [];
-  let rest: AiMessage[] = history.slice(0, history.length);
+  let head: Message[] = [];
+  let rest: Message[] = history.slice(0, history.length);
   if (lead) {
     head = history.slice(0, 1);
     rest = history.slice(1, history.length);
@@ -146,7 +146,7 @@ export function charBudgetMemory(history: AiMessage[], maxChars: int): AiMessage
   return [...head, ...rest];
 }
 
-export function renderTranscript(history: AiMessage[]): string {
+export function renderTranscript(history: Message[]): string {
   let out = "";
   let i: int = 0;
   while (i < history.length) {
@@ -157,7 +157,7 @@ export function renderTranscript(history: AiMessage[]): string {
   return out;
 }
 
-export function summaryPrompt(history: AiMessage[], priorSummary: string): string {
+export function summaryPrompt(history: Message[], priorSummary: string): string {
   let out = "Fold the new conversation turns into a single running summary.";
   out = out + "\nKeep decisions, facts, names, and open questions. Drop small talk.";
   out = out + "\nWrite the summary as plain prose in the third person. Return only the summary.";
@@ -172,8 +172,8 @@ export function summaryPrompt(history: AiMessage[], priorSummary: string): strin
   return out;
 }
 
-export function applySummary(summary: string, recent: AiMessage[]): AiMessage[] {
-  let head: AiMessage[] = [systemMessage("Summary of the conversation so far:\n" + summary)];
+export function applySummary(summary: string, recent: Message[]): Message[] {
+  let head: Message[] = [systemMessage("Summary of the conversation so far:\n" + summary)];
   return [...head, ...recent];
 }
 
@@ -181,17 +181,17 @@ export function applySummary(summary: string, recent: AiMessage[]): AiMessage[] 
 // folds older turns into a running summary on demand. the summarizer is
 // injected so this module stays free of I/O.
 
-type AiSummarizer = (prompt: string) => string;
+type Summarizer = (prompt: string) => string;
 
 // the marker `applySummary` writes; lets a compressed history be recognised and
 // its prior summary folded forward instead of summarised again.
 const SUMMARY_MARKER = "Summary of the conversation so far:\n";
 
-function isSummaryMessage(msg: AiMessage): bool {
+function isSummaryMessage(msg: Message): bool {
   return msg.role == "system" && msg.content.startsWith(SUMMARY_MARKER);
 }
 
-export function needsCompression(history: AiMessage[], maxChars: int): bool {
+export function needsCompression(history: Message[], maxChars: int): bool {
   return historyChars(history) > maxChars;
 }
 
@@ -199,12 +199,12 @@ export function needsCompression(history: AiMessage[], maxChars: int): bool {
 // keeping the leading system prompt and folding any previous summary forward.
 // returns the history unchanged when nothing is old enough, or when the
 // summarizer returns nothing — a failed model call must not destroy history.
-export function compressHistory(summarize: AiSummarizer, history: AiMessage[], keepRecent: int): AiMessage[] {
+export function compressHistory(summarize: Summarizer, history: Message[], keepRecent: int): Message[] {
   let keep = keepRecent;
   if (keep < 0) { keep = 0; }
 
   let i: int = 0;
-  let head: AiMessage[] = [];
+  let head: Message[] = [];
   if (i < history.length && history[i].role == "system" && !isSummaryMessage(history[i])) {
     head = [history[i]];
     i = i + 1;
@@ -222,11 +222,11 @@ export function compressHistory(summarize: AiSummarizer, history: AiMessage[], k
 
   let summary = summarize(summaryPrompt(older, prior)).trim();
   if (summary == "") { return history; }
-  let marker: AiMessage[] = [systemMessage(SUMMARY_MARKER + summary)];
+  let marker: Message[] = [systemMessage(SUMMARY_MARKER + summary)];
   return [...head, ...marker, ...recent];
 }
 
-export function compressIfNeeded(summarize: AiSummarizer, history: AiMessage[], maxChars: int, keepRecent: int): AiMessage[] {
+export function compressIfNeeded(summarize: Summarizer, history: Message[], maxChars: int, keepRecent: int): Message[] {
   if (!needsCompression(history, maxChars)) { return history; }
   return compressHistory(summarize, history, keepRecent);
 }
@@ -266,24 +266,24 @@ export function getMemoryValue(store: string, key: string): string {
   return "";
 }
 
-export function serializeHistory(history: AiMessage[]): string {
-  let file: AiHistoryFile = { messages: history };
+export function serializeHistory(history: Message[]): string {
+  let file: HistoryFile = { messages: history };
   return JSON.stringify(file);
 }
 
-export function parseHistory(raw: string): AiMessage[] {
+export function parseHistory(raw: string): Message[] {
   if (raw == "") {
-    let empty: AiMessage[] = [];
+    let empty: Message[] = [];
     return empty;
   }
-  const parsed: AiHistoryFile = JSON.parse<AiHistoryFile>(raw);
+  const parsed: HistoryFile = JSON.parse<HistoryFile>(raw);
   return parsed.messages;
 }
 
-export function saveHistory(path: string, history: AiMessage[]): void {
+export function saveHistory(path: string, history: Message[]): void {
   fs.writeFileSync(path, serializeHistory(history));
 }
 
-export function loadHistory(path: string): AiMessage[] {
+export function loadHistory(path: string): Message[] {
   return parseHistory(fs.readFileSync(path));
 }

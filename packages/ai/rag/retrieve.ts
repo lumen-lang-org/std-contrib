@@ -9,15 +9,15 @@ function retrIntText(n: int): string {
   return `${n}`;
 }
 
-export function retrMakeHit(doc: AiDocument, score: number): AiSearchHit {
+export function retrMakeHit(doc: Document, score: number): SearchHit {
   return {
     doc: doc,
     score: score,
   };
 }
 
-export function retrNoHits(): AiSearchHit[] {
-  let empty: AiSearchHit[] = [];
+export function retrNoHits(): SearchHit[] {
+  let empty: SearchHit[] = [];
   return empty;
 }
 
@@ -47,7 +47,7 @@ function retrUniqueTokens(tokens: string[]): string[] {
 }
 
 // empty vector when the store does not hold `id`.
-function retrVectorFor(store: AiVectorStore, id: string): number[] {
+function retrVectorFor(store: VectorStore, id: string): number[] {
   let i: int = 0;
   while (i < store.docs.length && i < store.vectors.length) {
     if (store.docs[i].id == id) { return store.vectors[i]; }
@@ -58,8 +58,8 @@ function retrVectorFor(store: AiVectorStore, id: string): number[] {
 }
 
 // both sides of a hybrid search, the first list winning on id.
-function retrUnionDocuments(primary: AiDocument[], secondary: AiDocument[]): AiDocument[] {
-  let out: AiDocument[] = [];
+function retrUnionDocuments(primary: Document[], secondary: Document[]): Document[] {
+  let out: Document[] = [];
   let ids: string[] = [];
   for (const doc of primary) {
     if (!retrHasToken(ids, doc.id)) {
@@ -87,10 +87,10 @@ function retrBeatsScore(candidate: number, current: number): bool {
 
 // no in-place sort, so the top k comes out of repeated max-extraction over a
 // shrinking copy. ties keep insertion order.
-export function retrTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
+export function retrTopHits(scored: SearchHit[], k: int): SearchHit[] {
   if (k <= 0) { return retrNoHits(); }
   let rest = scored;
-  let out: AiSearchHit[] = [];
+  let out: SearchHit[] = [];
   let n: int = 0;
   while (n < k && rest.length > 0) {
     let best: int = 0;
@@ -106,7 +106,7 @@ export function retrTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
   return out;
 }
 
-function retrCitationLabel(doc: AiDocument): string {
+function retrCitationLabel(doc: Document): string {
   if (doc.source != "") { return doc.source; }
   if (doc.id != "") { return doc.id; }
   return "unknown";
@@ -181,7 +181,7 @@ function retrCountToken(tokens: string[], token: string): int {
 //   length   — blocks under retrMinBlockTokens() are scaled by their length.
 // reaches 1.0 only for a block of at least retrMinBlockTokens() tokens made up
 // entirely of the query's terms.
-export function keywordScore(doc: AiDocument, terms: string[]): number {
+export function keywordScore(doc: Document, terms: string[]): number {
   let queryTerms = retrUniqueTokens(terms);
   if (queryTerms.length == 0) { return 0.0; }
   let docTokens = tokenizeQuery(doc.text);
@@ -208,11 +208,11 @@ export function keywordScore(doc: AiDocument, terms: string[]): number {
 // the default retrieval path: no embeddings, no API key, no network. documents
 // sharing no term with the query are dropped rather than scored 0.0, so a query
 // that matches nothing yields no context at all.
-export function keywordRetrieve(docs: AiDocument[], query: string, k: int): AiSearchHit[] {
+export function keywordRetrieve(docs: Document[], query: string, k: int): SearchHit[] {
   if (k <= 0 || docs.length == 0) { return retrNoHits(); }
   let terms = tokenizeQuery(query);
   if (terms.length == 0) { return retrNoHits(); }
-  let scored: AiSearchHit[] = [];
+  let scored: SearchHit[] = [];
   let i: int = 0;
   while (i < docs.length) {
     let score = keywordScore(docs[i], terms);
@@ -227,10 +227,10 @@ export function keywordRetrieve(docs: AiDocument[], query: string, k: int): AiSe
 // whitespace, so raw query text is passed through unnormalized. it hashes into
 // buckets, so a query sharing no word with the corpus still returns low-scoring
 // collision noise — prefer keywordRetrieve when "no match" must mean no results.
-export function vectorRetrieve(store: AiVectorStore, query: string, dims: int, k: int): AiSearchHit[] {
+export function vectorRetrieve(store: VectorStore, query: string, dims: int, k: int): SearchHit[] {
   if (k <= 0 || dims <= 0) { return retrNoHits(); }
   let hits = searchByText(store, query, dims, k);
-  let out: AiSearchHit[] = [];
+  let out: SearchHit[] = [];
   for (const hit of hits) {
     if (hit.score > 0.0) { out.push(hit); }
   }
@@ -241,12 +241,12 @@ export function vectorRetrieve(store: AiVectorStore, query: string, dims: int, k
 // so keyword scoring takes the larger share and the vector term only breaks ties
 // between documents with identical term overlap. a document in `docs` but absent
 // from `store` scores 0.0 on the vector side rather than being excluded.
-export function hybridRetrieve(store: AiVectorStore, docs: AiDocument[], query: string, dims: int, k: int): AiSearchHit[] {
+export function hybridRetrieve(store: VectorStore, docs: Document[], query: string, dims: int, k: int): SearchHit[] {
   if (k <= 0) { return retrNoHits(); }
   let terms = tokenizeQuery(query);
   let queryVector = fakeEmbedding(query, dims);
   let candidates = retrUnionDocuments(docs, store.docs);
-  let scored: AiSearchHit[] = [];
+  let scored: SearchHit[] = [];
   let i: int = 0;
   while (i < candidates.length) {
     let doc = candidates[i];
@@ -287,7 +287,7 @@ function retrEscapeBlockText(text: string): string {
 
 // numbered, cited blocks: "[1] (source) text", separated by a blank line. the
 // bracket number is what the model is told to cite.
-export function formatContext(hits: AiSearchHit[]): string {
+export function formatContext(hits: SearchHit[]): string {
   let out = "";
   let i: int = 0;
   while (i < hits.length) {
@@ -302,16 +302,16 @@ export function formatContext(hits: AiSearchHit[]): string {
 // with no hits the context reads "(no context available)", so the model has
 // something to refuse against rather than an empty section it may fill by
 // guessing.
-export function ragPrompt(question: string, hits: AiSearchHit[]): string {
+export function ragPrompt(question: string, hits: SearchHit[]): string {
   let context = formatContext(hits);
   if (context == "") { context = "(no context available)"; }
   return retrGroundingRules() + "\n\nContext:\n" + context + "\n\nQuestion:\n" + question + "\n\nAnswer:";
 }
 
-export function ragMessages(question: string, hits: AiSearchHit[]): AiMessage[] {
+export function ragMessages(question: string, hits: SearchHit[]): Message[] {
   let context = formatContext(hits);
   if (context == "") { context = "(no context available)"; }
-  let out: AiMessage[] = [
+  let out: Message[] = [
     systemMessage(retrGroundingRules() + "\n\nContext:\n" + context),
     userMessage(question),
   ];

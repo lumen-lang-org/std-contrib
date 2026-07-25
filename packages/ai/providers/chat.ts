@@ -7,7 +7,7 @@ import { makeAiResult } from "../core/result.ts";
 
 // honours cfg's temperature and maxTokens, which runOpenAIChat / runMistralChat
 // hardcode. an unroutable config fails rather than guessing an endpoint.
-export function runConfiguredChat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
+export function runConfiguredChat(cfg: ModelConfig, messages: Message[]): Result {
   let base = modelBaseUrl(cfg);
   if (base == "") {
     return makeAiResult(0, false, "", "unroutable model config: provider \"" + cfg.provider + "\" has no default endpoint — set a baseUrl");

@@ -23,7 +23,7 @@ test("add vector returns a new store", () => {
 
 test("add documents embeds each document", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     makeDocument("d1", "alpha beta gamma", "notes.txt", ""),
     makeDocument("d2", "delta epsilon zeta", "notes.txt", ""),
   ];
@@ -34,13 +34,13 @@ test("add documents embeds each document", () => {
   expect(filled.vectors[1].length == 64);
   expect(filled.docs[1].id == "d2");
   expect(storeSize(store) == 0);
-  let none: AiDocument[] = [];
+  let none: Document[] = [];
   expect(storeSize(addDocuments(filled, none, 64)) == 2);
 });
 
 test("delete by id", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     makeDocument("d1", "alpha", "notes.txt", ""),
     makeDocument("d2", "beta", "notes.txt", ""),
     makeDocument("d3", "gamma", "notes.txt", ""),
@@ -107,7 +107,7 @@ test("search an empty store is safe", () => {
 
 test("search by text retrieves the closest document", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     makeDocument("cat", "the cat sat on the warm mat", "s", ""),
     makeDocument("physics", "quantum chromodynamics describes gluon interactions", "s", ""),
     makeDocument("lumen", "lumen compiles to a native binary", "s", ""),
@@ -124,7 +124,7 @@ test("search by text retrieves the closest document", () => {
 
 test("search by text over unembeddable query scores zero", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     makeDocument("d1", "alpha beta", "s", ""),
   ];
   let filled = addDocuments(store, docs, 32);
@@ -135,7 +135,7 @@ test("search by text over unembeddable query scores zero", () => {
 
 test("a NaN score never takes the top rank in the store", () => {
   let notANumber = 0.0 / 0.0;
-  let scored: AiSearchHit[] = [
+  let scored: SearchHit[] = [
     makeSearchHit(makeDocument("poisoned", "poisoned", "s", ""), notANumber),
     makeSearchHit(makeDocument("perfect", "perfect", "s", ""), 1.0),
     makeSearchHit(makeDocument("okay", "okay", "s", ""), 0.707),
@@ -145,7 +145,7 @@ test("a NaN score never takes the top rank in the store", () => {
   expect(ranked[0].doc.id == "perfect");
   expect(ranked[1].doc.id == "okay");
   expect(ranked[2].doc.id == "poisoned");
-  let allBroken: AiSearchHit[] = [
+  let allBroken: SearchHit[] = [
     makeSearchHit(makeDocument("a", "a", "s", ""), notANumber),
     makeSearchHit(makeDocument("b", "b", "s", ""), notANumber),
   ];
@@ -175,7 +175,7 @@ test("a non-finite stored vector cannot take over the results", () => {
 
 test("metadata filtering cannot be bypassed by a forged value", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     withMetadata(makeDocument("public", "public secret", "s", ""), "note", "hello\nrole\tadmin"),
     withMetadata(makeDocument("private", "private secret", "s", ""), "role", "admin"),
   ];
@@ -189,7 +189,7 @@ test("metadata filtering cannot be bypassed by a forged value", () => {
 
 test("filter by metadata", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     withMetadata(makeDocument("d1", "alpha", "notes.txt", ""), "lang", "en"),
     withMetadata(makeDocument("d2", "beta", "notes.txt", ""), "lang", "fr"),
     withMetadata(makeDocument("d3", "gamma", "notes.txt", ""), "lang", "en"),
@@ -208,7 +208,7 @@ test("filter by metadata", () => {
 
 test("filtered store is still searchable", () => {
   let store = emptyVectorStore();
-  let docs: AiDocument[] = [
+  let docs: Document[] = [
     withMetadata(makeDocument("cat", "the cat sat on the warm mat", "s", ""), "lang", "en"),
     withMetadata(makeDocument("physics", "quantum chromodynamics describes gluon interactions", "s", ""), "lang", "fr"),
   ];

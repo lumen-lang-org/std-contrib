@@ -3,7 +3,7 @@
 import { jsonObjectBody, jsonSchemaBody, objectSchema, parseStructuredResponse, requiredFields, schemaField, schemaInstruction, structuredChat, structuredRetryPrompt, validateStructured } from "./structured.ts";
 
 test("objectSchema builds a strict JSON Schema", () => {
-  let fields: AiSchemaField[] = [
+  let fields: SchemaField[] = [
     schemaField("name", "string", "full name", true),
     schemaField("age", "integer", "", true),
     schemaField("nickname", "string", "", false),
@@ -19,8 +19,8 @@ test("objectSchema builds a strict JSON Schema", () => {
 });
 
 test("jsonSchemaBody carries the schema in response_format", () => {
-  let fields: AiSchemaField[] = [schemaField("city", "string", "", true)];
-  let msgs: AiMessage[] = [{ role: "user", content: "where?" }];
+  let fields: SchemaField[] = [schemaField("city", "string", "", true)];
+  let msgs: Message[] = [{ role: "user", content: "where?" }];
   let body = jsonSchemaBody("m", msgs, "place", objectSchema(fields), 0.2, 100);
   expect(body.includes("\"response_format\":{\"type\":\"json_schema\""));
   expect(body.includes("\"strict\":true"));
@@ -30,7 +30,7 @@ test("jsonSchemaBody carries the schema in response_format", () => {
 });
 
 test("jsonObjectBody asks for plain JSON mode", () => {
-  let msgs: AiMessage[] = [{ role: "user", content: "hi" }];
+  let msgs: Message[] = [{ role: "user", content: "hi" }];
   let body = jsonObjectBody("m", msgs, 0.2, 100);
   expect(body.includes("\"response_format\":{\"type\":\"json_object\"}"));
 });
@@ -101,7 +101,7 @@ test("schemaInstruction states the schema for json-mode providers", () => {
 });
 
 test("structuredChat rejects an unknown provider without calling out", () => {
-  let msgs: AiMessage[] = [{ role: "user", content: "hi" }];
+  let msgs: Message[] = [{ role: "user", content: "hi" }];
   let req: string[] = ["a"];
   let r = structuredChat("nope", "k", "m", msgs, "s", "{}", req);
   expect(!r.ok);

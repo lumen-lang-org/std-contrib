@@ -13,10 +13,10 @@ function tcNullToolCallsResponse(): string {
     + "\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"tool_calls\":null,\"content\":\"lumen ok\"}}]}";
 }
 
-function tcSampleTools(): AiTool[] {
+function tcSampleTools(): Tool[] {
   let weather = makeTool("weather", "Look up the weather.", "A city name.", (input: string) => "sunny in " + input);
   let clock = makeTool("clock", "Read the clock.", "", (input: string) => "12:00 " + input);
-  let tools: AiTool[] = [weather, clock];
+  let tools: Tool[] = [weather, clock];
   return tools;
 }
 
@@ -46,7 +46,7 @@ test("serialize tool definitions", () => {
 });
 
 test("serialize an empty tool list", () => {
-  let none: AiTool[] = [];
+  let none: Tool[] = [];
   expect(serializeToolDefs(none) == "[]");
   expect(serializeToolDefsMistral(none) == "[]");
 });
@@ -58,7 +58,7 @@ test("mistral tool definitions match the openai-compatible shape", () => {
 
 test("tool definitions escape quotes and newlines", () => {
   let odd = makeTool("say", "Says \"hi\"\nloudly.", "Text to say, e.g. {\"a\":1}", (input: string) => input);
-  let tools: AiTool[] = [odd];
+  let tools: Tool[] = [odd];
   let raw = serializeToolDefs(tools);
   expect(raw.indexOf("\\\"hi\\\"") > 0);
   expect(raw.indexOf("\\nloudly.") > 0);

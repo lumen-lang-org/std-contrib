@@ -12,7 +12,7 @@
 // `choices[0].delta.content`, which both produce.
 
 import { modelBaseUrl } from "../core/model.ts";
-import { AiMessage } from "../core/messages.ts";
+import { Message } from "../core/messages.ts";
 import { makeAiResult } from "../core/result.ts";
 import { bearerJsonHeaders } from "../core/headers.ts";
 
@@ -27,7 +27,7 @@ import { bearerJsonHeaders } from "../core/headers.ts";
 //
 // `raw` is always the original payload, so a handler can reach past this record
 // when it needs a field the record does not model.
-export type AiStreamEvent = {
+export type StreamEvent = {
   kind: string,
   delta: string,
   finishReason: string,
@@ -36,15 +36,15 @@ export type AiStreamEvent = {
 
 // Called once per event, in arrival order. It must not throw: a stream is read
 // inside a loop that cannot unwind past it.
-export type AiStreamHandler = (event: AiStreamEvent) => void;
+export type StreamHandler = (event: StreamEvent) => void;
 
 const DONE_SENTINEL = "[DONE]";
 
 // `finish` rather than `finishReason`: every module is inlined into one flat
 // namespace, so a parameter may not share a name with a top-level declaration,
 // and the package already exports a `finishReason` function.
-function makeStreamEvent(kind: string, delta: string, finish: string, raw: string): AiStreamEvent {
-  let e: AiStreamEvent = {
+function makeStreamEvent(kind: string, delta: string, finish: string, raw: string): StreamEvent {
+  let e: StreamEvent = {
     kind: kind,
     delta: delta,
     finishReason: finish,
@@ -288,7 +288,7 @@ export function streamLinePayload(line: string): string {
 // One SSE line to one event. A blank separator, a comment, or a non-data field
 // yields an "other" event with no text, so a caller can hand every line here
 // without pre-filtering.
-export function streamEventFromLine(line: string): AiStreamEvent {
+export function streamEventFromLine(line: string): StreamEvent {
   let payload = streamLinePayload(line);
   if (payload.length == 0) {
     return makeStreamEvent("other", "", "", line);
@@ -315,24 +315,24 @@ export function streamEventFromLine(line: string): AiStreamEvent {
 // Both provider entry points below normalize through the same parser; these
 // names exist because the milestone lists each wire format separately, and
 // because a future divergence has a place to land without moving callers.
-export function openAIStreamEvent(line: string): AiStreamEvent {
+export function openAIStreamEvent(line: string): StreamEvent {
   return streamEventFromLine(line);
 }
 
-export function mistralStreamEvent(line: string): AiStreamEvent {
+export function mistralStreamEvent(line: string): StreamEvent {
   return streamEventFromLine(line);
 }
 
 type StreamChatRequest = {
   model: string,
-  messages: AiMessage[],
+  messages: Message[],
   temperature: number,
   max_tokens: int,
   stream: bool,
 };
 
 // A chat body with `stream` set, which the buffered builders do not carry.
-export function buildStreamChatBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
+export function buildStreamChatBody(model: string, messages: Message[], temperature: number, maxTokens: int): string {
   const req: StreamChatRequest = {
     model: model,
     messages: messages,
@@ -359,7 +359,7 @@ function streamHeaders(apiKey: string): Map<string, string> {
 //
 // An unroutable config fails the same way the buffered path does rather than
 // guessing an endpoint.
-export function streamConfiguredChat(cfg: AiModelConfig, messages: AiMessage[], onEvent: AiStreamHandler): AiResult {
+export function streamConfiguredChat(cfg: ModelConfig, messages: Message[], onEvent: StreamHandler): Result {
   let base = modelBaseUrl(cfg);
   if (base == "") {
     return makeAiResult(0, false, "", "unroutable model config: provider \"" + cfg.provider + "\" has no default endpoint — set a baseUrl");
@@ -400,8 +400,8 @@ export function streamConfiguredChat(cfg: AiModelConfig, messages: AiMessage[], 
 
 // Collect a stream without a handler, for a caller that wants streaming's
 // time-to-first-byte on the wire but has nothing to do per token.
-export function streamChatToString(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
-  let sink: AiStreamHandler = (event: AiStreamEvent) => {
+export function streamChatToString(cfg: ModelConfig, messages: Message[]): Result {
+  let sink: StreamHandler = (event: StreamEvent) => {
   };
   return streamConfiguredChat(cfg, messages, sink);
 }
@@ -409,8 +409,8 @@ export function streamChatToString(cfg: AiModelConfig, messages: AiMessage[]): A
 // Replay a captured stream body through the parser, for tests and for reading a
 // recorded session back. Splits on newlines and reports the same events a live
 // stream would, in order.
-export function streamEventsFromBody(body: string): AiStreamEvent[] {
-  let out: AiStreamEvent[] = [];
+export function streamEventsFromBody(body: string): StreamEvent[] {
+  let out: StreamEvent[] = [];
   let lines = body.split("\n");
   let i: int = 0;
   while (i < lines.length) {

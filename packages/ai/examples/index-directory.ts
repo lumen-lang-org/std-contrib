@@ -34,7 +34,7 @@ if (loaded.docs.length == 0) {
 
 // Split every file. A chunk keeps its parent's metadata, so the source path
 // survives into the index.
-let chunked: AiDocument[] = [];
+let chunked: Document[] = [];
 let i: int = 0;
 while (i < loaded.docs.length) {
   chunked = [...chunked, ...splitDocument(loaded.docs[i], 600, 100)];

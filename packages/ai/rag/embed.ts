@@ -2,7 +2,7 @@
 
 import { makeAuthHeaders } from "../providers/openai.ts";
 import { makeMistralAuthHeaders } from "../providers/mistral.ts";
-import { modelBaseUrl, AiModelConfig } from "../core/model.ts";
+import { modelBaseUrl, ModelConfig } from "../core/model.ts";
 
 type EmbeddingRequest = {
   model: string,
@@ -177,7 +177,7 @@ export function embedBatchMistral(apiKey: string, model: string, inputs: string[
 
 // Embed a batch through a model config, so a caller that already has one does
 // not repeat the provider choice.
-export function embedBatchWithConfig(cfg: AiModelConfig, inputs: string[]): number[][] {
+export function embedBatchWithConfig(cfg: ModelConfig, inputs: string[]): number[][] {
   let none: number[][] = [];
   let base = modelBaseUrl(cfg);
   if (base == "") { return none; }

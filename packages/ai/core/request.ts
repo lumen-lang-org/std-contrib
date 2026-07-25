@@ -2,15 +2,15 @@
 
 import { systemMessage } from "./messages.ts";
 
-type AiChatRequest = {
+type ChatRequest = {
   provider: string,
   model: string,
-  messages: AiMessage[],
+  messages: Message[],
   temperature: number,
   max_tokens: int,
 };
 
-export function buildChatRequest(provider: string, model: string, messages: AiMessage[], temperature: number, maxTokens: int): AiChatRequest {
+export function buildChatRequest(provider: string, model: string, messages: Message[], temperature: number, maxTokens: int): ChatRequest {
   return {
     provider: provider,
     model: model,

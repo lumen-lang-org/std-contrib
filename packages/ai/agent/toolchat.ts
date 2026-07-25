@@ -1,5 +1,5 @@
 // the live tool-calling adapter: serialized tool definitions plus a turn history
-// carrying native `tool_calls` and `tool_call_id`. AiMessage holds only
+// carrying native `tool_calls` and `tool_call_id`. Message holds only
 // role+content, so it cannot carry the `tool_call_id` an OpenAI follow-up
 // requires — hence the superset turn record below.
 
@@ -8,12 +8,12 @@ import { serializeToolDefs, serializeToolDefsMistral, parseToolCalls, toolCallIn
 import { systemMessage, userMessage } from "../core/messages.ts";
 import { bearerJsonHeaders } from "../core/headers.ts";
 
-// a superset of AiMessage; absent fields are "". one shape covers a plain turn,
+// a superset of Message; absent fields are "". one shape covers a plain turn,
 // an assistant turn that asked for tools (`tool_calls` holds the native array
 // fragment), and a tool-result turn (`tool_call_id` matches an id in the
 // preceding assistant turn). declared without `export`; module inlining exposes
 // it to importers.
-type AiChatTurn = {
+type ChatTurn = {
   role: string,
   content: string,
   tool_call_id: string,
@@ -33,8 +33,8 @@ type ChatBodyScalars = {
 // the fragment parameter is `toolCallsFrag`, not `toolCalls`: the barrel (ai.ts)
 // exports a top-level `toolCalls` and inlines this module, so that name would
 // shadow the declaration and the native backend rejects the generated code.
-function chatTurn(role: string, content: string, toolCallId: string, name: string, toolCallsFrag: string): AiChatTurn {
-  let t: AiChatTurn = {
+function chatTurn(role: string, content: string, toolCallId: string, name: string, toolCallsFrag: string): ChatTurn {
+  let t: ChatTurn = {
     role: role,
     content: content,
     tool_call_id: toolCallId,
@@ -46,7 +46,7 @@ function chatTurn(role: string, content: string, toolCallId: string, name: strin
 
 // each `arguments` value is itself a JSON string, so it is re-escaped with
 // JSON.stringify rather than concatenated raw, as are the id and name.
-function nativeToolCalls(calls: AiToolCall[]): string {
+function nativeToolCalls(calls: ToolCall[]): string {
   let out = "[";
   let i: int = 0;
   while (i < calls.length) {
@@ -62,7 +62,7 @@ function nativeToolCalls(calls: AiToolCall[]): string {
 // one emitted message; fields are omitted per role. every string is escaped with
 // JSON.stringify, but the `tool_calls` fragment is already valid JSON and is
 // concatenated verbatim.
-export function emitChatTurn(turn: AiChatTurn): string {
+export function emitChatTurn(turn: ChatTurn): string {
   if (turn.role == "tool") {
     return "{\"role\":\"tool\",\"tool_call_id\":" + JSON.stringify(turn.tool_call_id)
       + ",\"content\":" + JSON.stringify(turn.content) + "}";
@@ -76,7 +76,7 @@ export function emitChatTurn(turn: AiChatTurn): string {
     + ",\"content\":" + JSON.stringify(turn.content) + "}";
 }
 
-export function emitChatMessages(turns: AiChatTurn[]): string {
+export function emitChatMessages(turns: ChatTurn[]): string {
   let out = "[";
   let i: int = 0;
   while (i < turns.length) {
@@ -88,20 +88,20 @@ export function emitChatMessages(turns: AiChatTurn[]): string {
 }
 
 // tool metadata is empty, so this emits as a bare `{role, content}` message.
-export function messageTurn(msg: AiMessage): AiChatTurn {
+export function messageTurn(msg: Message): ChatTurn {
   return chatTurn(msg.role, msg.content, "", "", "");
 }
 
 // `calls` become the native `tool_calls` fragment whose ids every following tool
 // turn must match.
-export function assistantToolCallsTurn(content: string, calls: AiToolCall[]): AiChatTurn {
+export function assistantToolCallsTurn(content: string, calls: ToolCall[]): ChatTurn {
   return chatTurn("assistant", content, "", "", nativeToolCalls(calls));
 }
 
 // `toolCallId` ties this back to a call in the preceding assistant turn — the
 // association OpenAI requires and plain role="tool" text cannot carry. a failure
 // takes the same shape as a success.
-export function toolResultTurn(toolCallId: string, result: AiToolResult): AiChatTurn {
+export function toolResultTurn(toolCallId: string, result: ToolResult): ChatTurn {
   let body = result.output;
   if (!result.ok) { body = "error: " + result.error; }
   return chatTurn("tool", body, toolCallId, result.name, "");
@@ -109,8 +109,8 @@ export function toolResultTurn(toolCallId: string, result: AiToolResult): AiChat
 
 // lift a neutral-text history into turn records. nothing carries tool metadata
 // yet; the loop appends assistant/tool turns as calls happen.
-export function toChatTurns(messages: AiMessage[]): AiChatTurn[] {
-  let out: AiChatTurn[] = [];
+export function toChatTurns(messages: Message[]): ChatTurn[] {
+  let out: ChatTurn[] = [];
   let i: int = 0;
   while (i < messages.length) {
     out.push(messageTurn(messages[i]));
@@ -122,7 +122,7 @@ export function toChatTurns(messages: AiMessage[]): AiChatTurn[] {
 // an empty registry omits the `tools` field entirely rather than sending
 // `"tools":[]`, which some providers reject. this only concatenates, so it never
 // throws.
-function buildToolBody(model: string, turns: AiChatTurn[], frag: string, temperature: number, maxTokens: int): string {
+function buildToolBody(model: string, turns: ChatTurn[], frag: string, temperature: number, maxTokens: int): string {
   let scalars: ChatBodyScalars = {
     model: model,
     temperature: temperature,
@@ -135,25 +135,25 @@ function buildToolBody(model: string, turns: AiChatTurn[], frag: string, tempera
   return body + "}";
 }
 
-export function buildOpenAIToolBody(model: string, turns: AiChatTurn[], tools: AiTool[], temperature: number, maxTokens: int): string {
+export function buildOpenAIToolBody(model: string, turns: ChatTurn[], tools: Tool[], temperature: number, maxTokens: int): string {
   return buildToolBody(model, turns, serializeToolDefs(tools), temperature, maxTokens);
 }
 
 // mistral takes the same OpenAI-compatible body; separate entry point so the two
 // can diverge later without moving callers.
-export function buildMistralToolBody(model: string, turns: AiChatTurn[], tools: AiTool[], temperature: number, maxTokens: int): string {
+export function buildMistralToolBody(model: string, turns: ChatTurn[], tools: Tool[], temperature: number, maxTokens: int): string {
   return buildToolBody(model, turns, serializeToolDefsMistral(tools), temperature, maxTokens);
 }
 
 // the only I/O in this module; it hands back the raw response body for the
 // caller to read with parseToolCalls/finishReason, keeping the rest offline.
-export function runOpenAIToolChat(apiKey: string, model: string, turns: AiChatTurn[], tools: AiTool[]): string {
+export function runOpenAIToolChat(apiKey: string, model: string, turns: ChatTurn[], tools: Tool[]): string {
   const body = buildOpenAIToolBody(model, turns, tools, 0.7, 1024);
   const res = http.request("https://api.openai.com/v1/chat/completions", "POST", body, bearerJsonHeaders(apiKey));
   return res.body;
 }
 
-export function runMistralToolChat(apiKey: string, model: string, turns: AiChatTurn[], tools: AiTool[]): string {
+export function runMistralToolChat(apiKey: string, model: string, turns: ChatTurn[], tools: Tool[]): string {
   const body = buildMistralToolBody(model, turns, tools, 0.7, 1024);
   const res = http.request("https://api.mistral.ai/v1/chat/completions", "POST", body, bearerJsonHeaders(apiKey));
   return res.body;

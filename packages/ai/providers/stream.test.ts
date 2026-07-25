@@ -123,7 +123,7 @@ test("both provider entry points normalize identically", () => {
 });
 
 test("the request body sets stream", () => {
-  let msgs: AiMessage[] = [];
+  let msgs: Message[] = [];
   let body = buildStreamChatBody("m", msgs, 0.5, 64);
   expect(body.indexOf("\"stream\":true") >= 0);
   expect(body.indexOf("\"model\":\"m\"") >= 0);

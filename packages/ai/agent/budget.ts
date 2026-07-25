@@ -14,43 +14,43 @@
 // loop, not close enough to reconcile against an invoice.
 
 import { estimateTokens } from "../memory/memory.ts";
-import { AiMessage } from "../core/messages.ts";
+import { Message } from "../core/messages.ts";
 
 // `limit` of 0 or less means unlimited, so a budget can be threaded through
 // code that does not always want one.
-export type AiBudget = {
+export type Budget = {
   limit: int,
   spent: int,
   calls: int,
 };
 
-export function makeBudget(limit: int): AiBudget {
-  let b: AiBudget = { limit: limit, spent: 0, calls: 0 };
+export function makeBudget(limit: int): Budget {
+  let b: Budget = { limit: limit, spent: 0, calls: 0 };
   return b;
 }
 
-export function unlimitedBudget(): AiBudget {
+export function unlimitedBudget(): Budget {
   return makeBudget(0);
 }
 
-export function budgetIsLimited(b: AiBudget): bool {
+export function budgetIsLimited(b: Budget): bool {
   return b.limit > 0;
 }
 
-export function budgetRemaining(b: AiBudget): int {
+export function budgetRemaining(b: Budget): int {
   if (!budgetIsLimited(b)) { return -1; }
   let left = b.limit - b.spent;
   if (left < 0) { return 0; }
   return left;
 }
 
-export function budgetExhausted(b: AiBudget): bool {
+export function budgetExhausted(b: Budget): bool {
   return budgetIsLimited(b) && b.spent >= b.limit;
 }
 
 // The tokens a set of messages will cost to send. Roles are counted too, since
 // a long exchange of short turns still carries per-message overhead.
-export function messagesCost(messages: AiMessage[]): int {
+export function messagesCost(messages: Message[]): int {
   let total: int = 0;
   let i: int = 0;
   while (i < messages.length) {
@@ -62,10 +62,10 @@ export function messagesCost(messages: AiMessage[]): int {
 
 // Charge a call against the budget. Records are immutable, so this returns the
 // new budget rather than updating in place.
-export function chargeBudget(b: AiBudget, tokens: int): AiBudget {
+export function chargeBudget(b: Budget, tokens: int): Budget {
   let charged: int = tokens;
   if (charged < 0) { charged = 0; }
-  let out: AiBudget = {
+  let out: Budget = {
     limit: b.limit,
     spent: b.spent + charged,
     calls: b.calls + 1,
@@ -73,25 +73,25 @@ export function chargeBudget(b: AiBudget, tokens: int): AiBudget {
   return out;
 }
 
-export function chargeMessages(b: AiBudget, messages: AiMessage[]): AiBudget {
+export function chargeMessages(b: Budget, messages: Message[]): Budget {
   return chargeBudget(b, messagesCost(messages));
 }
 
 // Whether a call of `tokens` fits. An unlimited budget always fits; a limited
 // one must have room for the whole call, so a request is refused before it is
 // sent rather than truncated part way.
-export function budgetAllows(b: AiBudget, tokens: int): bool {
+export function budgetAllows(b: Budget, tokens: int): bool {
   if (!budgetIsLimited(b)) { return true; }
   return b.spent + tokens <= b.limit;
 }
 
-export function budgetAllowsMessages(b: AiBudget, messages: AiMessage[]): bool {
+export function budgetAllowsMessages(b: Budget, messages: Message[]): bool {
   return budgetAllows(b, messagesCost(messages));
 }
 
 // A human-readable reason to hand back when a call is refused, so a caller can
 // report why a run stopped rather than inventing a message.
-export function budgetRefusal(b: AiBudget, tokens: int): string {
+export function budgetRefusal(b: Budget, tokens: int): string {
   if (budgetAllows(b, tokens)) { return ""; }
   return "token budget exhausted: " + `${b.spent}` + " spent of " + `${b.limit}`
     + ", this call needs " + `${tokens}` + " more, after " + `${b.calls}` + " calls";
@@ -100,7 +100,7 @@ export function budgetRefusal(b: AiBudget, tokens: int): string {
 // Charge a completed call: the request that was sent and the reply that came
 // back. Output tokens are usually the more expensive half, so a guard that
 // counted only the request would undercount every call.
-export function chargeCall(b: AiBudget, messages: AiMessage[], reply: string): AiBudget {
+export function chargeCall(b: Budget, messages: Message[], reply: string): Budget {
   return chargeBudget(b, messagesCost(messages) + estimateTokens(reply));
 }
 
@@ -115,10 +115,10 @@ export function chargeCall(b: AiBudget, messages: AiMessage[], reply: string): A
 //   b = chargeCall(b, msgs, reply);
 
 // Accessors, for reporting usage after a run.
-export function budgetSpent(b: AiBudget): int {
+export function budgetSpent(b: Budget): int {
   return b.spent;
 }
 
-export function budgetCalls(b: AiBudget): int {
+export function budgetCalls(b: Budget): int {
   return b.calls;
 }

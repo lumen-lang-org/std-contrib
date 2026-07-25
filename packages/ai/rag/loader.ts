@@ -7,25 +7,25 @@
 //
 // Reading is synchronous, because Lumen's filesystem calls are.
 
-import { makeDocument, withMetadata, AiDocument } from "./document.ts";
+import { makeDocument, withMetadata, Document } from "./document.ts";
 
 // A load that may have failed. `ok` false leaves `docs` empty and puts the
 // reason in `error` — an unreadable file is reported rather than quietly
 // contributing nothing to an index.
-export type AiLoadResult = {
+export type LoadResult = {
   ok: bool,
-  docs: AiDocument[],
+  docs: Document[],
   error: string,
 };
 
-function loadOk(docs: AiDocument[]): AiLoadResult {
-  let r: AiLoadResult = { ok: true, docs: docs, error: "" };
+function loadOk(docs: Document[]): LoadResult {
+  let r: LoadResult = { ok: true, docs: docs, error: "" };
   return r;
 }
 
-function loadErr(message: string): AiLoadResult {
-  let none: AiDocument[] = [];
-  let r: AiLoadResult = { ok: false, docs: none, error: message };
+function loadErr(message: string): LoadResult {
+  let none: Document[] = [];
+  let r: LoadResult = { ok: false, docs: none, error: message };
   return r;
 }
 
@@ -58,7 +58,7 @@ export function fileExtension(path: string): string {
 // A document from text already in hand. The trivial case, here so that a caller
 // assembling one does not hand-roll the metadata every example otherwise
 // repeats.
-export function loadText(text: string, source: string): AiDocument {
+export function loadText(text: string, source: string): Document {
   return makeDocument(source, text, source, "");
 }
 
@@ -68,7 +68,7 @@ export function loadText(text: string, source: string): AiDocument {
 // belongs, and a file the process may not read. Reading throws on both, and an
 // uncaught throw would take down a whole ingestion run over one bad file, so
 // the read is guarded.
-export function loadFile(path: string): AiLoadResult {
+export function loadFile(path: string): LoadResult {
   if (!fs.existsSync(path)) {
     return loadErr("no such file: " + path);
   }
@@ -90,7 +90,7 @@ export function loadFile(path: string): AiLoadResult {
   doc = withMetadata(doc, "name", baseName(path));
   let ext = fileExtension(path);
   if (ext != "") { doc = withMetadata(doc, "ext", ext); }
-  let docs: AiDocument[] = [doc];
+  let docs: Document[] = [doc];
   return loadOk(docs);
 }
 
@@ -123,7 +123,7 @@ function joinPath(dir: string, name: string): string {
 // listing, indistinguishable from a directory that is genuinely empty. Such a
 // subtree is skipped silently. Files inside a readable directory are reported
 // normally.
-export function loadDirectory(path: string, extensions: string[], recursive: bool): AiLoadResult {
+export function loadDirectory(path: string, extensions: string[], recursive: bool): LoadResult {
   if (!fs.existsSync(path)) {
     return loadErr("no such directory: " + path);
   }
@@ -131,7 +131,7 @@ export function loadDirectory(path: string, extensions: string[], recursive: boo
   if (!st.isDirectory) {
     return loadErr("not a directory: " + path);
   }
-  let out: AiDocument[] = [];
+  let out: Document[] = [];
   let names = fs.readdirSync(path);
   let i: int = 0;
   while (i < names.length) {

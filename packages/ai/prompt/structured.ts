@@ -16,7 +16,7 @@ import { firstJsonObjectOutput, typedJsonInputOutput, retryPromptOutput } from "
 
 // `type` is a JSON Schema primitive name: "string", "integer", "number",
 // "boolean".
-type AiSchemaField = {
+type SchemaField = {
   name: string,
   type: string,
   description: string,
@@ -24,7 +24,7 @@ type AiSchemaField = {
 };
 
 // `json` is the extracted object source on success, "" otherwise.
-type AiStructured = {
+type Structured = {
   ok: bool,
   json: string,
   error: string,
@@ -38,8 +38,8 @@ type StructuredScalars = {
   max_tokens: int,
 };
 
-function structOk(json: string): AiStructured {
-  let r: AiStructured = {
+function structOk(json: string): Structured {
+  let r: Structured = {
     ok: true,
     json: json,
     error: "",
@@ -47,8 +47,8 @@ function structOk(json: string): AiStructured {
   return r;
 }
 
-function structErr(message: string): AiStructured {
-  let r: AiStructured = {
+function structErr(message: string): Structured {
+  let r: Structured = {
     ok: false,
     json: "",
     error: message,
@@ -56,8 +56,8 @@ function structErr(message: string): AiStructured {
   return r;
 }
 
-export function schemaField(name: string, fieldType: string, description: string, required: bool): AiSchemaField {
-  let f: AiSchemaField = {
+export function schemaField(name: string, fieldType: string, description: string, required: bool): SchemaField {
+  let f: SchemaField = {
     name: name,
     type: fieldType,
     description: description,
@@ -68,7 +68,7 @@ export function schemaField(name: string, fieldType: string, description: string
 
 // strict schema mode requires `additionalProperties:false` and an explicit
 // `required` list.
-export function objectSchema(fields: AiSchemaField[]): string {
+export function objectSchema(fields: SchemaField[]): string {
   let props = "";
   let required = "";
   let i: int = 0;
@@ -89,7 +89,7 @@ export function objectSchema(fields: AiSchemaField[]): string {
   return "{\"type\":\"object\",\"properties\":{" + props + "},\"required\":[" + required + "],\"additionalProperties\":false}";
 }
 
-export function requiredFields(fields: AiSchemaField[]): string[] {
+export function requiredFields(fields: SchemaField[]): string[] {
   let out: string[] = [];
   for (const f of fields) {
     if (f.required) { out.push(f.name); }
@@ -97,7 +97,7 @@ export function requiredFields(fields: AiSchemaField[]): string[] {
   return out;
 }
 
-function structuredBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int, responseFormat: string): string {
+function structuredBody(model: string, messages: Message[], temperature: number, maxTokens: int, responseFormat: string): string {
   let scalars: StructuredScalars = {
     model: model,
     temperature: temperature,
@@ -112,13 +112,13 @@ function structuredBody(model: string, messages: AiMessage[], temperature: numbe
 }
 
 // json mode: the reply is valid JSON, but its shape is NOT constrained.
-export function jsonObjectBody(model: string, messages: AiMessage[], temperature: number, maxTokens: int): string {
+export function jsonObjectBody(model: string, messages: Message[], temperature: number, maxTokens: int): string {
   return structuredBody(model, messages, temperature, maxTokens, "{\"type\":\"json_object\"}");
 }
 
 // schema mode: the reply is constrained to `schemaJson` (build it with
 // objectSchema).
-export function jsonSchemaBody(model: string, messages: AiMessage[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
+export function jsonSchemaBody(model: string, messages: Message[], name: string, schemaJson: string, temperature: number, maxTokens: int): string {
   let rf = "{\"type\":\"json_schema\",\"json_schema\":{\"name\":" + JSON.stringify(name)
     + ",\"strict\":true,\"schema\":" + schemaJson + "}}";
   return structuredBody(model, messages, temperature, maxTokens, rf);
@@ -159,7 +159,7 @@ function hasTopLevelKey(json: string, key: string): bool {
 
 // presence check only, not full JSON Schema validation — types and nested
 // constraints are left to the provider's strict mode.
-export function validateStructured(json: string, required: string[]): AiStructured {
+export function validateStructured(json: string, required: string[]): Structured {
   let text = json.trim();
   if (text == "") { return structErr("empty response"); }
   let obj = firstJsonObjectOutput(text);
@@ -177,7 +177,7 @@ export function validateStructured(json: string, required: string[]): AiStructur
 
 // tolerates a model that wrapped its JSON in a code fence despite being asked
 // not to.
-export function parseStructuredResponse(raw: string, content: string, required: string[]): AiStructured {
+export function parseStructuredResponse(raw: string, content: string, required: string[]): Structured {
   if (content.trim() == "") {
     return structErr("no content in response: " + raw.slice(0, 160));
   }
@@ -190,7 +190,7 @@ export function structuredRetryPrompt(schemaJson: string, invalid: string, reaso
 
 // --- Live calls -------------------------------------------------------------
 
-function postStructured(url: string, headers: Map<string, string>, body: string, required: string[]): AiStructured {
+function postStructured(url: string, headers: Map<string, string>, body: string, required: string[]): Structured {
   let res = http.request(url, "POST", body, headers);
   let content = structuredContent(res.body);
   return parseStructuredResponse(res.body, content, required);
@@ -235,16 +235,16 @@ function structDecodeString(quoted: string): string {
   return out;
 }
 
-export function structuredOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
+export function structuredOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: Message[], name: string, schemaJson: string, required: string[]): Structured {
   let body = jsonSchemaBody(model, messages, name, schemaJson, 0.2, 1024);
   return postStructured(baseUrl + "/chat/completions", makeAuthHeaders(apiKey), body, required);
 }
 
-export function structuredOpenAI(apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
+export function structuredOpenAI(apiKey: string, model: string, messages: Message[], name: string, schemaJson: string, required: string[]): Structured {
   return structuredOpenAIWithBaseUrl("https://api.openai.com/v1", apiKey, model, messages, name, schemaJson, required);
 }
 
-export function structuredMistral(apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
+export function structuredMistral(apiKey: string, model: string, messages: Message[], name: string, schemaJson: string, required: string[]): Structured {
   let body = jsonSchemaBody(model, messages, name, schemaJson, 0.2, 1024);
   return postStructured("https://api.mistral.ai/v1/chat/completions", makeMistralAuthHeaders(apiKey), body, required);
 }
@@ -255,13 +255,13 @@ export function structuredMistral(apiKey: string, model: string, messages: AiMes
 // accept only `json_object`. The json-mode path therefore states the schema in
 // the prompt and relies on validateStructured to catch a wrong shape.
 
-export function schemaInstruction(schemaJson: string): AiMessage {
+export function schemaInstruction(schemaJson: string): Message {
   return { role: "system", content: "Reply with a single JSON object and nothing else. It must match this JSON Schema:\n" + schemaJson };
 }
 
 // shape is prompted rather than enforced, then validated locally.
-export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], schemaJson: string, required: string[]): AiStructured {
-  let guided: AiMessage[] = [schemaInstruction(schemaJson), ...messages];
+export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: Message[], schemaJson: string, required: string[]): Structured {
+  let guided: Message[] = [schemaInstruction(schemaJson), ...messages];
   let body = jsonObjectBody(model, guided, 0.2, 1024);
   return postStructured(baseUrl + "/chat/completions", makeAuthHeaders(apiKey), body, required);
 }
@@ -269,7 +269,7 @@ export function structuredJsonModeWithBaseUrl(baseUrl: string, apiKey: string, m
 // provider names match buildProviderChatBody's vocabulary. Only the two with
 // verified schema mode dispatch here; other endpoints go through the
 // *WithBaseUrl or json-mode forms.
-export function structuredChat(provider: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
+export function structuredChat(provider: string, apiKey: string, model: string, messages: Message[], name: string, schemaJson: string, required: string[]): Structured {
   if (provider == "mistral") {
     return structuredMistral(apiKey, model, messages, name, schemaJson, required);
   }
@@ -280,6 +280,6 @@ export function structuredChat(provider: string, apiKey: string, model: string, 
 }
 
 // schema mode against any OpenAI-compatible endpoint that supports it.
-export function structuredChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: AiMessage[], name: string, schemaJson: string, required: string[]): AiStructured {
+export function structuredChatWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: Message[], name: string, schemaJson: string, required: string[]): Structured {
   return structuredOpenAIWithBaseUrl(baseUrl, apiKey, model, messages, name, schemaJson, required);
 }
