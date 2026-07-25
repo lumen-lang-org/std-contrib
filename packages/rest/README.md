@@ -101,8 +101,48 @@ None of them binds a port. `dispatch` is split from `serve` precisely so every
 route, refusal and binding failure is a function call — a test that has to bind
 a port is a test that gets skipped.
 
+## Dependency inversion
+
+A controller takes what it needs through its constructor. Nothing reaches for a
+global, so a test builds one against a different database and the same code
+runs.
+
+```ts
+@controller("/agents")
+class AgentController {
+  agents: Store;
+  constructor(agents: Store) { this.agents = agents; }
+
+  @get("/:id")
+  find(req: Request): Reply {
+    let document = this.agents.findById(param(req, "id"));
+    if (document == "") { return notFound("agent " + param(req, "id")); }
+    return ok(document);
+  }
+}
+```
+
+```ts
+function main(): void {
+  let agents = store(openDatabase(), agentsMapping());
+  let api = new AgentController(agents);
+  ...
+}
+```
+
+There is no `@inject`, no auto-wiring and no lifetime management. `main` builds
+the dependencies and hands them over. With no reflection there is no honest way
+to do more, and that being visible is better than dressing it up.
+
 ## Status
 
 `@controller` needs the decorator compiler (Lumen spec 455, merged) and the
 method descriptions it reads (spec 459, merged). `examples/agents-api.ts` is a
-full REST API over a `plume`-mapped table.
+full REST API over a `plume`-mapped table, written with a plain route table;
+`examples/agents-controller.ts` is the same API as a controller.
+
+**Not yet safe under concurrency.** `http.createServer` dispatches each request
+to a worker thread, and a `plume` connection shared across threads has its
+result set overwritten by whichever request runs next — a POST followed by a
+read of the same id can report not found. Thread-local connections are in
+progress. Until then these examples are correct only for sequential traffic.

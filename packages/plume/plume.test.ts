@@ -8,7 +8,7 @@
 //
 // Override the connection with PLUME_TEST_CONNINFO.
 
-import { connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
+import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { postgres, postgresConnection, postgresVersion } from "./postgres.ts";
 

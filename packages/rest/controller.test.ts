@@ -2,7 +2,7 @@
 //
 //   cd packages/rest && lumen test controller.test.ts
 
-import { ControllerDescription, ControllerMethod, ControllerParam, ControllerField, ControllerDecoratorUse, controller, controllerProblem, joinPaths, httpMethodOf, methodArg } from "./controller.ts";
+import { Description, ControllerMethod, ControllerParam, ControllerField, ControllerDecoratorUse, controller, controllerProblem, joinPaths, httpMethodOf, methodArg } from "./controller.ts";
 import { Route, match, tableProblem } from "./router.ts";
 
 function on(name: string, args: string[]): ControllerDecoratorUse {
@@ -26,7 +26,7 @@ function controllerMethod(name: string, decorators: ControllerDecoratorUse[]): C
 //     @del("/:id")    remove(req: Request): Response
 //                     helper(): string            // no decorator
 //   }
-function agentController(): ControllerDescription {
+function agentController(): Description {
   let none: ControllerDecoratorUse[] = [];
   let noFields: ControllerField[] = [];
   let methods: ControllerMethod[] = [
@@ -36,7 +36,7 @@ function agentController(): ControllerDescription {
     controllerMethod("remove", [on("del", ["/:id"])]),
     controllerMethod("helper", none),
   ];
-  let d: ControllerDescription = {
+  let d: Description = {
     protocol: 1, kind: "class", name: "AgentController", args: ["/agents"],
     file: "api.ts", line: 3, fields: noFields, methods: methods,
   };
@@ -105,7 +105,7 @@ test("a well-formed controller reports no problem", () => {
 
 test("a protocol it does not know is refused", () => {
   let d = agentController();
-  let future: ControllerDescription = {
+  let future: Description = {
     protocol: 2, kind: d.kind, name: d.name, args: d.args,
     file: d.file, line: d.line, fields: d.fields, methods: d.methods,
   };
@@ -115,14 +115,14 @@ test("a protocol it does not know is refused", () => {
 test("a missing or relative path is refused", () => {
   let d = agentController();
   let empty: string[] = [];
-  let noPath: ControllerDescription = {
+  let noPath: Description = {
     protocol: d.protocol, kind: d.kind, name: d.name, args: empty,
     file: d.file, line: d.line, fields: d.fields, methods: d.methods,
   };
   expect(controllerProblem(noPath).indexOf("needs a path") >= 0);
 
   let relative: string[] = ["agents"];
-  let bad: ControllerDescription = {
+  let bad: Description = {
     protocol: d.protocol, kind: d.kind, name: d.name, args: relative,
     file: d.file, line: d.line, fields: d.fields, methods: d.methods,
   };
@@ -132,7 +132,7 @@ test("a missing or relative path is refused", () => {
 test("a method carrying two verbs is refused, naming it", () => {
   let d = agentController();
   let methods: ControllerMethod[] = [ controllerMethod("both", [on("get", ["/"]), on("post", ["/"])]) ];
-  let two: ControllerDescription = {
+  let two: Description = {
     protocol: d.protocol, kind: d.kind, name: "AgentController", args: d.args,
     file: d.file, line: d.line, fields: d.fields, methods: methods,
   };
@@ -145,7 +145,7 @@ test("a class serving nothing is refused", () => {
   let d = agentController();
   let none: ControllerDecoratorUse[] = [];
   let methods: ControllerMethod[] = [ controllerMethod("helper", none) ];
-  let bare: ControllerDescription = {
+  let bare: Description = {
     protocol: d.protocol, kind: d.kind, name: "AgentController", args: d.args,
     file: d.file, line: d.line, fields: d.fields, methods: methods,
   };
@@ -155,7 +155,7 @@ test("a class serving nothing is refused", () => {
 test("two controllers can share a prefix without colliding", () => {
   let d = agentController();
   let methods: ControllerMethod[] = [ controllerMethod("list", [on("get", ["/"])]) ];
-  let teams: ControllerDescription = {
+  let teams: Description = {
     protocol: 1, kind: "class", name: "TeamController", args: ["/teams"],
     file: "api.ts", line: 20, fields: d.fields, methods: methods,
   };
