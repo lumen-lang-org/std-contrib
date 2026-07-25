@@ -1,1 +1,3 @@
 *.o
+# Compiled programs: lumen writes the binary beside its source.
+zz*
