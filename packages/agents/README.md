@@ -148,6 +148,70 @@ valid envelope that decrypts to `""` — indistinguishable from a failure.
 `providersWithCredentials` returns names only; nothing in this module returns an
 envelope, so a listing endpoint cannot leak one by accident.
 
+## Running an agent
+
+```ts
+let answer = runAgent(db, "a1", "What is 2 plus 40?", masterKey());
+answer.text            // "42"
+answer.promptVersion   // which prompt actually served it
+answer.modelApiName    // which model actually served it
+```
+
+```
+agent=calculator prompt=v1 model=mistral-small-latest
+ok=true status=200
+reply 42
+
+after UPDATE: prompt=v2 ok=true
+disabled -> calculator is disabled
+```
+
+The prompt, the model, its wire name, the temperature and the key are all rows.
+Rolling a prompt back or moving an agent to another model is an UPDATE, and it
+takes effect on the next call.
+
+Each row is read on its own rather than through `agentsFull`. A relation that
+matches nothing is `null`, and a run needs its prompt, config and model to
+exist — so a dangling reference is named rather than turned into a parse
+failure against a type that declares them present.
+
+The run reports which prompt version and model answered, so a caller records
+what happened rather than what it assumed would.
+
+## Retrieval
+
+pgvector, so PostgreSQL only — SQLite and MySQL have no vector type. An agent
+runs anywhere; it retrieves against Postgres.
+
+```ts
+let width = embedText(embedModel, "probe", key).dimensions;   // ask the model
+createDocuments(db, width);
+indexDocument(db, embedModel, "d1", "plume", "Plume maps records to tables…", key);
+
+let found = retrieve(db, embedModel, "Why is an unordered page refused?", 2, key);
+runAgent(db, "a1", asContext(found.found) + "\nQuestion: " + question, masterKey());
+```
+
+```
+embedding width 1024
+indexed 3 documents
+
+retrieved plume/d2  distance 0.19052260549339184
+retrieved plume/d1  distance 0.23477740073896414
+
+Plume refuses an unordered page because two requests for the first twenty rows
+can overlap or skip records when the database answers in any order.
+```
+
+The vector width comes from the model rather than a constant, and the column is
+created that wide — a corpus embedded by one model cannot be searched by
+another, which is a property of the vectors and worth failing on rather than
+silently mixing.
+
+The query vector is bound, not interpolated: it came from a provider's reply
+and is data like any other. `distance` is returned so a caller can decide what
+is too far, rather than trusting the ranking blindly.
+
 ## Testing
 
 ```sh
@@ -156,6 +220,7 @@ lumen test schema.test.ts     # 10, against SQLite
 lumen test mcp.test.ts        # 3, the refusals — the live half is an example
 lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
+lumen test run.test.ts        # 11, every refusal on the run path
 ```
 
 The live halves are `examples/mount-mcp.ts` and `examples/call-model.ts`. A test
