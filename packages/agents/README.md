@@ -178,6 +178,68 @@ failure against a type that declares them present.
 The run reports which prompt version and model answered, so a caller records
 what happened rather than what it assumed would.
 
+## Calling tools
+
+An agent reaches an MCP server because a row links the two. That link is all it
+takes — the tools are fetched from the server on each run, described to the
+model in its own format, called, and their results fed back until the model
+stops asking.
+
+```
+mounted   2 tools from 1 server(s)
+  - warehouse_stock: How many units of a part are in a named warehouse.
+  - part_price: The unit price of a part in euros.
+
+user      We need 40 units of A-114. Is there enough in Rotterdam, and what
+          would 40 cost?
+
+-- what the model did (context) --------------------------------
+0 ok  parts.warehouse_stock {"part": "A-114", "warehouse": "Rotterdam"}
+      -> 37 units of A-114 in Rotterdam.
+1 ok  parts.part_price {"part": "A-114"}
+      -> A-114 costs EUR 12.50 per unit.
+rounds    2, stopped: final
+
+-- what the user sees (conversation) ---------------------------
+agent     There are 37 units of A-114 in Rotterdam, so you're short by 3.
+          The cost for 40 units would be EUR 500.00 (40 × €12.50).
+```
+
+`examples/run-with-tools.ts`, against a live model and a live MCP server.
+Nothing in it names a tool: `INSERT INTO agent_mcp_servers` is what gave the
+agent both of them.
+
+**A run has two kinds of state and they are different things.** The *context*
+is everything the model was shown — every turn, every call, every result. The
+*conversation* is what a person reads. Neither is a filter of the other: the
+context holds a tool's four thousand lines of output that nobody wants to read,
+and a transcript holds nothing about the six calls behind one sentence.
+`AgentRun` carries both, separately, and `text` is the only field meant for
+display.
+
+**Tool results are asked for, not cached.** Each run asks every linked server
+what it offers. That is a round trip per server per run, and it is deliberate:
+a cached list is a list that is wrong the first time somebody deploys a tool.
+
+**What could not be mounted is reported, never silent.** A disabled server, a
+stdio one, an unreachable one — the agent still answers, and `notes` says what
+it answered without. A tool the model was never told about is a failure that
+looks exactly like a bad answer.
+
+**A failed tool call goes back to the model, not to the caller.** A tool that
+reports an error, or a name the model invented, comes back as a result it can
+act on. Stopping the run instead would turn a recoverable mistake into a dead
+one.
+
+**The step budget bounds calls, not just rounds.** One reply can ask for an
+unbounded number of calls, so both are counted against the same budget.
+
+Three formats, not one abstraction: OpenAI and Mistral wrap a tool in a
+`function` object and send arguments as a string holding JSON; Anthropic names
+the schema `input_schema`, carries calls as content blocks, and needs every
+result of one turn inside a single user message. Those are the differences, and
+`wire.test.ts` is the record of them.
+
 ## Retrieval
 
 pgvector, so PostgreSQL only — SQLite and MySQL have no vector type. An agent
@@ -231,15 +293,18 @@ is too far, rather than trusting the ranking blindly.
 ```sh
 cd packages/agents
 lumen test schema.test.ts     # 10, against SQLite
+lumen test scan.test.ts       # 16, reading a document no type can declare
+lumen test wire.test.ts       # 18, the three providers' tool formats
 lumen test mcp.test.ts        # 3, the refusals — the live half is an example
+lumen test tools.test.ts      # 8, which tools an agent gets, and why not
 lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
 lumen test run.test.ts        # 11, every refusal on the run path
 lumen test knowledge.test.ts  # 11, what retrieval refuses before embedding
 ```
 
-The live halves are `examples/mount-mcp.ts` and `examples/call-model.ts`. A test
-that needs a credential or a listening port is a test that gets skipped, so
-those stay examples and the refusals stay tests.
+The live halves are `examples/mount-mcp.ts`, `examples/call-model.ts` and
+`examples/run-with-tools.ts`. A test that needs a credential or a listening port
+is a test that gets skipped, so those stay examples and the refusals stay tests.
 
 Requires `sh ../plume/build.sh` first.
