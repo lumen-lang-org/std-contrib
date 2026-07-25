@@ -43,6 +43,16 @@ export type DbRelation = {
   localColumn: string,
   foreignColumn: string,
   columns: string,
+  // A many-to-many goes through a link table: this row's key matches
+  // `linkTable.linkLocalColumn`, and `linkTable.linkForeignColumn` matches the
+  // far table's `foreignColumn`. Empty `linkTable` means a direct relation.
+  //
+  // Kept on the same record rather than in a second type because a caller
+  // reading a mapping should see every relation in one list, whatever shape
+  // each one is.
+  linkTable: string,
+  linkLocalColumn: string,
+  linkForeignColumn: string,
 };
 
 // A mapping between a record type and a table. `idField` and `idColumn` name
@@ -81,12 +91,29 @@ export function repositoryWith(table: string, idField: string, idColumn: string,
 }
 
 export function hasOne(fieldName: string, table: string, localColumn: string, foreignColumn: string, columns: string): DbRelation {
-  let r: DbRelation = { field: fieldName, kind: "one", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns };
+  let r: DbRelation = { field: fieldName, kind: "one", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
   return r;
 }
 
 export function hasMany(fieldName: string, table: string, localColumn: string, foreignColumn: string, columns: string): DbRelation {
-  let r: DbRelation = { field: fieldName, kind: "many", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns };
+  let r: DbRelation = { field: fieldName, kind: "many", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
+  return r;
+}
+
+// Many-to-many, through a link table.
+//
+//   hasManyThrough("servers", "mcp_servers", "id",
+//                  "agent_mcp_servers", "agent_id", "server_id",
+//                  "id", "id, name, url")
+//
+// Reads as: this row's `id` matches `agent_mcp_servers.agent_id`, and
+// `agent_mcp_servers.server_id` matches `mcp_servers.id`.
+//
+// The far table may be this one — an agent's sub-agents are agents — so
+// nothing here assumes the two differ. The generated subquery aliases the link
+// table, which is what lets a self-referential relation name both sides.
+export function hasManyThrough(fieldName: string, table: string, foreignColumn: string, linkTable: string, linkLocalColumn: string, linkForeignColumn: string, localColumn: string, columns: string): DbRelation {
+  let r: DbRelation = { field: fieldName, kind: "many", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns, linkTable: linkTable, linkLocalColumn: linkLocalColumn, linkForeignColumn: linkForeignColumn };
   return r;
 }
 
@@ -96,6 +123,13 @@ export function relationValid(rel: DbRelation): bool {
   if (!safeIdentifier(rel.field) || !safeIdentifier(rel.table)) { return false; }
   if (!safeIdentifier(rel.localColumn) || !safeIdentifier(rel.foreignColumn)) { return false; }
   if (rel.kind != "one" && rel.kind != "many") { return false; }
+  if (rel.linkTable != "") {
+    // A to-one through a link table would be a to-many the caller promised
+    // has one row, which the database will not honour.
+    if (rel.kind != "many") { return false; }
+    if (!safeIdentifier(rel.linkTable)) { return false; }
+    if (!safeIdentifier(rel.linkLocalColumn) || !safeIdentifier(rel.linkForeignColumn)) { return false; }
+  }
   return projectionValid(rel.columns);
 }
 
@@ -244,16 +278,36 @@ function updateSet(repo: DbRepository): string {
 // document. Empty when the relation is malformed, so the caller refuses.
 function relationColumn(db: Db, repo: DbRepository, rel: DbRelation): string {
   if (!relationValid(rel)) { return ""; }
-  let link = rel.table + "." + rel.foreignColumn + " = " + repo.table + "." + rel.localColumn;
+
+  // The far table is aliased, always. Without it a self-referential relation —
+  // an agent's sub-agents are agents — is silently empty rather than wrong:
+  // `agents.id = agents.parent_id` inside the subquery binds both sides to the
+  // inner table, so it asks for rows that are their own parent. Aliasing makes
+  // the unqualified `repo.table` reference reach the outer row, which is the
+  // one the relation is for.
+  let far = "plume_far";
+  let source = rel.table + " AS " + far;
+  let link = far + "." + rel.foreignColumn + " = " + repo.table + "." + rel.localColumn;
+  if (rel.linkTable != "") {
+    link = far + "." + rel.foreignColumn + " IN (SELECT plume_link." + rel.linkForeignColumn
+      + " FROM " + rel.linkTable + " AS plume_link WHERE plume_link." + rel.linkLocalColumn
+      + " = " + repo.table + "." + rel.localColumn + ")";
+  }
+
+  // The column list needs no alias: inside `FROM <table> AS plume_far` it is
+  // the only table in scope, so `id` is plume_far's. Only the correlation
+  // above had to be disambiguated.
+  let columns = rel.columns;
+
   if (db.docStyle == "pairs") {
-    let pairs = pairsFromColumns(rel.columns);
+    let pairs = pairsFromColumns(columns);
     if (pairs == "") { return ""; }
     let inner = "";
     if (rel.kind == "one") {
-      inner = "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + rel.table + " WHERE " + link;
+      inner = "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + source + " WHERE " + link;
     } else {
       inner = "SELECT coalesce(" + db.jsonAgg + "(" + db.rowToJson + "(" + pairs + ")), "
-        + db.emptyJsonArray + ") FROM " + rel.table + " WHERE " + link;
+        + db.emptyJsonArray + ") FROM " + source + " WHERE " + link;
     }
     // SQLite would embed the subquery's result as a string without this;
     // MySQL already knows it is JSON and says so by needing nothing.
@@ -261,12 +315,13 @@ function relationColumn(db: Db, repo: DbRepository, rel: DbRelation): string {
     return "(" + inner + ")";
   }
   if (rel.kind == "one") {
-    return "(SELECT " + db.rowToJson + "(rel) FROM (SELECT " + rel.columns
-      + " FROM " + rel.table + " WHERE " + link + ") rel)";
+    return "(SELECT " + db.rowToJson + "(rel) FROM (SELECT " + columns
+      + " FROM " + source + " WHERE " + link + ") rel)";
   }
   return "(SELECT coalesce(" + db.jsonAgg + "(rel), " + db.emptyJsonArray + ") FROM (SELECT "
-    + rel.columns + " FROM " + rel.table + " WHERE " + link + ") rel)";
+    + columns + " FROM " + source + " WHERE " + link + ") rel)";
 }
+
 
 // The parent's own columns followed by one column per relation. Used by the
 // row-style drivers, where the document is built from a subquery's columns.

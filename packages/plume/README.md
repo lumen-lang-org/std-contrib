@@ -288,8 +288,41 @@ empty there and `createTableSqlWithKeys` is the route — and SQLite enforces
 foreign keys only after `PRAGMA foreign_keys = ON`, which is its choice and
 one the tests state rather than leave to be discovered.
 
+### Many-to-many
+
+Through a link table, including the case where both sides are the same table:
+
+```ts
+let rs: DbRelation[] = [
+  hasManyThrough("servers", "mcp_servers", "id",
+                 "agent_mcp_servers", "agent_id", "server_id",
+                 "id", "id, server_name AS \"serverName\", url"),
+  hasManyThrough("subAgents", "agents", "id",
+                 "agent_children", "parent_id", "child_id",
+                 "id", "id, agent_name AS \"agentName\""),
+];
+```
+
+```json
+{"id":"a1","agentName":"lead",
+ "servers":[{"id":"s1","serverName":"filesystem","url":"stdio://fs"}],
+ "subAgents":[{"id":"a2","agentName":"scout"}]}
+```
+
+Reads as: this row's `id` matches `agent_mcp_servers.agent_id`, and
+`agent_mcp_servers.server_id` matches `mcp_servers.id`.
+
+The far table is aliased in the generated subquery, which is what makes the
+second relation work. Without it `agents.id = agents.parent_id` binds both
+sides to the inner table and asks for rows that are their own parent — which
+answers `[]` rather than failing, so it is the kind of bug a test finds and an
+eye does not.
+
+A to-one through a link table is refused: a link yields many, and promising
+otherwise is a promise the database will not keep.
+
 What is still missing: `FROM a JOIN b` proper, so no fetching two whole entities
-in one query, and no relation that spans a link table.
+in one query.
 
 ## Migrations
 
@@ -447,6 +480,9 @@ lumen test ordering.test.ts             # ordering, SQLite
 lumen test ordering_pg.test.ts          # ordering, PostgreSQL
 lumen test ordering_mysql.test.ts       # ordering, MySQL
 lumen test store.test.ts                # the bound repository
+lumen test linkrelations.test.ts        # many-to-many, SQLite
+lumen test linkrelations_pg.test.ts     # many-to-many, PostgreSQL
+lumen test linkrelations_mysql.test.ts  # many-to-many, MySQL
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections; a
