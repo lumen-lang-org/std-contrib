@@ -97,6 +97,8 @@ function postgresOn(handle: int): Db {
     upsertStyle: "on-conflict",
     readStyle: "record",
     floatJson: "",
+    // PostgreSQL has a real boolean, and row_to_json writes it as one.
+    boolJson: "",
     textType: "text",
     intType: "int",
     floatType: "float8",

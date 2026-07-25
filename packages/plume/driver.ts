@@ -123,6 +123,11 @@ export type Db = {
   // significant digits, which silently loses the last two of a double, so it
   // needs the value formatted itself. Empty on a driver that gets this right.
   floatJson: string,
+  // How a bool column is written into a document, as an expression with `{c}`
+  // for the column. SQLite and MySQL have no boolean type — both store 0 and
+  // 1 — so a document would carry a number where the record declares a bool,
+  // and JSON.parse would refuse it. Empty on a driver with a real boolean.
+  boolJson: string,
   // Type names for the portable set, since `float8` is not `REAL` is not
   // `DOUBLE`.
   textType: string,
@@ -162,6 +167,7 @@ export function noDatabase(): Db {
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     floatJson: "",
+    boolJson: "",
     textType: "text",
     intType: "int",
     floatType: "float8",

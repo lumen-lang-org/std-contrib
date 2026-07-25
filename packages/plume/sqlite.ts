@@ -93,6 +93,9 @@ function sqliteOn(handle: int): Db {
     floatJson: "json(CASE WHEN CAST(printf('%!.15g',{c}) AS REAL) = {c} THEN printf('%!.15g',{c})"
       + " WHEN CAST(printf('%!.16g',{c}) AS REAL) = {c} THEN printf('%!.16g',{c})"
       + " ELSE printf('%!.17g',{c}) END)",
+    // 0 and 1 in the column; true and false in the document, which is what
+    // the record declares and what JSON.parse will accept.
+    boolJson: "json(CASE WHEN {c} THEN 'true' ELSE 'false' END)",
     textType: "text",
     intType: "integer",
     floatType: "real",
