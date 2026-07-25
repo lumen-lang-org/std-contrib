@@ -218,7 +218,7 @@ function historyHas(db: Db, version: string, description: string): bool {
   // statement because the driver binds a single value.
   let sql = "SELECT 1 FROM " + historyTable()
     + " WHERE version = " + db.placeholder
-    + " AND description = " + quoted(description);
+    + " AND description = " + quoted(db, description);
   if (!db.query(sql, version)) { return false; }
   return db.rows() > 0;
 }
@@ -226,7 +226,7 @@ function historyHas(db: Db, version: string, description: string): bool {
 function recordedChecksum(db: Db, version: string, description: string): int {
   let sql = "SELECT checksum FROM " + historyTable()
     + " WHERE version = " + db.placeholder
-    + " AND description = " + quoted(description);
+    + " AND description = " + quoted(db, description);
   if (!db.query(sql, version)) { return 0; }
   if (db.rows() == 0) { return 0; }
   return parseIntOr(db.value(0, 0), 0);
@@ -235,7 +235,7 @@ function recordedChecksum(db: Db, version: string, description: string): int {
 function rankOf(db: Db, version: string, description: string): int {
   let sql = "SELECT installed_rank FROM " + historyTable()
     + " WHERE version = " + db.placeholder
-    + " AND description = " + quoted(description);
+    + " AND description = " + quoted(db, description);
   if (!db.query(sql, version)) { return 0; }
   if (db.rows() == 0) { return 0; }
   return parseIntOr(db.value(0, 0), 0);
@@ -265,10 +265,22 @@ function nextRank(db: Db): int {
   return parseIntOr(db.value(0, 0), 0) + 1;
 }
 
-// A string literal for SQL. Doubling a quote is the escape every one of these
-// databases agrees on.
-export function quoted(text: string): string {
-  return "'" + text.replaceAll("'", "''") + "'";
+// A string literal for SQL.
+//
+// Doubling the quote is the standard escape and all three accept it, but MySQL
+// also treats a backslash inside a literal as an escape character, so a
+// description ending in a backslash swallows the closing quote and everything
+// after it becomes SQL. That is not hypothetical: `note C:\path\` made the
+// history INSERT a syntax error, which left a migration that had RUN with no
+// record of it and no way to record it — and a description crafted around the
+// same hole appended a row of its own to the history.
+//
+// A description is free text a person writes, so it is escaped rather than
+// restricted.
+export function quoted(db: Db, text: string): string {
+  let body = text;
+  if (db.backslashEscapes) { body = body.replaceAll("\\", "\\\\"); }
+  return "'" + body.replaceAll("'", "''") + "'";
 }
 
 function parseIntOr(text: string, fallback: int): int {
@@ -452,12 +464,12 @@ function writeHistory(db: Db, m: Migration, rank: int, replacing: bool): DbResul
   if (replacing) {
     return execute(db, "UPDATE " + historyTable() + " SET checksum = " + `${sum}`
       + ", installed_rank = " + `${rank}`
-      + " WHERE version = " + quoted(historyKey(m))
-      + " AND description = " + quoted(m.description));
+      + " WHERE version = " + quoted(db, historyKey(m))
+      + " AND description = " + quoted(db, m.description));
   }
   return execute(db, "INSERT INTO " + historyTable()
     + " (installed_rank, version, description, checksum) VALUES ("
-    + `${rank}` + ", " + quoted(historyKey(m)) + ", " + quoted(m.description) + ", " + `${sum}` + ")");
+    + `${rank}` + ", " + quoted(db, historyKey(m)) + ", " + quoted(db, m.description) + ", " + `${sum}` + ")");
 }
 
 // Indices into the plan, ordered the way migrations must run: versioned steps
@@ -504,8 +516,8 @@ export function repairChecksums(db: Db, plan: Migration[]): DbResult {
     let m = plan[i];
     let sum = checksum(m.sql);
     let r = execute(db, "UPDATE " + historyTable() + " SET checksum = " + `${sum}`
-      + " WHERE version = " + quoted(historyKey(m))
-      + " AND description = " + quoted(m.description));
+      + " WHERE version = " + quoted(db, historyKey(m))
+      + " AND description = " + quoted(db, m.description));
     if (!r.ok) { return r; }
     i = i + 1;
   }

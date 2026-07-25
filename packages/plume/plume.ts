@@ -198,7 +198,9 @@ function oneSql(db: Db, repo: DbRepository, where: string): string {
 // json_object over `*` — which it spells as a correlated select.
 function projectedSql(db: Db, repo: DbRepository, columns: string, where: string): string {
   if (db.docStyle == "pairs") {
-    return "SELECT " + db.rowToJson + "(" + pairsFromColumns(columns) + ") FROM " + repo.table
+    let pairs = pairsFromColumns(columns);
+    if (pairs == "") { return ""; }
+    return "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + repo.table
       + " WHERE " + where;
   }
   return "SELECT " + db.rowToJson + "(r) FROM (SELECT " + columns
@@ -208,22 +210,140 @@ function projectedSql(db: Db, repo: DbRepository, columns: string, where: string
 // Turn a select list into json_object pairs, so `a, b AS "c"` becomes
 // `'a', a, 'c', b`. An alias names the key; without one the expression's own
 // text does, which is what row_to_json would have used too.
+// Split a select list on its top-level commas. Splitting on every comma
+// breaks `coalesce(a, b) AS x` into two nonsense pieces, which is not a
+// hostile input — it is ordinary SQL, and on a pairs-style driver it produced
+// a document with the key "coalesce(agent_name" while PostgreSQL returned the
+// right answer for the identical call.
+export function splitTopLevel(columns: string): string[] {
+  let out: string[] = [];
+  let depth: int = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let start: int = 0;
+  let i: int = 0;
+  while (i < columns.length) {
+    let c = columns.charCodeAt(i);
+    if (inSingle) {
+      if (c == 39) { inSingle = false; }
+    } else if (inDouble) {
+      if (c == 34) { inDouble = false; }
+    } else if (c == 39) {
+      inSingle = true;
+    } else if (c == 34) {
+      inDouble = true;
+    } else if (c == 40) {
+      depth = depth + 1;
+    } else if (c == 41) {
+      depth = depth - 1;
+    } else if (c == 44 && depth == 0) {
+      out.push(columns.substring(start, i));
+      start = i + 1;
+    }
+    i = i + 1;
+  }
+  out.push(columns.substring(start, columns.length));
+  // An unbalanced expression is refused rather than guessed at.
+  if (depth != 0 || inSingle || inDouble) {
+    let empty: string[] = [];
+    return empty;
+  }
+  return out;
+}
+
+// Where the top-level ` AS ` of one select-list entry begins, or -1. Looked
+// for outside quotes and outside parentheses, so the `as` in
+// `cast(x as text)` is not mistaken for one.
+export function asIndexOf(part: string): int {
+  let depth: int = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let i: int = 0;
+  while (i + 4 <= part.length) {
+    let c = part.charCodeAt(i);
+    if (inSingle) {
+      if (c == 39) { inSingle = false; }
+    } else if (inDouble) {
+      if (c == 34) { inDouble = false; }
+    } else if (c == 39) {
+      inSingle = true;
+    } else if (c == 34) {
+      inDouble = true;
+    } else if (c == 40) {
+      depth = depth + 1;
+    } else if (c == 41) {
+      depth = depth - 1;
+    } else if (depth == 0) {
+      if (part.substring(i, i + 4).toLowerCase() == " as ") { return i; }
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+// The alias of one entry, or an empty string when it has none.
+export function aliasOf(part: string): string {
+  let at = asIndexOf(part);
+  if (at < 0) { return ""; }
+  return part.substring(at + 4, part.length).trim();
+}
+
+// The expression of one entry: everything before its alias.
+export function exprOf(part: string): string {
+  let at = asIndexOf(part);
+  if (at < 0) { return part.trim(); }
+  return part.substring(0, at).trim();
+}
+
+// A JSON key taken from a select-list alias. It is written into the statement
+// between single quotes, so it must be a plain name: a key carrying a quote
+// would end the literal, and the projection is refused rather than repaired.
+export function keyFromAlias(alias: string): string {
+  let name = alias;
+  if (name.length >= 2 && name.startsWith("\"") && name.endsWith("\"")) {
+    name = name.substring(1, name.length - 1);
+  }
+  if (!safeIdentifier(name)) { return ""; }
+  return name;
+}
+
+// Whether a select list can be read the same way by every driver.
+//
+// A pairs-style driver builds the document's keys itself, so an alias has to
+// be a plain name there. PostgreSQL would accept any quoted identifier, but a
+// projection that works in development and is refused in production has not
+// made anything portable — so the stricter rule is the rule everywhere.
+export function projectionValid(columns: string): bool {
+  return pairsFromColumns(columns) != "";
+}
+
+// Turn a select list into json_object pairs, so `a, b AS "c"` becomes
+// `'a', a, 'c', b`. An alias names the key; without one the expression must be
+// a plain column, since its own text becomes the key.
+//
+// Returns an empty string when the list cannot be read that way — an alias
+// that is not a plain name, an unaliased expression, an unbalanced quote. The
+// caller refuses the query rather than sending something it has guessed at.
 export function pairsFromColumns(columns: string): string {
-  let parts = columns.split(",");
+  let parts = splitTopLevel(columns);
+  if (parts.length == 0) { return ""; }
   let out = "";
   let i: int = 0;
   while (i < parts.length) {
     let part = parts[i].trim();
     if (part != "") {
-      let expr = part;
-      let key = part;
-      let at = part.toLowerCase().indexOf(" as ");
-      if (at >= 0) {
-        expr = part.substring(0, at).trim();
-        key = part.substring(at + 4, part.length).trim();
-        if (key.startsWith("\"") && key.endsWith("\"")) {
-          key = key.substring(1, key.length - 1);
-        }
+      let expr = exprOf(part);
+      let alias = aliasOf(part);
+      let key = "";
+      if (alias == "") {
+        // No alias: the expression itself names the key, so it has to be a
+        // plain column.
+        if (!safeIdentifier(part)) { return ""; }
+        key = part;
+        expr = part;
+      } else {
+        key = keyFromAlias(alias);
+        if (key == "" || expr == "") { return ""; }
       }
       if (out != "") { out = out + ", "; }
       out = out + "'" + key + "', " + expr;
@@ -503,7 +623,9 @@ export function findById(db: Db, repo: DbRepository, id: string): string {
 // "maxSteps"` is what MapStruct spells with an annotation.
 export function findProjected(db: Db, repo: DbRepository, columns: string, id: string): string {
   if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn)) { return ""; }
+  if (!projectionValid(columns)) { return ""; }
   let sql = projectedSql(db, repo, columns, repo.idColumn + " = " + db.placeholder);
+  if (sql == "") { return ""; }
   if (!db.query(sql, id)) { return ""; }
   if (db.rows() == 0) { return ""; }
   return db.value(0, 0);
@@ -530,11 +652,14 @@ export function listWhere(db: Db, repo: DbRepository, where: string, a: string):
 // A projected list, for DTOs.
 export function listProjected(db: Db, repo: DbRepository, columns: string, where: string, a: string): string {
   if (!safeIdentifier(repo.table)) { return "[]"; }
+  if (!projectionValid(columns)) { return "[]"; }
   let sql = "";
   if (db.docStyle == "pairs") {
     // The caller's aliases name the keys; the expressions stay as written.
+    let pairs = pairsFromColumns(columns);
+    if (pairs == "") { return "[]"; }
     sql = "SELECT coalesce(" + db.jsonAgg + "(" + db.rowToJson + "("
-      + pairsFromColumns(columns) + ")), '[]') FROM " + repo.table;
+      + pairs + ")), '[]') FROM " + repo.table;
     if (where != "") { sql = sql + " WHERE " + where; }
   } else {
     let inner = "SELECT " + columns + " FROM " + repo.table;

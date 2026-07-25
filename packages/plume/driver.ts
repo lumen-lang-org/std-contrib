@@ -52,6 +52,10 @@ export type Db = {
   // json_to_record, "extract" for SQLite's json_each plus json_extract,
   // "json-table" for MySQL's JSON_TABLE.
   readStyle: string,
+  // Whether the database treats a backslash inside a string literal as an
+  // escape character. MySQL does, by default and unlike the SQL standard, so
+  // doubling the quote is not enough to make a literal safe there.
+  backslashEscapes: bool,
   // Whether pulling a scalar out of a JSON document leaves it quoted. MySQL's
   // JSON_EXTRACT does and needs JSON_UNQUOTE around it; SQLite's does not.
   jsonNeedsUnquote: bool,
@@ -90,6 +94,7 @@ export function noDatabase(): Db {
     docStyle: "row",
     identQuote: "\"",
     readStyle: "record",
+    backslashEscapes: false,
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     textType: "text",

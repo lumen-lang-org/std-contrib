@@ -102,9 +102,16 @@ test("a plan may not repeat a version or an unnamed repeatable", () => {
   expect(planValid(basePlan()) == "");
 });
 
-test("a quoted literal doubles its quotes", () => {
-  expect(quoted("plain") == "'plain'");
-  expect(quoted("it's") == "'it''s'");
+test("a quoted literal doubles its quotes, and its backslashes where they escape", () => {
+  expect(quoted(database, "plain") == "'plain'");
+  expect(quoted(database, "it's") == "'it''s'");
+  // MySQL treats a backslash inside a literal as an escape character and the
+  // others do not, so the same text is not the same literal on all three.
+  if (database.backslashEscapes) {
+    expect(quoted(database, "C:\\path") == "'C:\\\\path'");
+  } else {
+    expect(quoted(database, "C:\\path") == "'C:\\path'");
+  }
 });
 
 // --- applying --------------------------------------------------------------
@@ -176,6 +183,38 @@ test("a fixed migration runs on the next attempt", () => {
   expect(r.ok);
   expect(r.applied == 1);
   expect(migrationApplied(database, "2"));
+});
+
+test("a description containing a backslash is recorded, not lost", () => {
+  // MySQL treats a backslash inside a string literal as an escape, so a
+  // description ending in one swallowed the closing quote: the migration RAN
+  // and could never be recorded, and every later run failed on "already
+  // exists". Doubling the quote is not enough there.
+  clean();
+  let plan: Migration[] = [
+    migration("1", "note C:\\path\\", "CREATE TABLE mig_a (id text PRIMARY KEY)"),
+  ];
+  let first = migrate(database, plan);
+  expect(first.ok);
+  expect(first.applied == 1);
+  expect(migrationApplied(database, "1"));
+  // And running again is the no-op it should be.
+  let second = migrate(database, plan);
+  expect(second.ok);
+  expect(second.applied == 0);
+});
+
+test("a description cannot append a row of its own to the history", () => {
+  clean();
+  let hostile = "\\',0),(999,0x39,0x494e4a,0)#";
+  let plan: Migration[] = [
+    migration("5", hostile, "CREATE TABLE mig_a (id text PRIMARY KEY)"),
+  ];
+  expect(migrate(database, plan).ok);
+  database.queryNoArgs("SELECT count(*) FROM " + historyTable());
+  expect(database.value(0, 0) == "1");
+  // Stored as the text it is.
+  expect(migrationApplied(database, "5"));
 });
 
 // --- checksums in anger ----------------------------------------------------

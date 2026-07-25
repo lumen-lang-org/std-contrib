@@ -253,6 +253,35 @@ test("a projected list narrows every row", () => {
   expect(json.indexOf("agentName") >= 0);
 });
 
+test("a projection whose expression contains a comma is read correctly", () => {
+  // Splitting a select list on every comma broke `coalesce(a, b) AS x` into
+  // two nonsense pieces, and a pairs-style driver returned a document keyed
+  // "coalesce(agent_name" while PostgreSQL returned the right answer for the
+  // identical call. Ordinary SQL, not a hostile input.
+  let repo = seeded();
+  let cols = "id AS \"id\", coalesce(agent_name, 'none') AS \"agentName\"";
+  let json = listProjected(database, repo, cols, "", "");
+  expect(json.indexOf("\"agentName\"") >= 0);
+  expect(json.indexOf("coalesce") < 0);
+  expect(json.indexOf("researcher") >= 0);
+});
+
+test("an alias that is not a plain name is refused, not sent", () => {
+  // The alias becomes a JSON key between single quotes, so a quote in it would
+  // end the literal. Refusing beats repairing.
+  let repo = seeded();
+  expect(listProjected(database, repo, "agent_name AS \"x',(1)\"", "", "") == "[]");
+  expect(findProjected(database, repo, "agent_name AS \"x'\"", "a1") == "");
+  // And the table is still there, so nothing was executed.
+  expect(countWhere(database, repo, "", "") == 3);
+});
+
+test("a select list with an unbalanced quote or paren is refused", () => {
+  let repo = seeded();
+  expect(listProjected(database, repo, "coalesce(agent_name, 'none' AS \"a\"", "", "") == "[]");
+  expect(listProjected(database, repo, "agent_name AS \"a", "", "") == "[]");
+});
+
 test("picking narrows a document in memory", () => {
   let full = agentJson("a1", "researcher", 5, 0.2);
   let keys: string[] = ["id", "agentName"];

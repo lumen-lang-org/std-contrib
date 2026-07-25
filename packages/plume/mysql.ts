@@ -47,6 +47,7 @@ export function mysql(): Db {
     readStyle: "json-table",
     // JSON_EXTRACT returns a JSON value, so a string comes back with its
     // quotes still on and has to be unquoted before it reaches a text column.
+    backslashEscapes: true,
     jsonNeedsUnquote: true,
     upsertStyle: "on-duplicate-key",
     textType: "varchar(255)",

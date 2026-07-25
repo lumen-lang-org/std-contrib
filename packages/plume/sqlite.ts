@@ -46,6 +46,7 @@ export function sqlite(): Db {
     jsonAgg: "json_group_array",
     docStyle: "pairs",
     identQuote: "\"",
+    backslashEscapes: false,
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     readStyle: "extract",
