@@ -24,6 +24,15 @@ function directory(): SqlFile[] {
   return files;
 }
 
+test("a name starts with its version, with or without Flyway's V", () => {
+  expect(parseMigrationName("1__create_teams.sql").version == "1");
+  expect(parseMigrationName("1__create_teams.sql").description == "create teams");
+  expect(parseMigrationName("001__create_teams.sql").version == "001");
+  expect(parseMigrationName("2_3_4__deep.sql").version == "2.3.4");
+  // The V is accepted, because directories full of it exist.
+  expect(parseMigrationName("V1__create_teams.sql").version == "1");
+});
+
 test("a version comes from the name, and a single underscore is a dot", () => {
   expect(parseMigrationName("V1__create_teams.sql").version == "1");
   expect(parseMigrationName("V1_1__add_team_name.sql").version == "1.1");
@@ -56,10 +65,10 @@ test("a name that is not a migration says why", () => {
   expect(parseMigrationName("V1__.sql").problem.indexOf("nothing after") >= 0);
 
   expect(!parseMigrationName("X1__nope.sql").valid);
-  expect(parseMigrationName("X1__nope.sql").problem.indexOf("neither V") >= 0);
+  expect(parseMigrationName("X1__nope.sql").problem.indexOf("neither a version number") >= 0);
 
   expect(!parseMigrationName("Vabc__nope.sql").valid);
-  expect(parseMigrationName("Vabc__nope.sql").problem.indexOf("dotted number") >= 0);
+  expect(parseMigrationName("Vabc__nope.sql").problem.indexOf("neither a version number") >= 0);
 
   // The problem names the file, so a directory listing points at the culprit.
   expect(parseMigrationName("README.md").problem.indexOf("README.md") >= 0);
@@ -93,8 +102,8 @@ test("the plan runs in version order, not directory order", () => {
 
 test("10 sorts after 9, which a name sort would get wrong", () => {
   let files: SqlFile[] = [
-    sqlFile("V10__tenth.sql", "SELECT 1"),
-    sqlFile("V9__ninth.sql", "SELECT 1"),
+    sqlFile("10__tenth.sql", "SELECT 1"),
+    sqlFile("9__ninth.sql", "SELECT 1"),
   ];
   let plan = migrationsFrom(files);
   let order = planOrder(plan);

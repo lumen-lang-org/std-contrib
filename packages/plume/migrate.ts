@@ -189,9 +189,14 @@ export function planValid(plan: Migration[]): string {
 // carries the version and the description, so the plan is the directory
 // listing and adding a migration is adding a file.
 //
-//   sql/V1__create_teams.sql        version 1,   "create teams"
-//   sql/V1_1__add_agent_name.sql    version 1.1, "add agent name"
+//   sql/1__create_teams.sql         version 1,   "create teams"
+//   sql/1_1__add_agent_name.sql     version 1.1, "add agent name"
+//   sql/V2__create_agents.sql       version 2,   "create agents"
 //   sql/R__active_agents_view.sql   repeatable,  "active agents view"
+//
+// A name starts with its version. Flyway's `V` prefix is accepted because
+// people have directories full of it, but nothing needs it: the version is
+// what a migration is ordered by, so it is what the name leads with.
 //
 //   let plan = migrationsFrom(embedDir("./sql"));
 //
@@ -246,10 +251,17 @@ export function parseMigrationName(fileName: string): ParsedName {
   if (head == "R") {
     return parsedName("", description);
   }
-  if (head.length < 2 || !head.startsWith("V")) {
-    return unparsedName(fileName, "starts with neither V for a version nor R for a repeatable step");
+  // A leading V is Flyway's and is optional: a name starts with its version.
+  let digits = head;
+  if (head.startsWith("V")) { digits = head.substring(1, head.length); }
+  if (digits == "") {
+    return unparsedName(fileName, "has no version before its __ separator");
   }
-  let version = head.substring(1, head.length).replaceAll("_", ".");
+  let first = digits.charCodeAt(0);
+  if (first < 48 || first > 57) {
+    return unparsedName(fileName, "starts with neither a version number nor R for a repeatable step");
+  }
+  let version = digits.replaceAll("_", ".");
   if (!versionValid(version)) {
     return unparsedName(fileName, "has \"" + version + "\" where a dotted number belongs");
   }

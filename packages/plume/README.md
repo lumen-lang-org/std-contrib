@@ -226,11 +226,14 @@ The statements can live in `.sql` files, named the way Flyway names them, with
 the version and description read from the name:
 
 ```
-sql/V1__create_teams.sql        version 1,   "create teams"
-sql/V1_1__add_team_name.sql     version 1.1, "add team name"
-sql/V2__create_agents.sql       version 2,   "create agents"
+sql/1__create_teams.sql         version 1,   "create teams"
+sql/1_1__add_team_name.sql      version 1.1, "add team name"
+sql/2__create_agents.sql        version 2,   "create agents"
 sql/R__active_agents_view.sql   repeatable,  "active agents view"
 ```
+
+A name starts with its version. Flyway's `V` prefix is accepted, since
+directories full of it exist, but nothing needs it.
 
 ```ts
 let plan = migrationsFrom(embedDir("./sql"));
@@ -250,10 +253,29 @@ A file that is not a migration — a `README.md` beside the SQL — is left out 
 the plan and reported by `migrationNameProblem`. It is not silently skipped: a
 migration named wrongly would otherwise never run and never be missed.
 
-Everything after the name is still checked. Ordering is by version, so `V10`
-runs after `V9` where a name sort would get it backwards; the checksum is over
+Everything after the name is still checked. Ordering is by version, so `10`
+runs after `9` where a name sort would get it backwards; the checksum is over
 the file's contents, so editing an applied `.sql` is refused exactly as editing
 an inline string was.
+
+### The state table
+
+`plume_schema_history`, created on first use, is what every one of those checks
+reads:
+
+```
+rank | version | description   | checksum    | applied
+  1  | 1       | create teams  |  2061472074 | 2026-07-25 08:53:03
+  2  | 1.1     | add team name |    87105387 | 2026-07-25 08:53:03
+  3  | 2       | create agents | -1224966372 | 2026-07-25 08:53:03
+  4  | (rpt)   | active agents |  1515252556 | 2026-07-25 08:53:03
+```
+
+The files were handed over as `2`, `1`, `R`, `1.1` — the ranks show the order
+they actually ran in. `installed_rank` records that order, `checksum` is the
+CRC-32 of the file's contents, and `installed_on`, `execution_ms` and `success`
+round out the row. The table name is fixed rather than configurable, because
+two of them in one database is a way to apply everything twice.
 
 Migration bodies are your SQL, not plume's, so they are spelled for the
 database they run against.
