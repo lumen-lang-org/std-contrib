@@ -62,7 +62,9 @@ import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcp
 // modules; no sibling imports their names, so every one is aliased here.
 import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
 import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
-import { makeSubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer } from "./agent/subagent.ts";
+import { runAgentWithApproval as runGatedAgent, resumeAgent as resumeGatedAgent, saveCheckpoint as writeCheckpoint, loadCheckpoint as readCheckpoint, APPROVAL_SENTINEL } from "./agent/approval.ts";
+import { fileCheckpointStore as makeFileCheckpointStore, memoryCheckpointStore as makeMemoryCheckpointStore } from "./agent/checkpointstore.ts";
+import { makeSubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer, subAgentAsGatedTool as wrapGatedSubAgent, decideChildPause as recordChildVerdict, childPausePending as readChildPausePending } from "./agent/subagent.ts";
 import { makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
 import { splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
 import { loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
@@ -654,6 +656,48 @@ export function modelEndpoint(cfg: AiModelConfig): string {
 // Send messages using a config.
 export function chat(cfg: AiModelConfig, messages: AiMessage[]): AiResult {
   return runConfiguredChat(cfg, messages);
+}
+
+// --- Human in the loop --------------------------------------------------------
+// Pause an agent before a sensitive tool; resume with a verdict. The pause is
+// the program ending with a checkpoint in a store; the resume is a new
+// invocation with the same tools. A child's sensitive call pauses the whole
+// tree, and the verdict travels back down through the store.
+
+export function agentWithApproval(model: AiModel, tools: AiTool[], sensitive: string[], history: AiMessage[], maxSteps: int): AiApprovalRun {
+  return runGatedAgent(model, tools, sensitive, history, maxSteps);
+}
+
+export function resumeApproval(model: AiModel, tools: AiTool[], sensitive: string[], checkpoint: string, approved: bool): AiApprovalRun {
+  return resumeGatedAgent(model, tools, sensitive, checkpoint, approved);
+}
+
+export function saveCheckpoint(path: string, run: AiApprovalRun): bool {
+  return writeCheckpoint(path, run);
+}
+
+export function loadCheckpoint(path: string): string {
+  return readCheckpoint(path);
+}
+
+export function fileCheckpointStore(dir: string): AiCheckpointStore {
+  return makeFileCheckpointStore(dir);
+}
+
+export function memoryCheckpointStore(): AiCheckpointStore {
+  return makeMemoryCheckpointStore();
+}
+
+export function gatedSubAgentTool(sub: AiSubAgent, sensitive: string[], store: AiCheckpointStore): AiTool {
+  return wrapGatedSubAgent(sub, sensitive, store);
+}
+
+export function decideChildPause(store: AiCheckpointStore, subName: string, approved: bool): void {
+  recordChildVerdict(store, subName, approved);
+}
+
+export function childPausePending(store: AiCheckpointStore, subName: string): bool {
+  return readChildPausePending(store, subName);
 }
 
 // --- Subagents ----------------------------------------------------------------
