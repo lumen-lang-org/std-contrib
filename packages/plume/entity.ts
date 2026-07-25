@@ -21,7 +21,7 @@
 // convention, and plume has none — but stating it once beside the field is not
 // repetition, it is the declaration.
 
-import { DbField, DbRepository, field, repository } from "./plume.ts";
+import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany } from "./plume.ts";
 
 // --- the description the compiler passes in --------------------------------
 //
@@ -94,13 +94,23 @@ export function defaultSqlType(declared: string): string {
 // this signature rather than against a generated line nobody wrote.
 export function entity(d: Description): DbRepository {
   let fields: DbField[] = [];
+  let relations: DbRelation[] = [];
   let idField = "";
   let idColumn = "";
 
   let i: int = 0;
   while (i < d.fields.length) {
     let f = d.fields[i];
-    if (fieldHas(f, "column")) {
+    // A relation is not a column: the field holds a related row, or rows,
+    // fetched alongside. @hasOne/@hasMany name the other table, the column on
+    // each side, and the select list that shapes what comes back.
+    if (fieldHas(f, "hasOne")) {
+      relations.push(hasOne(f.name, fieldArg(f, "hasOne", 0), fieldArg(f, "hasOne", 1),
+        fieldArg(f, "hasOne", 2), fieldArg(f, "hasOne", 3)));
+    } else if (fieldHas(f, "hasMany")) {
+      relations.push(hasMany(f.name, fieldArg(f, "hasMany", 0), fieldArg(f, "hasMany", 1),
+        fieldArg(f, "hasMany", 2), fieldArg(f, "hasMany", 3)));
+    } else if (fieldHas(f, "column")) {
       let column = fieldArg(f, "column", 0);
       if (column == "") { column = f.name; }
       let sqlType = fieldArg(f, "column", 1);
@@ -116,7 +126,8 @@ export function entity(d: Description): DbRepository {
 
   let table = "";
   if (d.args.length > 0) { table = d.args[0]; }
-  return repository(table, idField, idColumn, fields);
+  if (relations.length == 0) { return repository(table, idField, idColumn, fields); }
+  return repositoryWith(table, idField, idColumn, fields, relations);
 }
 
 // Whether a description would produce a usable mapping, and why not. Called by
@@ -138,6 +149,14 @@ export function entityProblem(d: Description): string {
   let keys: int = 0;
   let i: int = 0;
   while (i < d.fields.length) {
+    if (fieldHas(d.fields[i], "hasOne") || fieldHas(d.fields[i], "hasMany")) {
+      let which = "hasOne";
+      if (fieldHas(d.fields[i], "hasMany")) { which = "hasMany"; }
+      if (fieldArg(d.fields[i], which, 3) == "") {
+        return "@" + which + " on \"" + d.fields[i].name
+          + "\" needs four arguments: the other table, the column on this one, the column on that one, and the select list";
+      }
+    }
     if (fieldHas(d.fields[i], "column")) { mapped = mapped + 1; }
     if (fieldHas(d.fields[i], "id")) {
       keys = keys + 1;

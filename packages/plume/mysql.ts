@@ -42,6 +42,8 @@ export function mysql(): Db {
     upsertNeedsWhereTrue: false,
     rowToJson: "JSON_OBJECT",
     jsonAgg: "JSON_ARRAYAGG",
+    emptyJsonArray: "JSON_ARRAY()",
+    nestedJsonWrap: false,
     docStyle: "pairs",
     identQuote: "`",
     readStyle: "json-table",

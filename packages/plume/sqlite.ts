@@ -44,6 +44,8 @@ export function sqlite(): Db {
     upsertNeedsWhereTrue: true,
     rowToJson: "json_object",
     jsonAgg: "json_group_array",
+    emptyJsonArray: "'[]'",
+    nestedJsonWrap: true,
     docStyle: "pairs",
     identQuote: "\"",
     backslashEscapes: false,

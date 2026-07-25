@@ -101,6 +101,56 @@ and a projection that works in development and is refused in production has not
 made anything portable. Expressions are otherwise free: `coalesce(a, b) AS "x"`
 is read correctly, commas and all.
 
+## Relations
+
+A related row, or rows, fetched with the record that points at them:
+
+```ts
+let rs: DbRelation[] = [
+  hasOne("team", "teams", "team_id", "id", "id, team_name AS \"teamName\""),
+  hasMany("tasks", "tasks", "id", "agent_id", "id, title"),
+];
+let agents = repositoryWith("agents", "id", "id", fields, rs);
+
+findById(database, agents, "a1");
+```
+
+```json
+{"id":"a1","agentName":"researcher","teamId":"t1",
+ "team":{"id":"t1","teamName":"research"},
+ "tasks":[{"id":"k1","title":"read"},{"id":"k2","title":"write"}]}
+```
+
+**This is not a join.** Each relation is a correlated subquery producing its own
+JSON, which all three databases nest inside the parent document. A join would
+flatten the two into one row set and leave you to regroup — and a to-many would
+repeat the parent once per child. Here a parent with two tasks is still one row:
+`countWhere` returns what it returned before the relation existed.
+
+A to-one that matches nothing is `null`; a to-many that matches nothing is `[]`.
+The last argument is a select list over the other table, read the same way a
+projection is, so `team_name AS "teamName"` names the key. A relation whose
+names or select list will not parse refuses the read rather than sending it.
+
+With the decorator, the relation is declared on the field that holds it:
+
+```ts
+@entity("agents")
+class Agent {
+  @id @column("id", "text")           id: string;
+  @column("team_id", "text")          teamId: string;
+
+  @hasOne("teams", "team_id", "id", "id, team_name AS \"teamName\"")
+  team: Team;
+
+  @hasMany("tasks", "id", "agent_id", "id, title")
+  tasks: Task[];
+}
+```
+
+What is still missing: `FROM a JOIN b` proper, so no fetching two whole entities
+in one query, and no relation that spans a link table.
+
 ## Migrations
 
 `migrate.ts` is Flyway's model: an ordered plan of versioned steps, a history
@@ -192,6 +242,9 @@ lumen test migrate_pg.test.ts           # migrations, PostgreSQL
 lumen test migrate_mysql.test.ts        # migrations, MySQL
 lumen test entity.test.ts               # the @entity decorator, offline
 lumen test entity_live.test.ts          # its mapping against a database
+lumen test relations.test.ts            # relations, SQLite
+lumen test relations_pg.test.ts         # relations, PostgreSQL
+lumen test relations_mysql.test.ts      # relations, MySQL
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections. The

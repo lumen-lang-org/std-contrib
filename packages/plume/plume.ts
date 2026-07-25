@@ -26,6 +26,25 @@ export type DbField = {
   sqlType: string,
 };
 
+// A related row, or rows, fetched with the record that points at them.
+//
+// Not a join: each relation is a correlated subquery producing its own JSON,
+// which every one of these databases can nest inside the parent document. A
+// join would flatten the two into one row set and leave the caller to
+// regroup, and one-to-many would repeat the parent once per child.
+//
+// `columns` is a select list over the other table, written the way a
+// projection is, so `team_name AS "teamName"` names the key.
+export type DbRelation = {
+  field: string,
+  // "one" for a single nested object, "many" for an array of them.
+  kind: string,
+  table: string,
+  localColumn: string,
+  foreignColumn: string,
+  columns: string,
+};
+
 // A mapping between a record type and a table. `idField` and `idColumn` name
 // the key used by find, persist and delete.
 export type DbRepository = {
@@ -33,6 +52,7 @@ export type DbRepository = {
   idField: string,
   idColumn: string,
   fields: DbField[],
+  relations: DbRelation[],
 };
 
 // The outcome of a call that changes something, or of one that reads nothing.
@@ -48,8 +68,35 @@ export function field(name: string, column: string, sqlType: string): DbField {
 }
 
 export function repository(table: string, idField: string, idColumn: string, fields: DbField[]): DbRepository {
-  let r: DbRepository = { table: table, idField: idField, idColumn: idColumn, fields: fields };
+  let none: DbRelation[] = [];
+  let r: DbRepository = { table: table, idField: idField, idColumn: idColumn, fields: fields, relations: none };
   return r;
+}
+
+// The same, carrying relations. A mapping with none behaves exactly as it did
+// before relations existed — the reads below add nothing to the statement.
+export function repositoryWith(table: string, idField: string, idColumn: string, fields: DbField[], relations: DbRelation[]): DbRepository {
+  let r: DbRepository = { table: table, idField: idField, idColumn: idColumn, fields: fields, relations: relations };
+  return r;
+}
+
+export function hasOne(fieldName: string, table: string, localColumn: string, foreignColumn: string, columns: string): DbRelation {
+  let r: DbRelation = { field: fieldName, kind: "one", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns };
+  return r;
+}
+
+export function hasMany(fieldName: string, table: string, localColumn: string, foreignColumn: string, columns: string): DbRelation {
+  let r: DbRelation = { field: fieldName, kind: "many", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns };
+  return r;
+}
+
+// A relation's names are interpolated into SQL like a mapping's are, and its
+// column list is read the same way a projection is.
+export function relationValid(rel: DbRelation): bool {
+  if (!safeIdentifier(rel.field) || !safeIdentifier(rel.table)) { return false; }
+  if (!safeIdentifier(rel.localColumn) || !safeIdentifier(rel.foreignColumn)) { return false; }
+  if (rel.kind != "one" && rel.kind != "many") { return false; }
+  return projectionValid(rel.columns);
 }
 
 function dbOk(rows: int): DbResult {
@@ -183,12 +230,59 @@ function updateSet(repo: DbRepository): string {
   return out;
 }
 
+// A relation as one column of the parent's select list: a correlated subquery
+// producing its own JSON, which every driver can nest inside the parent
+// document. Empty when the relation is malformed, so the caller refuses.
+function relationColumn(db: Db, repo: DbRepository, rel: DbRelation): string {
+  if (!relationValid(rel)) { return ""; }
+  let link = rel.table + "." + rel.foreignColumn + " = " + repo.table + "." + rel.localColumn;
+  if (db.docStyle == "pairs") {
+    let pairs = pairsFromColumns(rel.columns);
+    if (pairs == "") { return ""; }
+    let inner = "";
+    if (rel.kind == "one") {
+      inner = "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + rel.table + " WHERE " + link;
+    } else {
+      inner = "SELECT coalesce(" + db.jsonAgg + "(" + db.rowToJson + "(" + pairs + ")), "
+        + db.emptyJsonArray + ") FROM " + rel.table + " WHERE " + link;
+    }
+    // SQLite would embed the subquery's result as a string without this;
+    // MySQL already knows it is JSON and says so by needing nothing.
+    if (db.nestedJsonWrap) { return "json((" + inner + "))"; }
+    return "(" + inner + ")";
+  }
+  if (rel.kind == "one") {
+    return "(SELECT " + db.rowToJson + "(rel) FROM (SELECT " + rel.columns
+      + " FROM " + rel.table + " WHERE " + link + ") rel)";
+  }
+  return "(SELECT coalesce(" + db.jsonAgg + "(rel), " + db.emptyJsonArray + ") FROM (SELECT "
+    + rel.columns + " FROM " + rel.table + " WHERE " + link + ") rel)";
+}
+
+// The parent's own columns followed by one column per relation. Used by the
+// row-style drivers, where the document is built from a subquery's columns.
+function selectListWithRelations(db: Db, repo: DbRepository): string {
+  let out = selectList(repo);
+  let i: int = 0;
+  while (i < repo.relations.length) {
+    let col = relationColumn(db, repo, repo.relations[i]);
+    if (col == "") { return ""; }
+    out = out + ", " + col + " AS \"" + repo.relations[i].field + "\"";
+    i = i + 1;
+  }
+  return out;
+}
+
 // One row as a document, from the mapping's own columns.
 function oneSql(db: Db, repo: DbRepository, where: string): string {
   if (db.docStyle == "pairs") {
-    return "SELECT " + rowJson(db, repo) + " FROM " + repo.table + " WHERE " + where;
+    let doc = rowJson(db, repo);
+    if (doc == "") { return ""; }
+    return "SELECT " + doc + " FROM " + repo.table + " WHERE " + where;
   }
-  return "SELECT " + db.rowToJson + "(r) FROM (SELECT " + selectList(repo)
+  let cols = selectListWithRelations(db, repo);
+  if (cols == "") { return ""; }
+  return "SELECT " + db.rowToJson + "(r) FROM (SELECT " + cols
     + " FROM " + repo.table + " WHERE " + where + ") r";
 }
 
@@ -361,12 +455,18 @@ function listSql(db: Db, repo: DbRepository, where: string, tail: string): strin
     // aggregate into, so they go in a subquery even when there are none.
     let inner = "SELECT * FROM " + repo.table;
     if (where != "") { inner = inner + " WHERE " + where; }
-    // MySQL requires every derived table to be named, and the others accept a
-    // name they do not need.
-    return "SELECT coalesce(" + db.jsonAgg + "(" + rowJson(db, repo) + "), '[]') FROM ("
-      + inner + tail + ") AS r";
+    let doc = rowJson(db, repo);
+    if (doc == "") { return ""; }
+    // Named for the table it selects from, not `r`: a relation's subquery
+    // refers to the parent by table name, and inside a derived table called
+    // anything else that reference has nothing to bind to. MySQL requires the
+    // name; the others accept one they do not need.
+    return "SELECT coalesce(" + db.jsonAgg + "(" + doc + "), '[]') FROM ("
+      + inner + tail + ") AS " + repo.table;
   }
-  let inner = "SELECT " + selectList(repo) + " FROM " + repo.table;
+  let cols = selectListWithRelations(db, repo);
+  if (cols == "") { return ""; }
+  let inner = "SELECT " + cols + " FROM " + repo.table;
   if (where != "") { inner = inner + " WHERE " + where; }
   return "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + tail + ") r";
 }
@@ -393,6 +493,13 @@ function rowJson(db: Db, repo: DbRepository): string {
       if (i > 0) { pairs = pairs + ", "; }
       pairs = pairs + "'" + repo.fields[i].field + "', " + jsonValue(db, repo.fields[i]);
       i = i + 1;
+    }
+    let r: int = 0;
+    while (r < repo.relations.length) {
+      let col = relationColumn(db, repo, repo.relations[r]);
+      if (col == "") { return ""; }
+      pairs = pairs + ", '" + repo.relations[r].field + "', " + col;
+      r = r + 1;
     }
     return db.rowToJson + "(" + pairs + ")";
   }
@@ -624,6 +731,7 @@ export function deleteWhere(db: Db, repo: DbRepository, where: string, a: string
 export function findById(db: Db, repo: DbRepository, id: string): string {
   if (!repositoryValid(repo)) { return ""; }
   let sql = oneSql(db, repo, repo.idColumn + " = " + db.placeholder);
+  if (sql == "") { return ""; }
   if (!db.query(sql, id)) { return ""; }
   if (db.rows() == 0) { return ""; }
   return db.value(0, 0);
@@ -652,6 +760,7 @@ function rowsAsArray(db: Db): string {
 export function listWhere(db: Db, repo: DbRepository, where: string, a: string): string {
   if (!repositoryValid(repo)) { return "[]"; }
   let sql = listSql(db, repo, where, "");
+  if (sql == "") { return "[]"; }
   if (where == "") {
     if (!db.queryNoArgs(sql)) { return "[]"; }
   } else {
@@ -689,6 +798,7 @@ export function listProjected(db: Db, repo: DbRepository, columns: string, where
 export function pageWhere(db: Db, repo: DbRepository, where: string, a: string, orderBy: string, limit: int, offset: int): string {
   if (!repositoryValid(repo) || !safeIdentifier(orderBy)) { return "[]"; }
   let sql = listSql(db, repo, where, " ORDER BY " + orderBy + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`);
+  if (sql == "") { return "[]"; }
   if (where == "") {
     if (!db.queryNoArgs(sql)) { return "[]"; }
   } else {
