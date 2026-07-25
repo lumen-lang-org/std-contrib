@@ -121,18 +121,14 @@ test("a self-referential link works: an agent's sub-agents are agents", () => {
   expect(json.indexOf("scout") >= 0);
   expect(json.indexOf("writer") >= 0);
   // And a1 is not its own child.
-  // Split across statements because nesting a substring inside another's
-  // arguments hits spec 464 — the compiler emits one temporary name twice.
-  let at = json.indexOf("\"subAgents\"");
-  let subs = json.substring(at, json.length);
+  let subs = json.substring(json.indexOf("\"subAgents\""), json.length);
   expect(subs.indexOf("lead") < 0);
 });
 
 test("a child agent has no children of its own", () => {
   let repo = seeded();
   let json = findById(database, repo, "a2");
-  let at = json.indexOf("\"subAgents\"");
-  let subs = json.substring(at, json.length);
+  let subs = json.substring(json.indexOf("\"subAgents\""), json.length);
   expect(subs.indexOf("scout") < 0);
   expect(subs.indexOf("writer") < 0);
 });

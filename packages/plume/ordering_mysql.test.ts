@@ -39,11 +39,11 @@ function seeded(): DbRepository {
   return repo;
 }
 
-// The first record's id. Written to tolerate whitespace after the colon
-// because MySQL's JSON_OBJECT emits `"id": "a1"` where the others emit
-// `"id":"a1"` — a difference invisible to JSON.parse and fatal to a substring
-// search, which is why the first version of this helper reported every MySQL
-// ordering test as a failure of the ordering.
+// The first record's id. Tolerates whitespace after the colon because MySQL's
+// JSON_OBJECT emits `"id": "a1"` where the others emit `"id":"a1"` — a
+// difference invisible to JSON.parse and fatal to a substring search, which is
+// why the first version of this helper reported every MySQL ordering test as a
+// failure of the ordering.
 function firstId(document: string): string {
   let at = document.indexOf("\"id\"");
   if (at < 0) { return ""; }
