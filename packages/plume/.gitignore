@@ -3,3 +3,5 @@
 # named for its source and with no extension to tell it apart.
 zz*
 decorated-entity
+concurrent_server
+.lumen-*
