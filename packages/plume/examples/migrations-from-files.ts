@@ -45,12 +45,12 @@ function agentsRepo(): DbRepository {
 // The plan is the directory. `embedDir` reads it while compiling, and the
 // version and description come from each file name the way Flyway's do — so
 // adding a migration is adding a file, and nothing has to be edited here.
-function files(): SqlFile[] {
+function sqlDirectory(): SqlFile[] {
   return embedDir("./sql");
 }
 
-function plan(): Migration[] {
-  return migrationsFrom(files());
+function migrationPlan(): Migration[] {
+  return migrationsFrom(sqlDirectory());
 }
 
 function main(): void {
@@ -63,21 +63,21 @@ function main(): void {
 
   // A file that is not a migration is an error, not something to skip
   // quietly: one named wrongly would otherwise never run and never be missed.
-  let problem = migrationNameProblem(files());
+  let problem = migrationNameProblem(sqlDirectory());
   if (problem != "") {
     console.error("the migration directory is not a plan: " + problem);
     return;
   }
 
   // What would happen, before anything does.
-  let before = migrationInfo(database, plan());
+  let before = migrationInfo(database, migrationPlan());
   let i: int = 0;
   while (i < before.length) {
     console.log("pending  " + before[i].version + "  " + before[i].description);
     i = i + 1;
   }
 
-  let r = migrate(database, plan());
+  let r = migrate(database, migrationPlan());
   console.log("");
   console.log("applied  " + `${r.applied}` + "  ok=" + `${r.ok}` + " " + r.error);
 
@@ -91,7 +91,7 @@ function main(): void {
   console.log("read     " + findById(database, agentsRepo(), "a1"));
 
   // Running again applies nothing: the history already holds all three.
-  let again = migrate(database, plan());
+  let again = migrate(database, migrationPlan());
   console.log("re-run   applied=" + `${again.applied}`);
 
   closeDatabase(database);
