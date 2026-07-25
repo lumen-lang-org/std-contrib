@@ -95,6 +95,12 @@ let summary = findProjected(database, agents(), "id, agent_name AS \"agentName\"
 
 `pickFields` does the same narrowing in memory, without a round trip.
 
+An alias must be a plain name, on every driver. PostgreSQL would accept any
+quoted identifier, but a driver that builds the document's keys itself cannot,
+and a projection that works in development and is refused in production has not
+made anything portable. Expressions are otherwise free: `coalesce(a, b) AS "x"`
+is read correctly, commas and all.
+
 ## Migrations
 
 `migrate.ts` is Flyway's model: an ordered plan of versioned steps, a history

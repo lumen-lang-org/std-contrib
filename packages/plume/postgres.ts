@@ -40,6 +40,7 @@ export function postgres(): Db {
     jsonAgg: "json_agg",
     docStyle: "row",
     identQuote: "\"",
+    backslashEscapes: false,
     jsonNeedsUnquote: false,
     upsertStyle: "on-conflict",
     readStyle: "record",
