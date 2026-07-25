@@ -3,38 +3,38 @@
 import { cosineSimilarity, fakeEmbedding } from "./vector.ts";
 import { makeDocument, withMetadata, documentMetadata } from "./document.ts";
 
-type AiVectorStore = {
-  docs: AiDocument[],
+type VectorStore = {
+  docs: Document[],
   vectors: number[][],
 };
 
-type AiSearchHit = {
-  doc: AiDocument,
+type SearchHit = {
+  doc: Document,
   score: number,
 };
 
-export function makeSearchHit(doc: AiDocument, score: number): AiSearchHit {
+export function makeSearchHit(doc: Document, score: number): SearchHit {
   return {
     doc: doc,
     score: score,
   };
 }
 
-function makeVectorStore(docs: AiDocument[], vectors: number[][]): AiVectorStore {
+function makeVectorStore(docs: Document[], vectors: number[][]): VectorStore {
   return {
     docs: docs,
     vectors: vectors,
   };
 }
 
-function noSearchHits(): AiSearchHit[] {
-  let empty: AiSearchHit[] = [];
+function noSearchHits(): SearchHit[] {
+  let empty: SearchHit[] = [];
   return empty;
 }
 
 // docs and vectors are parallel lists: a vector is only usable when the doc at
 // the same index exists.
-function storeVectorAt(store: AiVectorStore, index: int): number[] {
+function storeVectorAt(store: VectorStore, index: int): number[] {
   if (index < 0 || index >= store.vectors.length) {
     let empty: number[] = [];
     return empty;
@@ -42,22 +42,22 @@ function storeVectorAt(store: AiVectorStore, index: int): number[] {
   return store.vectors[index];
 }
 
-export function emptyVectorStore(): AiVectorStore {
-  let docs: AiDocument[] = [];
+export function emptyVectorStore(): VectorStore {
+  let docs: Document[] = [];
   let vectors: number[][] = [];
   return makeVectorStore(docs, vectors);
 }
 
-export function storeSize(store: AiVectorStore): int {
+export function storeSize(store: VectorStore): int {
   return store.docs.length;
 }
 
 // values are immutable, so every write returns a fresh store.
-export function addVector(store: AiVectorStore, doc: AiDocument, vector: number[]): AiVectorStore {
+export function addVector(store: VectorStore, doc: Document, vector: number[]): VectorStore {
   return makeVectorStore([...store.docs, doc], [...store.vectors, vector]);
 }
 
-export function addDocuments(store: AiVectorStore, docs: AiDocument[], dims: int): AiVectorStore {
+export function addDocuments(store: VectorStore, docs: Document[], dims: int): VectorStore {
   let out = store;
   let i: int = 0;
   while (i < docs.length) {
@@ -67,8 +67,8 @@ export function addDocuments(store: AiVectorStore, docs: AiDocument[], dims: int
   return out;
 }
 
-export function deleteById(store: AiVectorStore, id: string): AiVectorStore {
-  let docs: AiDocument[] = [];
+export function deleteById(store: VectorStore, id: string): VectorStore {
+  let docs: Document[] = [];
   let vectors: number[][] = [];
   let i: int = 0;
   while (i < store.docs.length) {
@@ -81,8 +81,8 @@ export function deleteById(store: AiVectorStore, id: string): AiVectorStore {
   return makeVectorStore(docs, vectors);
 }
 
-export function filterByMetadata(store: AiVectorStore, key: string, value: string): AiVectorStore {
-  let docs: AiDocument[] = [];
+export function filterByMetadata(store: VectorStore, key: string, value: string): VectorStore {
+  let docs: Document[] = [];
   let vectors: number[][] = [];
   let i: int = 0;
   while (i < store.docs.length) {
@@ -106,9 +106,9 @@ function storeBeatsScore(candidate: number, current: number): bool {
 
 // no in-place sort, so the top k comes out of repeated max-extraction over a
 // shrinking copy. ties keep insertion order.
-export function storeTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
+export function storeTopHits(scored: SearchHit[], k: int): SearchHit[] {
   let rest = scored;
-  let out: AiSearchHit[] = [];
+  let out: SearchHit[] = [];
   let n: int = 0;
   while (n < k && rest.length > 0) {
     let best: int = 0;
@@ -124,9 +124,9 @@ export function storeTopHits(scored: AiSearchHit[], k: int): AiSearchHit[] {
   return out;
 }
 
-export function searchByVector(store: AiVectorStore, query: number[], k: int): AiSearchHit[] {
+export function searchByVector(store: VectorStore, query: number[], k: int): SearchHit[] {
   if (k <= 0 || store.docs.length == 0 || query.length == 0) { return noSearchHits(); }
-  let scored: AiSearchHit[] = [];
+  let scored: SearchHit[] = [];
   let i: int = 0;
   while (i < store.docs.length && i < store.vectors.length) {
     scored.push(makeSearchHit(store.docs[i], cosineSimilarity(query, store.vectors[i])));
@@ -135,7 +135,7 @@ export function searchByVector(store: AiVectorStore, query: number[], k: int): A
   return storeTopHits(scored, k);
 }
 
-export function searchByText(store: AiVectorStore, query: string, dims: int, k: int): AiSearchHit[] {
+export function searchByText(store: VectorStore, query: string, dims: int, k: int): SearchHit[] {
   if (k <= 0 || dims <= 0) { return noSearchHits(); }
   return searchByVector(store, fakeEmbedding(query, dims), k);
 }

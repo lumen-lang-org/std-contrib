@@ -3,8 +3,8 @@
 import { makeBudget, unlimitedBudget, budgetIsLimited, budgetRemaining, budgetExhausted, messagesCost, chargeBudget, chargeMessages, budgetAllows, budgetAllowsMessages, budgetRefusal, chargeCall } from "./budget.ts";
 import { systemMessage, userMessage } from "../core/messages.ts";
 
-function twoMessages(): AiMessage[] {
-  let ms: AiMessage[] = [
+function twoMessages(): Message[] {
+  let ms: Message[] = [
     systemMessage("You are concise."),
     userMessage("What is the capital of France?"),
   ];
@@ -78,7 +78,7 @@ test("a call is refused whole rather than truncated", () => {
 test("messages cost their content and their roles", () => {
   let cost = messagesCost(twoMessages());
   expect(cost > 0);
-  let empty: AiMessage[] = [];
+  let empty: Message[] = [];
   expect(messagesCost(empty) == 0);
 });
 

@@ -251,8 +251,8 @@ test("parse live-shaped mistral content", () => {
   expect(parseMistralContent(raw) == "lumen ok");
 });
 
-function barrelCorpus(): AiDocument[] {
-  let out: AiDocument[] = [
+function barrelCorpus(): Document[] {
+  let out: Document[] = [
     document("lumen", "lumen compiles to a native binary with no runtime", "langs.md", "topic\tlangs"),
     document("python", "python runs on an interpreter and ships a large standard library", "langs.md", "topic\tlangs"),
     document("bread", "sourdough bread needs a starter, flour, water and salt", "recipes.md", "topic\tfood"),
@@ -379,7 +379,7 @@ test("rag prompt through the barrel", () => {
 });
 
 test("conversation memory through the barrel", () => {
-  let history: AiMessage[] = [system("You are concise.")];
+  let history: Message[] = [system("You are concise.")];
   history = appendMessage(history, user("Hi"));
   history = appendMessage(history, assistant("Hello"));
   history = appendMessage(history, user("What is Lumen?"));
@@ -399,7 +399,7 @@ test("conversation memory through the barrel", () => {
 });
 
 test("summary memory through the barrel", () => {
-  let history: AiMessage[] = [user("Ship the parser"), assistant("Done Tuesday")];
+  let history: Message[] = [user("Ship the parser"), assistant("Done Tuesday")];
   let prompt = summaryPrompt(history, "");
   expect(prompt.includes("(none)"));
   expect(prompt.includes("user: Ship the parser"));
@@ -419,7 +419,7 @@ test("key value memory through the barrel", () => {
 });
 
 test("history serialization through the barrel", () => {
-  let history: AiMessage[] = [system("be brief"), user("hi")];
+  let history: Message[] = [system("be brief"), user("hi")];
   let raw = serializeHistory(history);
   expect(raw.includes("\"role\":\"system\""));
   let parsed = parseHistory(raw);
@@ -440,14 +440,14 @@ function barrelClockBody(input: string): string {
   return "12:00 in " + input;
 }
 
-function barrelTools(): AiTool[] {
+function barrelTools(): Tool[] {
   let tools = registerTool(toolRegistry(), defineTool("weather", "Current weather for a city.", "city name", barrelWeatherBody));
   tools = registerTool(tools, defineTool("clock", "The local time in a zone.", "zone name", barrelClockBody));
   return tools;
 }
 
-function barrelAgentHistory(): AiMessage[] {
-  let history: AiMessage[] = [
+function barrelAgentHistory(): Message[] {
+  let history: Message[] = [
     system(agentSystemPrompt(barrelTools(), "You are a weather assistant.")),
     user("What is the weather in Paris?"),
   ];
@@ -584,7 +584,7 @@ test("agent step record through the barrel", () => {
 
 test("live tool-calling agent surface through the barrel", () => {
   let tools = barrelTools();
-  let history: AiMessage[] = [
+  let history: Message[] = [
     system("You are a weather assistant."),
     user("weather in Paris?"),
     assistant("[tool_calls] weather({\"input\":\"Paris\"})"),
@@ -611,8 +611,8 @@ test("live tool-calling agent surface through the barrel", () => {
   expect(back.length == 1);
   expect(back[0].id == "call_1");
   expect(toolInput(back[0]) == "Paris");
-  // The agent model builders yield AiModel closures with no I/O.
-  let models: AiModel[] = [
+  // The agent model builders yield Model closures with no I/O.
+  let models: Model[] = [
     openAIAgent("sk-test", "gpt-4o-mini", tools),
     mistralAgent("mk-test", "mistral-large-latest", tools),
   ];

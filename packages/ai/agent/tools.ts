@@ -2,14 +2,14 @@
 
 import { systemMessage } from "../core/messages.ts";
 
-type AiTool = {
+type Tool = {
   name: string,
   description: string,
   params: string,
   run: (input: string) => string,
 };
 
-type AiToolResult = {
+type ToolResult = {
   name: string,
   input: string,
   output: string,
@@ -17,8 +17,8 @@ type AiToolResult = {
   error: string,
 };
 
-function toolOk(name: string, input: string, output: string): AiToolResult {
-  let res: AiToolResult = {
+function toolOk(name: string, input: string, output: string): ToolResult {
+  let res: ToolResult = {
     name: name,
     input: input,
     output: output,
@@ -28,8 +28,8 @@ function toolOk(name: string, input: string, output: string): AiToolResult {
   return res;
 }
 
-function toolFailure(name: string, input: string, message: string): AiToolResult {
-  let res: AiToolResult = {
+function toolFailure(name: string, input: string, message: string): ToolResult {
+  let res: ToolResult = {
     name: name,
     input: input,
     output: "",
@@ -70,7 +70,7 @@ function toolFlattenLine(text: string): string {
   return out;
 }
 
-function toolNameList(tools: AiTool[]): string {
+function toolNameList(tools: Tool[]): string {
   let out = "";
   let i: int = 0;
   while (i < tools.length) {
@@ -81,7 +81,7 @@ function toolNameList(tools: AiTool[]): string {
   return out;
 }
 
-export function makeTool(name: string, description: string, params: string, run: (input: string) => string): AiTool {
+export function makeTool(name: string, description: string, params: string, run: (input: string) => string): Tool {
   return {
     name: name,
     description: description,
@@ -90,20 +90,20 @@ export function makeTool(name: string, description: string, params: string, run:
   };
 }
 
-export function toolRegistry(): AiTool[] {
-  let empty: AiTool[] = [];
+export function toolRegistry(): Tool[] {
+  let empty: Tool[] = [];
   return empty;
 }
 
 // a name already present is replaced in place; two tools sharing a name would
 // leave every later lookup silently picking the first.
-export function registerTool(tools: AiTool[], tool: AiTool): AiTool[] {
+export function registerTool(tools: Tool[], tool: Tool): Tool[] {
   let at = findTool(tools, tool.name);
   if (at < 0) { return [...tools, tool]; }
   return [...tools.slice(0, at), tool, ...tools.slice(at + 1, tools.length)];
 }
 
-export function findTool(tools: AiTool[], name: string): int {
+export function findTool(tools: Tool[], name: string): int {
   let i: int = 0;
   while (i < tools.length) {
     if (tools[i].name == name) { return i; }
@@ -112,11 +112,11 @@ export function findTool(tools: AiTool[], name: string): int {
   return -1;
 }
 
-export function hasTool(tools: AiTool[], name: string): bool {
+export function hasTool(tools: Tool[], name: string): bool {
   return findTool(tools, name) >= 0;
 }
 
-export function toolNames(tools: AiTool[]): string[] {
+export function toolNames(tools: Tool[]): string[] {
   let out: string[] = [];
   let i: int = 0;
   while (i < tools.length) {
@@ -128,7 +128,7 @@ export function toolNames(tools: AiTool[]): string[] {
 
 // the tool block a system prompt carries. an empty registry renders as "", so
 // the caller can drop the whole section.
-export function describeTools(tools: AiTool[]): string {
+export function describeTools(tools: Tool[]): string {
   let out = "";
   let i: int = 0;
   while (i < tools.length) {
@@ -143,7 +143,7 @@ export function describeTools(tools: AiTool[]): string {
 
 // an unknown tool is an ordinary failed result, not a crash: the loop hands it
 // back to the model so it can pick a real name next step.
-export function runTool(tools: AiTool[], name: string, input: string): AiToolResult {
+export function runTool(tools: Tool[], name: string, input: string): ToolResult {
   let at = findTool(tools, name);
   if (at < 0) {
     if (tools.length == 0) {
@@ -163,7 +163,7 @@ export function runTool(tools: AiTool[], name: string, input: string): AiToolRes
 // policy is checked before the registry is consulted, so a denied name is never
 // dispatched and leaks nothing about whether it exists. deny wins over allow; an
 // empty allow list means everything not denied.
-export function runToolWithPolicy(tools: AiTool[], allow: string[], deny: string[], name: string, input: string): AiToolResult {
+export function runToolWithPolicy(tools: Tool[], allow: string[], deny: string[], name: string, input: string): ToolResult {
   if (toolListHas(deny, name)) {
     return toolFailure(name, input, "tool \"" + toolFlattenLine(name) + "\" is blocked by policy: denied");
   }
@@ -175,10 +175,10 @@ export function runToolWithPolicy(tools: AiTool[], allow: string[], deny: string
 
 // carries a tool result back into the conversation. a failure takes the same
 // shape as a success so the loop has one path.
-export function toolResultMessage(result: AiToolResult): AiMessage {
+export function toolResultMessage(result: ToolResult): Message {
   let body = result.output;
   if (!result.ok) { body = "error: " + result.error; }
-  let msg: AiMessage = {
+  let msg: Message = {
     role: "tool",
     content: "[tool " + toolFlattenLine(result.name) + "] " + body,
   };

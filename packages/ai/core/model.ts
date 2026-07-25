@@ -2,7 +2,7 @@
 // The per-provider entry points hardcode temperature and max_tokens; a config
 // makes them settable.
 
-export type AiModelConfig = {
+export type ModelConfig = {
   // "mistral" or "openai". Anything else needs an explicit baseUrl.
   provider: string,
   model: string,
@@ -17,8 +17,8 @@ export type AiModelConfig = {
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MISTRAL_BASE_URL = "https://api.mistral.ai/v1";
 
-export function makeModelConfig(provider: string, model: string, apiKey: string): AiModelConfig {
-  let cfg: AiModelConfig = {
+export function makeModelConfig(provider: string, model: string, apiKey: string): ModelConfig {
+  let cfg: ModelConfig = {
     provider: provider,
     model: model,
     apiKey: apiKey,
@@ -31,8 +31,8 @@ export function makeModelConfig(provider: string, model: string, apiKey: string)
 
 // records are immutable: each `with*` helper rebuilds the config rather than
 // assigning a field.
-export function modelWithTemperature(cfg: AiModelConfig, temperature: number): AiModelConfig {
-  let out: AiModelConfig = {
+export function modelWithTemperature(cfg: ModelConfig, temperature: number): ModelConfig {
+  let out: ModelConfig = {
     provider: cfg.provider,
     model: cfg.model,
     apiKey: cfg.apiKey,
@@ -43,8 +43,8 @@ export function modelWithTemperature(cfg: AiModelConfig, temperature: number): A
   return out;
 }
 
-export function modelWithMaxTokens(cfg: AiModelConfig, maxTokens: int): AiModelConfig {
-  let out: AiModelConfig = {
+export function modelWithMaxTokens(cfg: ModelConfig, maxTokens: int): ModelConfig {
+  let out: ModelConfig = {
     provider: cfg.provider,
     model: cfg.model,
     apiKey: cfg.apiKey,
@@ -55,8 +55,8 @@ export function modelWithMaxTokens(cfg: AiModelConfig, maxTokens: int): AiModelC
   return out;
 }
 
-export function modelWithBaseUrl(cfg: AiModelConfig, baseUrl: string): AiModelConfig {
-  let out: AiModelConfig = {
+export function modelWithBaseUrl(cfg: ModelConfig, baseUrl: string): ModelConfig {
+  let out: ModelConfig = {
     provider: cfg.provider,
     model: cfg.model,
     apiKey: cfg.apiKey,
@@ -67,8 +67,8 @@ export function modelWithBaseUrl(cfg: AiModelConfig, baseUrl: string): AiModelCo
   return out;
 }
 
-export function modelWithApiKey(cfg: AiModelConfig, apiKey: string): AiModelConfig {
-  let out: AiModelConfig = {
+export function modelWithApiKey(cfg: ModelConfig, apiKey: string): ModelConfig {
+  let out: ModelConfig = {
     provider: cfg.provider,
     model: cfg.model,
     apiKey: apiKey,
@@ -81,7 +81,7 @@ export function modelWithApiKey(cfg: AiModelConfig, apiKey: string): AiModelConf
 
 // baseUrl when set, else the provider default. an unknown provider with no
 // baseUrl yields "" — callers must report that, not guess an endpoint.
-export function modelBaseUrl(cfg: AiModelConfig): string {
+export function modelBaseUrl(cfg: ModelConfig): string {
   if (cfg.baseUrl != "") { return cfg.baseUrl; }
   if (cfg.provider == "mistral") { return MISTRAL_BASE_URL; }
   if (cfg.provider == "openai") { return OPENAI_BASE_URL; }

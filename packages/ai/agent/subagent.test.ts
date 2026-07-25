@@ -7,16 +7,16 @@ import { fakeModel, agentFakeAnswer, agentFakeToolCall, runAgent } from "./agent
 import { makeTool } from "./tools.ts";
 import { systemMessage, userMessage } from "../core/messages.ts";
 
-function saNoTools(): AiTool[] {
-  let none: AiTool[] = [];
+function saNoTools(): Tool[] {
+  let none: Tool[] = [];
   return none;
 }
 
-function saEchoTools(): AiTool[] {
+function saEchoTools(): Tool[] {
   let echo = makeTool("echo", "Echo the input.", "text", (input: string) => {
     return "echo:" + input;
   });
-  let tools: AiTool[] = [echo];
+  let tools: Tool[] = [echo];
   return tools;
 }
 
@@ -78,7 +78,7 @@ test("the contract rides on the child's system prompt", () => {
 // The parent delegates to a hand-built subagent tool whose runner is a
 // compiled function driving a fake child — the exact shape live subagents use,
 // with the provider call swapped for a script.
-function saResearcherTool(): AiTool {
+function saResearcherTool(): Tool {
   return makeTool(
     "researcher",
     "Answers research questions.",
@@ -94,8 +94,8 @@ test("a parent delegates and gets one message back", () => {
     agentFakeToolCall("researcher", "look into lumen"),
     agentFakeAnswer("parent conclusion"),
   ];
-  let tools: AiTool[] = [saResearcherTool()];
-  let history: AiMessage[] = [
+  let tools: Tool[] = [saResearcherTool()];
+  let history: Message[] = [
     systemMessage("You are the supervisor."),
     userMessage("what is lumen?"),
   ];
@@ -114,8 +114,8 @@ test("the parent's history never contains the child's intermediate output", () =
     agentFakeToolCall("researcher", "look into lumen"),
     agentFakeAnswer("done"),
   ];
-  let tools: AiTool[] = [saResearcherTool()];
-  let history: AiMessage[] = [systemMessage("sup"), userMessage("q")];
+  let tools: Tool[] = [saResearcherTool()];
+  let history: Message[] = [systemMessage("sup"), userMessage("q")];
   let result = runAgent(fakeModel(parentScript), tools, history, 4);
   let i: int = 0;
   while (i < result.steps.length) {
@@ -144,7 +144,7 @@ test("wrapping a subagent yields a tool that warns about isolation", () => {
 });
 
 test("several subagents wrap into a registry", () => {
-  let subs: AiSubAgent[] = [
+  let subs: SubAgent[] = [
     makeSubAgent("a", "A.", "mistral", "k", "m", "p", saNoTools(), 3),
     makeSubAgent("b", "B.", "openai", "k", "m", "p", saNoTools(), 3),
   ];

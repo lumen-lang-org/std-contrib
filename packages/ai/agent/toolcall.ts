@@ -2,7 +2,7 @@
 
 import { makeTool } from "./tools.ts";
 
-type AiToolCall = {
+type ToolCall = {
   id: string,
   name: string,
   arguments: string,
@@ -79,8 +79,8 @@ function tcStr(value: string, next: int): TcString {
   };
 }
 
-function tcNoCalls(): AiToolCall[] {
-  let empty: AiToolCall[] = [];
+function tcNoCalls(): ToolCall[] {
+  let empty: ToolCall[] = [];
   return empty;
 }
 
@@ -293,7 +293,7 @@ function tcFirstMessage(raw: string): int {
   return tcFieldValue(raw, items[0], "message");
 }
 
-function tcMakeCall(id: string, name: string, args: string): AiToolCall {
+function tcMakeCall(id: string, name: string, args: string): ToolCall {
   return {
     id: id,
     name: name,
@@ -303,13 +303,13 @@ function tcMakeCall(id: string, name: string, args: string): AiToolCall {
 
 // JSON.parse<T> throws on any unknown field, and live provider bodies always
 // carry extras, so this scanner — not the typed path — handles real responses.
-function tcScanToolCalls(raw: string): AiToolCall[] {
+function tcScanToolCalls(raw: string): ToolCall[] {
   let message = tcFirstMessage(raw);
   if (message < 0) { return tcNoCalls(); }
   let calls = tcFieldValue(raw, message, "tool_calls");
   if (calls < 0) { return tcNoCalls(); }
   let items = tcArrayItems(raw, calls);
-  let out: AiToolCall[] = [];
+  let out: ToolCall[] = [];
   let i: int = 0;
   while (i < items.length) {
     let entry = items[i];
@@ -335,7 +335,7 @@ function tcScanFinishReason(raw: string): string {
   return tcStringField(raw, items[0], "finish_reason");
 }
 
-function tcToolDefEntry(tool: AiTool): ToolCallDefEntry {
+function tcToolDefEntry(tool: Tool): ToolCallDefEntry {
   let hint = tool.params;
   if (hint == "") { hint = "Input for the " + tool.name + " tool."; }
   return {
@@ -357,13 +357,13 @@ function tcToolDefEntry(tool: AiTool): ToolCallDefEntry {
   };
 }
 
-export function makeToolCall(id: string, name: string, args: string): AiToolCall {
+export function makeToolCall(id: string, name: string, args: string): ToolCall {
   return tcMakeCall(id, name, args);
 }
 
 // JSON.stringify does the escaping, so a quote or brace in a tool name or
 // description cannot break out of the request body.
-export function serializeToolDefs(tools: AiTool[]): string {
+export function serializeToolDefs(tools: Tool[]): string {
   let entries: ToolCallDefEntry[] = [];
   let i: int = 0;
   while (i < tools.length) {
@@ -375,18 +375,18 @@ export function serializeToolDefs(tools: AiTool[]): string {
 
 // mistral takes the same OpenAI-compatible `tools` array; separate entry point
 // so the two can diverge later without moving callers.
-export function serializeToolDefsMistral(tools: AiTool[]): string {
+export function serializeToolDefsMistral(tools: Tool[]): string {
   return serializeToolDefs(tools);
 }
 
 // tool calls from an OpenAI-compatible chat completion. no calls, plain text, a
 // malformed body, and an empty body all yield an empty list rather than an error.
-export function parseToolCalls(raw: string): AiToolCall[] {
+export function parseToolCalls(raw: string): ToolCall[] {
   try {
     const parsed: ToolCallResponse = JSON.parse<ToolCallResponse>(raw);
     if (parsed.choices.length == 0) { return tcNoCalls(); }
     let entries = parsed.choices[0].message.tool_calls;
-    let out: AiToolCall[] = [];
+    let out: ToolCall[] = [];
     let i: int = 0;
     while (i < entries.length) {
       // drop a nameless call, matching the scanner fallback; otherwise the two
@@ -404,20 +404,20 @@ export function parseToolCalls(raw: string): AiToolCall[] {
   }
 }
 
-export function parseMistralToolCalls(raw: string): AiToolCall[] {
+export function parseMistralToolCalls(raw: string): ToolCall[] {
   return parseToolCalls(raw);
 }
 
 // one value out of the call's `arguments` payload. absent key, non-object
 // payload, and malformed payload all give "".
-export function toolCallArgument(call: AiToolCall, key: string): string {
+export function toolCallArgument(call: ToolCall, key: string): string {
   let at = tcFieldValue(call.arguments, 0, key);
   if (at < 0) { return ""; }
   return tcValueText(call.arguments, at);
 }
 
 // v1 tools take a single string under `input`.
-export function toolCallInput(call: AiToolCall): string {
+export function toolCallInput(call: ToolCall): string {
   return toolCallArgument(call, "input");
 }
 

@@ -30,19 +30,19 @@ export const SUBAGENT_CONTRACT = "The calling agent only sees your final message
 
 // A subagent definition: what the parent's model reads to choose it, and what
 // the child runs with. `provider` is "openai" or "mistral".
-export type AiSubAgent = {
+export type SubAgent = {
   name: string,
   description: string,
   provider: string,
   apiKey: string,
   model: string,
   systemPrompt: string,
-  tools: AiTool[],
+  tools: Tool[],
   maxSteps: int,
 };
 
-export function makeSubAgent(name: string, description: string, provider: string, apiKey: string, model: string, systemPrompt: string, tools: AiTool[], maxSteps: int): AiSubAgent {
-  let s: AiSubAgent = {
+export function makeSubAgent(name: string, description: string, provider: string, apiKey: string, model: string, systemPrompt: string, tools: Tool[], maxSteps: int): SubAgent {
+  let s: SubAgent = {
     name: name,
     description: description,
     provider: provider,
@@ -63,8 +63,8 @@ export function makeSubAgent(name: string, description: string, provider: string
 // return value is the child's final answer alone; on a run that ended without
 // one, it is an error string, since a tool returns text rather than raising —
 // which matches what the reference implementations do by default.
-export function subAgentAnswer(model: AiModel, systemPrompt: string, tools: AiTool[], task: string, maxSteps: int): string {
-  let history: AiMessage[] = [
+export function subAgentAnswer(model: Model, systemPrompt: string, tools: Tool[], task: string, maxSteps: int): string {
+  let history: Message[] = [
     systemMessage(systemPrompt + "\n\n" + SUBAGENT_CONTRACT),
     userMessage(task),
   ];
@@ -83,15 +83,15 @@ export function subAgentAnswer(model: AiModel, systemPrompt: string, tools: AiTo
 
 // The live runner: builds the provider model inside a top-level function, so a
 // tool's run closure only ever captures strings and calls this by name.
-export function runSubAgent(sub: AiSubAgent, task: string): string {
+export function runSubAgent(sub: SubAgent, task: string): string {
   if (sub.provider == "mistral") {
-    let mm: AiModel = (messages: AiMessage[]) => {
+    let mm: Model = (messages: Message[]) => {
       return runMistralToolChat(sub.apiKey, sub.model, agentHistoryToTurns(messages), sub.tools);
     };
     return subAgentAnswer(mm, sub.systemPrompt, sub.tools, task, sub.maxSteps);
   }
   if (sub.provider == "openai") {
-    let om: AiModel = (messages: AiMessage[]) => {
+    let om: Model = (messages: Message[]) => {
       return runOpenAIToolChat(sub.apiKey, sub.model, agentHistoryToTurns(messages), sub.tools);
     };
     return subAgentAnswer(om, sub.systemPrompt, sub.tools, task, sub.maxSteps);
@@ -102,7 +102,7 @@ export function runSubAgent(sub: AiSubAgent, task: string): string {
 // Wrap a subagent as a tool for a parent's registry. The input is the task
 // description the parent's model writes; the description tells that model when
 // to delegate, so it should say what the child is good at.
-export function subAgentAsTool(sub: AiSubAgent): AiTool {
+export function subAgentAsTool(sub: SubAgent): Tool {
   return makeTool(
     sub.name,
     sub.description + " Give it a complete, self-contained task description — it does not see this conversation.",
@@ -114,8 +114,8 @@ export function subAgentAsTool(sub: AiSubAgent): AiTool {
 }
 
 // Wrap several at once, for a parent that routes among specialists.
-export function subAgentsAsTools(subs: AiSubAgent[]): AiTool[] {
-  let out: AiTool[] = [];
+export function subAgentsAsTools(subs: SubAgent[]): Tool[] {
+  let out: Tool[] = [];
   let i: int = 0;
   while (i < subs.length) {
     out = [...out, subAgentAsTool(subs[i])];
@@ -135,7 +135,7 @@ export function subAgentsAsTools(subs: AiSubAgent[]): AiTool[] {
 // test's map — because a checkpoint is a string and a verdict is one word.
 
 import { runAgentWithApproval, resumeAgent, APPROVAL_SENTINEL } from "./approval.ts";
-import { AiCheckpointStore } from "./checkpointstore.ts";
+import { CheckpointStore } from "./checkpointstore.ts";
 
 function subCheckpointKey(name: string): string {
   return name + ".checkpoint.json";
@@ -146,21 +146,21 @@ function subDecisionKey(name: string): string {
 }
 
 // Record a human's verdict on a paused child, before resuming the parent.
-export function decideChildPause(store: AiCheckpointStore, subName: string, approved: bool): void {
+export function decideChildPause(store: CheckpointStore, subName: string, approved: bool): void {
   let verdict = "deny";
   if (approved) { verdict = "approve"; }
   store.put(subDecisionKey(subName), verdict);
 }
 
 // Whether a child in the store is waiting on a verdict.
-export function childPausePending(store: AiCheckpointStore, subName: string): bool {
+export function childPausePending(store: CheckpointStore, subName: string): bool {
   return store.has(subCheckpointKey(subName)) && !store.has(subDecisionKey(subName));
 }
 
 // The gated child runner, seamed on the model for tests. Fresh task -> gated
 // run; existing checkpoint + verdict -> resume; existing checkpoint and no
 // verdict -> still waiting, say so again.
-export function subAgentGatedAnswer(model: AiModel, systemPrompt: string, tools: AiTool[], sensitive: string[], store: AiCheckpointStore, name: string, task: string, maxSteps: int): string {
+export function subAgentGatedAnswer(model: Model, systemPrompt: string, tools: Tool[], sensitive: string[], store: CheckpointStore, name: string, task: string, maxSteps: int): string {
   let cpKey = subCheckpointKey(name);
   let decisionKey = subDecisionKey(name);
 
@@ -176,7 +176,7 @@ export function subAgentGatedAnswer(model: AiModel, systemPrompt: string, tools:
     return subGatedOutcome(resumed, store, name);
   }
 
-  let history: AiMessage[] = [
+  let history: Message[] = [
     systemMessage(systemPrompt + "\n\n" + SUBAGENT_CONTRACT),
     userMessage(task),
   ];
@@ -184,7 +184,7 @@ export function subAgentGatedAnswer(model: AiModel, systemPrompt: string, tools:
   return subGatedOutcome(run, store, name);
 }
 
-function subGatedOutcome(run: AiApprovalRun, store: AiCheckpointStore, name: string): string {
+function subGatedOutcome(run: ApprovalRun, store: CheckpointStore, name: string): string {
   if (run.stopReason == "approval") {
     store.put(subCheckpointKey(name), run.checkpoint);
     return APPROVAL_SENTINEL + " subagent " + name + " wants " + run.pendingTool + "(" + run.pendingInput + ")";
@@ -200,15 +200,15 @@ function subGatedOutcome(run: AiApprovalRun, store: AiCheckpointStore, name: str
 }
 
 // The live gated runner and its tool wrapper, mirroring runSubAgent.
-export function runSubAgentGated(sub: AiSubAgent, sensitive: string[], store: AiCheckpointStore, task: string): string {
+export function runSubAgentGated(sub: SubAgent, sensitive: string[], store: CheckpointStore, task: string): string {
   if (sub.provider == "mistral") {
-    let mm: AiModel = (messages: AiMessage[]) => {
+    let mm: Model = (messages: Message[]) => {
       return runMistralToolChat(sub.apiKey, sub.model, agentHistoryToTurns(messages), sub.tools);
     };
     return subAgentGatedAnswer(mm, sub.systemPrompt, sub.tools, sensitive, store, sub.name, task, sub.maxSteps);
   }
   if (sub.provider == "openai") {
-    let om: AiModel = (messages: AiMessage[]) => {
+    let om: Model = (messages: Message[]) => {
       return runOpenAIToolChat(sub.apiKey, sub.model, agentHistoryToTurns(messages), sub.tools);
     };
     return subAgentGatedAnswer(om, sub.systemPrompt, sub.tools, sensitive, store, sub.name, task, sub.maxSteps);
@@ -218,7 +218,7 @@ export function runSubAgentGated(sub: AiSubAgent, sensitive: string[], store: Ai
 
 // Wrap a gated subagent as a tool. `sensitive` names the child's tools that
 // need a human; `store` is where its pause state lives between invocations.
-export function subAgentAsGatedTool(sub: AiSubAgent, sensitive: string[], store: AiCheckpointStore): AiTool {
+export function subAgentAsGatedTool(sub: SubAgent, sensitive: string[], store: CheckpointStore): Tool {
   return makeTool(
     sub.name,
     sub.description + " Give it a complete, self-contained task description — it does not see this conversation.",

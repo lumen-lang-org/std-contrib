@@ -32,16 +32,16 @@ function chatBalanced(src: string): bool {
   return depth == 0;
 }
 
-function ctSampleTools(): AiTool[] {
+function ctSampleTools(): Tool[] {
   let weather = makeTool("weather", "Look up the weather.", "A city name.", (input: string) => "sunny in " + input);
   let clock = makeTool("clock", "Read the clock.", "A time zone.", (input: string) => "12:00 " + input);
-  let tools: AiTool[] = [weather, clock];
+  let tools: Tool[] = [weather, clock];
   return tools;
 }
 
 test("a plain-history body omits the tools array and round-trips as JSON", () => {
   let turns = toChatTurns([systemMessage("You are helpful."), userMessage("Hello")]);
-  let none: AiTool[] = [];
+  let none: Tool[] = [];
   let body = buildOpenAIToolBody("gpt-4o-mini", turns, none, 0.7, 1024);
   expect(body.indexOf("\"tools\":") < 0);
   expect(body.indexOf("\"messages\":[") > 0);
@@ -71,14 +71,14 @@ test("a non-empty registry embeds a valid tools array", () => {
 });
 
 test("an assistant tool-calls turn and two tool-result turns serialize with matching ids", () => {
-  let calls: AiToolCall[] = [
+  let calls: ToolCall[] = [
     makeToolCall("call_a", "weather", "{\"input\":\"Paris\"}"),
     makeToolCall("call_b", "clock", "{\"input\":\"UTC\"}"),
   ];
   let reg = ctSampleTools();
   let r1 = runTool(reg, "weather", "Paris");
   let r2 = runTool(reg, "clock", "UTC");
-  let convo: AiChatTurn[] = [
+  let convo: ChatTurn[] = [
     assistantToolCallsTurn("", calls),
     toolResultTurn("call_a", r1),
     toolResultTurn("call_b", r2),
@@ -117,7 +117,7 @@ test("an assistant tool-calls turn and two tool-result turns serialize with matc
 
 test("content escaping holds for quotes, newlines, and unicode", () => {
   let turns = toChatTurns([userMessage("she said \"go\"\nfrom São Paulo")]);
-  let none: AiTool[] = [];
+  let none: Tool[] = [];
   let body = buildOpenAIToolBody("m", turns, none, 0.7, 1024);
   expect(body.indexOf("\n") < 0);
   expect(body.indexOf("\\n") > 0);
@@ -128,7 +128,7 @@ test("content escaping holds for quotes, newlines, and unicode", () => {
 });
 
 test("a tool call argument with quotes and newlines survives the round trip", () => {
-  let odd: AiToolCall[] = [
+  let odd: ToolCall[] = [
     makeToolCall("call_x", "say", "{\"input\":\"she said \\\"hi\\\"\\nbye\"}"),
   ];
   let turn = assistantToolCallsTurn("thinking", odd);
@@ -165,7 +165,7 @@ test("a malformed response is handled by the parse helpers the caller relies on"
 });
 
 test("lifting history and re-emitting keeps every role and content intact", () => {
-  let history: AiMessage[] = [
+  let history: Message[] = [
     systemMessage("You are a weather assistant."),
     userMessage("What is the weather in Paris?"),
   ];

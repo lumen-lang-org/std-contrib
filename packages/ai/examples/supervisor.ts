@@ -36,7 +36,7 @@ function sumNumbers(input: string): string {
   return `${total}`;
 }
 
-function sumTool(): AiTool {
+function sumTool(): Tool {
   return defineTool(
     "sum",
     "Add integers. Input: the numbers separated by spaces.",
@@ -47,15 +47,15 @@ function sumTool(): AiTool {
   );
 }
 
-function noTools(): AiTool[] {
-  let none: AiTool[] = [];
+function noTools(): Tool[] {
+  let none: Tool[] = [];
   return none;
 }
 
 // Two specialists. The descriptions are what the supervisor's model reads when
 // deciding whom to delegate to.
-let calcTools: AiTool[] = [sumTool()];
-let subs: AiSubAgent[] = [
+let calcTools: Tool[] = [sumTool()];
+let subs: SubAgent[] = [
   subAgent(
     "calculator",
     "Does arithmetic. Use it for any question involving numbers.",
@@ -75,7 +75,7 @@ let subs: AiSubAgent[] = [
 let tools = subAgentTools(subs);
 let model = mistralAgent(apiKey, MODEL, tools);
 
-let history: AiMessage[] = [
+let history: Message[] = [
   system("You are a supervisor. Delegate to your tools rather than answering"
     + " yourself: calculator for numbers, poet for verse. Then combine their"
     + " results into one reply."),

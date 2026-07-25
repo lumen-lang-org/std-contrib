@@ -16,7 +16,7 @@ function sideEffectPath(): string {
   return APPROVAL_DIR + "/fired.txt";
 }
 
-function apTools(): AiTool[] {
+function apTools(): Tool[] {
   let send = makeTool("send_email", "Send an email.", "the message", (input: string) => {
     fs.writeFileSync(APPROVAL_DIR + "/fired.txt", "sent: " + input);
     return "email sent: " + input;
@@ -24,7 +24,7 @@ function apTools(): AiTool[] {
   let look = makeTool("lookup", "Look something up.", "the query", (input: string) => {
     return "found: " + input;
   });
-  let tools: AiTool[] = [send, look];
+  let tools: Tool[] = [send, look];
   return tools;
 }
 
@@ -33,8 +33,8 @@ function apSensitive(): string[] {
   return s;
 }
 
-function apHistory(): AiMessage[] {
-  let h: AiMessage[] = [
+function apHistory(): Message[] {
+  let h: Message[] = [
     systemMessage("You are an assistant."),
     userMessage("email bob the report"),
   ];
@@ -150,7 +150,7 @@ function apChildRun(task: string): string {
   return subAgentGatedAnswer(fakeModel(script), "You are a mailer.", apTools(), apSensitive(), fileCheckpointStore(APPROVAL_DIR), "mailer", task, 5);
 }
 
-function apChildTool(): AiTool {
+function apChildTool(): Tool {
   return makeTool("mailer", "Sends mail.", "the task", (task: string) => {
     return apChildRun(task);
   });
@@ -162,7 +162,7 @@ test("a child's sensitive call pauses the parent too", () => {
     agentFakeToolCall("mailer", "send bob the report"),
     agentFakeAnswer("all done"),
   ];
-  let tools: AiTool[] = [apChildTool()];
+  let tools: Tool[] = [apChildTool()];
   let none: string[] = [];
   let run = runAgentWithApproval(fakeModel(parentScript), tools, none, apHistory(), 6);
   expect(run.stopReason == "approval");
@@ -179,7 +179,7 @@ test("approving the child resumes it through the parent to completion", () => {
     agentFakeToolCall("mailer", "send bob the report"),
     agentFakeAnswer("all done"),
   ];
-  let tools: AiTool[] = [apChildTool()];
+  let tools: Tool[] = [apChildTool()];
   let none: string[] = [];
   let paused = runAgentWithApproval(fakeModel(parentScript), tools, none, apHistory(), 6);
   expect(paused.stopReason == "approval");
@@ -199,7 +199,7 @@ test("denying the child lets it finish without the side effect", () => {
     agentFakeToolCall("mailer", "send bob the report"),
     agentFakeAnswer("noted"),
   ];
-  let tools: AiTool[] = [apChildTool()];
+  let tools: Tool[] = [apChildTool()];
   let none: string[] = [];
   let paused = runAgentWithApproval(fakeModel(parentScript), tools, none, apHistory(), 6);
 
@@ -215,7 +215,7 @@ test("resuming the parent without a verdict pauses again rather than guessing", 
     agentFakeToolCall("mailer", "send bob the report"),
     agentFakeAnswer("all done"),
   ];
-  let tools: AiTool[] = [apChildTool()];
+  let tools: Tool[] = [apChildTool()];
   let none: string[] = [];
   let paused = runAgentWithApproval(fakeModel(parentScript), tools, none, apHistory(), 6);
   // No decideChildPause call: the human has not decided yet.

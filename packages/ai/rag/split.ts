@@ -9,14 +9,14 @@
 // behaviours corrected — see spec.md 9a. Sizes are byte counts, because a Lumen
 // string is UTF-8 indexed by byte, as in Zig.
 
-import { makeDocument, withMetadata, AiDocument } from "./document.ts";
+import { makeDocument, withMetadata, Document } from "./document.ts";
 
 // A piece of a larger text, and where it came from. `start` and `end` are byte
 // offsets into that text, so `text.substring(start, end)` is exactly `text`.
 // `forced` marks a chunk whose boundary fell inside a word because the text
 // offered no separator to break on — a long URL, or a run of CJK with no
 // spaces. The chunk is still valid UTF-8; only the word was broken.
-export type AiChunk = {
+export type Chunk = {
   text: string,
   start: int,
   end: int,
@@ -51,8 +51,8 @@ export function codeSeparators(): string[] {
   return CODE_SEPARATORS;
 }
 
-function chunkAt(text: string, start: int, end: int, forced: bool): AiChunk {
-  let c: AiChunk = {
+function chunkAt(text: string, start: int, end: int, forced: bool): Chunk {
+  let c: Chunk = {
     text: text.substring(start, end),
     start: start,
     end: end,
@@ -175,8 +175,8 @@ function mergeBounds(bounds: int[], size: int): int[] {
 // where a language written without spaces ends up. Chunks stay within the
 // budget — an embedding endpoint rejects anything larger — and are marked
 // `forced` so a caller can see that a word was broken.
-function hardCut(text: string, start: int, end: int, size: int): AiChunk[] {
-  let out: AiChunk[] = [];
+function hardCut(text: string, start: int, end: int, size: int): Chunk[] {
+  let out: Chunk[] = [];
   let cur = start;
   while (cur < end) {
     if (end - cur <= size) {
@@ -199,8 +199,8 @@ function hardCut(text: string, start: int, end: int, size: int): AiChunk[] {
 // that are actually too long get broken down further.
 // An array argument is copied, not shared, so every step returns its chunks
 // and the caller joins them rather than filling a buffer passed down.
-function splitRange(text: string, start: int, end: int, seps: string[], from: int, size: int): AiChunk[] {
-  let out: AiChunk[] = [];
+function splitRange(text: string, start: int, end: int, seps: string[], from: int, size: int): Chunk[] {
+  let out: Chunk[] = [];
   if (end <= start) { return out; }
   if (end - start <= size) {
     out = [...out, chunkAt(text, start, end, false)];
@@ -236,8 +236,8 @@ function splitRange(text: string, start: int, end: int, seps: string[], from: in
   return out;
 }
 
-function flushPending(text: string, pending: int[], size: int): AiChunk[] {
-  let out: AiChunk[] = [];
+function flushPending(text: string, pending: int[], size: int): Chunk[] {
+  let out: Chunk[] = [];
   if (pending.length == 0) { return out; }
   let merged = mergeBounds(pending, size);
   let i: int = 0;
@@ -259,9 +259,9 @@ function flushPending(text: string, pending: int[], size: int): AiChunk[] {
 // `list`, not `chunks`: modules are inlined into one namespace, so a parameter
 // may not share a name with any top-level declaration, and the barrel exports a
 // `chunks` function.
-function applyOverlap(text: string, list: AiChunk[], overlap: int): AiChunk[] {
+function applyOverlap(text: string, list: Chunk[], overlap: int): Chunk[] {
   if (overlap <= 0 || list.length < 2) { return list; }
-  let out: AiChunk[] = [list[0]];
+  let out: Chunk[] = [list[0]];
   let i: int = 1;
   while (i < list.length) {
     let c = list[i];
@@ -288,8 +288,8 @@ function applyOverlap(text: string, list: AiChunk[], overlap: int): AiChunk[] {
 //
 // The one case that still yields nothing is a document that is entirely
 // whitespace, which has no content to chunk.
-function dropEmpty(text: string, list: AiChunk[]): AiChunk[] {
-  let out: AiChunk[] = [];
+function dropEmpty(text: string, list: Chunk[]): Chunk[] {
+  let out: Chunk[] = [];
   let carry: int = -1;
   let i: int = 0;
   while (i < list.length) {
@@ -317,8 +317,8 @@ function dropEmpty(text: string, list: AiChunk[]): AiChunk[] {
 // Split with an explicit separator list. `size` and `overlap` are byte counts;
 // an overlap at or above the size would not advance, and is clamped rather than
 // rejected so a caller cannot hang.
-export function splitChunksWith(text: string, seps: string[], size: int, overlap: int): AiChunk[] {
-  let out: AiChunk[] = [];
+export function splitChunksWith(text: string, seps: string[], size: int, overlap: int): Chunk[] {
+  let out: Chunk[] = [];
   if (text == "" || size <= 0) { return out; }
   // An overlap at or above the size would not advance, so it is clamped rather
   // than rejected: this returns a list of chunks and has no error channel to
@@ -331,17 +331,17 @@ export function splitChunksWith(text: string, seps: string[], size: int, overlap
 }
 
 // Split prose.
-export function splitChunks(text: string, size: int, overlap: int): AiChunk[] {
+export function splitChunks(text: string, size: int, overlap: int): Chunk[] {
   return splitChunksWith(text, SPLIT_SEPARATORS, size, overlap);
 }
 
 // Split markdown, breaking at headings before prose boundaries.
-export function splitMarkdownChunks(text: string, size: int, overlap: int): AiChunk[] {
+export function splitMarkdownChunks(text: string, size: int, overlap: int): Chunk[] {
   return splitChunksWith(text, MARKDOWN_SEPARATORS, size, overlap);
 }
 
 // Split source code, breaking at declarations before blank lines.
-export function splitCodeChunks(text: string, size: int, overlap: int): AiChunk[] {
+export function splitCodeChunks(text: string, size: int, overlap: int): Chunk[] {
   return splitChunksWith(text, CODE_SEPARATORS, size, overlap);
 }
 
@@ -358,8 +358,8 @@ function intText(n: int): string {
 // Each chunk's metadata gains `chunk` (its index), `start` and `end` (its byte
 // range in the parent), and `parent` (the parent's id). Keys already present on
 // the parent are kept.
-export function splitDocumentChunks(doc: AiDocument, seps: string[], size: int, overlap: int): AiDocument[] {
-  let out: AiDocument[] = [];
+export function splitDocumentChunks(doc: Document, seps: string[], size: int, overlap: int): Document[] {
+  let out: Document[] = [];
   let parts = splitChunksWith(doc.text, seps, size, overlap);
   let i: int = 0;
   while (i < parts.length) {
@@ -376,6 +376,6 @@ export function splitDocumentChunks(doc: AiDocument, seps: string[], size: int, 
   return out;
 }
 
-export function splitDocumentProse(doc: AiDocument, size: int, overlap: int): AiDocument[] {
+export function splitDocumentProse(doc: Document, size: int, overlap: int): Document[] {
   return splitDocumentChunks(doc, SPLIT_SEPARATORS, size, overlap);
 }

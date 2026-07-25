@@ -10,7 +10,7 @@
 // package can back this with a table — so this file defines the contract and
 // the two backends with no dependencies: files and memory.
 
-export type AiCheckpointStore = {
+export type CheckpointStore = {
   put: (key: string, value: string) => bool,
   get: (key: string) => string,
   del: (key: string) => bool,
@@ -49,8 +49,8 @@ function fileStoreHas(dir: string, key: string): bool {
 // Checkpoints as files under a directory. Keys become file names, so they are
 // restricted to names that cannot escape the directory: letters, digits,
 // dashes, underscores and dots, and never a path separator.
-export function fileCheckpointStore(dir: string): AiCheckpointStore {
-  let store: AiCheckpointStore = {
+export function fileCheckpointStore(dir: string): CheckpointStore {
+  let store: CheckpointStore = {
     put: (key: string, value: string) => {
       if (!storeKeyOk(key)) { return false; }
       return fileStorePut(dir, key, value);
@@ -93,9 +93,9 @@ export function storeKeyOk(key: string): bool {
 // A map-backed store for tests and single-process runs. The map is shared by
 // the four functions through capture, which is read-only capture of a heap
 // value — mutation through a Map is visible, as the language defines.
-export function memoryCheckpointStore(): AiCheckpointStore {
+export function memoryCheckpointStore(): CheckpointStore {
   let entries = new Map<string, string>();
-  let store: AiCheckpointStore = {
+  let store: CheckpointStore = {
     put: (key: string, value: string) => {
       entries.set(key, value);
       return true;

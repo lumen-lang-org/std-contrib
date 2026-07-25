@@ -7,7 +7,7 @@
 // EOF.
 //
 // importing the value builders from client.ts also pulls its McpTool/McpResult
-// types into scope, and makeTool pulls in AiTool — the types need no export.
+// types into scope, and makeTool pulls in Tool — the types need no export.
 
 import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId } from "./client.ts";
 import { makeTool } from "../agent/tools.ts";
@@ -95,7 +95,7 @@ export function mcpStdioClose(session: McpStdioSession): void {
 // {"input": <input>} — this package's one-string-arg convention. it never
 // throws: neither writeLine/readLine nor parseMcpToolResult throws, so trouble
 // comes back as text.
-export function mcpStdioToolToLumen(session: McpStdioSession, tool: McpTool): AiTool {
+export function mcpStdioToolToLumen(session: McpStdioSession, tool: McpTool): Tool {
   let toolName = tool.name;
   return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
@@ -108,8 +108,8 @@ export function mcpStdioToolToLumen(session: McpStdioSession, tool: McpTool): Ai
 }
 
 // every tool in the registry is bound to the same live session.
-export function mcpStdioToolsToRegistry(session: McpStdioSession, tools: McpTool[]): AiTool[] {
-  let out: AiTool[] = [];
+export function mcpStdioToolsToRegistry(session: McpStdioSession, tools: McpTool[]): Tool[] {
+  let out: Tool[] = [];
   let i: int = 0;
   while (i < tools.length) {
     out.push(mcpStdioToolToLumen(session, tools[i]));

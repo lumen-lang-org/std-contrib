@@ -163,7 +163,7 @@ export function sseCall(url: string, headers: Map<string, string>, name: string,
 // run wraps its single string input as {"input": <input>} — this package's
 // one-string-arg convention — and never throws: neither net's methods nor
 // parseMcpToolResult throws, so trouble comes back as text.
-export function sseToolToLumen(url: string, headers: Map<string, string>, tool: McpTool): AiTool {
+export function sseToolToLumen(url: string, headers: Map<string, string>, tool: McpTool): Tool {
   let toolName = tool.name;
   return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
@@ -173,8 +173,8 @@ export function sseToolToLumen(url: string, headers: Map<string, string>, tool: 
   });
 }
 
-export function sseToolsToRegistry(url: string, headers: Map<string, string>, tools: McpTool[]): AiTool[] {
-  let out: AiTool[] = [];
+export function sseToolsToRegistry(url: string, headers: Map<string, string>, tools: McpTool[]): Tool[] {
+  let out: Tool[] = [];
   let i: int = 0;
   while (i < tools.length) {
     out.push(sseToolToLumen(url, headers, tools[i]));

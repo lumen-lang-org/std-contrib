@@ -15,7 +15,7 @@
 
 import { runToolWithPolicy, toolResultMessage } from "./tools.ts";
 import { parseToolCalls, toolCallInput } from "./toolcall.ts";
-import { assistantMessage, AiMessage } from "../core/messages.ts";
+import { assistantMessage, Message } from "../core/messages.ts";
 import { makeAgentStep } from "./agent.ts";
 import { serializeHistory, parseHistory } from "../memory/memory.ts";
 
@@ -25,7 +25,7 @@ export const APPROVAL_SENTINEL = "[[approval-required]]";
 
 // Why a run stopped, beyond the loop's own reasons: "approval" means a
 // sensitive call is waiting for a human.
-export type AiApprovalRun = {
+export type ApprovalRun = {
   answer: string,
   stopReason: string,
   stepCount: int,
@@ -42,7 +42,7 @@ export type AiApprovalRun = {
 // The saved state of a paused run. `steps` is flattened to parallel arrays
 // because JSON.parse<T> needs a closed shape and the step record already
 // exists elsewhere; a checkpoint is a wire format, not an API.
-type AiCheckpointFile = {
+type CheckpointFile = {
   version: int,
   history: string,
   stepTools: string[],
@@ -56,16 +56,16 @@ type AiCheckpointFile = {
   maxSteps: int,
 };
 
-function approvalResult(answer: string, stopReason: string, stepCount: int): AiApprovalRun {
-  let r: AiApprovalRun = {
+function approvalResult(answer: string, stopReason: string, stepCount: int): ApprovalRun {
+  let r: ApprovalRun = {
     answer: answer, stopReason: stopReason, stepCount: stepCount,
     pendingTool: "", pendingInput: "", pendingKind: "", checkpoint: "",
   };
   return r;
 }
 
-function pausedResult(checkpoint: AiCheckpointFile): AiApprovalRun {
-  let r: AiApprovalRun = {
+function pausedResult(checkpoint: CheckpointFile): ApprovalRun {
+  let r: ApprovalRun = {
     answer: "",
     stopReason: "approval",
     stepCount: checkpoint.stepTools.length,
@@ -88,7 +88,7 @@ function isSensitive(name: string, sensitive: string[]): bool {
 
 // The loop, resumable. `convo` and the step arrays carry whatever a checkpoint
 // restored; a fresh run passes them empty.
-function approvalLoop(model: AiModel, tools: AiTool[], sensitive: string[], convo: AiMessage[], stepTools: string[], stepInputs: string[], stepOutputs: string[], stepOks: bool[], turns: int, maxSteps: int): AiApprovalRun {
+function approvalLoop(model: Model, tools: Tool[], sensitive: string[], convo: Message[], stepTools: string[], stepInputs: string[], stepOutputs: string[], stepOks: bool[], turns: int, maxSteps: int): ApprovalRun {
   let messages = convo.slice(0, convo.length);
   let answer = "";
   let turn = turns;
@@ -111,7 +111,7 @@ function approvalLoop(model: AiModel, tools: AiTool[], sensitive: string[], conv
       // The gate: a sensitive call checkpoints BEFORE executing, so nothing
       // has happened yet when the human looks at it.
       if (isSensitive(name, sensitive)) {
-        let cp: AiCheckpointFile = {
+        let cp: CheckpointFile = {
           version: 1,
           history: serializeHistory(messages),
           stepTools: stepTools, stepInputs: stepInputs, stepOutputs: stepOutputs, stepOks: stepOks,
@@ -127,7 +127,7 @@ function approvalLoop(model: AiModel, tools: AiTool[], sensitive: string[], conv
       // checkpoint the parent with the same call pending, so a resume can
       // re-dispatch into the child.
       if (result.ok && result.output.startsWith(APPROVAL_SENTINEL)) {
-        let cp: AiCheckpointFile = {
+        let cp: CheckpointFile = {
           version: 1,
           history: serializeHistory(messages),
           stepTools: stepTools, stepInputs: stepInputs, stepOutputs: stepOutputs, stepOks: stepOks,
@@ -152,7 +152,7 @@ function approvalLoop(model: AiModel, tools: AiTool[], sensitive: string[], conv
 
 // Run with a pause gate. `sensitive` names the tools that need a human; the
 // run stops before the first such call with a checkpoint in the result.
-export function runAgentWithApproval(model: AiModel, tools: AiTool[], sensitive: string[], history: AiMessage[], maxSteps: int): AiApprovalRun {
+export function runAgentWithApproval(model: Model, tools: Tool[], sensitive: string[], history: Message[], maxSteps: int): ApprovalRun {
   let noTools: string[] = [];
   let noInputs: string[] = [];
   let noOutputs: string[] = [];
@@ -165,8 +165,8 @@ export function runAgentWithApproval(model: AiModel, tools: AiTool[], sensitive:
 // Approved: the pending call runs now, and the loop continues with its result.
 // Denied: the model gets a tool message saying a human refused, and plans
 // around it — the tool itself never executes.
-export function resumeAgent(model: AiModel, tools: AiTool[], sensitive: string[], checkpointJson: string, approved: bool): AiApprovalRun {
-  let cp: AiCheckpointFile = JSON.parse<AiCheckpointFile>(checkpointJson);
+export function resumeAgent(model: Model, tools: Tool[], sensitive: string[], checkpointJson: string, approved: bool): ApprovalRun {
+  let cp: CheckpointFile = JSON.parse<CheckpointFile>(checkpointJson);
   let messages = parseHistory(cp.history);
   let stepTools = cp.stepTools;
   let stepInputs = cp.stepInputs;
@@ -174,7 +174,7 @@ export function resumeAgent(model: AiModel, tools: AiTool[], sensitive: string[]
   let stepOks = cp.stepOks;
 
   if (!approved) {
-    let refusal: AiMessage = {
+    let refusal: Message = {
       role: "tool",
       content: "[tool " + cp.pendingTool + "] a human reviewed this call and denied it — do not retry it; explain or find another way",
     };
@@ -193,7 +193,7 @@ export function resumeAgent(model: AiModel, tools: AiTool[], sensitive: string[]
   let result = runToolWithPolicy(tools, none, none, cp.pendingTool, cp.pendingInput);
   if (result.ok && result.output.startsWith(APPROVAL_SENTINEL)) {
     // The child paused again — a second sensitive call deeper in its run.
-    let again: AiCheckpointFile = {
+    let again: CheckpointFile = {
       version: 1,
       history: cp.history,
       stepTools: stepTools, stepInputs: stepInputs, stepOutputs: stepOutputs, stepOks: stepOks,
@@ -215,7 +215,7 @@ export function resumeAgent(model: AiModel, tools: AiTool[], sensitive: string[]
 
 // --- checkpoint files -----------------------------------------------------------
 
-export function saveCheckpoint(path: string, run: AiApprovalRun): bool {
+export function saveCheckpoint(path: string, run: ApprovalRun): bool {
   if (run.checkpoint == "") { return false; }
   fs.writeFileSync(path, run.checkpoint);
   return true;
@@ -252,7 +252,7 @@ function agApprovalText(raw: string): string {
   return out;
 }
 
-function agApprovalSummary(text: string, calls: AiToolCall[]): string {
+function agApprovalSummary(text: string, calls: ToolCall[]): string {
   let names = "";
   let i: int = 0;
   while (i < calls.length) {

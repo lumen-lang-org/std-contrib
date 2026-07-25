@@ -32,7 +32,7 @@ let stats = new Map<string, i64>();
 stats.set("deltas", 0);
 stats.set("firstAt", -1);
 
-let onEvent: AiStreamHandler = (event: AiStreamEvent): void => {
+let onEvent: StreamHandler = (event: StreamEvent): void => {
   let at = time.monotonic() - start;
   if (event.kind == "delta") {
     let n = stats.get("deltas") ?? 0;

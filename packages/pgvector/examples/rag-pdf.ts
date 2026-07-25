@@ -144,7 +144,7 @@ let stats = new Map<string, i64>();
 stats.set("deltas", 0);
 stats.set("firstAt", -1);
 
-let onEvent: AiStreamHandler = (event: AiStreamEvent): void => {
+let onEvent: StreamHandler = (event: StreamEvent): void => {
   if (event.kind == "delta") {
     stats.set("deltas", (stats.get("deltas") ?? 0) + 1);
     if ((stats.get("firstAt") ?? -1) < 0) { stats.set("firstAt", time.monotonic() - start); }
