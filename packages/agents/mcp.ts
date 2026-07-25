@@ -9,10 +9,15 @@
 // by something that speaks HTTP.
 
 import { McpServerRow } from "./schema.ts";
+import { jsonRaw, jsonText, jsonList } from "./scan.ts";
 
+// A tool as its server describes it. `schema` is the tool's own JSON Schema,
+// kept as text: it is written by whoever wrote the tool, no record type can
+// declare its shape, and it is passed to the model unchanged.
 export type McpTool = {
   name: string,
   description: string,
+  schema: string,
 };
 
 export type McpCall = {
@@ -62,67 +67,89 @@ export function initialize(server: McpServerRow): McpCall {
   return rpc(server.endpoint, 1, "initialize", "{}");
 }
 
-// Tool names, in the order the server listed them. Parsed by scanning for
-// `"name"` inside the tools array rather than with JSON.parse, because the
-// input schemas are arbitrary shapes and a strict parse would refuse them.
-export function toolNames(server: McpServerRow): string[] {
-  let out: string[] = [];
+// What the server offers, in the order it listed them.
+//
+// Read by scanning rather than with JSON.parse: a tool's input schema is an
+// arbitrary shape by design, and a strict parse would refuse the whole reply
+// over a key it had never been told about.
+export function listTools(server: McpServerRow): McpTool[] {
+  let out: McpTool[] = [];
+  if (server.transport != "http" || !server.enabled) { return out; }
   let listed = rpc(server.endpoint, 2, "tools/list", "");
   if (!listed.ok) { return out; }
-  let rest = listed.text;
-  let at = rest.indexOf("\"tools\"");
-  if (at < 0) { return out; }
-  rest = rest.substring(at, rest.length);
-  while (true) {
-    let n = rest.indexOf("\"name\"");
-    if (n < 0) { return out; }
-    rest = rest.substring(n + 6, rest.length);
-    let open = rest.indexOf("\"");
-    if (open < 0) { return out; }
-    rest = rest.substring(open + 1, rest.length);
-    let close = rest.indexOf("\"");
-    if (close < 0) { return out; }
-    out.push(rest.substring(0, close));
-    rest = rest.substring(close + 1, rest.length);
+
+  let items = jsonList(jsonRaw(listed.text, "tools"));
+  let i: int = 0;
+  while (i < items.length) {
+    let name = jsonText(items[i], "name");
+    if (name != "") {
+      // A tool that declares no schema still takes an argument object; saying
+      // so explicitly is what every provider's tool format requires, and an
+      // absent `parameters` is rejected by some of them.
+      let schema = jsonRaw(items[i], "inputSchema");
+      if (schema == "" || !schema.startsWith("{")) {
+        schema = "{\"type\":\"object\",\"properties\":{}}";
+      }
+      let tool: McpTool = {
+        name: name,
+        description: jsonText(items[i], "description"),
+        schema: schema,
+      };
+      out.push(tool);
+    }
+    i = i + 1;
   }
   return out;
 }
 
-// The string value of the first `"<key>":` in a document. Written by hand
-// rather than with JSON.parse because a tool's result carries whatever shape
-// the tool defines, and a strict parse would refuse it.
-function memberAfter(document: string, key: string): string {
-  let marker = "\"" + key + "\"";
-  let rest = document;
-  while (true) {
-    let at = rest.indexOf(marker);
-    if (at < 0) { return ""; }
-    rest = rest.substring(at + marker.length, rest.length);
-    // A key is followed by a colon; the same spelling as a value is not.
-    let after = rest.trimStart();
-    if (after.startsWith(":")) {
-      let value = after.substring(1, after.length).trimStart();
-      if (!value.startsWith("\"")) { return ""; }
-      value = value.substring(1, value.length);
-      let close = value.indexOf("\"");
-      if (close < 0) { return ""; }
-      return value.substring(0, close);
-    }
+// Just the names, for a caller that only wants to know what is there.
+export function toolNames(server: McpServerRow): string[] {
+  let out: string[] = [];
+  let tools = listTools(server);
+  let i: int = 0;
+  while (i < tools.length) {
+    out.push(tools[i].name);
+    i = i + 1;
   }
-  return "";
+  return out;
+}
+
+// The text blocks of a tool's result, joined.
+//
+// A result is `content: [{"type":"text","text":"..."}, ...]` and may hold more
+// than one block. Taking only the first would quietly drop the rest of an
+// answer, so they are joined in order; blocks of any other type — an image,
+// say — have no text and are left out.
+export function resultText(document: string): string {
+  let out = "";
+  let blocks = jsonList(jsonRaw(document, "content"));
+  let i: int = 0;
+  while (i < blocks.length) {
+    if (jsonText(blocks[i], "type") == "text") {
+      let piece = jsonText(blocks[i], "text");
+      if (out != "") { out = out + "\n"; }
+      out = out + piece;
+    }
+    i = i + 1;
+  }
+  return out;
 }
 
 // Call a tool. `args` is a JSON object as text, because its shape is the
 // tool's and not something this file can know.
 export function callTool(server: McpServerRow, toolName: string, args: string): McpCall {
-  let params = "{\"name\":" + JSON.stringify(toolName) + ",\"arguments\":" + args + "}";
+  let body = args;
+  if (body == "") { body = "{}"; }
+  let params = "{\"name\":" + JSON.stringify(toolName) + ",\"arguments\":" + body + "}";
   let answered = rpc(server.endpoint, 3, "tools/call", params);
   if (!answered.ok) { return answered; }
-  // The result is `content: [{"type":"text","text":"..."}]`, so `"text"` occurs
-  // twice: once as the value of "type" and once as the key holding the answer.
-  // Only the one followed by a colon is the key.
-  let value = memberAfter(answered.text, "text");
-  if (value == "") { return answered; }
-  let text: McpCall = { ok: true, text: value, error: "" };
+  // A tool that reports failure says so in the result rather than in a JSON-RPC
+  // error, and the model is the one that has to recover from it — so the text
+  // is handed back either way, with `ok` saying which happened.
+  let failed = jsonRaw(answered.text, "isError") == "true";
+  let value = resultText(answered.text);
+  if (value == "") { value = answered.text; }
+  let text: McpCall = { ok: !failed, text: value, error: "" };
+  if (failed) { text = { ok: false, text: value, error: "the tool reported an error" }; }
   return text;
 }
