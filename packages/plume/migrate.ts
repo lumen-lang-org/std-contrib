@@ -182,6 +182,110 @@ export function planValid(plan: Migration[]): string {
   return "";
 }
 
+
+// --- a plan from a directory ------------------------------------------------
+//
+// Flyway's naming, which is the part of Flyway worth taking: a file name
+// carries the version and the description, so the plan is the directory
+// listing and adding a migration is adding a file.
+//
+//   sql/V1__create_teams.sql        version 1,   "create teams"
+//   sql/V1_1__add_agent_name.sql    version 1.1, "add agent name"
+//   sql/R__active_agents_view.sql   repeatable,  "active agents view"
+//
+//   let plan = migrationsFrom(embedDir("./sql"));
+//
+// `embedDir` reads the directory while compiling, so the names are resolved at
+// build time and the binary still ships alone. Nothing here requires that,
+// though — any list of name-and-contents will do.
+
+// One file, as `embedDir` hands it over.
+export type SqlFile = {
+  name: string,
+  text: string,
+};
+
+export type ParsedName = {
+  version: string,
+  description: string,
+  valid: bool,
+  problem: string,
+};
+
+function parsedName(version: string, description: string): ParsedName {
+  let p: ParsedName = { version: version, description: description, valid: true, problem: "" };
+  return p;
+}
+
+function unparsedName(fileName: string, problem: string): ParsedName {
+  let p: ParsedName = { version: "", description: "", valid: false, problem: "\"" + fileName + "\" " + problem };
+  return p;
+}
+
+// `V1_1__add_agent_name.sql` -> version 1.1, "add agent name".
+//
+// The separator is a double underscore, so a single one is free to mean a dot
+// in the version and a space in the description — which is Flyway's rule, and
+// the reason a description cannot contain a double underscore.
+export function parseMigrationName(fileName: string): ParsedName {
+  let stem = fileName;
+  let dot = stem.lastIndexOf(".");
+  if (dot > 0) { stem = stem.substring(0, dot); }
+
+  let sep = stem.indexOf("__");
+  if (sep < 0) {
+    return unparsedName(fileName, "has no __ separating its version from its description");
+  }
+  let head = stem.substring(0, sep);
+  let tail = stem.substring(sep + 2, stem.length);
+  if (tail == "") {
+    return unparsedName(fileName, "has nothing after its __ separator to describe it");
+  }
+  let description = tail.replaceAll("_", " ");
+
+  if (head == "R") {
+    return parsedName("", description);
+  }
+  if (head.length < 2 || !head.startsWith("V")) {
+    return unparsedName(fileName, "starts with neither V for a version nor R for a repeatable step");
+  }
+  let version = head.substring(1, head.length).replaceAll("_", ".");
+  if (!versionValid(version)) {
+    return unparsedName(fileName, "has \"" + version + "\" where a dotted number belongs");
+  }
+  return parsedName(version, description);
+}
+
+// The plan a directory describes. Files that do not follow the naming are
+// skipped here and reported by `migrationNameProblem`, so a stray README beside
+// the SQL is not silently treated as a migration.
+export function migrationsFrom(files: SqlFile[]): Migration[] {
+  let out: Migration[] = [];
+  let i: int = 0;
+  while (i < files.length) {
+    let parsed = parseMigrationName(files[i].name);
+    if (parsed.valid) {
+      out.push(migration(parsed.version, parsed.description, files[i].text));
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// Why a directory does not describe a plan. A file that is not a migration is
+// an error rather than something to ignore: a migration that was meant to run
+// and was named wrongly would otherwise disappear without a word.
+export function migrationNameProblem(files: SqlFile[]): string {
+  if (files.length == 0) { return "no files to read migrations from"; }
+  let i: int = 0;
+  while (i < files.length) {
+    let parsed = parseMigrationName(files[i].name);
+    if (!parsed.valid) { return parsed.problem; }
+    i = i + 1;
+  }
+  return planValid(migrationsFrom(files));
+}
+
 // --- the history table ----------------------------------------------------
 
 // The table name is fixed rather than configurable, because two names in one

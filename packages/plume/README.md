@@ -220,8 +220,40 @@ What it does:
 - **Baseline** for adopting plume on a database that already has a schema.
 - **`migrationInfo`** reports what would happen without doing it.
 
-There is no filename convention. A plan is a value, written in the program or
-assembled from anywhere, so nothing depends on how a file happens to be named.
+### A plan from a directory
+
+The statements can live in `.sql` files, named the way Flyway names them, with
+the version and description read from the name:
+
+```
+sql/V1__create_teams.sql        version 1,   "create teams"
+sql/V1_1__add_team_name.sql     version 1.1, "add team name"
+sql/V2__create_agents.sql       version 2,   "create agents"
+sql/R__active_agents_view.sql   repeatable,  "active agents view"
+```
+
+```ts
+let plan = migrationsFrom(embedDir("./sql"));
+migrate(database, plan);
+```
+
+Adding a migration is adding a file. A single underscore is a dot in the
+version and a space in the description; `__` separates the two, which is why a
+description cannot contain one.
+
+`embedDir` reads the directory **while compiling** (Lumen spec 458), so the SQL
+is reviewable as SQL and the program is still one binary — delete `sql/` after
+building and it still runs. Nothing requires `embedDir`, though:
+`migrationsFrom` takes any list of names and contents.
+
+A file that is not a migration — a `README.md` beside the SQL — is left out of
+the plan and reported by `migrationNameProblem`. It is not silently skipped: a
+migration named wrongly would otherwise never run and never be missed.
+
+Everything after the name is still checked. Ordering is by version, so `V10`
+runs after `V9` where a name sort would get it backwards; the checksum is over
+the file's contents, so editing an applied `.sql` is refused exactly as editing
+an inline string was.
 
 Migration bodies are your SQL, not plume's, so they are spelled for the
 database they run against.
@@ -282,6 +314,7 @@ lumen test relations_mysql.test.ts      # relations, MySQL
 lumen test foreignkeys.test.ts          # generated keys, SQLite
 lumen test foreignkeys_pg.test.ts       # generated keys, PostgreSQL
 lumen test foreignkeys_mysql.test.ts    # generated keys, MySQL
+lumen test migratenames.test.ts         # the V1__name.sql convention
 ```
 
 `PLUME_TEST_CONNINFO` and `PLUME_MYSQL_CONNINFO` override the connections. The
