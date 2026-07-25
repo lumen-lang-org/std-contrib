@@ -95,9 +95,9 @@ export function mcpStdioClose(session: McpStdioSession): void {
 // {"input": <input>} — this package's one-string-arg convention. it never
 // throws: neither writeLine/readLine nor parseMcpToolResult throws, so trouble
 // comes back as text.
-export function mcpStdioToolToLumen(session: McpStdioSession, tool: McpTool): Tool {
-  let toolName = tool.name;
-  return makeTool(tool.name, tool.description, tool.schema, (input: string) => {
+export function mcpStdioToolToLumen(session: McpStdioSession, entry: McpTool): Tool {
+  let toolName = entry.name;
+  return makeTool(entry.name, entry.description, entry.schema, (input: string) => {
     let args = "{\"input\":" + JSON.stringify(input) + "}";
     let id = stdioNextId(session);
     let reply = stdioExchange(session, mcpCallToolRequest(id, toolName, args), id);
