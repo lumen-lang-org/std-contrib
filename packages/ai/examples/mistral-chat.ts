@@ -16,7 +16,7 @@ import { requireEnv } from "./env.ts";
 let apiKey = requireEnv("MISTRAL_API_KEY");
 
 let mistral = withTemperature(
-  modelConfig("mistral", "mistral-large-latest", apiKey),
+  modelConfig({ provider: "mistral", model: "mistral-large-latest", apiKey: apiKey }),
   0.2,
 );
 

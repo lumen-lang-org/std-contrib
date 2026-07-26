@@ -10,7 +10,7 @@ import { modelConfig, chat, modelEndpoint, system, user } from "../ai.ts";
 import { requireEnv } from "./env.ts";
 
 let apiKey = requireEnv("OPENAI_API_KEY");
-let openai = modelConfig("openai", "gpt-4.1-mini", apiKey);
+let openai = modelConfig({ provider: "openai", model: "gpt-4.1-mini", apiKey: apiKey });
 
 console.log(`calling ${openai.model} at ${modelEndpoint(openai)}`);
 

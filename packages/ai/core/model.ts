@@ -17,11 +17,24 @@ export type ModelConfig = {
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MISTRAL_BASE_URL = "https://api.mistral.ai/v1";
 
-export function makeModelConfig(provider: string, model: string, apiKey: string): ModelConfig {
+// What identifies a model call. Three strings positionally is the shape that
+// sends a model name as a bearer token and reads back as a credentials
+// problem, so they are named at the call site.
+export type ModelSpec = {
+  provider: string,
+  model: string,
+  apiKey: string,
+};
+
+export function makeModelConfig(spec: ModelSpec): ModelConfig {
+  // The three fields a caller must decide, plus the three with sensible
+  // starting points that `withBaseUrl`/`withTemperature`/`withMaxTokens`
+  // change. Lumen records have no defaults, so this function is where they
+  // live.
   let cfg: ModelConfig = {
-    provider: provider,
-    model: model,
-    apiKey: apiKey,
+    provider: spec.provider,
+    model: spec.model,
+    apiKey: spec.apiKey,
     baseUrl: "",
     temperature: 0.7,
     maxTokens: 1024,

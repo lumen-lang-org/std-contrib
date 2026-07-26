@@ -7,7 +7,7 @@
 //   lumen compile packages/ai/examples/openai-compatible-chat.ts
 //   ./openai-compatible-chat
 
-import { chatOpenAIWithBaseUrl, system, user } from "../ai.ts";
+import { chatOpenAI, system, user } from "../ai.ts";
 import { envValueOr } from "./env.ts";
 
 
@@ -15,10 +15,15 @@ let baseUrl = envValueOr("OPENAI_COMPATIBLE_BASE_URL", "http://localhost:11434/v
 let model = envValueOr("OPENAI_COMPATIBLE_MODEL", "llama3.2");
 let apiKey = envValueOr("OPENAI_COMPATIBLE_API_KEY", "local");
 
-let result = chatOpenAIWithBaseUrl(baseUrl, apiKey, model, [
-  system("You are concise."),
-  user("Reply with exactly: lumen ok"),
-]);
+let result = chatOpenAI({
+  apiKey: apiKey,
+  model: model,
+  baseUrl: baseUrl,
+  messages: [
+    system("You are concise."),
+    user("Reply with exactly: lumen ok"),
+  ],
+});
 
 console.log(result.status);
 console.log(result.content);

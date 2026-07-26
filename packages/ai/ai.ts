@@ -10,7 +10,7 @@ import { buildChatRequest } from "./core/request.ts";
 // providers/chat.ts imports makeModelConfig and modelBaseUrl from core/model.ts
 // unaliased, so they are imported unaliased here too. The public wrappers below
 // take different names, so nothing collides.
-import { makeModelConfig, modelBaseUrl, modelWithTemperature, modelWithMaxTokens, modelWithBaseUrl, modelWithApiKey } from "./core/model.ts";
+import { ModelConfig as ModelConfigRecord, ModelSpec as ModelSpecRecord, makeModelConfig, modelBaseUrl, modelWithTemperature, modelWithMaxTokens, modelWithBaseUrl, modelWithApiKey } from "./core/model.ts";
 import { runConfiguredChat } from "./providers/chat.ts";
 import { makeAiResult } from "./core/result.ts";
 import { makeProviderError } from "./core/error.ts";
@@ -231,12 +231,32 @@ export function parseOpenAITokenUsage(raw: string): TokenUsage {
   return readOpenAITokenUsage(raw);
 }
 
-export function chatOpenAIWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: Message[]): Result {
-  return runOpenAIChatWithBaseUrl(baseUrl, apiKey, model, messages);
-}
+// One chat call, as a record.
+//
+//   let reply = chatMistral({
+//     apiKey: key,
+//     model: "mistral-large-latest",
+//     baseUrl: "",
+//     messages: windowMemory(history, 8),
+//   });
+//
+// Three positional arguments — two of them strings — read as nothing at a call
+// site and swap without complaint: an api key sent as a model name is a 401
+// that looks like a credentials problem rather than a call-site problem.
+//
+// `baseUrl` is a field rather than a separate `...WithBaseUrl` function. Empty
+// means the provider's own endpoint; anything else is an OpenAI-compatible
+// server — Ollama, Groq, vLLM, a gateway.
+export type ChatCall = {
+  apiKey: string,
+  model: string,
+  baseUrl: string,
+  messages: Message[],
+};
 
-export function chatOpenAI(apiKey: string, model: string, messages: Message[]): Result {
-  return runOpenAIChat(apiKey, model, messages);
+export function chatOpenAI(call: ChatCall): Result {
+  if (call.baseUrl == "") { return runOpenAIChat(call.apiKey, call.model, call.messages); }
+  return runOpenAIChatWithBaseUrl(call.baseUrl, call.apiKey, call.model, call.messages);
 }
 
 export function mistralChatBody(model: string, messages: Message[], temperature: number, maxTokens: int): string {
@@ -263,12 +283,9 @@ export function parseMistralTokenUsage(raw: string): TokenUsage {
   return readMistralTokenUsage(raw);
 }
 
-export function chatMistralWithBaseUrl(baseUrl: string, apiKey: string, model: string, messages: Message[]): Result {
-  return runMistralChatWithBaseUrl(baseUrl, apiKey, model, messages);
-}
-
-export function chatMistral(apiKey: string, model: string, messages: Message[]): Result {
-  return runMistralChat(apiKey, model, messages);
+export function chatMistral(call: ChatCall): Result {
+  if (call.baseUrl == "") { return runMistralChat(call.apiKey, call.model, call.messages); }
+  return runMistralChatWithBaseUrl(call.baseUrl, call.apiKey, call.model, call.messages);
 }
 
 export function document(id: string, text: string, source: string, metadata: string): Document {
@@ -644,8 +661,12 @@ export function mcpRequestBody(id: int, method: string, params: string): string 
 // options, so a call site names a model instead of threading four arguments.
 // Unlike chatOpenAI / chatMistral, `chat` honours temperature and maxTokens.
 
-export function modelConfig(provider: string, model: string, apiKey: string): ModelConfig {
-  return makeModelConfig(provider, model, apiKey);
+// The names, so a caller can annotate a variable of either.
+export type ModelConfig = ModelConfigRecord;
+export type ModelSpec = ModelSpecRecord;
+
+export function modelConfig(spec: ModelSpec): ModelConfig {
+  return makeModelConfig(spec);
 }
 
 export function withTemperature(cfg: ModelConfig, temperature: number): ModelConfig {
@@ -982,18 +1003,20 @@ export function compressIfNeeded(summarize: Summarizer, history: Message[], maxC
   return foldHistoryIfNeeded(summarize, history, maxChars, keepRecent);
 }
 
-// Summarizers backed by a real provider, ready to hand to the helpers above.
-export function openAISummarizer(apiKey: string, model: string): Summarizer {
+// A summarizer backed by a real model.
+//
+// One function, not one per provider: which provider to call is already a
+// field of the config, so `mistralSummarizer` and `openAISummarizer` were the
+// same three lines with a different constant inside. A generic one also works
+// for anything reached by baseUrl, which the pair never could.
+//
+//   let summarize = summarizer(modelConfig({
+//     provider: "mistral", model: "mistral-large-latest", apiKey: key,
+//   }));
+export function summarizer(cfg: ModelConfigRecord): Summarizer {
   return (prompt: string) => {
     let msgs: Message[] = [userMessage(prompt)];
-    return runOpenAIChat(apiKey, model, msgs).content;
-  };
-}
-
-export function mistralSummarizer(apiKey: string, model: string): Summarizer {
-  return (prompt: string) => {
-    let msgs: Message[] = [userMessage(prompt)];
-    return runMistralChat(apiKey, model, msgs).content;
+    return runConfiguredChat(cfg, msgs).content;
   };
 }
 

@@ -27,7 +27,12 @@ let messages = [
   user(prompt),
 ];
 
-let result = chatMistral("mistral-key", "mistral-large-latest", messages);
+let result = chatMistral({
+  apiKey: "mistral-key",
+  model: "mistral-large-latest",
+  baseUrl: "",
+  messages: messages,
+});
 console.log(result.content);
 ```
 
@@ -77,8 +82,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `parseOpenAIResult(status, ok, raw)` | Build a normalized result record |
 | `parseOpenAIError(status, raw)` | Parse an OpenAI-compatible error JSON body |
 | `parseOpenAITokenUsage(raw)` | Parse OpenAI-compatible token usage |
-| `chatOpenAI(apiKey, model, messages)` | POST to `https://api.openai.com/v1/chat/completions` |
-| `chatOpenAIWithBaseUrl(baseUrl, apiKey, model, messages)` | POST to another OpenAI-compatible base URL |
+| `chatOpenAI(call)` | POST an OpenAI chat; `call` is `{ apiKey, model, baseUrl, messages }`, empty `baseUrl` meaning OpenAI itself |
 | `mistralChatBody(model, messages, temperature, maxTokens)` | Build Mistral request JSON |
 | `mistralChatBodyWithStops(model, messages, temperature, maxTokens, stop)` | Build Mistral request JSON with stop sequences |
 | `mistralAuthHeaders(apiKey)` | Build Mistral HTTP headers |
@@ -86,8 +90,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `parseMistralResult(status, ok, raw)` | Build a normalized Mistral result record |
 | `parseMistralError(status, raw)` | Parse a Mistral error JSON body |
 | `parseMistralTokenUsage(raw)` | Parse Mistral token usage |
-| `chatMistral(apiKey, model, messages)` | POST to `https://api.mistral.ai/v1/chat/completions` |
-| `chatMistralWithBaseUrl(baseUrl, apiKey, model, messages)` | POST to another Mistral-compatible base URL |
+| `chatMistral(call)` | POST a Mistral chat; same `ChatCall` record, empty `baseUrl` meaning Mistral itself |
 | `document(id, text, source, metadata)` | Build a document record |
 | `docMetadata(doc, key)` | Read one metadata value, or `""` when absent |
 | `withDocMetadata(doc, key, value)` | Return a copy of the document with one metadata entry set |
@@ -141,8 +144,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `needsCompression(history, maxChars)` | Whether the conversation has outgrown its character budget |
 | `compressHistory(summarize, history, keepRecent)` | Fold older turns into a running summary, keeping the system prompt and the last `keepRecent` messages |
 | `compressIfNeeded(summarize, history, maxChars, keepRecent)` | Compress only when over budget |
-| `openAISummarizer(apiKey, model)` | A summarizer backed by an OpenAI-compatible model |
-| `mistralSummarizer(apiKey, model)` | A summarizer backed by Mistral |
+| `summarizer(cfg)` | A summarizer backed by any configured model — the provider is a field of `cfg`, so there is one of these, not one per vendor |
 | `schemaField(name, type, description, required)` | Describe one property of an object schema |
 | `objectSchema(fields)` | Build a strict JSON Schema object from fields |
 | `schemaRequired(fields)` | The required field names, for validation |
@@ -325,11 +327,12 @@ let hits = retrieve(store, docs, question, 128, 3);
 
 console.log(formatContext(hits));
 
-let result = chatMistral(
-  "mistral-key",
-  "mistral-large-latest",
-  ragMessages(question, hits),
-);
+let result = chatMistral({
+  apiKey: "mistral-key",
+  model: "mistral-large-latest",
+  baseUrl: "",
+  messages: ragMessages(question, hits),
+});
 console.log(result.content);
 ```
 
@@ -346,7 +349,7 @@ takes every chunk in one request, and the returned vectors go into the store
 with `addVector`:
 
 ```ts
-let cfg = modelConfig("mistral", "mistral-embed", apiKey);
+let cfg = modelConfig({ provider: "mistral", model: "mistral-embed", apiKey: apiKey });
 let vectors = embedBatchWithConfig(cfg, texts);
 ```
 
@@ -379,11 +382,12 @@ import {
 let history = [system("You are concise.")];
 history = appendMessage(history, user("What compiles to a native binary?"));
 
-let reply = chatMistral(
-  "mistral-key",
-  "mistral-large-latest",
-  windowMemory(history, 8),
-);
+let reply = chatMistral({
+  apiKey: "mistral-key",
+  model: "mistral-large-latest",
+  baseUrl: "",
+  messages: windowMemory(history, 8),
+});
 history = appendMessage(history, assistant(reply.content));
 
 saveHistory("chat.json", history);
@@ -643,7 +647,9 @@ folds the older turns into a running summary **on demand** — the app checks a
 budget and compresses only when it is exceeded:
 
 ```ts
-let summarize = mistralSummarizer(apiKey, "mistral-large-latest");
+let summarize = summarizer(modelConfig({
+  provider: "mistral", model: "mistral-large-latest", apiKey: apiKey,
+}));
 
 if (needsCompression(history, 8000)) {
   history = compressHistory(summarize, history, 4);   // keep the last 4 turns
@@ -665,7 +671,7 @@ Two safety properties matter in practice:
 
 The summarizer is an injected `(prompt: string) => string`, so the memory module
 does no I/O and is testable with a deterministic fake; the provider-backed
-`openAISummarizer` / `mistralSummarizer` are conveniences.
+`summarizer(cfg)` is the convenience — one function, since which provider to call is already a field of the config.
 
 ## Structured output
 
