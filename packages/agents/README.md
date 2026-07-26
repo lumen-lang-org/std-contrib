@@ -36,6 +36,14 @@ and moving an agent to a newer model is an UPDATE.
 next version; the agent points at one. Rolling back is an UPDATE, and the
 version you rolled back from is still there.
 
+That invariant needs guarding, not just stating. `persist` is an upsert — the
+right default for a mapper and the wrong one for a create — so `POST /prompts`
+carrying an id that already exists used to *replace that version's text in
+place* and answer as though it had made a new one, while every agent pointing
+at it silently changed behaviour. Now the version and the id are both assigned
+by the server, and a taken id is refused by name. The same guard is on every
+create in the API: a POST that overwrites is a PUT wearing the wrong verb.
+
 **Config is separate from the model**, because two agents on one model
 routinely want different knobs. `extra` carries whatever a provider accepts
 that the named columns do not, so an unfamiliar parameter needs no migration.
