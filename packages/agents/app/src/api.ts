@@ -63,6 +63,10 @@ export type ThreadListing = {
 
 export type TranscriptTurn = { role: string; text: string };
 
+export type ScopeNode = { path: string; documents: number; total: number };
+
+export type SourceListing = { source: string; scope: string; chunks: number; bytes: number };
+
 export type WorkspaceFile = { name: string; mime: string; origin: string };
 
 export type SayReply = {
@@ -160,6 +164,17 @@ export const configureTracing = (row: {
 export const setTracingSecret = (secretKey: string) =>
   call<unknown>("/tracing/key", { method: "PUT", body: JSON.stringify({ secretKey }) });
 
+export const listScopes = () => call<ScopeNode[]>("/scopes");
+export const listSources = (scope: string) =>
+  call<SourceListing[]>(`/documents?scope=${encodeURIComponent(scope)}`);
+export const uploadDocument = (source: string, scope: string, body: string, model: string) =>
+  call<unknown>(`/documents?model=${encodeURIComponent(model)}`, {
+    method: "POST",
+    body: JSON.stringify({ source, scope, body }),
+  });
+export const deleteSource = (source: string) =>
+  call<unknown>(`/documents/${encodeURIComponent(source)}`, { method: "DELETE" });
+
 export const setAgentModel = (agentId: string, modelConfigId: string) =>
   call<unknown>(`/agents/${encodeURIComponent(agentId)}/model`, {
     method: "PUT", body: JSON.stringify({ modelConfigId }),
@@ -168,8 +183,25 @@ export const setAgentPrompt = (agentId: string, promptId: string) =>
   call<unknown>(`/agents/${encodeURIComponent(agentId)}/prompt`, {
     method: "PUT", body: JSON.stringify({ promptId }),
   });
-export const createAgent = (row: AgentRow) =>
+// Only the row's own columns. GET /agents answers the *full* view — prompt,
+// config, servers and sub-agents nested — and spreading that back into a PUT
+// sends fields the record does not declare, which JSON.parse<AgentRow>
+// rejects outright.
+export const updateAgent = (a: AgentRow) =>
+  call<AgentRow>(`/agents/${encodeURIComponent(a.id)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: a.id, agentName: a.agentName, description: a.description,
+      modelConfigId: a.modelConfigId, promptId: a.promptId,
+      enabled: a.enabled, updatedAt: "now",
+    }),
+  });
+export const createAgent = (a: AgentRow) =>
   call<AgentRow>("/agents", {
     method: "POST",
-    body: JSON.stringify({ ...row, updatedAt: "now", description: row.description ?? "" }),
+    body: JSON.stringify({
+      id: a.id, agentName: a.agentName, description: a.description ?? "",
+      modelConfigId: a.modelConfigId, promptId: a.promptId,
+      enabled: a.enabled, updatedAt: "now",
+    }),
   });

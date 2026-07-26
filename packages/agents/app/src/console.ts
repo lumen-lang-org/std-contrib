@@ -9,6 +9,7 @@ import "./ui.js";
 import "./sidebar.js";
 import "./workspace-panel.js";
 import "./settings.js";
+import "./knowledge.js";
 import {
   AgentRow, ThreadListing, listAgents, listThreads, openThread, say, transcript,
 } from "./api.js";
@@ -60,6 +61,7 @@ export class AgentConsole extends LitElement {
   @state() private busy = false;
   @state() private panel = false;
   @state() private settings = false;
+  @state() private view: "chat" | "knowledge" = "chat";
 
   async connectedCallback() {
     super.connectedCallback();
@@ -122,12 +124,14 @@ export class AgentConsole extends LitElement {
       <console-sidebar
         .threads=${this.threads}
         .activeId=${this.threadId}
-        @pick-thread=${(e: CustomEvent) => this.open(e.detail.id)}
-        @new-thread=${this.fresh}
+        @pick-thread=${(e: CustomEvent) => { this.view = "chat"; this.open(e.detail.id); }}
+        @new-thread=${() => { this.view = "chat"; this.fresh(); }}
         @open-settings=${() => { this.settings = true; }}
+        @open-knowledge=${() => { this.view = "knowledge"; }}
       ></console-sidebar>
 
       <div class="center">
+        ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>` : html`
         <header>
           <span class="title">${this.threadTitle()}</span>
           <span class="chip"><span class="bolt">⚡</span>
@@ -148,7 +152,7 @@ export class AgentConsole extends LitElement {
             @nr-chatbot-message-sent=${(e: CustomEvent) =>
               this.send(e.detail?.metadata?.text ?? e.detail?.text ?? "")}
           ></nr-chatbot>
-        </main>
+        </main>`}
       </div>
 
       ${this.panel ? html`<workspace-panel .threadId=${this.threadId}></workspace-panel>` : ""}
