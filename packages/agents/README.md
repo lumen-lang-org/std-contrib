@@ -509,3 +509,33 @@ The live halves are `examples/mount-mcp.ts`, `examples/call-model.ts` and
 is a test that gets skipped, so those stay examples and the refusals stay tests.
 
 Requires `sh ../plume/build.sh` first.
+
+## The console
+
+A web frontend for this package lives in `app/`: a Lit element built on
+[LumenUI](https://www.npmjs.com/package/@nuraly/lumenui)'s `<nr-chatbot>`,
+served by Vite, talking to the API above through one origin.
+
+Run everything — database, API, console — with one command:
+
+```sh
+cd packages/agents
+cp .env.example .env      # set LUMEN_MASTER_KEY (openssl rand -hex 16)
+docker compose up --build
+```
+
+Console on `http://localhost:8080`, the API behind it on `/api`, PostgreSQL
+with pgvector underneath so documents and retrieval work.
+
+For development against a locally running API:
+
+```sh
+cd packages/agents/app
+npm install
+npm run dev               # http://localhost:5173, /api proxied to :8100
+```
+
+The app is plain npm/Vite and is not part of the URL-import catalog; CI's
+`packages/*/*.ts` glob is one level deep on purpose, so the TypeScript here
+is never handed to the Lumen compiler. Keep it that way — both languages
+use `.ts`.

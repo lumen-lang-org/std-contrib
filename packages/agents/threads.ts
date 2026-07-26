@@ -16,7 +16,7 @@
 // go, oldest first, never single turns.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql, execute } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
@@ -125,6 +125,42 @@ export function openThread(db: Db, agentId: string, now: string): string {
   let written = persist(db, threadsMapping(), JSON.stringify(row));
   if (!written.ok) { return ""; }
   return id;
+}
+
+// One row of the thread list: enough for a sidebar, nothing more.
+export type ThreadListing = {
+  id: string,
+  agentId: string,
+  createdAt: string,
+  // The first thing the user said, which is the only honest title a thread
+  // has — nobody names their conversations.
+  title: string,
+};
+
+// The threads, newest first. The title costs one query per row, which is fine
+// for a sidebar page of fifty and wrong for anything unbounded — hence the
+// limit is required, not defaulted.
+export function listThreads(db: Db, limit: int, offset: int): ThreadListing[] {
+  let out: ThreadListing[] = [];
+  let newest: DbOrder[] = [desc("created_at")];
+  let page = pageOrdered(db, threadsMapping(), "", [], newest, limit, offset);
+  if (page == "" || page == "[]") { return out; }
+  let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(page);
+  let i: int = 0;
+  while (i < rows.length) {
+    let said = threadMessages(db, rows[i].id);
+    let title = "";
+    let m: int = 0;
+    while (m < said.length) {
+      if (said[m].role == "user") { title = said[m].text; break; }
+      m = m + 1;
+    }
+    if (title.length > 80) { title = title.slice(0, 77) + "..."; }
+    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title };
+    out.push(listing);
+    i = i + 1;
+  }
+  return out;
 }
 
 export function threadAgent(db: Db, threadId: string): string {
