@@ -166,7 +166,21 @@ export function runTool(tools: Tool[], name: string, input: string): ToolResult 
 // policy is checked before the registry is consulted, so a denied name is never
 // dispatched and leaks nothing about whether it exists. deny wins over allow; an
 // empty allow list means everything not denied.
-export function runToolWithPolicy(tools: Tool[], allow: string[], deny: string[], name: string, input: string): ToolResult {
+// Which tools an agent may call.
+//
+// Two adjacent string lists positionally, and swapping them INVERTS the policy
+// while compiling — a deny list read as an allow list permits exactly what was
+// meant to be blocked. The tests passed the same array in both slots, which is
+// the clearest evidence the positions were indistinguishable.
+export type ToolPolicy = {
+  // Empty means "no allow list": anything not denied is permitted.
+  allow: string[],
+  deny: string[],
+};
+
+export function runToolWithPolicy(tools: Tool[], policy: ToolPolicy, name: string, input: string): ToolResult {
+  let allow = policy.allow;
+  let deny = policy.deny;
   if (toolListHas(deny, name)) {
     return toolFailure(name, input, "tool \"" + toolFlattenLine(name) + "\" is blocked by policy: denied");
   }

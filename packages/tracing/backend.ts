@@ -236,7 +236,25 @@ export function noBackend(): TraceBackend {
 // `endpoint` is the full trace URL in both cases. For Langfuse the API root is
 // derived from it by removing the OTLP path — the two are the same deployment,
 // and asking for the address twice is asking for them to disagree.
-export function backendNamed(name: string, endpoint: string, publicKey: string, secretKey: string): TraceBackend {
+// What a backend needs to authenticate.
+//
+// `identity` rather than `publicKey`, because that name was true for exactly
+// one of the six: it is a public key for Langfuse, a project for Braintrust
+// and LangSmith, a space id for Arize, and unused for OTLP and Phoenix. A
+// caller filling a field called `publicKey` with a LangSmith project got the
+// two swapped — and that sends the API secret as a plaintext
+// `Langsmith-Project` header, which is a leak rather than a 401.
+export type BackendCredentials = {
+  endpoint: string,
+  identity: string,
+  // The key or token. Empty for a collector wanting none.
+  secret: string,
+};
+
+export function backendNamed(name: string, creds: BackendCredentials): TraceBackend {
+  let endpoint = creds.endpoint;
+  let publicKey = creds.identity;
+  let secretKey = creds.secret;
   if (name == "langfuse") {
     return langfuseBackend(langfuseRootOf(endpoint), publicKey, secretKey);
   }
@@ -247,7 +265,7 @@ export function backendNamed(name: string, endpoint: string, publicKey: string, 
     if (secretKey == "") { return otlpBackend(endpoint, "", ""); }
     return otlpBackend(endpoint, "Authorization", "Bearer " + secretKey);
   }
-  // `publicKey` is the second thing each of these needs, and what it means is
+  // `identity` is the second thing each of these needs, and what it means is
   // the backend's business: a project for Braintrust and LangSmith, a space
   // for Arize. One column rather than one per vendor, because a config row
   // should not grow a field every time a backend is added.

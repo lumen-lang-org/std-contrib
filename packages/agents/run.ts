@@ -29,7 +29,7 @@ import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, d
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
-import { Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL, TRACE_RETRIEVER } from "../tracing/tracing.ts";
+import { GenerationCall, Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL, TRACE_RETRIEVER } from "../tracing/tracing.ts";
 
 // How many times a run may go back to the model after calling tools.
 //
@@ -319,7 +319,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   }
 
   if (on && want.embeddingModelId != "") {
-    trace = endSpan(trace, retrieveSpan, userText, passageSummary(retrieved));
+    trace = endSpan(trace, retrieveSpan, { input: userText, output: passageSummary(retrieved) });
   }
 
   // Everything the thread already holds, then this question's passages, then
@@ -355,15 +355,23 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // Token counts are not read back: a failed call has none, and inventing
       // zeroes would put a real-looking number on a request that never ran.
       if (on) {
-        trace = endSpanFailed(trace, modelSpan, userText, last.error);
-        trace = endSpanFailed(trace, agentSpan, userText, last.error);
+        trace = endSpanFailed(trace, modelSpan, { input: userText, message: last.error });
+        trace = endSpanFailed(trace, agentSpan, { input: userText, message: last.error });
       }
       let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       return refused;
     }
     if (on) {
-      trace = endGeneration(trace, modelSpan, model.apiName, configRow.temperature, configRow.maxTokens,
-        userText, replyText(model.provider, last.text), last.inputTokens, last.outputTokens);
+      let call: GenerationCall = {
+        model: model.apiName,
+        temperature: configRow.temperature,
+        maxTokens: configRow.maxTokens,
+        input: userText,
+        output: replyText(model.provider, last.text),
+        inputTokens: last.inputTokens,
+        outputTokens: last.outputTokens,
+      };
+      trace = endGeneration(trace, modelSpan, call);
     }
 
     inputTokens = inputTokens + last.inputTokens;
@@ -377,7 +385,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // `said.text` so a reply in an unrecognised shape is handed back whole
       // instead of as an empty answer.
       answer = replyText(model.provider, last.text);
-      if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
+      if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: answer }); }
       return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
     }
 
@@ -389,7 +397,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // for an unbounded number of them, so without this a single round could
       // run arbitrarily many side effects.
       if (steps.length >= MAX_TOOL_STEPS) {
-        if (on) { trace = endSpan(trace, agentSpan, userText, said.text); }
+        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: said.text }); }
         return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       }
       // A child first: a delegation and a tool call are the same thing to the
@@ -472,7 +480,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultText = answered.text;
         calledTools.push(calls[i].name);
       }
-      if (on) { trace = endTool(trace, callSpan, calls[i].args, resultText, resultOk); }
+      if (on) { trace = endTool(trace, callSpan, { input: calls[i].args, output: resultText }, resultOk); }
       let step: AgentStep = {
         index: steps.length,
         tool: calls[i].name,
@@ -489,7 +497,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     }
   }
 
-  if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
+  if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: answer }); }
   return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
 }
 

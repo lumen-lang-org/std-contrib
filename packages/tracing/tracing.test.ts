@@ -124,7 +124,7 @@ test("a fresh tracer has a trace id and no spans", () => {
 test("recording a span leaves the tracer it was given alone", () => {
   let t = tracer();
   let s = startSpan("step", TRACE_SPAN, "");
-  let t2 = endSpan(t, s, "in", "out");
+  let t2 = endSpan(t, s, { input: "in", output: "out" });
   expect(spanCount(t) == 0);
   expect(spanCount(t2) == 1);
 });
@@ -132,7 +132,7 @@ test("recording a span leaves the tracer it was given alone", () => {
 test("a span carries its trace, its own id and its timings", () => {
   let t = tracer();
   let s = startSpan("retrieve", TRACE_SPAN, "");
-  let body = traceBody(endSpan(t, s, "q", "docs"));
+  let body = traceBody(endSpan(t, s, { input: "q", output: "docs" }));
   expect(body.indexOf(traceId(t)) >= 0);
   expect(body.indexOf(s.id) >= 0);
   expect(body.indexOf("startTimeUnixNano") >= 0);
@@ -144,7 +144,7 @@ test("a child names its parent and a root does not", () => {
   let t = tracer();
   let root = startSpan("run", TRACE_CHAIN, "");
   let child = startSpan("call", TRACE_GENERATION, root.id);
-  let body = traceBody(endSpan(endSpan(t, root, "", ""), child, "", ""));
+  let body = traceBody(endSpan(endSpan(t, root, { input: "", output: "" }), child, { input: "", output: "" }));
   expect(body.indexOf("\"parentSpanId\":\"" + root.id + "\"") >= 0);
   // The root's own span carries no parent.
   expect(body.indexOf("\"parentSpanId\":\"\"") < 0);
@@ -155,9 +155,9 @@ test("the document is well formed with several spans", () => {
   let root = startSpan("run", TRACE_CHAIN, "");
   let gen = startSpan("chat", TRACE_GENERATION, root.id);
   let tool = startSpan("weather", TRACE_TOOL, root.id);
-  let t2 = endGeneration(t, gen, "mistral-large", 0.2, 512, "hi", "hello", 10, 4);
-  let t3 = endTool(t2, tool, "Paris", "18C", true);
-  let t4 = endSpan(t3, root, "q", "a");
+  let t2 = endGeneration(t, gen, { model: "mistral-large", temperature: 0.2, maxTokens: 512, input: "hi", output: "hello", inputTokens: 10, outputTokens: 4 });
+  let t3 = endTool(t2, tool, { input: "Paris", output: "18C" }, true);
+  let t4 = endSpan(t3, root, { input: "q", output: "a" });
   expect(spanCount(t4) == 3);
   expect(balanced(traceBody(t4)));
 });
@@ -167,7 +167,7 @@ test("output containing braces and quotes keeps the document valid", () => {
   let t = tracer();
   let s = startSpan("chat", TRACE_GENERATION, "");
   let nasty = "{\"answer\": \"it's \\\"quoted\\\"\"}\n[1,2]";
-  expect(balanced(traceBody(endSpan(t, s, nasty, nasty))));
+  expect(balanced(traceBody(endSpan(t, s, { input: nasty, output: nasty }))));
 });
 
 // --- kinds and levels -------------------------------------------------------------
@@ -175,7 +175,7 @@ test("output containing braces and quotes keeps the document valid", () => {
 test("a generation carries model, parameters and usage", () => {
   let t = tracer();
   let s = startSpan("chat", TRACE_GENERATION, "");
-  let body = traceBody(endGeneration(t, s, "mistral-large-latest", 0.7, 1024, "in", "out", 120, 45));
+  let body = traceBody(endGeneration(t, s, { model: "mistral-large-latest", temperature: 0.7, maxTokens: 1024, input: "in", output: "out", inputTokens: 120, outputTokens: 45 }));
   expect(body.indexOf("langfuse.observation.model.name") >= 0);
   expect(body.indexOf("mistral-large-latest") >= 0);
   expect(body.indexOf("\\\"temperature\\\":0.7") >= 0);
@@ -188,7 +188,7 @@ test("a generation also carries the standard opentelemetry attributes", () => {
   // These are what a collector that knows nothing of Langfuse classifies on.
   let t = tracer();
   let s = startSpan("chat", TRACE_GENERATION, "");
-  let body = traceBody(endGeneration(t, s, "gpt-4o", 0.5, 256, "in", "out", 7, 3));
+  let body = traceBody(endGeneration(t, s, { model: "gpt-4o", temperature: 0.5, maxTokens: 256, input: "in", output: "out", inputTokens: 7, outputTokens: 3 }));
   expect(body.indexOf("\"gen_ai.operation.name\"") >= 0);
   expect(body.indexOf("\"chat\"") >= 0);
   expect(body.indexOf("gen_ai.usage.input_tokens") >= 0);
@@ -199,7 +199,7 @@ test("a generation also carries the standard opentelemetry attributes", () => {
 test("a failed span is marked error and says why", () => {
   let t = tracer();
   let s = startSpan("chat", TRACE_GENERATION, "");
-  let body = traceBody(endSpanFailed(t, s, "in", "the provider returned 429"));
+  let body = traceBody(endSpanFailed(t, s, { input: "in", message: "the provider returned 429" }));
   // The message goes in OTLP's own status field as well as a Langfuse
   // attribute, so a collector that knows nothing of Langfuse still shows why.
   expect(body.indexOf("\"status\":{\"code\":2,\"message\":") >= 0);
@@ -210,21 +210,21 @@ test("a failed span is marked error and says why", () => {
 test("a successful span leaves its status unset", () => {
   let t = tracer();
   let s = startSpan("step", TRACE_SPAN, "");
-  expect(traceBody(endSpan(t, s, "", "")).indexOf("\"status\"") < 0);
+  expect(traceBody(endSpan(t, s, { input: "", output: "" })).indexOf("\"status\"") < 0);
 });
 
 test("a failed tool is marked error, a successful one is not", () => {
   let t = tracer();
   let good = startSpan("weather", TRACE_TOOL, "");
   let bad = startSpan("weather", TRACE_TOOL, "");
-  expect(traceBody(endTool(t, good, "Paris", "18C", true)).indexOf("\"code\":2") < 0);
-  expect(traceBody(endTool(t, bad, "Paris", "no such city", false)).indexOf("\"code\":2") >= 0);
+  expect(traceBody(endTool(t, good, { input: "Paris", output: "18C" }, true)).indexOf("\"code\":2") < 0);
+  expect(traceBody(endTool(t, bad, { input: "Paris", output: "no such city" }, false)).indexOf("\"code\":2") >= 0);
 });
 
 test("the observation type reaches the document", () => {
   let t = tracer();
   let s = startSpan("x", TRACE_TOOL, "");
-  let body = traceBody(endTool(t, s, "", "", true));
+  let body = traceBody(endTool(t, s, { input: "", output: "" }, true));
   expect(body.indexOf("langfuse.observation.type") >= 0);
   expect(body.indexOf("\"tool\"") >= 0);
 });
@@ -234,7 +234,7 @@ test("the observation type reaches the document", () => {
 test("the service name and environment ride on the resource", () => {
   let t = tracerWithEnvironment(tracer(), "staging");
   let s = startSpan("x", TRACE_SPAN, "");
-  let body = traceBody(endSpan(t, s, "", ""));
+  let body = traceBody(endSpan(t, s, { input: "", output: "" }));
   expect(body.indexOf("service.name") >= 0);
   expect(body.indexOf("lumen-test") >= 0);
   expect(body.indexOf("staging") >= 0);
@@ -246,7 +246,7 @@ test("session and user are repeated on every span", () => {
   let t = tracerWithSession(tracer(), "sess-1", "user-1");
   let a = startSpan("one", TRACE_SPAN, "");
   let b = startSpan("two", TRACE_SPAN, "");
-  let body = traceBody(endSpan(endSpan(t, a, "", ""), b, "", ""));
+  let body = traceBody(endSpan(endSpan(t, a, { input: "", output: "" }), b, { input: "", output: "" }));
   let first = body.indexOf("sess-1");
   expect(first >= 0);
   // Present twice, once per span.
@@ -257,7 +257,7 @@ test("session and user are repeated on every span", () => {
 test("an unset session is omitted rather than sent empty", () => {
   let t = tracer();
   let s = startSpan("x", TRACE_SPAN, "");
-  expect(traceBody(endSpan(t, s, "", "")).indexOf("session.id") < 0);
+  expect(traceBody(endSpan(t, s, { input: "", output: "" })).indexOf("session.id") < 0);
 });
 
 // --- envelope and flush ---------------------------------------------------------
@@ -265,7 +265,7 @@ test("an unset session is omitted rather than sent empty", () => {
 test("the envelope nests resource, scope and spans", () => {
   let t = tracer();
   let s = startSpan("x", TRACE_SPAN, "");
-  let body = traceBody(endSpan(t, s, "", ""));
+  let body = traceBody(endSpan(t, s, { input: "", output: "" }));
   expect(body.indexOf("\"resourceSpans\"") >= 0);
   expect(body.indexOf("\"scopeSpans\"") >= 0);
   expect(body.indexOf("\"spans\"") >= 0);
@@ -283,7 +283,7 @@ test("flushing nothing makes no request", () => {
 test("a failed flush reports the collector's answer", () => {
   let t = tracer();
   let s = startSpan("x", TRACE_SPAN, "");
-  let r = flush(endSpan(t, s, "", ""));
+  let r = flush(endSpan(t, s, { input: "", output: "" }));
   expect(!r.ok);
   expect(r.error.length > 0);
 });
@@ -291,7 +291,7 @@ test("a failed flush reports the collector's answer", () => {
 test("resetting keeps the settings and takes a new trace id", () => {
   let t = tracer();
   let s = startSpan("x", TRACE_SPAN, "");
-  let used = endSpan(t, s, "", "");
+  let used = endSpan(t, s, { input: "", output: "" });
   let fresh = resetTracer(used);
   expect(spanCount(fresh) == 0);
   expect(traceId(fresh) != traceId(used));
@@ -307,11 +307,11 @@ test("a callee's spans can be folded into the caller's tracer", () => {
   // records are immutable and its additions are on its own copy.
   let parent = makeTracer("http://collector", "pk", "sk", "svc");
   let root = startSpan("parent", TRACE_AGENT, "");
-  parent = endSpan(parent, root, "in", "out");
+  parent = endSpan(parent, root, { input: "in", output: "out" });
 
   let child = makeTracer("http://collector", "pk", "sk", "svc");
   let below = startSpan("child", TRACE_AGENT, root.id);
-  child = endSpan(child, below, "in", "out");
+  child = endSpan(child, below, { input: "in", output: "out" });
   expect(spanCount(child) == 1);
 
   let merged = tracerWithMoreSpans(parent, tracerSpans(child));
@@ -343,7 +343,7 @@ test("a callee starts from an empty tracer in the same trace", () => {
   // subtree in a real run.
   let parent = makeTracer("http://collector", "pk", "sk", "svc");
   let root = startSpan("parent", TRACE_AGENT, "");
-  parent = endSpan(parent, root, "in", "out");
+  parent = endSpan(parent, root, { input: "in", output: "out" });
   expect(spanCount(parent) == 1);
 
   let forChild = tracerForCallee(parent);
@@ -352,7 +352,7 @@ test("a callee starts from an empty tracer in the same trace", () => {
   expect(traceId(forChild) == traceId(parent));
 
   let below = startSpan("child", TRACE_AGENT, root.id);
-  forChild = endSpan(forChild, below, "in", "out");
+  forChild = endSpan(forChild, below, { input: "in", output: "out" });
   let merged = tracerWithMoreSpans(parent, tracerSpans(forChild));
   expect(spanCount(merged) == 2);
 });
@@ -385,18 +385,18 @@ test("a plain collector gets no vendor header and no vendor attributes", () => {
 });
 
 test("a backend is chosen by name, not sniffed from a url", () => {
-  let lf = backendNamed("langfuse", "https://lf.example/api/public/otel/v1/traces", "pk", "sk");
+  let lf = backendNamed("langfuse", { endpoint: "https://lf.example/api/public/otel/v1/traces", identity: "pk", secret: "sk" });
   expect(lf.name == "langfuse");
   expect(lf.apiBase == "https://lf.example");
 
   // A collector with a token takes it as a bearer; one without takes no
   // header at all.
-  let withToken = backendNamed("otlp", "http://c:4318/v1/traces", "", "tok");
+  let withToken = backendNamed("otlp", { endpoint: "http://c:4318/v1/traces", identity: "", secret: "tok" });
   expect(withToken.authValue == "Bearer tok");
-  expect(backendNamed("otlp", "http://c:4318/v1/traces", "", "").authHeader == "");
+  expect(backendNamed("otlp", { endpoint: "http://c:4318/v1/traces", identity: "", secret: "" }).authHeader == "");
 
   // An unknown name sends nowhere rather than guessing.
-  expect(backendNamed("something-else", "http://x", "", "").name == "none");
+  expect(backendNamed("something-else", { endpoint: "http://x", identity: "", secret: "" }).name == "none");
 });
 
 test("the trace url is the backend's, whichever way it was given", () => {
@@ -412,7 +412,7 @@ test("the trace url is the backend's, whichever way it was given", () => {
 test("a plain collector still gets the standard attributes", () => {
   let t = makeTracerFor(otlpBackend("http://c:4318/v1/traces", "", ""), "http://c:4318/v1/traces", "svc");
   let s = startSpan("call", TRACE_TOOL, "");
-  t = endSpan(t, s, "in", "out");
+  t = endSpan(t, s, { input: "in", output: "out" });
   let body = traceBody(t);
   expect(body.indexOf("otel.span.kind") >= 0);
   expect(body.indexOf("deployment.environment.name") >= 0);
@@ -423,7 +423,7 @@ test("a plain collector still gets the standard attributes", () => {
 test("langfuse still gets its own attributes", () => {
   let t = makeTracer("https://lf.example/api/public/otel/v1/traces", "pk", "sk", "svc");
   let s = startSpan("call", TRACE_TOOL, "");
-  t = endSpan(t, s, "in", "out");
+  t = endSpan(t, s, { input: "in", output: "out" });
   let body = traceBody(t);
   expect(body.indexOf("langfuse.observation.type") >= 0);
   expect(body.indexOf("langfuse.observation.input") >= 0);
@@ -488,7 +488,7 @@ test("each backend's otlp path is appended once, or not at all", () => {
 test("openinference names attributes by meaning, not by vendor", () => {
   let t = makeTracerFor(phoenixBackend("http://localhost:6006/v1/traces", ""), "http://localhost:6006/v1/traces", "svc");
   let s = startSpan("read_file", TRACE_TOOL, "");
-  t = endSpan(t, s, "the input", "the output");
+  t = endSpan(t, s, { input: "the input", output: "the output" });
   let body = traceBody(t);
   // The kind is namespaced and capitalised; the values are not namespaced.
   expect(body.indexOf("\"openinference.span.kind\"") >= 0);
@@ -502,7 +502,7 @@ test("openinference names attributes by meaning, not by vendor", () => {
 test("a model call carries openinference token counts", () => {
   let t = makeTracerFor(phoenixBackend("http://localhost:6006/v1/traces", ""), "http://localhost:6006/v1/traces", "svc");
   let s = startSpan("gpt", TRACE_GENERATION, "");
-  t = endGeneration(t, s, "mistral-small", 0.2, 512, "in", "out", 11, 22);
+  t = endGeneration(t, s, { model: "mistral-small", temperature: 0.2, maxTokens: 512, input: "in", output: "out", inputTokens: 11, outputTokens: 22 });
   let body = traceBody(t);
   expect(body.indexOf("\"llm.model_name\"") >= 0);
   expect(body.indexOf("\"llm.token_count.prompt\"") >= 0);
@@ -535,7 +535,7 @@ test("a protobuf span carries ids as bytes, not as their hex", () => {
   // nothing and breaks every parent link.
   let t = makeTracerFor(phoenixBackend("http://x", ""), "http://x", "svc");
   let s = startSpan("call", TRACE_TOOL, "");
-  t = endSpan(t, s, "in", "out");
+  t = endSpan(t, s, { input: "in", output: "out" });
   let body = traceBodyProtobuf(t);
   // 16 raw bytes of trace id and 8 of span id, not 32 and 16 of hex.
   expect(body.indexOf(bytesFromHex(traceId(t))) >= 0);
@@ -545,7 +545,7 @@ test("a protobuf span carries ids as bytes, not as their hex", () => {
 test("the protobuf document nests as OTLP requires", () => {
   let t = makeTracerFor(phoenixBackend("http://x", ""), "http://x", "svc");
   let s = startSpan("call", TRACE_TOOL, "");
-  t = endSpan(t, s, "in", "out");
+  t = endSpan(t, s, { input: "in", output: "out" });
   let body = traceBodyProtobuf(t);
   // resource_spans is field 1, length-delimited: the first byte is 0x0a.
   expect(body.charCodeAt(0) == 10);

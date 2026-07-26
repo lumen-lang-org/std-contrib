@@ -39,9 +39,9 @@ import { Summarizer, needsCompression as historyNeedsCompression, compressHistor
 // toolCallArgument. Those eight names are imported here WITHOUT an alias, so
 // their public wrappers below take a different name rather than renaming the
 // definition out from under a sibling.
-import { Tool, ToolResult, makeTool, describeTools, runToolWithPolicy, toolResultMessage, toolRegistry as emptyToolRegistry, registerTool as addToolEntry, findTool as findToolIndex, hasTool as hasToolNamed, toolNames as readToolNames, runTool as dispatchTool } from "./agent/tools.ts";
+import { ToolPolicy, Tool, ToolResult, makeTool, describeTools, runToolWithPolicy, toolResultMessage, toolRegistry as emptyToolRegistry, registerTool as addToolEntry, findTool as findToolIndex, hasTool as hasToolNamed, toolNames as readToolNames, runTool as dispatchTool } from "./agent/tools.ts";
 import { ToolCall, makeToolCall, toolCallArgument, toolCallInput, parseToolCalls, serializeToolDefs as buildToolDefs, serializeToolDefsMistral as buildToolDefsMistral, parseMistralToolCalls as readMistralToolCalls, hasToolCalls as responseHasToolCalls, finishReason as readFinishReason } from "./agent/toolcall.ts";
-import { Model, AgentStep, AgentResult, runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall, openAIAgentModel as makeOpenAIAgentModel, mistralAgentModel as makeMistralAgentModel, agentHistoryToTurns as buildAgentTurns } from "./agent/agent.ts";
+import { FakeToolCall, Model, AgentStep, AgentResult, runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall, openAIAgentModel as makeOpenAIAgentModel, mistralAgentModel as makeMistralAgentModel, agentHistoryToTurns as buildAgentTurns } from "./agent/agent.ts";
 // toolchat.ts is already inlined through agent.ts (which imports several of its
 // functions), so its exports are in scope under their ORIGINAL names. Importing
 // them here under an alias would not bind — the module was inlined once already.
@@ -82,7 +82,7 @@ import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen 
 // `export { X }` rather than `export type X = Y`: the alias form declares the
 // name a second time, which in a flat namespace collides with the module that
 // defined it.
-export { AgentResult, AgentStep, ApprovalRun, Budget, ChatPromptPart, ChatRequest, ChatTurn, CheckpointStore, Chunk, Document, LoadResult, McpResult, McpStdioSession, McpTool, Message, Model, ModelConfig, ModelOptions, ModelSpec, ProviderError, Result, SchemaField, SearchHit, StreamEvent, StreamHandler, Structured, SubAgent, Summarizer, TemplateVar, TokenUsage, Tool, ToolCall, ToolResult, VectorStore };
+export { FakeToolCall, ToolPolicy, AgentResult, AgentStep, ApprovalRun, Budget, ChatPromptPart, ChatRequest, ChatTurn, CheckpointStore, Chunk, Document, LoadResult, McpResult, McpStdioSession, McpTool, Message, Model, ModelConfig, ModelOptions, ModelSpec, ProviderError, Result, SchemaField, SearchHit, StreamEvent, StreamHandler, Structured, SubAgent, Summarizer, TemplateVar, TokenUsage, Tool, ToolCall, ToolResult, VectorStore };
 
 
 type JsonName = {
@@ -541,8 +541,8 @@ export function runTool(tools: Tool[], name: string, input: string): ToolResult 
 }
 
 // Deny wins over allow, and an empty allow list means everything not denied.
-export function runToolGuarded(tools: Tool[], allow: string[], deny: string[], name: string, input: string): ToolResult {
-  return runToolWithPolicy(tools, allow, deny, name, input);
+export function runToolGuarded(tools: Tool[], policy: ToolPolicy, name: string, input: string): ToolResult {
+  return runToolWithPolicy(tools, policy, name, input);
 }
 
 export function toolMessage(result: ToolResult): Message {
@@ -600,8 +600,8 @@ export function runAgent(model: Model, tools: Tool[], history: Message[], maxSte
   return runAgentLoop(model, tools, history, maxSteps);
 }
 
-export function runAgentWithPolicy(model: Model, tools: Tool[], allow: string[], deny: string[], history: Message[], maxSteps: int): AgentResult {
-  return runAgentLoopWithPolicy(model, tools, allow, deny, history, maxSteps);
+export function runAgentWithPolicy(model: Model, tools: Tool[], policy: ToolPolicy, history: Message[], maxSteps: int): AgentResult {
+  return runAgentLoopWithPolicy(model, tools, policy, history, maxSteps);
 }
 
 export function agentTrace(result: AgentResult): string {

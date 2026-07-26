@@ -3,7 +3,7 @@
 // This file exists to prove the barrel exports them: a caller importing ai.ts
 // by URL gets no name leaking in from module inlining, so if any of these is
 // missing from ai.ts the file will not compile.
-import { Message, Result, ProviderError, ChatRequest, ModelOptions, TokenUsage, ModelConfig, ModelSpec, Document, Chunk, LoadResult, SearchHit, VectorStore, Tool, ToolResult, ToolCall, ChatTurn, Model, AgentStep, AgentResult, SubAgent, Budget, ApprovalRun, CheckpointStore, SchemaField, Structured, TemplateVar, ChatPromptPart, Summarizer, StreamEvent, StreamHandler, McpTool, McpResult, McpStdioSession, ChatCall, system, user, modelConfig, vectorStore, unlimitedBudget, memoryCheckpointStore } from "../ai.ts";
+import { Message, Result, ProviderError, ChatRequest, ModelOptions, TokenUsage, ModelConfig, ModelSpec, Document, Chunk, LoadResult, SearchHit, VectorStore, Tool, ToolResult, ToolCall, ChatTurn, Model, AgentStep, AgentResult, SubAgent, Budget, ApprovalRun, CheckpointStore, SchemaField, Structured, TemplateVar, ChatPromptPart, Summarizer, StreamEvent, StreamHandler, McpTool, McpResult, McpStdioSession, ChatCall, ToolPolicy, FakeToolCall, system, user, modelConfig, vectorStore, unlimitedBudget, memoryCheckpointStore } from "../ai.ts";
 
 function main(): void {
   let msg: Message = system("You are concise.");
@@ -15,9 +15,12 @@ function main(): void {
   let store: VectorStore = vectorStore();
   let budget: Budget = unlimitedBudget();
   let checkpoints: CheckpointStore = memoryCheckpointStore();
+  let policy: ToolPolicy = { allow: ["weather"], deny: [] };
+  let fake: FakeToolCall[] = [{ name: "weather", input: "Paris" }];
 
   console.log(msg.role + " " + cfg.provider + " " + spec.model + " " + call.model);
   console.log(`${vars.length}` + " " + `${parts.length}` + " " + `${store.docs.length}`);
   console.log(`${budget.limit}` + " " + `${budget.calls}` + " " + `${checkpoints.has("k")}`);
+  console.log(`${policy.allow.length}` + " " + `${fake.length}`);
 }
 main();
