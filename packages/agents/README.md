@@ -296,6 +296,66 @@ recorded as such — in the notes, never in the result, because the result goes
 to the model and a warning it can quote is a warning that reaches the user as
 an answer.
 
+## Evaluations
+
+Cases live in a Langfuse dataset, so the people who write them do not need a
+programmer. Running them is a request, not a deployment — the agent, its
+sub-agents, its tools and the judge are all rows.
+
+```ts
+let out = runEvals(db, "a1", "judge1", "parts-desk-evals", "nightly", tracerFor(db, master), master, 50);
+```
+
+A case says what to ask, what a good answer looks like, and — when it cares —
+the route the run should take:
+
+```json
+{"input":  {"question": "Can we ship 40 units of A-114 from Rotterdam today?"},
+ "expectedOutput": {"answer": "No — only 37 units are in stock in Rotterdam.",
+                    "tools":  ["warehouse_stock", "part_price"],
+                    "agents": ["parts-desk"]}}
+```
+
+**The route is scored separately from the answer**, and that is the point:
+
+```
+PASS  answer 1  tools 0.5  agents 1   Can we ship 40 units of A-114 today?
+      route   : tools [warehouse_stock]  agents [parts-desk]
+      MISSING tools : part_price
+```
+
+The answer was right and the run never called `part_price`, so it had no basis
+for the bill it quoted. An outcome-only suite records that as a clean pass and
+finds out when the prices change. The mirror case is an agent that answers a
+stock question from its own head — `agents 0`, no delegation — which reads as
+a good answer until the stock moves.
+
+So `tool-use` and `delegation` go to Langfuse as their own scores beside
+`correctness`. Averaging them into one number would hide both failures.
+
+**What was reached is collected from the whole tree.** `AgentRun.steps` holds
+only what *that* agent did; a tool called inside a sub-agent appears nowhere in
+it. `calledTools` and `calledAgents` accumulate through the delegations,
+because "did this run reach the stock tool" is a question about the tree and
+not about the top of it.
+
+**A case that names no route cannot fail one** — it scores 1, rather than being
+dragged to zero by a check it never asked for.
+
+**The judge is an agent**, so which model judges and how strictly are rows.
+With none configured, a built-in judge compares the numbers in the reference
+against the answer and says that is what it did; a suite that refuses to run
+until someone sets up a judge is a suite nobody sets up a judge for. A judge
+that *was* configured and failed to run is reported rather than fallen back
+from — those are different problems, and grading anyway would hide one. A judge
+answering in prose has not judged, which is not the same as scoring zero.
+
+Langfuse's own LLM-as-a-judge can run alongside this one: it scores server-side
+on new dataset runs, needs an LLM connection configured in Langfuse, and in
+v3.224 its evaluator config has no public API. Both scores then sit on the same
+trace, and they do disagree at the margins — which is an argument for keeping
+both rather than trusting either alone.
+
 ## Retrieval
 
 pgvector, so PostgreSQL only — SQLite and MySQL have no vector type. An agent
@@ -354,6 +414,7 @@ lumen test wire.test.ts       # 18, the three providers' tool formats
 lumen test mcp.test.ts        # 3, the refusals — the live half is an example
 lumen test tools.test.ts      # 8, which tools an agent gets, and why not
 lumen test delegate.test.ts   # 13, children as tools, cycles, the depth limit
+lumen test evals.test.ts      # 19, datasets, judges, and route checks
 lumen test runlog.test.ts     # 7, what a run leaves behind
 lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
