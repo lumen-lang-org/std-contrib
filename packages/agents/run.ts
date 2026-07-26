@@ -27,7 +27,8 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
 import { jsonText } from "./scan.ts";
-import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, asContext } from "./knowledge.ts";
+import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
+import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
 import { Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL, TRACE_RETRIEVER } from "../tracing/tracing.ts";
 
 // How many times a run may go back to the model after calling tools.
@@ -147,7 +148,8 @@ function failed(agentName: string, why: string): AgentRun {
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path, noTracer(), "", fresh);
+  let noChunks: string[] = [];
+  return runAgentAt(db, agentId, userText, master, 0, path, noTracer(), "", fresh, "", noChunks);
 }
 
 // The same run, traced. The tracer carries the collector's address and the
@@ -157,7 +159,8 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
 export function runAgentTraced(db: Db, agentId: string, userText: string, master: string, tracer: Tracer): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path, tracer, "", fresh);
+  let noChunks: string[] = [];
+  return runAgentAt(db, agentId, userText, master, 0, path, tracer, "", fresh, "", noChunks);
 }
 
 // The same run, at a depth, knowing which agents are already above it.
@@ -166,7 +169,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
 // re-enter one is refused by name. Passed rather than tracked in a global: a
 // server runs handlers on many threads, and one run's path is nothing to do
 // with another's.
-export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[], tracer: Tracer, parentSpan: string, prior: Turn[]): AgentRun {
+export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[], tracer: Tracer, parentSpan: string, prior: Turn[], threadId: string, excludeChunks: string[]): AgentRun {
   // Read each row on its own rather than through agentsFull. A relation that
   // matches nothing is null, and a run needs its prompt, config and model to
   // exist — so a dangling reference should be named, not turned into a parse
@@ -203,6 +206,18 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // call to work out what it was refusing.
   let mounted = mountTools(db, agent.id);
   let specs = toolSpecs(mounted);
+
+  // In a thread, the conversation's files are tools like any others: a write
+  // is a tool span in the trace and an expectation an eval can check. A bare
+  // run has no workspace and offering tools that answer "no thread" is noise.
+  if (threadId != "") {
+    let ws = workspaceTools();
+    let w: int = 0;
+    while (w < ws.length) {
+      specs.push(toolSpec(ws[w].name, ws[w].description, ws[w].schema));
+      w = w + 1;
+    }
+  }
 
   // Mounting's problems, plus delegation's, in one list. Copied rather than
   // appended to in place: a record's field is not a place to accumulate.
@@ -285,7 +300,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         if (embedKey == "") {
           notes.push("no credential for " + embedder.provider + ", so nothing was retrieved");
         } else {
-          let found = retrieve(db, embedder, granted, userText, want.topK, embedKey);
+          // Not what the thread already shows: those passages are in the
+          // replay, and fetching them again would put them in the context
+          // twice at full price. Excluded in the query so topK still means
+          // "this many new ones".
+          let found = retrieveExcluding(db, embedder, granted, excludeChunks, userText, want.topK, embedKey);
           if (!found.ok) {
             notes.push("retrieval failed: " + found.error);
           } else {
@@ -380,7 +399,17 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let resultOk = false;
       let from = serverOf(mounted, calls[i].name);
       let callSpan = startSpan(calls[i].name, TRACE_TOOL, agentSpan.id);
-      if (child.id != "") {
+      // The workspace first: its three names are fixed and a thread that has
+      // one wants them answered here, not sent to an MCP server that happens
+      // to share a name.
+      let fileAnswer = callWorkspaceTool(db, threadId, calls[i].name,
+        jsonText(calls[i].args, "name"), jsonText(calls[i].args, "content"), "now");
+      if (fileAnswer.handled) {
+        resultOk = fileAnswer.ok;
+        resultText = fileAnswer.text;
+        from = "workspace";
+        calledTools.push(calls[i].name);
+      } else if (child.id != "") {
         let question = jsonText(calls[i].args, "question");
         if (question == "") {
           resultText = "Ask a question: this agent takes {\"question\":\"...\"} and cannot see your conversation.";
@@ -393,7 +422,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           // it is, and replaying a parent's transcript into a specialist would ask
           // it to answer questions it was never part of.
           let childPrior: Turn[] = [];
-          let asked = runAgentAt(db, child.id, question, master, deeper, below, tracerForCallee(trace), callSpan.id, childPrior);
+          // The workspace is the thread's, and the thread is the parent's
+          // conversation — so the child gets the files too: it is doing the
+          // parent's work on the parent's material.
+          let noChildChunks: string[] = [];
+          let asked = runAgentAt(db, child.id, question, master, deeper, below, tracerForCallee(trace), callSpan.id, childPrior, threadId, noChildChunks);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }
           // What the child reached counts as reached: an evaluation asking
           // whether the stock tool was called does not care which agent

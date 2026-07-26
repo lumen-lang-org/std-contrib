@@ -1,0 +1,159 @@
+// Workspace files: what a name may be, what the tools answer, and what
+// promotion means. The live half — a model actually writing an artifact — is
+// exercised through a thread against a real provider.
+//
+//   cd packages/agents && lumen test workspace.test.ts
+
+import { Db, DbConfig } from "../plume/driver.ts";
+import { sqlite } from "../plume/sqlite.ts";
+import { connectDatabase, execute } from "../plume/plume.ts";
+import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
+import { WorkspaceFileRow, workspacePlan, fileNameOk, putFile, getFile, listFiles, deleteFile, sourceOf, mimeOf, workspaceTools, callWorkspaceTool } from "./workspace.ts";
+
+let database: Db = sqlite();
+
+function fresh(): void {
+  let cfg: DbConfig = { filename: "/tmp/agents_workspace_test.db" };
+  connectDatabase(database, cfg);
+  forgetMigrations(database);
+  execute(database, "DROP INDEX IF EXISTS files_by_thread");
+  execute(database, "DROP TABLE IF EXISTS workspace_files");
+  // The plan starts at 22; alone in a fresh database that is fine — the
+  // history is per-database and these tests own theirs.
+  migrate(database, workspacePlan(database));
+}
+
+// --- names --------------------------------------------------------------------------
+
+test("a file name that climbs is refused at the door", () => {
+  // These names arrive from the model as tool arguments. "../etc/passwd"
+  // dies here, not in whatever later touches the file.
+  expect(!fileNameOk("../etc/passwd"));
+  expect(!fileNameOk("a/../../b"));
+  expect(!fileNameOk("notes/../secret.md"));
+  expect(!fileNameOk(".hidden"));
+  expect(!fileNameOk("a..b.md"));
+  expect(!fileNameOk(""));
+});
+
+test("ordinary names pass", () => {
+  expect(fileNameOk("notes.md"));
+  expect(fileNameOk("Q3 forecast.csv"));
+  expect(fileNameOk("report_v2.html"));
+});
+
+test("a separator of any kind is not a name", () => {
+  expect(!fileNameOk("a/b.md"));
+  expect(!fileNameOk("a\\b.md"));
+  expect(!fileNameOk("a:b.md"));
+});
+
+// --- storage ------------------------------------------------------------------------
+
+test("writing a name that exists replaces it", () => {
+  fresh();
+  expect(putFile(database, "t1", "notes.md", "text/markdown", "uploaded", "first", "", "now") == "");
+  expect(putFile(database, "t1", "notes.md", "text/markdown", "generated", "second", "", "now") == "");
+  let file = getFile(database, "t1", "notes.md");
+  expect(file.body == "second");
+  expect(file.origin == "generated");
+  expect(listFiles(database, "t1").length == 1);
+});
+
+test("threads do not see each other's files", () => {
+  fresh();
+  putFile(database, "t1", "mine.md", "text/markdown", "uploaded", "a", "", "now");
+  putFile(database, "t2", "theirs.md", "text/markdown", "uploaded", "b", "", "now");
+  expect(listFiles(database, "t1").length == 1);
+  expect(listFiles(database, "t1")[0].fileName == "mine.md");
+  expect(getFile(database, "t1", "theirs.md").id == "");
+});
+
+test("an unknown origin is refused", () => {
+  fresh();
+  expect(putFile(database, "t1", "x.md", "text/plain", "conjured", "b", "", "now").indexOf("origin") >= 0);
+});
+
+test("deleting removes one file, not the workspace", () => {
+  fresh();
+  putFile(database, "t1", "keep.md", "text/plain", "uploaded", "a", "", "now");
+  putFile(database, "t1", "drop.md", "text/plain", "uploaded", "b", "", "now");
+  expect(deleteFile(database, "t1", "drop.md") == "");
+  expect(listFiles(database, "t1").length == 1);
+  expect(listFiles(database, "t1")[0].fileName == "keep.md");
+});
+
+// --- the tools ----------------------------------------------------------------------
+
+test("the three tools are described with schemas", () => {
+  let ts = workspaceTools();
+  expect(ts.length == 3);
+  expect(ts[0].name == "list_files");
+  expect(ts[1].name == "read_file");
+  expect(ts[2].name == "write_file");
+  expect(ts[1].schema.indexOf("\"required\":[\"name\"]") >= 0);
+});
+
+test("outside a thread the tools do not answer at all", () => {
+  // handled=false sends the call on to MCP; a workspace tool must not shadow
+  // a server's tool for a run that has no workspace.
+  fresh();
+  expect(!callWorkspaceTool(database, "", "list_files", "", "", "now").handled);
+});
+
+test("list, write and read behave as a loop would use them", () => {
+  fresh();
+  let empty = callWorkspaceTool(database, "t1", "list_files", "", "", "now");
+  expect(empty.handled && empty.ok);
+  expect(empty.text.indexOf("empty") >= 0);
+
+  let wrote = callWorkspaceTool(database, "t1", "write_file", "draft.md", "# Title", "now");
+  expect(wrote.handled && wrote.ok);
+  // What the model wrote is a generated file with a mime from its name.
+  let file = getFile(database, "t1", "draft.md");
+  expect(file.origin == "generated");
+  expect(file.mime == "text/markdown");
+
+  let read = callWorkspaceTool(database, "t1", "read_file", "draft.md", "", "now");
+  expect(read.ok);
+  expect(read.text == "# Title");
+
+  let listed = callWorkspaceTool(database, "t1", "list_files", "", "", "now");
+  expect(listed.text.indexOf("draft.md") >= 0);
+  expect(listed.text.indexOf("generated") >= 0);
+});
+
+test("reading a file that is not there tells the model what to do instead", () => {
+  fresh();
+  let missing = callWorkspaceTool(database, "t1", "read_file", "ghost.md", "", "now");
+  expect(missing.handled);
+  expect(!missing.ok);
+  expect(missing.text.indexOf("list_files") >= 0);
+});
+
+test("a model-invented name is refused with the rule, not stored", () => {
+  fresh();
+  let bad = callWorkspaceTool(database, "t1", "write_file", "../escape.md", "x", "now");
+  expect(bad.handled);
+  expect(!bad.ok);
+  expect(listFiles(database, "t1").length == 0);
+});
+
+// --- promotion helpers ---------------------------------------------------------------
+
+test("a file name becomes a plain document source", () => {
+  expect(sourceOf("Q3 forecast.csv") == "Q3_forecast_csv");
+  expect(sourceOf("notes.md") == "notes_md");
+});
+
+test("a mime comes from the name, and text is the fallback", () => {
+  expect(mimeOf("a.md") == "text/markdown");
+  expect(mimeOf("a.csv") == "text/csv");
+  expect(mimeOf("a.xyz") == "text/plain");
+});
+
+test("the suite leaves nothing behind", () => {
+  fresh();
+  execute(database, "DROP TABLE IF EXISTS workspace_files");
+  database.close();
+});

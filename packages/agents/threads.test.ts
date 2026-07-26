@@ -3,7 +3,13 @@
 //   cd packages/agents && lumen test threads.test.ts
 
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { withinBudget, nextRound, threadBudget } from "./threads.ts";
+import { withinBudget, nextRound, threadBudget, threadPlan, recordChunks, chunksShownSince } from "./threads.ts";
+import { Db, DbConfig } from "../plume/driver.ts";
+import { sqlite } from "../plume/sqlite.ts";
+import { connectDatabase, execute } from "../plume/plume.ts";
+import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
+
+let database: Db = sqlite();
 
 // A round: a question, an assistant turn that called a tool, the result, and
 // the answer.
@@ -80,4 +86,34 @@ test("a budget too small for even one round keeps that round rather than nothing
 
 test("the budget is a number this package states", () => {
   expect(threadBudget() > 0);
+});
+
+// --- what a round showed, and what the next may fetch ------------------------------
+
+test("chunks are recorded per round and read back from a boundary", () => {
+  let cfg: DbConfig = { filename: "/tmp/agents_threads_test.db" };
+  connectDatabase(database, cfg);
+  forgetMigrations(database);
+  execute(database, "DROP INDEX IF EXISTS chunks_by_thread");
+  execute(database, "DROP INDEX IF EXISTS turns_by_thread");
+  execute(database, "DROP TABLE IF EXISTS thread_chunks");
+  execute(database, "DROP TABLE IF EXISTS thread_turns");
+  execute(database, "DROP TABLE IF EXISTS threads");
+  migrate(database, threadPlan(database));
+
+  let first: string[] = ["plume_0", "plume_1"];
+  let second: string[] = ["rest_0"];
+  recordChunks(database, "t1", 0, first);
+  recordChunks(database, "t1", 4, second);
+
+  // From the start, everything is excluded.
+  expect(chunksShownSince(database, "t1", 0).length == 3);
+  // From round two's boundary, round one's chunks were trimmed away with
+  // their turns and may come back.
+  let since = chunksShownSince(database, "t1", 4);
+  expect(since.length == 1);
+  expect(since[0] == "rest_0");
+  // Another thread's chunks are not this one's.
+  expect(chunksShownSince(database, "t2", 0).length == 0);
+  database.close();
 });
