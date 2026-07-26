@@ -169,8 +169,8 @@ test("a close with no code reads as 1005, not as zero", () => {
 
 test("a fragmented message is assembled in order", () => {
   let a = newAssembly();
-  let first: Frame = { complete: true, fin: false, opcode: OP_TEXT, payload: "Hel", consumed: 0, error: "" };
-  let rest: Frame = { complete: true, fin: true, opcode: OP_CONTINUATION, payload: "lo", consumed: 0, error: "" };
+  let first: Frame = { complete: true, fin: false, opcode: OP_TEXT, payload: "Hel", consumed: 0, masked: true, error: "" };
+  let rest: Frame = { complete: true, fin: true, opcode: OP_CONTINUATION, payload: "lo", consumed: 0, masked: true, error: "" };
   a = addFrame(a, first);
   expect(!a.ready);
   a = addFrame(a, rest);
@@ -183,8 +183,8 @@ test("a control frame arriving mid-message is delivered at once", () => {
   // A ping may interleave with fragments. Buffering it would answer after the
   // message it interrupted, which is the opposite of what a heartbeat is for.
   let a = newAssembly();
-  let first: Frame = { complete: true, fin: false, opcode: OP_TEXT, payload: "Hel", consumed: 0, error: "" };
-  let ping: Frame = { complete: true, fin: true, opcode: OP_PING, payload: "hi", consumed: 0, error: "" };
+  let first: Frame = { complete: true, fin: false, opcode: OP_TEXT, payload: "Hel", consumed: 0, masked: true, error: "" };
+  let ping: Frame = { complete: true, fin: true, opcode: OP_PING, payload: "hi", consumed: 0, masked: true, error: "" };
   a = addFrame(a, first);
   let withPing = addFrame(a, ping);
   expect(withPing.ready);
@@ -195,14 +195,14 @@ test("a control frame arriving mid-message is delivered at once", () => {
 
 test("a continuation with nothing to continue is refused", () => {
   let a = newAssembly();
-  let orphan: Frame = { complete: true, fin: true, opcode: OP_CONTINUATION, payload: "x", consumed: 0, error: "" };
+  let orphan: Frame = { complete: true, fin: true, opcode: OP_CONTINUATION, payload: "x", consumed: 0, masked: true, error: "" };
   expect(addFrame(a, orphan).error.indexOf("nothing to continue") >= 0);
 });
 
 test("a second message before the first finished is refused", () => {
   let a = newAssembly();
-  let first: Frame = { complete: true, fin: false, opcode: OP_TEXT, payload: "a", consumed: 0, error: "" };
-  let second: Frame = { complete: true, fin: true, opcode: OP_TEXT, payload: "b", consumed: 0, error: "" };
+  let first: Frame = { complete: true, fin: false, opcode: OP_TEXT, payload: "a", consumed: 0, masked: true, error: "" };
+  let second: Frame = { complete: true, fin: true, opcode: OP_TEXT, payload: "b", consumed: 0, masked: true, error: "" };
   a = addFrame(a, first);
   expect(addFrame(a, second).error.indexOf("before the last one finished") >= 0);
 });
