@@ -145,12 +145,19 @@ export function readEventRequest(buffer: string): EventRequest {
 // says so itself, "likely a Lumen compiler bug; please report it" — at the
 // line calling `onStream`.
 //
-// The trigger has NOT been reduced. A closure that captures and calls a
-// parameter compiles, and so does one doing that inside net.createServer's
-// callback; both were tried. So the cause is something narrower here and the
-// obvious explanation is wrong. This shape is a workaround for a bug nobody
-// has characterised, which is worth saying plainly rather than dressing up as
-// a design decision.
+// The trigger is this: a closure cannot CALL a function value that reached
+// the enclosing scope as a parameter. It may capture one and pass it along —
+// which is exactly what the call below does — and it may call a lambda
+// defined as a literal in scope. Copying the parameter into a local first
+// does not help; the local is rejected the same way.
+//
+//   function passes(g: () => string): void {
+//     taker((): string => { return g(); });   // 'g' not accessible from inner function
+//   }
+//
+// So `handleStream` is a top-level function taking `onStream` as its own
+// parameter, where calling it is a direct call and not a capture. Every
+// server in these packages has the same shape for the same reason.
 export function serveEvents(port: int, onStream: (stream: EventStream) => void): void {
   net.createServer(port, (socket: Socket) => {
     handleStream(socket, onStream);
