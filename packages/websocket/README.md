@@ -30,12 +30,22 @@ that did exactly that.
 | handshake | RFC 6455 §1.3's worked example — 13 tests |
 | server, wire | an independent Python client with its own framing |
 | server, real world | Chromium, via `browsercheck.py` |
+| client | an independent Python server |
 
 The RFC prints exact bytes for four frames and this asserts all four:
 `810548656c6c6f` for an unmasked "Hello", `8185 37fa213d 7f9f4d5158` masked,
 and both extended-length headers. Section 1.3's key
 `dGhlIHNhbXBsZSBub25jZQ==` must answer `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`; a
 browser compares that exactly and closes the connection on anything else.
+
+Both halves are judged by foreign implementations: the server by Chromium and
+by a Python client, the client by a Python server. Nothing in the chain tests
+this package against itself.
+
+The Python server prints what it received, which is where the client's own
+claims are checked — `key decoded to 16 bytes`, and `masked=True` on every
+frame. A client that forgot to mask would be refused by any real server, and
+a client that masked with a fixed key would defeat the point of masking.
 
 ## The decisions worth knowing
 
@@ -97,6 +107,8 @@ lumen test handshake.test.ts    # 13, the RFC's own exchange
 
 lumen run echo-server.ts &      # then, against a real browser:
 python3 browsercheck.py
+
+lumen run ws-client-demo.ts    # the client, against an independent server
 ```
 
 `browsercheck.py` carries two harness lessons in its comments, because both
