@@ -22,8 +22,10 @@ import { DbOrder, DbRepository, asc, desc, placeholderAt, connectDatabase, persi
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
-import { AgentRun, runAgent } from "./run.ts";
+import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
+import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
+import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
 type ModelChange = { modelConfigId: string };
@@ -32,6 +34,7 @@ type ServerLink = { serverId: string };
 type ChildLink = { childId: string };
 type KeyBody = { apiKey: string };
 type RunBody = { text: string };
+type TraceSecret = { secretKey: string };
 
 // Credentials, over the API. A key can be written and named; it can never be
 // read back. Anything that returns one is a leak waiting for a log line, and
@@ -240,11 +243,24 @@ class AgentApi {
       return notFound("agent " + param(req, "id"));
     }
 
-    let answered = runAgent(this.db, param(req, "id"), body.text, this.master);
+    // The tracer is read per request, not held: turning tracing on is an
+    // UPDATE and takes effect on the next run like everything else here.
+    // Unconfigured, it records nothing and sends nothing.
+    let tracer = tracerFor(this.db, this.master);
+    let answered = runAgentTraced(this.db, param(req, "id"), body.text, this.master, tracer);
 
     // Logged either way: the runs an operator needs to read are mostly the
     // ones that went wrong.
     let runId = recordRun(this.db, param(req, "id"), body.text, answered);
+
+    // The collector is told after the answer is in hand, and a collector that
+    // is down or wrong does not cost the caller its answer -- it costs a
+    // trace, which is the right thing to lose.
+    let traced = "";
+    if (tracing(tracer) && answered.spans.length > 0) {
+      let sent = flush(tracerWithMoreSpans(tracer, answered.spans));
+      if (sent.ok) { traced = traceId(tracer); }
+    }
 
     let out = "{\"runId\":" + JSON.stringify(runId)
       + ",\"ok\":" + `${answered.ok}`
@@ -254,6 +270,7 @@ class AgentApi {
       + ",\"modelApiName\":" + JSON.stringify(answered.modelApiName)
       + ",\"stopReason\":" + JSON.stringify(answered.stopReason)
       + ",\"toolCalls\":" + `${answered.steps.length}`
+      + ",\"traceId\":" + JSON.stringify(traced)
       + ",\"error\":" + JSON.stringify(answered.error) + "}";
     if (!answered.ok && answered.agentName == "") {
       // The one refusal that is the caller's mistake rather than the run's:
@@ -283,6 +300,80 @@ class AgentApi {
     executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder, [param(req, "id")]);
     deleteById(this.db, this.flat, param(req, "id"));
     return noContent();
+  }
+}
+
+// Where traces go, configured like everything else.
+//
+// Off unless a row says otherwise, and off is not an error: a deployment with
+// no collector runs exactly as it did before this existed.
+@controller("/tracing")
+class TraceApi {
+  db: Db;
+  master: string;
+
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
+
+  // What is configured, and whether it would actually send. The secret is
+  // never in this answer -- only whether one is stored, which is the only
+  // thing a caller needs to know.
+  @get("/")
+  status(req: Request): Reply {
+    let document = findById(this.db, traceConfigMapping(), "default");
+    if (document == "") {
+      return ok("{\"configured\":false,\"active\":false}");
+    }
+    let row: TraceConfigRow = JSON.parse<TraceConfigRow>(document);
+    let hasSecret = credentialFor(this.db, "tracing", this.master) != "";
+    // `active` is the question that matters: enabled, addressed and keyed.
+    // Three ways to be configured and still silent, so it is answered rather
+    // than left to be inferred from the other fields.
+    return ok("{\"configured\":true,\"active\":" + `${tracing(tracerFor(this.db, this.master))}`
+      + ",\"endpoint\":" + JSON.stringify(row.endpoint)
+      + ",\"publicKey\":" + JSON.stringify(row.publicKey)
+      + ",\"serviceName\":" + JSON.stringify(row.serviceName)
+      + ",\"environment\":" + JSON.stringify(row.environment)
+      + ",\"enabled\":" + `${row.enabled}`
+      + ",\"secretStored\":" + `${hasSecret}` + "}");
+  }
+
+  // The collector's address and labels. Written whole rather than field by
+  // field: there is one row, and a partial update of a connection is how you
+  // get a deployment pointing half at one collector and half at another.
+  @put("/")
+  configure(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: TraceConfigRow = JSON.parse<TraceConfigRow>(req.body);
+    if (body.enabled && body.endpoint == "") {
+      return badRequest("tracing cannot be enabled without an endpoint");
+    }
+    let row: TraceConfigRow = {
+      id: "default",
+      endpoint: body.endpoint,
+      publicKey: body.publicKey,
+      serviceName: body.serviceName,
+      environment: body.environment,
+      enabled: body.enabled,
+    };
+    let written = persist(this.db, traceConfigMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return this.status(req);
+  }
+
+  // The secret half, through the same encrypted store as a provider's key --
+  // and, like those, it can be written and never read back.
+  @put("/key")
+  setKey(req: Request): Reply {
+    let problem = masterKeyProblem(this.master);
+    if (problem != "") { return badRequest(problem); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: TraceSecret = JSON.parse<TraceSecret>(req.body);
+    let stored = storeCredential(this.db, "tracing", body.secretKey, this.master, "now");
+    if (stored != "") { return badRequest(stored); }
+    return this.status(req);
   }
 }
 
@@ -545,6 +636,9 @@ function openDatabase(): Db {
   let extra = runLogPlan(db);
   let e: int = 0;
   while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  let traces = tracePlan(db);
+  let t: int = 0;
+  while (t < traces.length) { plan.push(traces[t]); t = t + 1; }
   let ran = migrate(db, plan);
   if (!ran.ok) { console.error(ran.error); }
   return db;
@@ -612,6 +706,11 @@ function main(): void {
 
   bound.set("rfind", (req: Request) => { return traces.find(req); });
 
+  let tracingApi = new TraceApi(db, master);
+  bound.set("tstatus", (req: Request) => { return tracingApi.status(req); });
+  bound.set("tconfigure", (req: Request) => { return tracingApi.configure(req); });
+  bound.set("tsetKey", (req: Request) => { return tracingApi.setKey(req); });
+
   let models = new ModelApi(db);
   bound.set("mlist", (req: Request) => { return models.list(req); });
   bound.set("mcreate", (req: Request) => { return models.create(req); });
@@ -668,6 +767,12 @@ function main(): void {
     let r = controllerPromptApi[pr];
     table.push(route(r.method, r.pattern, "prompt" + r.handler));
     pr = pr + 1;
+  }
+  let tr: int = 0;
+  while (tr < controllerTraceApi.length) {
+    let r = controllerTraceApi[tr];
+    table.push(route(r.method, r.pattern, "t" + r.handler));
+    tr = tr + 1;
   }
   let sv: int = 0;
   while (sv < controllerServerApi.length) {

@@ -235,6 +235,70 @@ export function traceId(t: Tracer): string {
   return t.traceId;
 }
 
+// The encoded spans recorded so far.
+//
+// A run that hands work to something running separately — a sub-agent, a
+// worker — cannot pass a tracer back, because records are immutable and the
+// callee's additions are on its own copy. It returns this instead, and the
+// caller folds it in with `tracerWithMoreSpans`. Without that pair, the
+// callee's spans are recorded and then dropped on the floor, which looks
+// exactly like work that never happened.
+export function tracerSpans(t: Tracer): string[] {
+  return t.spans;
+}
+
+// Take spans recorded elsewhere into this tracer. They keep whatever parent
+// they were opened with, so a child's tree hangs where it belongs.
+export function tracerWithMoreSpans(t: Tracer, spans: string[]): Tracer {
+  let all = t.spans;
+  let i: int = 0;
+  while (i < spans.length) {
+    all = [...all, spans[i]];
+    i = i + 1;
+  }
+  let out: Tracer = {
+    traceId: t.traceId, spans: all, endpoint: t.endpoint, auth: t.auth,
+    serviceName: t.serviceName, environment: t.environment,
+    sessionId: t.sessionId, userId: t.userId,
+  };
+  return out;
+}
+
+// The same trace, with nothing recorded yet.
+//
+// What to hand a callee whose spans you will fold back in. Passing your own
+// tracer instead means the callee accumulates on top of your spans and returns
+// them with its own, and folding *that* in records everything below the call
+// twice — a tree that looks plausible and is wrong. `resetTracer` is not this:
+// it starts a new trace, which would leave the callee's work in a different
+// tree altogether.
+export function tracerForCallee(t: Tracer): Tracer {
+  let none: string[] = [];
+  let out: Tracer = {
+    traceId: t.traceId, spans: none, endpoint: t.endpoint, auth: t.auth,
+    serviceName: t.serviceName, environment: t.environment,
+    sessionId: t.sessionId, userId: t.userId,
+  };
+  return out;
+}
+
+// A tracer that records nothing and sends nothing. Tracing is off unless it is
+// configured, and every call site should be able to run without asking whether
+// it is: an unconfigured tracer is threaded through exactly like a real one.
+export function noTracer(): Tracer {
+  let none: string[] = [];
+  let t: Tracer = {
+    traceId: "", spans: none, endpoint: "", auth: "",
+    serviceName: "", environment: "", sessionId: "", userId: "",
+  };
+  return t;
+}
+
+// Whether this tracer would send anything.
+export function tracing(t: Tracer): bool {
+  return t.endpoint != "";
+}
+
 export function spanCount(t: Tracer): int {
   return t.spans.length;
 }
