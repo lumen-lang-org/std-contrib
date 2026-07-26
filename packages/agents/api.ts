@@ -30,7 +30,7 @@ import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./pa
 import { jsonText } from "./scan.ts";
 import { ThreadListing, listThreads, openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
-import { ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
+import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
@@ -146,6 +146,30 @@ class AgentApi {
     let written = persist(this.db, this.flat, req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, this.full, jsonId(req.body)));
+  }
+
+  // Editing an agent is one PUT of its whole row. The referenced config and
+  // prompt must exist — persist would happily write a dangling reference, and
+  // the run loop would then name the missing row at the worst time.
+  @put("/:id")
+  update(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let row: AgentRow = JSON.parse<AgentRow>(req.body);
+    if (row.id != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    if (!existsById(this.db, modelConfigsMapping(this.db), row.modelConfigId)) {
+      return badRequest("no model config " + row.modelConfigId);
+    }
+    if (!existsById(this.db, promptsMapping(), row.promptId)) {
+      return badRequest("no prompt " + row.promptId);
+    }
+    let written = persist(this.db, this.flat, req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, this.full, param(req, "id")));
   }
 
   // Moving an agent to a different model is an update to one column, which is
@@ -879,6 +903,28 @@ class DocumentApi {
     this.master = master;
   }
 
+  // What one folder holds: the sources, with how many chunks and how many
+  // bytes each. Chunks are grouped here rather than listed — a reader manages
+  // documents, and the chunking is the index's business.
+  @get("/")
+  list(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    let rows = listSources(this.db, queryParam(req, "scope", "/"));
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"source\":" + JSON.stringify(rows[i].source)
+        + ",\"scope\":" + JSON.stringify(rows[i].scope)
+        + ",\"chunks\":" + `${rows[i].chunks}`
+        + ",\"bytes\":" + `${rows[i].bytes}` + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
   // Upload a document: split, embedded and filed under one scope. Re-uploading
   // the same source replaces its chunks.
   @post("/")
@@ -1076,6 +1122,10 @@ function main(): void {
     try { return api.find(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
+  bound.set("update", (req: Request) => {
+    try { return api.update(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
   bound.set("create", (req: Request) => {
     try { return api.create(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
@@ -1200,6 +1250,10 @@ function main(): void {
   });
 
   let documents = new DocumentApi(db, master);
+  bound.set("dlist", (req: Request) => {
+    try { return documents.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
   bound.set("dupload", (req: Request) => {
     try { return documents.upload(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }

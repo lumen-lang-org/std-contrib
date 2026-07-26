@@ -9,8 +9,8 @@ import {
   AgentRow, ModelConfigRow, ModelRow, PromptRow, ServerRow, TracingStatus,
   configureTracing, createModel, createPrompt, createServer, listAgents,
   listConfigs, listModels, listPrompts, listProviders, listServers,
-  setAgentModel, setAgentPrompt, setModelEnabled, setTracingSecret,
-  storeProviderKey, tracingStatus,
+  setModelEnabled, setTracingSecret,
+  storeProviderKey, tracingStatus, updateAgent,
 } from "./api.js";
 
 const TABS = ["Agents", "Models", "Prompts", "MCP", "Providers", "Tracing"] as const;
@@ -54,6 +54,7 @@ export class ConsoleSettings extends LitElement {
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
+  @state() private editing: AgentRow | null = null;
 
   async connectedCallback() {
     super.connectedCallback();
@@ -109,25 +110,53 @@ export class ConsoleSettings extends LitElement {
   }
 
   private agentsTab() {
+    if (this.editing !== null) return this.agentForm(this.editing);
     return html`
       <table>
-        <tr><th>Agent</th><th>Model config</th><th>Prompt</th><th>Enabled</th></tr>
+        <tr><th>Agent</th><th>Description</th><th>Model config</th><th>Prompt</th><th>Enabled</th><th></th></tr>
         ${this.agents.map((a) => html`<tr>
-          <td title=${a.description}>${a.agentName}</td>
-          <td><select @change=${(e: Event) =>
-              this.act(() => setAgentModel(a.id, (e.target as HTMLSelectElement).value))}>
-            ${this.configs.map((c) => html`
-              <option value=${c.id} ?selected=${c.id === a.modelConfigId}>${c.id} · ${c.modelId}</option>`)}
-          </select></td>
-          <td><select @change=${(e: Event) =>
-              this.act(() => setAgentPrompt(a.id, (e.target as HTMLSelectElement).value))}>
-            ${this.prompts.map((p) => html`
-              <option value=${p.id} ?selected=${p.id === a.promptId}>${p.promptName} v${p.version}</option>`)}
-          </select></td>
+          <td>${a.agentName}</td>
+          <td class="note">${a.description.slice(0, 40)}</td>
+          <td>${a.modelConfigId}</td>
+          <td>${this.prompts.find((p) => p.id === a.promptId)?.promptName ?? a.promptId}</td>
           <td>${a.enabled ? "yes" : "no"}</td>
+          <td><button @click=${() => { this.editing = { ...a }; }}>Edit</button></td>
         </tr>`)}
       </table>
-      <p class="note">Changing a model or prompt takes effect on the next message — no restart.</p>
+      <p class="note">Changes take effect on the next message — no restart.</p>
+    `;
+  }
+
+  // One form, every editable field, one PUT. The row being edited is a copy,
+  // so Cancel is just dropping it.
+  private agentForm(a: AgentRow) {
+    const bind = (field: keyof AgentRow) => (e: Event) => {
+      const el = e.target as HTMLInputElement;
+      this.editing = { ...this.editing!, [field]: el.type === "checkbox" ? el.checked : el.value };
+    };
+    return html`
+      <h3 style="margin-top:0">Edit ${a.id}</h3>
+      <div class="row"><label style="width:110px">Name</label>
+        <input .value=${a.agentName} @input=${bind("agentName")} style="flex:1" /></div>
+      <div class="row"><label style="width:110px">Description</label>
+        <input .value=${a.description} @input=${bind("description")} style="flex:1" /></div>
+      <div class="row"><label style="width:110px">Model config</label>
+        <select @change=${bind("modelConfigId")}>
+          ${this.configs.map((c) => html`
+            <option value=${c.id} ?selected=${c.id === a.modelConfigId}>${c.id} · ${c.modelId}</option>`)}
+        </select></div>
+      <div class="row"><label style="width:110px">Prompt</label>
+        <select @change=${bind("promptId")}>
+          ${this.prompts.map((p) => html`
+            <option value=${p.id} ?selected=${p.id === a.promptId}>${p.promptName} v${p.version}</option>`)}
+        </select></div>
+      <div class="row"><label style="width:110px">Enabled</label>
+        <input type="checkbox" ?checked=${a.enabled} @change=${bind("enabled")} /></div>
+      <div class="row">
+        <button @click=${() => this.act(async () => { await updateAgent(this.editing!); this.editing = null; })}>Save</button>
+        <button style="background:none;color:var(--muted);border:1px solid var(--border)"
+          @click=${() => { this.editing = null; }}>Cancel</button>
+      </div>
     `;
   }
 

@@ -527,6 +527,13 @@ docker compose up --build
 Console on `http://localhost:8080`, the API behind it on `/api`, PostgreSQL
 with pgvector underneath so documents and retrieval work.
 
+The console has a chat surface per conversation, a workspace panel over the
+thread's files, a **Knowledge** page — folder rail, the folder's sources, and
+upload, where typing a new path *is* how a folder is created, since a scope
+exists by carrying documents — and a settings overlay reached from the account
+block: agents (an edit form per agent), models, prompt versions, MCP servers,
+provider keys and tracing.
+
 For development against a locally running API:
 
 ```sh

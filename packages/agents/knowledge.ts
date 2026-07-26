@@ -413,6 +413,35 @@ export type ScopeNode = {
 // A flat list rather than a nested structure: the nesting is implied by the
 // paths, a caller that wants a tree can build one, and a list survives being
 // turned into JSON without a recursive type the language would have to declare.
+// One source in a folder: its chunk count and total size. What a person
+// managing a corpus thinks in — the chunking is the index's business.
+export type SourceListing = {
+  source: string,
+  scope: string,
+  chunks: int,
+  bytes: int,
+};
+
+export function listSources(db: Db, scope: string): SourceListing[] {
+  let out: SourceListing[] = [];
+  let where = normalScope(scope);
+  let sql = "SELECT source, MIN(scope), COUNT(*), SUM(LENGTH(body)) FROM documents"
+    + " WHERE scope = " + db.placeholder + " GROUP BY source ORDER BY source";
+  if (!db.query(sql, [where])) { return out; }
+  let i: int = 0;
+  while (i < db.rows()) {
+    let row: SourceListing = {
+      source: db.value(i, 0),
+      scope: db.value(i, 1),
+      chunks: parseInt(db.value(i, 2)) ?? 0,
+      bytes: parseInt(db.value(i, 3)) ?? 0,
+    };
+    out.push(row);
+    i = i + 1;
+  }
+  return out;
+}
+
 export function scopeCounts(db: Db, prefix: string): ScopeNode[] {
   let out: ScopeNode[] = [];
   let sql = "SELECT scope, COUNT(*) FROM documents GROUP BY scope ORDER BY scope";
