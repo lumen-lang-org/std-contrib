@@ -166,11 +166,15 @@ export class ConsoleSettings extends LitElement {
         <tr><th>Label</th><th>API name</th><th>Provider</th><th>Kind</th><th>Enabled</th></tr>
         ${this.models.map((m) => html`<tr>
           <td>${m.label}</td><td>${m.apiName}</td><td>${m.provider}</td><td>${m.kind}</td>
-          <td><input type="checkbox" ?checked=${m.enabled}
+          <td><input type=${m.kind === "embedding" ? "radio" : "checkbox"} name="embedder"
+            ?checked=${m.enabled}
             @change=${(e: Event) => this.act(() =>
               setModelEnabled(m.id, (e.target as HTMLInputElement).checked))} /></td>
         </tr>`)}
       </table>
+      <p class="note">One embedding model is active at a time, and turning one on turns
+      the others off — documents embedded by different models cannot see each other, so a
+      second active embedder splits the corpus with nothing to report it.</p>
       <div class="row" id="newModel">
         <input name="id" placeholder="id" style="width:70px" />
         <input name="label" placeholder="Label" />
