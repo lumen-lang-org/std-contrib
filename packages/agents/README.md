@@ -350,6 +350,16 @@ that *was* configured and failed to run is reported rather than fallen back
 from — those are different problems, and grading anyway would hide one. A judge
 answering in prose has not judged, which is not the same as scoring zero.
 
+**The backend is a row, not an assumption.** `trace_config.backend` names it —
+`"langfuse"` or `"otlp"` — and the tracing package turns that name into how a
+request authenticates, which extra header it wants, and whose attribute
+namespace it reads. Against a plain OpenTelemetry collector the same run
+produces the same 15-span tree with the standard `gen_ai.*` attributes and no
+`langfuse.*` at all; against Langfuse it carries both. Datasets are the one
+thing that does not generalise — they are not an OpenTelemetry concept, so a
+backend either has an API for them or says it has none, and evaluations report
+that rather than building a URL that 404s.
+
 Langfuse's own LLM-as-a-judge can run alongside this one: it scores server-side
 on new dataset runs, needs an LLM connection configured in Langfuse, and in
 v3.224 its evaluator config has no public API. Both scores then sit on the same

@@ -72,6 +72,7 @@ function main(): void {
 
   let traceRow: TraceConfigRow = {
     id: "default",
+    backend: process.env("TRACE_BACKEND") ?? "langfuse",
     endpoint: collector,
     publicKey: process.env("LANGFUSE_PUBLIC_KEY") ?? "pk-lf-demo",
     serviceName: "lumen-agents",

@@ -16,7 +16,8 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, field, repository, findById, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { Tracer, makeTracer, tracerWithEnvironment, noTracer } from "../tracing/tracing.ts";
+import { Tracer, makeTracerFor, tracerWithEnvironment, noTracer } from "../tracing/tracing.ts";
+import { backendNamed } from "../tracing/backend.ts";
 import { credentialFor } from "./credentials.ts";
 
 // There is one of these, keyed "default". A table rather than a constant
@@ -25,6 +26,10 @@ import { credentialFor } from "./credentials.ts";
 // change takes effect on the next request without a restart.
 export type TraceConfigRow = {
   id: string,
+  // Which backend this is: "langfuse", "otlp", or anything the tracing package
+  // learns later. Named rather than sniffed from the endpoint — a URL suffix
+  // is a guess, and a deployment that knows what it is running should say so.
+  backend: string,
   // The collector's trace URL. For Langfuse, `/api/public/otel/v1/traces` on
   // whichever instance.
   endpoint: string,
@@ -37,6 +42,30 @@ export type TraceConfigRow = {
 };
 
 export function traceConfigMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("backend", "backend", "text"),
+    field("endpoint", "endpoint", "text"),
+    field("publicKey", "public_key", "text"),
+    field("serviceName", "service_name", "text"),
+    field("environment", "environment", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("trace_config", "id", "id", fs);
+}
+
+// The mapping as migration 14 wrote it.
+//
+// Frozen on purpose. A migration's checksum is over its SQL, so generating
+// step 14 from a mapping that later grows would change its checksum and be
+// refused by every database that already ran it. The live mapping above is
+// free to grow; this one records what was actually created, and each new
+// column arrives as its own step.
+//
+// That is the answer to a question this package has been dodging: generated
+// CREATEs and an append-only history can coexist, as long as the generator a
+// past step used stops changing.
+function traceConfigMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("endpoint", "endpoint", "text"),
@@ -52,7 +81,9 @@ export function traceConfigMapping(): DbRepository {
 // be handed a plan missing the recorded versions and refuse.
 export function tracePlan(db: Db): Migration[] {
   let plan: Migration[] = [
-    migration("14", "trace config", createTableSql(db, traceConfigMapping())),
+    migration("14", "trace config", createTableSql(db, traceConfigMappingV1())),
+    migration("15", "trace backend",
+      "ALTER TABLE trace_config ADD COLUMN backend " + db.textType),
   ];
   return plan;
 }
@@ -71,12 +102,28 @@ export function tracerFor(db: Db, master: string): Tracer {
 
   // The secret is read the same way a provider's key is: out of the encrypted
   // store, never out of this table.
+  //
+  // A collector wanting no credential is not a misconfiguration, so an empty
+  // secret only stops a backend that needs one. Langfuse always does.
   let secret = credentialFor(db, "tracing", master);
-  if (secret == "") { return noTracer(); }
+  let name = backendNameOf(row);
+  if (secret == "" && name == "langfuse") { return noTracer(); }
 
-  let t = makeTracer(row.endpoint, row.publicKey, secret, serviceNameOr(row));
+  let backend = backendNamed(name, row.endpoint, row.publicKey, secret);
+  if (backend.name == "none") { return noTracer(); }
+
+  let t = makeTracerFor(backend, row.endpoint, serviceNameOr(row));
   if (row.environment == "") { return t; }
   return tracerWithEnvironment(t, row.environment);
+}
+
+// A row written before backends were named has an empty column, and it was
+// Langfuse — that is the only thing this package could talk to then. Reading
+// it as Langfuse keeps those deployments working; writing the column is what
+// the API does now.
+function backendNameOf(row: TraceConfigRow): string {
+  if (row.backend == "") { return "langfuse"; }
+  return row.backend;
 }
 
 // A collector groups by service name, and an empty one groups everything
