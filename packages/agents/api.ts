@@ -528,6 +528,19 @@ class ModelApi {
     }
     let flag = "0";
     if (req.body.indexOf("true") >= 0) { flag = "1"; }
+
+    // At most one embedding model is enabled at a time, enforced here rather
+    // than asked of a caller. Two enabled embedders is not a preference, it is
+    // a corpus split down the middle: a document embedded by one is invisible
+    // to every agent retrieving through the other, and nothing reports it —
+    // the query simply comes back with fewer passages than it should.
+    let row: ModelRow = JSON.parse<ModelRow>(findById(this.db, modelsMapping(), param(req, "id")));
+    if (flag == "1" && row.kind == "embedding") {
+      executeWith(this.db, "UPDATE models SET enabled = " + this.db.placeholder
+        + " WHERE kind = " + placeholderAt(this.db, 2)
+        + " AND id <> " + placeholderAt(this.db, 3), ["0", "embedding", param(req, "id")]);
+    }
+
     executeWith(this.db, "UPDATE models SET enabled = " + this.db.placeholder
       + " WHERE id = " + placeholderAt(this.db, 2), [flag, param(req, "id")]);
     return ok(findById(this.db, modelsMapping(), param(req, "id")));
