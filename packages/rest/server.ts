@@ -171,6 +171,37 @@ export function dispatch(table: Route[], handlers: Map<string, Handler>, method:
   return handler(req);
 }
 
+// Routing that answers instead of dying.
+//
+// What this catches: a throw raised on the way to a handler — matching the
+// path, reading the query. Those are direct calls, and spec 245 propagates a
+// throw through those.
+//
+// What it CANNOT catch, and this is the part to know: a throw inside the
+// handler itself. A handler arrives as a function value, spec 245's fixpoint
+// pass cannot see through one, and the callee is emitted as non-throwing —
+// so the throw panics at the handler and no try up here ever runs. Reduced to
+// thirty lines: a throw inside a named function called from a try is caught,
+// the same throw inside a lambda is not.
+//
+// A wrapper taking a Handler and returning a guarded one is the obvious fix
+// and does not compile — the backend rejects a returned closure that calls a
+// captured parameter. So a handler that parses a body must hold its own try,
+// inside its own lambda, which is where it works. The agents API does that at
+// every binding.
+//
+// The status is 400: a request the router could not make sense of is the
+// request's fault. A handler failing for its own reasons should return
+// `problem(500, ...)` rather than throw.
+export function dispatched(table: Route[], handlers: Map<string, Handler>, method: string, target: string,
+    body: string, headers: Map<string, string>): Reply {
+  try {
+    return dispatch(table, handlers, method, target, body, headers);
+  } catch (e) {
+    return badRequest("the request could not be handled: " + e.message);
+  }
+}
+
 // --- listening ---------------------------------------------------------------
 
 // Serve the table on `port`. Returns a description of what went wrong, or an
@@ -183,7 +214,7 @@ export function serve(port: int, table: Route[], handlers: Map<string, Handler>)
   // response. The streaming form exists too (spec 452) and is what a
   // long-running agent reply would want; a REST table does not.
   http.createServer(port, (req): HttpResponse => {
-    let answer = dispatch(table, handlers, req.method, req.path, req.body, req.headers);
+    let answer = dispatched(table, handlers, req.method, req.path, req.body, req.headers);
     let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
     return out;
   });

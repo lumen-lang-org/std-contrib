@@ -25,6 +25,7 @@ import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersW
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
+import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonText } from "./scan.ts";
 import { openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
@@ -47,18 +48,6 @@ type FilePull = { name: string, documentId: string };
 type DocumentUpload = { source: string, scope: string, body: string };
 type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number, enabled: bool };
 
-// The backends this API will write into a trace_config row. Checked here
-// rather than at the tracer, because a typo should be refused when it is set
-// and not silently turn tracing off later.
-function backendOr(name: string): string {
-  if (name == "") { return "langfuse"; }
-  return name;
-}
-
-function knownBackend(name: string): bool {
-  return name == "langfuse" || name == "otlp" || name == "phoenix"
-    || name == "braintrust" || name == "langsmith" || name == "arize";
-}
 
 // Credentials, over the API. A key can be written and named; it can never be
 // read back. Anything that returns one is a leak waiting for a log line, and
@@ -956,41 +945,8 @@ class RunApi {
 //
 // So every create refuses a taken id, by name. Changing a row is what PUT is
 // for, and for prompts the answer is a new version, which is a new id.
-function createProblem(db: Db, repo: DbRepository, document: string): string {
-  if (document == "") { return "a body is required"; }
-  let id = jsonId(document);
-  if (id == "") { return "an \"id\" is required"; }
-  if (existsById(db, repo, id)) {
-    return "\"" + id + "\" already exists; a POST creates, and changing a row is a PUT";
-  }
-  return "";
-}
 
-// A list of folders with their counts.
-function scopesJson(nodes: ScopeNode[]): string {
-  let out = "[";
-  let i: int = 0;
-  while (i < nodes.length) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"path\":" + JSON.stringify(nodes[i].path)
-      + ",\"documents\":" + `${nodes[i].documents}`
-      + ",\"total\":" + `${nodes[i].total}` + "}";
-    i = i + 1;
-  }
-  return out + "]";
-}
 
-// An id read out of a posted document, so a create can answer with the whole
-// agent rather than the fragment it was given.
-function jsonId(document: string): string {
-  let at = document.indexOf("\"id\"");
-  if (at < 0) { return ""; }
-  let rest = document.substring(at + 4, document.length);
-  let open = rest.indexOf("\"");
-  if (open < 0) { return ""; }
-  let value = rest.substring(open + 1, rest.length);
-  return value.substring(0, value.indexOf("\""));
-}
 
 
 function openDatabase(): Db {
@@ -1062,75 +1018,231 @@ function main(): void {
   let traces = new RunApi(db);
 
   let bound = new Map<string, Handler>();
-  bound.set("list", (req: Request) => { return api.list(req); });
-  bound.set("find", (req: Request) => { return api.find(req); });
-  bound.set("create", (req: Request) => { return api.create(req); });
-  bound.set("setModel", (req: Request) => { return api.setModel(req); });
-  bound.set("setPrompt", (req: Request) => { return api.setPrompt(req); });
-  bound.set("addServer", (req: Request) => { return api.addServer(req); });
-  bound.set("removeServer", (req: Request) => { return api.removeServer(req); });
-  bound.set("addChild", (req: Request) => { return api.addChild(req); });
-  bound.set("removeChild", (req: Request) => { return api.removeChild(req); });
-  bound.set("run", (req: Request) => { return api.run(req); });
-  bound.set("scopes", (req: Request) => { return api.scopes(req); });
-  bound.set("grant", (req: Request) => { return api.grant(req); });
-  bound.set("revoke", (req: Request) => { return api.revoke(req); });
-  bound.set("setRetrieval", (req: Request) => { return api.setRetrieval(req); });
-  bound.set("runs", (req: Request) => { return api.runs(req); });
-  bound.set("remove", (req: Request) => { return api.remove(req); });
+  // Every binding catches, and the try is inside the lambda because that is
+  // the only place it works: spec 245 propagates a throw through direct calls,
+  // but a handler is reached through a function value, and the fixpoint pass
+  // cannot see through one — so a throw inside a handler lambda escapes any
+  // try in `serve` and kills the process.
+  //
+  // It did. `JSON.parse<T>` throws when the body is missing a field the record
+  // declares, and one PUT with a partial body stopped the whole API for
+  // everyone. Twenty-one routes parse a body.
+  bound.set("list", (req: Request) => {
+    try { return api.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("find", (req: Request) => {
+    try { return api.find(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("create", (req: Request) => {
+    try { return api.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("setModel", (req: Request) => {
+    try { return api.setModel(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("setPrompt", (req: Request) => {
+    try { return api.setPrompt(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("addServer", (req: Request) => {
+    try { return api.addServer(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("removeServer", (req: Request) => {
+    try { return api.removeServer(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("addChild", (req: Request) => {
+    try { return api.addChild(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("removeChild", (req: Request) => {
+    try { return api.removeChild(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("run", (req: Request) => {
+    try { return api.run(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("scopes", (req: Request) => {
+    try { return api.scopes(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("grant", (req: Request) => {
+    try { return api.grant(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("revoke", (req: Request) => {
+    try { return api.revoke(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("setRetrieval", (req: Request) => {
+    try { return api.setRetrieval(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("runs", (req: Request) => {
+    try { return api.runs(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("remove", (req: Request) => {
+    try { return api.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
-  bound.set("plist", (req: Request) => { return providers.list(req); });
-  bound.set("pstatus", (req: Request) => { return providers.status(req); });
-  bound.set("psetKey", (req: Request) => { return providers.setKey(req); });
-  bound.set("pclearKey", (req: Request) => { return providers.clearKey(req); });
+  bound.set("plist", (req: Request) => {
+    try { return providers.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("pstatus", (req: Request) => {
+    try { return providers.status(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("psetKey", (req: Request) => {
+    try { return providers.setKey(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("pclearKey", (req: Request) => {
+    try { return providers.clearKey(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
-  bound.set("rfind", (req: Request) => { return traces.find(req); });
+  bound.set("rfind", (req: Request) => {
+    try { return traces.find(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let workspace = new WorkspaceApi(db, master);
-  bound.set("wlist", (req: Request) => { return workspace.list(req); });
-  bound.set("wupload", (req: Request) => { return workspace.upload(req); });
-  bound.set("wread", (req: Request) => { return workspace.read(req); });
-  bound.set("wremove", (req: Request) => { return workspace.remove(req); });
-  bound.set("wpull", (req: Request) => { return workspace.pull(req); });
-  bound.set("wpromote", (req: Request) => { return workspace.promote(req); });
+  bound.set("wlist", (req: Request) => {
+    try { return workspace.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("wupload", (req: Request) => {
+    try { return workspace.upload(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("wread", (req: Request) => {
+    try { return workspace.read(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("wremove", (req: Request) => {
+    try { return workspace.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("wpull", (req: Request) => {
+    try { return workspace.pull(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("wpromote", (req: Request) => {
+    try { return workspace.promote(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let threads = new ThreadApi(db, master);
-  bound.set("hopen", (req: Request) => { return threads.open(req); });
-  bound.set("hsay", (req: Request) => { return threads.say(req); });
-  bound.set("htranscript", (req: Request) => { return threads.transcript(req); });
+  bound.set("hopen", (req: Request) => {
+    try { return threads.open(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("hsay", (req: Request) => {
+    try { return threads.say(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("htranscript", (req: Request) => {
+    try { return threads.transcript(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let documents = new DocumentApi(db, master);
-  bound.set("dupload", (req: Request) => { return documents.upload(req); });
-  bound.set("dremove", (req: Request) => { return documents.remove(req); });
+  bound.set("dupload", (req: Request) => {
+    try { return documents.upload(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("dremove", (req: Request) => {
+    try { return documents.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let scopeApi = new ScopeApi(db);
-  bound.set("kstree", (req: Request) => { return scopeApi.tree(req); });
+  bound.set("kstree", (req: Request) => {
+    try { return scopeApi.tree(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let tracingApi = new TraceApi(db, master);
-  bound.set("tstatus", (req: Request) => { return tracingApi.status(req); });
-  bound.set("tconfigure", (req: Request) => { return tracingApi.configure(req); });
-  bound.set("tsetKey", (req: Request) => { return tracingApi.setKey(req); });
+  bound.set("tstatus", (req: Request) => {
+    try { return tracingApi.status(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("tconfigure", (req: Request) => {
+    try { return tracingApi.configure(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("tsetKey", (req: Request) => {
+    try { return tracingApi.setKey(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let models = new ModelApi(db);
-  bound.set("mlist", (req: Request) => { return models.list(req); });
-  bound.set("mcreate", (req: Request) => { return models.create(req); });
-  bound.set("msetEnabled", (req: Request) => { return models.setEnabled(req); });
-  bound.set("mremove", (req: Request) => { return models.remove(req); });
+  bound.set("mlist", (req: Request) => {
+    try { return models.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("mcreate", (req: Request) => {
+    try { return models.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("msetEnabled", (req: Request) => {
+    try { return models.setEnabled(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("mremove", (req: Request) => {
+    try { return models.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let configs = new ConfigApi(db);
-  bound.set("clist", (req: Request) => { return configs.list(req); });
-  bound.set("ccreate", (req: Request) => { return configs.create(req); });
-  bound.set("cremove", (req: Request) => { return configs.remove(req); });
+  bound.set("clist", (req: Request) => {
+    try { return configs.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("ccreate", (req: Request) => {
+    try { return configs.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("cremove", (req: Request) => {
+    try { return configs.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let prompts = new PromptApi(db);
-  bound.set("promptlist", (req: Request) => { return prompts.list(req); });
-  bound.set("promptcreate", (req: Request) => { return prompts.create(req); });
+  bound.set("promptlist", (req: Request) => {
+    try { return prompts.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("promptcreate", (req: Request) => {
+    try { return prompts.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   let servers = new ServerApi(db);
-  bound.set("slist", (req: Request) => { return servers.list(req); });
-  bound.set("screate", (req: Request) => { return servers.create(req); });
-  bound.set("ssetEnabled", (req: Request) => { return servers.setEnabled(req); });
-  bound.set("sremove", (req: Request) => { return servers.remove(req); });
+  bound.set("slist", (req: Request) => {
+    try { return servers.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("screate", (req: Request) => {
+    try { return servers.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("ssetEnabled", (req: Request) => {
+    try { return servers.setEnabled(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("sremove", (req: Request) => {
+    try { return servers.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
 
   // Three controllers, one table. The provider and run handlers are prefixed
   // because a table is keyed by handler name and the classes share a `find`
