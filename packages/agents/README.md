@@ -381,6 +381,55 @@ both rather than trusting either alone.
 
 ## Retrieval
 
+Documents live in folders and an agent reads the folders it is granted.
+
+```
+uploaded  /engineering/plume  chunks=1
+uploaded  /hr/policies        chunks=1
+
+engineer granted /engineering
+people   granted /hr
+
+-- eng: How many days of annual leave do we get?
+   read  /engineering/plume/plume_relations  distance 0.377
+   said  Your documents do not cover it.
+
+-- hr:  How many days of annual leave do we get?
+   read  /hr/policies/leave_policy  distance 0.147
+   said  You get 28 days of annual leave, including public holidays.
+```
+
+`examples/scoped-rag.ts`, against PostgreSQL. One table, one embedding model,
+one question — and the engineer cannot see the HR document. The isolation is
+the `agent_scopes` rows, not separate corpora, which is what makes it survive
+somebody adding a folder.
+
+That was a disclosure before scopes existed: `retrieve` filtered on `model_id`
+alone, so any two agents sharing an embedding model read each other's
+documents. A demo with one corpus never shows it.
+
+**Scopes match on segment boundaries.** `/specs` covers `/specs/plume` and must
+not cover `/specifications`. A string prefix would hand a folder to anyone
+granted a name that starts the same way.
+
+**An empty grant reads nothing**, never everything. The alternative makes
+revoking an agent's access the most destructive edit available, and the failure
+looks like the system working.
+
+**Retrieval happens in the run**, not in the caller. It was a thing you did
+before calling `runAgent`, which meant an agent's knowledge lived in whoever
+remembered to fetch it — two callers of the same agent got different
+behaviour. Now `agent_scopes` says what it may read and `agent_retrieval` says
+how.
+
+**Every way it can come up short is in `notes`** — not PostgreSQL, switched
+off, no embedding model, no scopes, no credential, nothing close enough. An
+agent that answered without its documents looks exactly like one that answered
+from them.
+
+### Retrieval, the older way
+
+
 pgvector, so PostgreSQL only — SQLite and MySQL have no vector type. An agent
 runs anywhere; it retrieves against Postgres.
 
