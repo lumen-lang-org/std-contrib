@@ -14,6 +14,7 @@
 //
 // No TLS: `net` has none, so `wss://` needs a terminating proxy in front.
 
+import { Step, STEP_WAIT, STEP_MESSAGE, STEP_PONG, STEP_CLOSE, STEP_FAIL, drain } from "./session.ts";
 import { Frame, Assembly, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG, CLOSE_NORMAL, encodeFrame, decodeFrame, encodeClose, newAssembly, addFrame } from "./frame.ts";
 import { Accepted, newKey, upgradeRequest, readAccept } from "./handshake.ts";
 
@@ -135,36 +136,32 @@ export function receive(conn: Connection): Exchange {
   let buffer = conn.buffer;
   while (true) {
     // Everything already buffered first: one read can carry several frames.
+    // The framing itself is `drain`'s, in session.ts, so the client and the
+    // server cannot drift apart on what a frame means — and so it can be
+    // tested without a connection.
     while (true) {
-      let frame = decodeFrame(buffer, 8 * 1024 * 1024);
-      if (frame.error != "") {
-        let broken: Received = { ok: false, kind: "", message: "", error: frame.error };
+      let step = drain(buffer, assembly, 8 * 1024 * 1024, false);
+      buffer = step.buffer;
+      assembly = step.assembly;
+
+      if (step.what == STEP_WAIT) { break; }
+      if (step.what == STEP_FAIL) {
+        let broken: Received = { ok: false, kind: "", message: "", error: step.error };
         return exchange(withBuffer(conn, buffer, conn.open), broken);
       }
-      if (!frame.complete) { break; }
-      buffer = buffer.slice(frame.consumed, buffer.length);
-
-      assembly = addFrame(assembly, frame);
-      if (assembly.error != "") {
-        let bad: Received = { ok: false, kind: "", message: "", error: assembly.error };
-        return exchange(withBuffer(conn, buffer, conn.open), bad);
-      }
-      if (!assembly.ready) { continue; }
-
-      if (assembly.opcode == OP_PING) {
+      if (step.what == STEP_PONG) {
         // Answered here. A heartbeat a caller has to remember is one that
         // eventually stops.
-        conn.socket.write(encodeFrame(OP_PONG, assembly.message, true, maskKey()));
+        conn.socket.write(encodeFrame(OP_PONG, step.message, true, maskKey()));
         continue;
       }
-      if (assembly.opcode == OP_PONG) { continue; }
-      if (assembly.opcode == OP_CLOSE) {
-        let closed: Received = { ok: true, kind: "close", message: assembly.message, error: "" };
+      if (step.what == STEP_CLOSE) {
+        let closed: Received = { ok: true, kind: "close", message: step.message, error: "" };
         return exchange(withBuffer(conn, buffer, false), closed);
       }
       let kind = "text";
-      if (assembly.opcode == OP_BINARY) { kind = "binary"; }
-      let got: Received = { ok: true, kind: kind, message: assembly.message, error: "" };
+      if (step.opcode == OP_BINARY) { kind = "binary"; }
+      let got: Received = { ok: true, kind: kind, message: step.message, error: "" };
       return exchange(withBuffer(conn, buffer, conn.open), got);
     }
 

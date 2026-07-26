@@ -14,6 +14,7 @@
 
 import { Peer, send, closePeer } from "../websocket/server.ts";
 import { Upgrade, readUpgrade, acceptResponse, refuseResponse } from "../websocket/handshake.ts";
+import { Step, STEP_WAIT, STEP_MESSAGE, STEP_PONG, STEP_CLOSE, STEP_FAIL, drain } from "../websocket/session.ts";
 import { Frame, Assembly, OP_CLOSE, OP_PING, OP_PONG, encodeFrame, decodeFrame, newAssembly, addFrame } from "../websocket/frame.ts";
 import { EnginePacket, SocketPacket, EventCall, EIO_OPEN, EIO_CLOSE, EIO_PING, EIO_PONG, EIO_MESSAGE, SIO_CONNECT, SIO_DISCONNECT, SIO_EVENT, SIO_ACK, openPacket, readEnginePacket, messagePacket, eventPacket, ackPacket, connectPacket, readSocketPacket, readEvent, newSid } from "./protocol.ts";
 
@@ -104,25 +105,23 @@ function runSession(socket: Socket, onEvent: (client: Client, name: string, args
 
   let assembly = newAssembly();
   while (true) {
+    // The framing decisions are `drain`'s, in the websocket package, where
+    // they are tested without a connection. Only the session is here.
     while (true) {
-      let frame = decodeFrame(buffer, 1000000);
-      if (frame.error != "") { closePeer(peer, 1002, frame.error); return; }
-      if (!frame.complete) { break; }
-      buffer = buffer.slice(frame.consumed, buffer.length);
+      let step = drain(buffer, assembly, 1000000, true);
+      buffer = step.buffer;
+      assembly = step.assembly;
 
-      assembly = addFrame(assembly, frame);
-      if (assembly.error != "") { closePeer(peer, 1002, assembly.error); return; }
-      if (!assembly.ready) { continue; }
-
-      if (assembly.opcode == OP_CLOSE) { closePeer(peer, 1000, ""); return; }
-      if (assembly.opcode == OP_PING) {
-        socket.write(encodeFrame(OP_PONG, assembly.message, false, ""));
+      if (step.what == STEP_WAIT) { break; }
+      if (step.what == STEP_FAIL) { closePeer(peer, 1002, step.error); return; }
+      if (step.what == STEP_CLOSE) { closePeer(peer, 1000, ""); return; }
+      if (step.what == STEP_PONG) {
+        socket.write(encodeFrame(OP_PONG, step.message, false, ""));
         continue;
       }
-      if (assembly.opcode == OP_PONG) { continue; }
 
-      client = handleMessage(client, assembly.message, onEvent);
-      if (!client.connected && assembly.message.startsWith(`${EIO_CLOSE}`)) {
+      client = handleMessage(client, step.message, onEvent);
+      if (!client.connected && step.message.startsWith(`${EIO_CLOSE}`)) {
         socket.close();
         return;
       }
@@ -134,70 +133,97 @@ function runSession(socket: Socket, onEvent: (client: Client, name: string, args
   }
 }
 
-// A run of one client's session, driven by the websocket server's callback.
+// What one incoming packet decides, with no socket involved.
 //
-// State lives in the session table rather than in a closure: this language's
-// records are immutable and its callbacks cannot hold one, so a connection's
-// sid and namespace are looked up by peer path on each message. A single
-// server hosting one namespace is the case this is built for.
-export function handleMessage(client: Client, text: string, onEvent: (client: Client, name: string, argsJson: string) => void): Client {
+// Separated from `handleMessage` so it can be tested: a Client holds a Peer
+// which holds a Socket, and anything taking one needs a real connection. This
+// takes the session's *values* and returns what to send and what the session
+// becomes, which is the whole protocol decision and none of the I/O.
+export type Decision = {
+  // What to write back, "" for nothing. Already Engine.IO-framed.
+  reply: string,
+  nsp: string,
+  connected: bool,
+  // Set when the packet is an event the handler should see.
+  eventName: string,
+  eventArgs: string,
+  // The ack id to answer with after the handler runs, -1 for none.
+  ackId: int,
+  // Set when the peer asked to end the session.
+  closing: bool,
+};
+
+export function decide(sid: string, nsp: string, connected: bool, text: string): Decision {
+  let nothing: Decision = { reply: "", nsp: nsp, connected: connected, eventName: "", eventArgs: "", ackId: -1, closing: false };
+
   let packet = readEnginePacket(text);
-  if (!packet.ok) { return client; }
+  if (!packet.ok) { return nothing; }
 
   // A client's pong answers our ping. Nothing to do but notice it arrived.
-  if (packet.kind == EIO_PONG) { return client; }
+  if (packet.kind == EIO_PONG) { return nothing; }
 
   // v4 clients do not ping, but v3 ones do, and answering costs a byte.
   if (packet.kind == EIO_PING) {
-    send(client.peer, `${EIO_PONG}`);
-    return client;
+    let pong: Decision = { reply: `${EIO_PONG}`, nsp: nsp, connected: connected, eventName: "", eventArgs: "", ackId: -1, closing: false };
+    return pong;
   }
 
   if (packet.kind == EIO_CLOSE) {
-    let gone: Client = { peer: client.peer, sid: client.sid, nsp: client.nsp, connected: false };
-    return gone;
+    let bye: Decision = { reply: "", nsp: nsp, connected: false, eventName: "", eventArgs: "", ackId: -1, closing: true };
+    return bye;
   }
 
-  if (packet.kind != EIO_MESSAGE) { return client; }
+  if (packet.kind != EIO_MESSAGE) { return nothing; }
 
   let sio = readSocketPacket(packet.body);
-  if (!sio.ok) { return client; }
+  if (!sio.ok) { return nothing; }
 
   if (sio.kind == SIO_CONNECT) {
-    // The client is joining a namespace. Answering with its session id is what
-    // modern clients expect; one that gets a bare `40` believes it belongs to
-    // no session and cannot reconnect into it.
-    let joined: Client = { peer: client.peer, sid: client.sid, nsp: sio.nsp, connected: true };
-    send(joined.peer, messagePacket(connectPacket(sio.nsp, joined.sid)));
+    // Answering with the session id is what modern clients expect; one that
+    // gets a bare `40` believes it belongs to no session and cannot reconnect
+    // into it.
+    let joined: Decision = {
+      reply: messagePacket(connectPacket(sio.nsp, sid)),
+      nsp: sio.nsp, connected: true, eventName: "", eventArgs: "", ackId: -1, closing: false,
+    };
     return joined;
   }
 
   if (sio.kind == SIO_DISCONNECT) {
-    let left: Client = { peer: client.peer, sid: client.sid, nsp: client.nsp, connected: false };
+    let left: Decision = { reply: "", nsp: nsp, connected: false, eventName: "", eventArgs: "", ackId: -1, closing: false };
     return left;
   }
 
   if (sio.kind == SIO_EVENT) {
-    if (!client.connected) {
-      // An event before CONNECT is a client that has not joined. Ignoring it
-      // silently would look like a lost message; there is nowhere to reply to
-      // it, so it is dropped and the connection left alone.
-      return client;
-    }
+    // An event before CONNECT is a client that has not joined. There is
+    // nowhere to reply to it, so it is dropped and the connection left alone.
+    if (!connected) { return nothing; }
     let call = readEvent(sio.payload);
-    if (!call.ok) { return client; }
-    // The ack id travels with the event and must come back on the reply, so it
-    // is carried on the client the handler is given.
-    let asked: Client = { peer: client.peer, sid: client.sid, nsp: client.nsp, connected: true };
-    onEvent(asked, call.name, call.argsJson);
-    // An event that asked for an acknowledgement and got none leaves the
-    // client's callback pending forever, so an empty ack is sent when the
-    // handler did not.
-    if (sio.ackId >= 0) { ack(asked, sio.ackId, ""); }
-    return asked;
+    if (!call.ok) { return nothing; }
+    let fire: Decision = {
+      reply: "", nsp: nsp, connected: true,
+      eventName: call.name, eventArgs: call.argsJson, ackId: sio.ackId, closing: false,
+    };
+    return fire;
   }
 
-  return client;
+  return nothing;
+}
+
+// The same decision, applied to a live client.
+export function handleMessage(client: Client, text: string, onEvent: (client: Client, name: string, argsJson: string) => void): Client {
+  let d = decide(client.sid, client.nsp, client.connected, text);
+  if (d.reply != "") { send(client.peer, d.reply); }
+
+  let next: Client = { peer: client.peer, sid: client.sid, nsp: d.nsp, connected: d.connected };
+  if (d.eventName != "") {
+    onEvent(next, d.eventName, d.eventArgs);
+    // An event that asked for acknowledgement and got none leaves the
+    // client's callback pending forever, so an empty ack is sent when the
+    // handler did not.
+    if (d.ackId >= 0) { ack(next, d.ackId, ""); }
+  }
+  return next;
 }
 
 // The opening packet a client must receive before anything else.

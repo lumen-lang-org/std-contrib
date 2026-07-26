@@ -42,6 +42,10 @@ export type Frame = {
   payload: string,
   // How many bytes of the buffer this frame used. The caller drops them.
   consumed: int,
+  // Whether the peer masked it. A client must mask every frame and a server
+  // must mask none, but only the caller knows which side it is on, so this is
+  // reported here and enforced there.
+  masked: bool,
   // Set when the bytes cannot be a frame at all, which is a protocol error and
   // not something more reading will fix.
   error: string,
@@ -138,7 +142,7 @@ export function closeCodeOf(payload: string): int {
 // Returns `complete: false` when there is not enough yet. That is not a
 // failure and must not be treated as one: a caller reads more and asks again.
 export function decodeFrame(buffer: string, maxPayload: int): Frame {
-  let partial: Frame = { complete: false, fin: false, opcode: 0, payload: "", consumed: 0, error: "" };
+  let partial: Frame = { complete: false, fin: false, opcode: 0, payload: "", consumed: 0, masked: false, error: "" };
   if (buffer.length < 2) { return partial; }
 
   let b0 = buffer.charCodeAt(0);
@@ -160,7 +164,7 @@ export function decodeFrame(buffer: string, maxPayload: int): Frame {
     // beats an allocation that takes the process with it.
     if (buffer.charCodeAt(2) != 0 || buffer.charCodeAt(3) != 0
         || buffer.charCodeAt(4) != 0 || buffer.charCodeAt(5) != 0) {
-      let vast: Frame = { complete: false, fin: false, opcode: 0, payload: "", consumed: 0,
+      let vast: Frame = { complete: false, fin: false, opcode: 0, payload: "", consumed: 0, masked: false,
         error: "a frame larger than 4 GB is refused" };
       return vast;
     }
@@ -170,7 +174,7 @@ export function decodeFrame(buffer: string, maxPayload: int): Frame {
   }
 
   if (maxPayload > 0 && len > maxPayload) {
-    let big: Frame = { complete: false, fin: false, opcode: 0, payload: "", consumed: 0,
+    let big: Frame = { complete: false, fin: false, opcode: 0, payload: "", consumed: 0, masked: false,
       error: "frame of " + `${len}` + " bytes is over the limit of " + `${maxPayload}` };
     return big;
   }
@@ -180,12 +184,12 @@ export function decodeFrame(buffer: string, maxPayload: int): Frame {
   // that will not improve.
   if (opcode >= 8) {
     if (len > 125) {
-      let bad: Frame = { complete: false, fin: false, opcode: opcode, payload: "", consumed: 0,
+      let bad: Frame = { complete: false, fin: false, opcode: opcode, payload: "", consumed: 0, masked: false,
         error: "a control frame carries at most 125 bytes" };
       return bad;
     }
     if (!fin) {
-      let split: Frame = { complete: false, fin: false, opcode: opcode, payload: "", consumed: 0,
+      let split: Frame = { complete: false, fin: false, opcode: opcode, payload: "", consumed: 0, masked: false,
         error: "a control frame is never fragmented" };
       return split;
     }
@@ -204,7 +208,7 @@ export function decodeFrame(buffer: string, maxPayload: int): Frame {
 
   let out: Frame = {
     complete: true, fin: fin, opcode: opcode, payload: body,
-    consumed: at + len, error: "",
+    consumed: at + len, masked: masked, error: "",
   };
   return out;
 }
