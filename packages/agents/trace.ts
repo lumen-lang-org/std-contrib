@@ -17,7 +17,7 @@ import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, field, repository, findById, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Tracer, makeTracerFor, tracerWithEnvironment, noTracer } from "../tracing/tracing.ts";
-import { backendNamed } from "../tracing/backend.ts";
+import { BackendCredentials, backendNamed } from "../tracing/backend.ts";
 import { credentialFor } from "./credentials.ts";
 
 // There is one of these, keyed "default". A table rather than a constant
@@ -109,7 +109,8 @@ export function tracerFor(db: Db, master: string): Tracer {
   let name = backendNameOf(row);
   if (secret == "" && name == "langfuse") { return noTracer(); }
 
-  let backend = backendNamed(name, row.endpoint, row.publicKey, secret);
+  let creds: BackendCredentials = { endpoint: row.endpoint, identity: row.publicKey, secret: secret };
+  let backend = backendNamed(name, creds);
   if (backend.name == "none") { return noTracer(); }
 
   let t = makeTracerFor(backend, row.endpoint, serviceNameOr(row));

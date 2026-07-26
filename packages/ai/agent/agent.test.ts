@@ -1,6 +1,6 @@
 // Tests for agent.
 
-import { agFakeCallBody, agentFakeAnswer, agentFakeToolCall, agentHistoryToTurns, agentSystemPrompt, agentTrace, fakeModel, makeAgentStep, runAgent, runAgentWithPolicy } from "./agent.ts";
+import { FakeToolCall, agFakeCallBody, agentFakeAnswer, agentFakeToolCall, agentHistoryToTurns, agentSystemPrompt, agentTrace, fakeModel, makeAgentStep, runAgent, runAgentWithPolicy } from "./agent.ts";
 
 function agSampleTools(): Tool[] {
   let weather = makeTool("weather", "Current weather for a city.", "city name", agWeatherBody);
@@ -198,9 +198,11 @@ test("an unknown tool comes back as a failed step the model can read", () => {
 });
 
 test("two tool calls in one turn are both dispatched", () => {
-  let names: string[] = ["weather", "clock"];
-  let inputs: string[] = ["Paris", "UTC"];
-  let script: string[] = [agFakeCallBody(names, inputs)];
+  let calls: FakeToolCall[] = [
+    { name: "weather", input: "Paris" },
+    { name: "clock", input: "UTC" },
+  ];
+  let script: string[] = [agFakeCallBody(calls)];
   let run = runAgent(fakeModel(script), agSampleTools(), agStartHistory(), 5);
   expect(run.stopReason == "final");
   expect(run.stepCount == 2);
@@ -223,9 +225,11 @@ test("a two-call turn appends one assistant message and two tool messages", () =
       if (msg.role == "tool") { tools = tools + 1; }
     }
     if (assistants == 0) {
-      let names: string[] = ["weather", "clock"];
-      let inputs: string[] = ["Paris", "UTC"];
-      return agFakeCallBody(names, inputs);
+      let calls: FakeToolCall[] = [
+        { name: "weather", input: "Paris" },
+        { name: "clock", input: "UTC" },
+      ];
+      return agFakeCallBody(calls);
     }
     return agentFakeAnswer(`${messages.length}` + "/" + `${assistants}` + "/" + `${tools}`);
   };
@@ -244,7 +248,7 @@ test("policy blocks a tool inside the loop and the run keeps going", () => {
   let script: string[] = [agentFakeToolCall("shell", "rm -rf /")];
   let allow: string[] = [];
   let deny: string[] = ["shell"];
-  let run = runAgentWithPolicy(fakeModel(script), tools, allow, deny, agStartHistory(), 5);
+  let run = runAgentWithPolicy(fakeModel(script), tools, { allow: allow, deny: deny }, agStartHistory(), 5);
   expect(run.stopReason == "final");
   expect(run.steps.length == 1);
   expect(!run.steps[0].ok);
@@ -252,19 +256,21 @@ test("policy blocks a tool inside the loop and the run keeps going", () => {
   expect(run.steps[0].output.indexOf("SENTINEL-EXECUTED") < 0);
   expect(fs.readFileSync(path) == "not-run");
   expect(run.answer == "done");
-  let permitted = runAgentWithPolicy(fakeModel(script), tools, allow, allow, agStartHistory(), 5);
+  let permitted = runAgentWithPolicy(fakeModel(script), tools, { allow: allow, deny: allow }, agStartHistory(), 5);
   expect(permitted.steps[0].ok);
   expect(permitted.steps[0].output == "SENTINEL-EXECUTED");
   expect(fs.readFileSync(path) == "ran rm -rf /");
 });
 
 test("a tool outside the allow list never runs", () => {
-  let names: string[] = ["weather", "clock"];
-  let inputs: string[] = ["Paris", "UTC"];
-  let script: string[] = [agFakeCallBody(names, inputs)];
+  let calls: FakeToolCall[] = [
+    { name: "weather", input: "Paris" },
+    { name: "clock", input: "UTC" },
+  ];
+  let script: string[] = [agFakeCallBody(calls)];
   let allow: string[] = ["weather"];
   let deny: string[] = [];
-  let run = runAgentWithPolicy(fakeModel(script), agSampleTools(), allow, deny, agStartHistory(), 5);
+  let run = runAgentWithPolicy(fakeModel(script), agSampleTools(), { allow: allow, deny: deny }, agStartHistory(), 5);
   expect(run.steps.length == 2);
   expect(run.steps[0].ok);
   expect(!run.steps[1].ok);
@@ -272,9 +278,11 @@ test("a tool outside the allow list never runs", () => {
 });
 
 test("the trace reads as a numbered list and says why the run ended", () => {
-  let names: string[] = ["weather", "clock"];
-  let inputs: string[] = ["Paris", "UTC"];
-  let script: string[] = [agFakeCallBody(names, inputs)];
+  let calls: FakeToolCall[] = [
+    { name: "weather", input: "Paris" },
+    { name: "clock", input: "UTC" },
+  ];
+  let script: string[] = [agFakeCallBody(calls)];
   let run = runAgent(fakeModel(script), agSampleTools(), agStartHistory(), 5);
   expect(agentTrace(run) == "1. weather(Paris) -> 18C in Paris\n2. clock(UTC) -> 12:00 UTC\nstopped: final after 2 model calls, 2 tool calls");
 });
@@ -391,11 +399,10 @@ test("one turn cannot exceed the step budget with a giant tool_calls array", () 
     return "18C in " + input;
   });
   let tools: Tool[] = [counter];
-  let names: string[] = [];
-  let inputs: string[] = [];
+  let calls: FakeToolCall[] = [];
   let i: int = 0;
-  while (i < 500) { names.push("weather"); inputs.push("Paris"); i = i + 1; }
-  let script: string[] = [agFakeCallBody(names, inputs)];
+  while (i < 500) { calls.push({ name: "weather", input: "Paris" }); i = i + 1; }
+  let script: string[] = [agFakeCallBody(calls)];
   let run = runAgent(fakeModel(script), tools, agStartHistory(), 2);
   expect(run.stopReason == "max_steps");
   expect(run.stepCount == 1);
@@ -469,7 +476,7 @@ test("the live model rebuilds native turns from a neutral tool history", () => {
     systemMessage("You are a weather assistant."),
     userMessage("What is the weather in Paris?"),
     assistantMessage("[tool_calls] weather({\"input\":\"Paris\"})"),
-    toolResultMessage(runToolWithPolicy(reg, allow, deny, "weather", "Paris")),
+    toolResultMessage(runToolWithPolicy(reg, { allow: allow, deny: deny }, "weather", "Paris")),
   ];
   let turns = agentHistoryToTurns(history);
   expect(turns.length == 4);
@@ -502,8 +509,8 @@ test("the live model ties two tool turns to one assistant turn's ids", () => {
   let history: Message[] = [
     userMessage("weather and time?"),
     assistantMessage("[tool_calls] weather({\"input\":\"Paris\"}), clock({\"input\":\"UTC\"})"),
-    toolResultMessage(runToolWithPolicy(reg, allow, deny, "weather", "Paris")),
-    toolResultMessage(runToolWithPolicy(reg, allow, deny, "clock", "UTC")),
+    toolResultMessage(runToolWithPolicy(reg, { allow: allow, deny: deny }, "weather", "Paris")),
+    toolResultMessage(runToolWithPolicy(reg, { allow: allow, deny: deny }, "clock", "UTC")),
   ];
   let turns = agentHistoryToTurns(history);
   expect(turns.length == 4);
@@ -543,7 +550,7 @@ test("a failed tool result and a stray tool turn both stay valid", () => {
   let deny: string[] = [];
   let history: Message[] = [
     userMessage("do it"),
-    toolResultMessage(runToolWithPolicy(none, allow, deny, "wether", "Paris")),
+    toolResultMessage(runToolWithPolicy(none, { allow: allow, deny: deny }, "wether", "Paris")),
   ];
   let turns = agentHistoryToTurns(history);
   expect(turns.length == 2);

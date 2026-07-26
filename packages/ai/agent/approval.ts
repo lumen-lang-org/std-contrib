@@ -122,7 +122,7 @@ function approvalLoop(model: Model, tools: Tool[], sensitive: string[], convo: M
         return pausedResult(cp);
       }
       let none: string[] = [];
-      let result = runToolWithPolicy(tools, none, none, name, input);
+      let result = runToolWithPolicy(tools, { allow: none, deny: none }, name, input);
       // A child pausing shows up as its tool result carrying the sentinel:
       // checkpoint the parent with the same call pending, so a resume can
       // re-dispatch into the child.
@@ -190,7 +190,7 @@ export function resumeAgent(model: Model, tools: Tool[], sensitive: string[], ch
   // the subagent tool, whose runner finds its own checkpoint and the verdict
   // on disk and resumes the child rather than starting over.
   let none: string[] = [];
-  let result = runToolWithPolicy(tools, none, none, cp.pendingTool, cp.pendingInput);
+  let result = runToolWithPolicy(tools, { allow: none, deny: none }, cp.pendingTool, cp.pendingInput);
   if (result.ok && result.output.startsWith(APPROVAL_SENTINEL)) {
     // The child paused again — a second sensitive call deeper in its run.
     let again: CheckpointFile = {

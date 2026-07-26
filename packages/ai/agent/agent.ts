@@ -1,6 +1,6 @@
 // The agent loop: a model, a tool registry, and a run bounded by a step limit.
 
-import { makeTool, runToolWithPolicy, toolResultMessage, describeTools } from "./tools.ts";
+import { ToolPolicy, makeTool, runToolWithPolicy, toolResultMessage, describeTools } from "./tools.ts";
 import { parseToolCalls, toolCallInput, makeToolCall, toolCallArgument } from "./toolcall.ts";
 import { assistantMessage, systemMessage, userMessage } from "../core/messages.ts";
 import { messageTurn, assistantToolCallsTurn, toolResultTurn, runOpenAIToolChat, runMistralToolChat, emitChatTurn, emitChatMessages } from "./toolchat.ts";
@@ -193,16 +193,27 @@ function agTraceLine(step: AgentStep): string {
 }
 
 // one turn of a canned tool call, as a provider-shaped body.
-export function agFakeCallBody(names: string[], inputs: string[]): string {
+// One tool call a fake model should emit.
+//
+// Was two parallel arrays paired by index, which nothing kept aligned: a
+// reordered list gave weather("UTC") and clock("Paris"), and the test that
+// caught it failed on an assertion rather than a type error. Nothing checked
+// the lengths either, so a short `inputs` read past its end.
+export type FakeToolCall = {
+  name: string,
+  input: string,
+};
+
+export function agFakeCallBody(calls: FakeToolCall[]): string {
   let entries: AgentFakeEntry[] = [];
   let i: int = 0;
-  while (i < names.length) {
-    let args: AgentFakeArgs = { input: inputs[i] };
+  while (i < calls.length) {
+    let args: AgentFakeArgs = { input: calls[i].input };
     let entry: AgentFakeEntry = {
       id: "call_" + `${i + 1}`,
       type: "function",
       function: {
-        name: names[i],
+        name: calls[i].name,
         arguments: JSON.stringify(args),
       },
     };
@@ -259,7 +270,7 @@ function agentLoop(model: Model, tools: Tool[], allow: string[], deny: string[],
       // an unbounded `tool_calls` array, so without a per-dispatch check it
       // could run arbitrarily many tool side-effects within the budget.
       if (steps.length >= maxSteps) { return agResult(answer, steps, "max_steps", turns); }
-      let result = runToolWithPolicy(tools, allow, deny, calls[i].name, toolCallInput(calls[i]));
+      let result = runToolWithPolicy(tools, { allow: allow, deny: deny }, calls[i].name, toolCallInput(calls[i]));
       steps = [...steps, makeAgentStep(steps.length, result.name, result.input, agStepOutput(result), result.ok)];
       convo = [...convo, toolResultMessage(result)];
       i = i + 1;
@@ -302,8 +313,8 @@ export function runAgent(model: Model, tools: Tool[], history: Message[], maxSte
 // policy is enforced per dispatch inside the loop, not by filtering the registry
 // up front, so a denied name comes back as a failed step the model can recover
 // from.
-export function runAgentWithPolicy(model: Model, tools: Tool[], allow: string[], deny: string[], history: Message[], maxSteps: int): AgentResult {
-  return agentLoop(model, tools, allow, deny, history, maxSteps);
+export function runAgentWithPolicy(model: Model, tools: Tool[], policy: ToolPolicy, history: Message[], maxSteps: int): AgentResult {
+  return agentLoop(model, tools, policy.allow, policy.deny, history, maxSteps);
 }
 
 // the loop keeps history as provider-neutral text (`[tool_calls] name(args)` and
@@ -480,9 +491,8 @@ export function agentFakeAnswer(text: string): string {
 }
 
 export function agentFakeToolCall(name: string, input: string): string {
-  let names: string[] = [name];
-  let inputs: string[] = [input];
-  return agFakeCallBody(names, inputs);
+  let one: FakeToolCall[] = [{ name: name, input: input }];
+  return agFakeCallBody(one);
 }
 
 // a deterministic driver: hands back `responses` in order, then "done", so a

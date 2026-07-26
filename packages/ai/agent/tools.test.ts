@@ -129,13 +129,13 @@ test("deny beats allow", () => {
     makeTool("shell", "Run a command.", "a command", (input: string) => { return "ran " + input; }));
   let allow: string[] = ["shell"];
   let deny: string[] = ["shell"];
-  let blocked = runToolWithPolicy(tools, allow, deny, "shell", "rm -rf /");
+  let blocked = runToolWithPolicy(tools, { allow: allow, deny: deny }, "shell", "rm -rf /");
   expect(!blocked.ok);
   expect(blocked.output == "");
   expect(blocked.error.indexOf("blocked by policy") > 0);
   expect(blocked.error.indexOf("denied") > 0);
   let none: string[] = [];
-  let permitted = runToolWithPolicy(tools, allow, none, "shell", "ls");
+  let permitted = runToolWithPolicy(tools, { allow: allow, deny: none }, "shell", "ls");
   expect(permitted.ok);
   expect(permitted.output == "ran ls");
 });
@@ -146,8 +146,8 @@ test("an empty allow list permits everything not denied", () => {
     makeTool("write", "Write a file.", "a path", (input: string) => { return "wrote " + input; }));
   let allow: string[] = [];
   let deny: string[] = ["write"];
-  expect(runToolWithPolicy(tools, allow, deny, "read", "/etc/hosts").ok);
-  let blocked = runToolWithPolicy(tools, allow, deny, "write", "/etc/hosts");
+  expect(runToolWithPolicy(tools, { allow: allow, deny: deny }, "read", "/etc/hosts").ok);
+  let blocked = runToolWithPolicy(tools, { allow: allow, deny: deny }, "write", "/etc/hosts");
   expect(!blocked.ok);
   expect(blocked.error.indexOf("denied") > 0);
 });
@@ -157,7 +157,7 @@ test("a tool outside a non-empty allow list is blocked", () => {
     makeTool("shell", "Run a command.", "a command", (input: string) => { return "ran " + input; }));
   let allow: string[] = ["weather"];
   let deny: string[] = [];
-  let blocked = runToolWithPolicy(tools, allow, deny, "shell", "ls");
+  let blocked = runToolWithPolicy(tools, { allow: allow, deny: deny }, "shell", "ls");
   expect(!blocked.ok);
   expect(blocked.error.indexOf("not in the allow list") > 0);
   expect(blocked.output == "");
@@ -172,11 +172,11 @@ test("a blocked tool's function genuinely does not run", () => {
   }));
   let allow: string[] = [];
   let deny: string[] = ["shell"];
-  let blocked = runToolWithPolicy(tools, allow, deny, "shell", "rm -rf /");
+  let blocked = runToolWithPolicy(tools, { allow: allow, deny: deny }, "shell", "rm -rf /");
   expect(!blocked.ok);
   expect(blocked.output.indexOf("SENTINEL-EXECUTED") < 0);
   expect(fs.readFileSync(path) == "not-run");
-  let permitted = runToolWithPolicy(tools, allow, allow, "shell", "ls");
+  let permitted = runToolWithPolicy(tools, { allow: allow, deny: allow }, "shell", "ls");
   expect(permitted.ok);
   expect(permitted.output == "SENTINEL-EXECUTED");
   expect(fs.readFileSync(path) == "ran ls");
@@ -191,7 +191,7 @@ test("a deny entry blocks despite case or whitespace spelling divergence", () =>
     fs.writeFileSync("/tmp/lumen-ai-tools-canon-test.txt", "RAN:" + input);
     return "EXEC";
   }));
-  let blocked = runToolWithPolicy(cased, allow, deny, "Shell", "rm -rf /");
+  let blocked = runToolWithPolicy(cased, { allow: allow, deny: deny }, "Shell", "rm -rf /");
   expect(!blocked.ok);
   expect(blocked.error.indexOf("blocked by policy") > 0);
   expect(blocked.output.indexOf("EXEC") < 0);
@@ -200,7 +200,7 @@ test("a deny entry blocks despite case or whitespace spelling divergence", () =>
     fs.writeFileSync("/tmp/lumen-ai-tools-canon-test.txt", "RAN:" + input);
     return "EXEC";
   }));
-  let blocked2 = runToolWithPolicy(spaced, allow, deny, "shell ", "rm -rf /");
+  let blocked2 = runToolWithPolicy(spaced, { allow: allow, deny: deny }, "shell ", "rm -rf /");
   expect(!blocked2.ok);
   expect(blocked2.error.indexOf("blocked by policy") > 0);
   expect(fs.readFileSync(path) == "not-run");
@@ -210,7 +210,7 @@ test("policy blocks a denied name even when no such tool exists", () => {
   let tools = toolRegistry();
   let allow: string[] = [];
   let deny: string[] = ["shell"];
-  let blocked = runToolWithPolicy(tools, allow, deny, "shell", "ls");
+  let blocked = runToolWithPolicy(tools, { allow: allow, deny: deny }, "shell", "ls");
   expect(!blocked.ok);
   expect(blocked.error.indexOf("denied") > 0);
   expect(blocked.error.indexOf("no tools are registered") < 0);

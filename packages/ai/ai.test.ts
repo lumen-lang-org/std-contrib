@@ -480,12 +480,12 @@ test("tool dispatch through the barrel", () => {
   expect(!missing.ok);
   expect(missing.error.includes("unknown tool"));
   expect(toolMessage(missing).content.includes("error: unknown tool"));
-  let denied = runToolGuarded(tools, [], ["weather"], "weather", "Paris");
+  let denied = runToolGuarded(tools, { allow: [], deny: ["weather"] }, "weather", "Paris");
   expect(!denied.ok);
   expect(denied.error.includes("denied"));
-  let allowed = runToolGuarded(tools, ["weather"], [], "weather", "Paris");
+  let allowed = runToolGuarded(tools, { allow: ["weather"], deny: [] }, "weather", "Paris");
   expect(allowed.ok);
-  let outside = runToolGuarded(tools, ["weather"], [], "clock", "CET");
+  let outside = runToolGuarded(tools, { allow: ["weather"], deny: [] }, "clock", "CET");
   expect(!outside.ok);
 });
 
@@ -564,7 +564,7 @@ test("agent policy through the barrel", () => {
   ]);
   let deny: string[] = ["clock"];
   let allow: string[] = [];
-  let result = runAgentWithPolicy(model, barrelTools(), allow, deny, barrelAgentHistory(), 4);
+  let result = runAgentWithPolicy(model, barrelTools(), { allow: allow, deny: deny }, barrelAgentHistory(), 4);
   expect(result.stopReason == "final");
   expect(result.steps.length == 1);
   expect(!result.steps[0].ok);

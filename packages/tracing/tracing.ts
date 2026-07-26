@@ -446,25 +446,65 @@ function spanJson(span: RecordedSpan): string {
 }
 
 // Close a span and record it.
-export function endSpan(t: Tracer, span: TraceSpan, input: string, output: string): Tracer {
-  let attrs = baseAttrs(t, span, input, output, TRACE_DEFAULT, "");
+// What went into a span and what came out.
+//
+// Two adjacent strings positionally, and a transposition is invisible: the
+// trace renders identically, just backwards.
+export type SpanResult = {
+  input: string,
+  output: string,
+};
+
+export function endSpan(t: Tracer, span: TraceSpan, result: SpanResult): Tracer {
+  let attrs = baseAttrs(t, span, result.input, result.output, TRACE_DEFAULT, "");
   return withSpan(t, recordSpan(t, span, nowNanos(), attrs, false, ""));
 }
 
 // Close a span that failed. The message is what a reader sees first when they
 // open the trace, so it should say what went wrong rather than name a type.
-export function endSpanFailed(t: Tracer, span: TraceSpan, input: string, message: string): Tracer {
-  let attrs = baseAttrs(t, span, input, "", TRACE_ERROR, message);
-  return withSpan(t, recordSpan(t, span, nowNanos(), attrs, true, message));
+// A failure is not a SpanResult: `message` is not an output, and swapping it
+// with the input puts the user's prompt where the error headline goes — which
+// is the first thing a reader sees when they open the trace.
+export type SpanFailure = {
+  input: string,
+  message: string,
+};
+
+export function endSpanFailed(t: Tracer, span: TraceSpan, failure: SpanFailure): Tracer {
+  let attrs = baseAttrs(t, span, failure.input, "", TRACE_ERROR, failure.message);
+  return withSpan(t, recordSpan(t, span, nowNanos(), attrs, true, failure.message));
 }
+
+// What a model call cost and what went through it.
+//
+// A record, because the positional form had two adjacent same-typed pairs and
+// both transpositions are silent. `input`/`output` swapped renders a trace
+// where every call shows the reply as the prompt — the UI cannot tell, because
+// both fields hold plausible prose. `inputTokens`/`outputTokens` swapped is
+// worse: the total is their sum, so every aggregate still reconciles while the
+// per-token cost is wrong, and output tokens are priced several times input.
+export type GenerationCall = {
+  model: string,
+  temperature: number,
+  maxTokens: int,
+  input: string,
+  output: string,
+  inputTokens: int,
+  outputTokens: int,
+};
 
 // Close a model call, with the model's name, its settings and what it cost.
 //
 // Token counts go in `usage_details`. Langfuse's older `usage` field is
 // deprecated in its own schema, and the newer one takes any keys, so a provider
 // reporting something beyond input and output has somewhere to put it.
-export function endGeneration(t: Tracer, span: TraceSpan, model: string, temperature: number, maxTokens: int, input: string, output: string, inputTokens: int, outputTokens: int): Tracer {
-  let attrs = baseAttrs(t, span, input, output, TRACE_DEFAULT, "");
+export function endGeneration(t: Tracer, span: TraceSpan, call: GenerationCall): Tracer {
+  let model = call.model;
+  let temperature = call.temperature;
+  let maxTokens = call.maxTokens;
+  let inputTokens = call.inputTokens;
+  let outputTokens = call.outputTokens;
+  let attrs = baseAttrs(t, span, call.input, call.output, TRACE_DEFAULT, "");
   let style = t.backend.attributeStyle;
   if (style == ATTRS_LANGFUSE) {
     attrs = [...attrs, attrString("langfuse.observation.model.name", model)];
@@ -492,7 +532,9 @@ export function endGeneration(t: Tracer, span: TraceSpan, model: string, tempera
 }
 
 // Close a tool dispatch.
-export function endTool(t: Tracer, span: TraceSpan, input: string, output: string, ok: bool): Tracer {
+export function endTool(t: Tracer, span: TraceSpan, result: SpanResult, ok: bool): Tracer {
+  let input = result.input;
+  let output = result.output;
   let level = TRACE_DEFAULT;
   let message = "";
   if (!ok) {

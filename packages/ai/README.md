@@ -162,7 +162,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `toolNames(tools)` | Registered tool names, in order |
 | `toolDescriptions(tools)` | Render the registry as one `- name(params): description` line per tool |
 | `runTool(tools, name, input)` | Dispatch one tool and return a result record |
-| `runToolGuarded(tools, allow, deny, name, input)` | Dispatch only when the allow/deny policy permits it |
+| `runToolGuarded(tools, policy, name, input)` | Dispatch only when the policy permits it; `policy` is `{ allow, deny }` |
 | `toolMessage(result)` | Turn a tool result into a `role: "tool"` message |
 | `toolCall(id, name, args)` | Build a provider-neutral tool call record |
 | `toolCalls(raw)` | Parse tool calls out of an OpenAI-compatible response body |
@@ -175,7 +175,7 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `serializeToolDefsMistral(tools)` | Serialize the registry as a Mistral `tools` array |
 | `agentSystemPrompt(tools, instruction)` | Build the agent system prompt that lists the tools and how to stop |
 | `runAgent(model, tools, history, maxSteps)` | Run the model/tool loop and return answer, steps, and stop reason |
-| `runAgentWithPolicy(model, tools, allow, deny, history, maxSteps)` | Run the loop with a tool allow/deny policy |
+| `runAgentWithPolicy(model, tools, policy, history, maxSteps)` | Run the loop under a `{ allow, deny }` tool policy |
 | `agentStep(index, name, input, output, ok)` | Build one agent step record |
 | `agentTrace(result)` | Render every tool call in order and why the run stopped |
 | `fakeModel(responses)` | Deterministic offline model driver replaying canned response bodies |
@@ -485,8 +485,10 @@ is not a crash either; it comes back as a step whose output is `error: ...` and
 goes to the model in the same message shape as a success, so the model can read
 it and try something else.
 
-`runToolGuarded` and `runAgentWithPolicy` take an allow list and a deny list.
-Deny wins over allow, an empty allow list means everything not denied, and
+`runToolGuarded` and `runAgentWithPolicy` take a `ToolPolicy` — `{ allow, deny }`
+as one record rather than two adjacent lists, because swapping two lists of
+strings compiles and inverts the policy, permitting exactly what was meant to be
+blocked. Deny wins over allow, an empty allow list means everything not denied, and
 policy is checked before the registry is consulted, so a denied name never
 reveals whether such a tool exists.
 
