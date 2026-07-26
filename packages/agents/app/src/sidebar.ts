@@ -9,26 +9,44 @@ import type { ThreadListing } from "./api.js";
 export class ConsoleSidebar extends LitElement {
   static styles = css`
     :host { display: flex; flex-direction: column; height: 100%;
-            background: #0a0d12; border-right: 1px solid #21262d; }
-    .brand { padding: 14px 16px; font-weight: 700; }
-    .brand .dot { color: #ea580c; }
-    .tools { display: flex; gap: 8px; padding: 0 12px 10px; }
-    input { flex: 1; background: #161b22; border: 1px solid #21262d; color: inherit;
-            border-radius: 6px; padding: 6px 10px; font: inherit; }
-    button { background: #ea580c; color: #fff; border: 0; border-radius: 6px;
-             padding: 6px 10px; cursor: pointer; font: inherit; }
-    nav { flex: 1; overflow-y: auto; }
-    .thread { padding: 9px 16px; cursor: pointer; border-left: 2px solid transparent;
+            background: var(--bg-rail); border-right: 1px solid var(--border); }
+    .brand { padding: 16px 18px 12px; font: 700 18px var(--serif); }
+    .brand .dot { color: var(--accent); }
+    .tools { display: flex; gap: 8px; padding: 0 14px 12px; }
+    input { flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+            color: inherit; border-radius: 8px; padding: 6px 10px; font: inherit; }
+    button { background: var(--accent); color: var(--accent-fg); border: 0;
+             border-radius: 8px; padding: 6px 11px; cursor: pointer; font: inherit; }
+    button:hover { background: var(--accent-hover); }
+    nav { flex: 1; overflow-y: auto; padding: 4px 8px; }
+    .thread { padding: 8px 10px; cursor: pointer; border-radius: 8px; margin: 1px 0;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-              font-size: 13.5px; color: #b6bec8; }
-    .thread:hover { background: #161b22; }
-    .thread.active { color: #e6edf3; border-left-color: #ea580c; background: #161b22; }
-    .none { padding: 16px; color: #8b949e; font-size: 13px; }
+              font-size: 13.5px; color: var(--muted); }
+    .thread:hover { background: var(--bg-user); color: var(--fg); }
+    .thread.active { color: var(--fg); background: var(--bg-user); }
+    .none { padding: 16px; color: var(--muted); font-size: 13px; }
+    footer { position: relative; border-top: 1px solid var(--border); padding: 10px 12px; }
+    .me { display: flex; align-items: center; gap: 10px; cursor: pointer;
+          border-radius: 8px; padding: 6px 8px; }
+    .me:hover { background: var(--bg-user); }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+              color: var(--accent-fg); display: grid; place-items: center;
+              font: 600 13px var(--serif); }
+    .who { flex: 1; font-size: 13.5px; }
+    .menu { position: absolute; bottom: 54px; left: 12px; right: 12px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 10px; box-shadow: 0 10px 30px rgba(31,30,29,0.14);
+            overflow: hidden; }
+    .menu div { padding: 9px 14px; cursor: pointer; font-size: 13.5px; }
+    .menu div:hover { background: var(--bg-user); }
+    .menu .about { color: var(--muted); cursor: default; border-top: 1px solid var(--border); }
+    .menu .about:hover { background: none; }
   `;
 
   @property({ type: Array }) threads: ThreadListing[] = [];
   @property() activeId = "";
   @state() private filter = "";
+  @state() private menu = false;
 
   private shown(): ThreadListing[] {
     const q = this.filter.trim().toLowerCase();
@@ -54,6 +72,17 @@ export class ConsoleSidebar extends LitElement {
             ${t.title === "" ? t.agentId : t.title}
           </div>`)}
       </nav>
+      <footer>
+        ${this.menu ? html`<div class="menu">
+          <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>
+          <div class="about">Agent console · std-contrib</div>
+        </div>` : ""}
+        <div class="me" @click=${() => { this.menu = !this.menu; }}>
+          <span class="avatar">A</span>
+          <span class="who">Agents</span>
+          <span>⋯</span>
+        </div>
+      </footer>
     `;
   }
 }

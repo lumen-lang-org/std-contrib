@@ -19,26 +19,30 @@ type Tab = typeof TABS[number];
 @customElement("console-settings")
 export class ConsoleSettings extends LitElement {
   static styles = css`
-    :host { position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    :host { position: fixed; inset: 0; background: rgba(31,30,29,0.4);
             display: flex; align-items: center; justify-content: center; z-index: 40; }
-    .modal { width: min(860px, 92vw); height: min(560px, 88vh); background: #0e1116;
-             border: 1px solid #21262d; border-radius: 10px; display: flex; overflow: hidden; }
-    aside { width: 150px; border-right: 1px solid #21262d; padding-top: 10px; }
-    aside div { padding: 9px 16px; cursor: pointer; color: #b6bec8; font-size: 14px; }
-    aside div.on { color: #e6edf3; background: #161b22; border-left: 2px solid #ea580c; }
-    main { flex: 1; overflow-y: auto; padding: 16px 20px; font-size: 13.5px; }
+    .modal { width: min(860px, 92vw); height: min(560px, 88vh); background: var(--bg);
+             border: 1px solid var(--border); border-radius: 14px; display: flex;
+             overflow: hidden; box-shadow: 0 18px 50px rgba(31,30,29,0.18); }
+    aside { width: 150px; border-right: 1px solid var(--border); padding-top: 12px;
+            background: var(--bg-rail); }
+    aside div { padding: 9px 16px; cursor: pointer; color: var(--muted); font-size: 14px;
+                border-radius: 8px; margin: 1px 8px; }
+    aside div.on { color: var(--fg); background: var(--bg-user); }
+    main { flex: 1; overflow-y: auto; padding: 18px 22px; font-size: 13.5px; }
     table { width: 100%; border-collapse: collapse; }
-    td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #21262d; }
-    th { color: #8b949e; font-weight: 600; }
-    input, select, textarea { background: #161b22; border: 1px solid #21262d; color: inherit;
-             border-radius: 6px; padding: 5px 8px; font: inherit; }
-    button { background: #ea580c; color: #fff; border: 0; border-radius: 6px;
-             padding: 5px 12px; cursor: pointer; font: inherit; }
-    .row { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; align-items: center; }
+    td, th { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    input, select, textarea { background: var(--bg-card); border: 1px solid var(--border);
+             color: inherit; border-radius: 8px; padding: 5px 9px; font: inherit; }
+    button { background: var(--accent); color: var(--accent-fg); border: 0;
+             border-radius: 8px; padding: 5px 13px; cursor: pointer; font: inherit; }
+    button:hover { background: var(--accent-hover); }
+    .row { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; align-items: center; }
     .close { position: absolute; margin: 10px; right: max(calc(50vw - 430px), 4vw);
-             background: none; border: 0; color: #8b949e; font-size: 18px; cursor: pointer; }
-    .note { color: #8b949e; }
-    .err { color: #f85149; }
+             background: none; border: 0; color: var(--bg); font-size: 18px; cursor: pointer; }
+    .note { color: var(--muted); }
+    .err { color: #B3261E; }
   `;
 
   @property() tab: Tab = "Agents";

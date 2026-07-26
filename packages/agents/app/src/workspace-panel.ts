@@ -10,21 +10,23 @@ import { WorkspaceFile, listFiles, readFile, uploadFile } from "./api.js";
 export class WorkspacePanel extends LitElement {
   static styles = css`
     :host { display: flex; flex-direction: column; height: 100%; width: 320px;
-            background: #0a0d12; border-left: 1px solid #21262d; }
-    h3 { margin: 0; padding: 14px 16px 8px; font-size: 13px; text-transform: uppercase;
-         letter-spacing: 0.05em; color: #8b949e; display: flex; justify-content: space-between; }
-    h3 button { background: none; border: 1px solid #21262d; color: #b6bec8;
-                border-radius: 6px; cursor: pointer; font: inherit; padding: 2px 8px; }
-    .list { flex: 1; overflow-y: auto; }
-    .file { padding: 8px 16px; cursor: pointer; font-size: 13.5px; }
-    .file:hover { background: #161b22; }
-    .file .meta { color: #8b949e; font-size: 11.5px; }
+            background: var(--bg-rail); border-left: 1px solid var(--border); }
+    h3 { margin: 0; padding: 16px 16px 8px; font-size: 12px; text-transform: uppercase;
+         letter-spacing: 0.06em; color: var(--muted); display: flex; justify-content: space-between; }
+    h3 button { background: none; border: 1px solid var(--border); color: var(--muted);
+                border-radius: 8px; cursor: pointer; font: inherit; padding: 2px 9px; }
+    h3 button:hover { border-color: var(--accent); color: var(--fg); }
+    .list { flex: 1; overflow-y: auto; padding: 0 8px; }
+    .file { padding: 8px 10px; cursor: pointer; font-size: 13.5px; border-radius: 8px; }
+    .file:hover { background: var(--bg-user); }
+    .file .meta { color: var(--muted); font-size: 11.5px; }
     .view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-    .view pre { flex: 1; overflow: auto; margin: 0; padding: 12px 16px; font-size: 12.5px;
-                background: #0e1116; white-space: pre-wrap; }
-    .back { align-self: flex-start; margin: 8px 16px; background: none; color: #ea580c;
+    .view pre { flex: 1; overflow: auto; margin: 8px; padding: 12px; font-size: 12.5px;
+                background: var(--bg-card); border: 1px solid var(--border);
+                border-radius: 8px; white-space: pre-wrap; }
+    .back { align-self: flex-start; margin: 10px 16px 0; background: none; color: var(--accent);
             border: 0; cursor: pointer; font: inherit; }
-    .none { padding: 16px; color: #8b949e; font-size: 13px; }
+    .none { padding: 16px; color: var(--muted); font-size: 13px; }
   `;
 
   @property() threadId = "";

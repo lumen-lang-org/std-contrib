@@ -21,21 +21,35 @@ type UiMessage = {
 export class AgentConsole extends LitElement {
   static styles = css`
     :host { display: flex; height: 100%; }
-    console-sidebar { width: 250px; flex: none; }
+    console-sidebar { width: 264px; flex: none; }
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-    header { display: flex; align-items: center; gap: 10px; padding: 9px 14px;
-             border-bottom: 1px solid #21262d; }
-    .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+    header { display: flex; align-items: center; gap: 10px; padding: 10px 18px;
+             border-bottom: 1px solid var(--border); background: var(--bg); }
+    .title { font: 600 17px var(--serif); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; flex: 1; }
     .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px;
-            border: 1px solid #21262d; border-radius: 999px; padding: 3px 10px; color: #b6bec8; }
-    .chip .bolt { color: #ea580c; }
-    select { background: #161b22; border: 1px solid #21262d; color: inherit;
-             border-radius: 6px; padding: 4px 8px; font: inherit; }
-    .icon { background: none; border: 1px solid #21262d; color: #b6bec8; border-radius: 6px;
-            padding: 4px 9px; cursor: pointer; font: inherit; }
+            border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px;
+            color: var(--muted); background: var(--bg-card); }
+    .chip .bolt { color: var(--accent); }
+    select { background: var(--bg-card); border: 1px solid var(--border); color: inherit;
+             border-radius: 8px; padding: 4px 8px; font: inherit; }
+    .icon { background: none; border: 1px solid var(--border); color: var(--muted);
+            border-radius: 8px; padding: 4px 10px; cursor: pointer; font: inherit; }
+    .icon:hover { border-color: var(--accent); color: var(--fg); }
     main { flex: 1; min-height: 0; }
-    nr-chatbot { height: 100%; }
+    nr-chatbot {
+      height: 100%;
+      /* The Claude reading: the user's turn is a warm block, the model's is
+         plain text on the page. */
+      --nuraly-color-user-bubble-bg: var(--bg-user);
+      --nuraly-color-user-bubble-fg: var(--fg);
+      --nuraly-color-bot-bubble-bg: transparent;
+      --nuraly-color-bot-bubble-fg: var(--fg);
+      --nuraly-color-divider: var(--border);
+      --nuraly-color-error-bg: #FDF0EC;
+      --nuraly-color-error-border: var(--accent);
+      --nuraly-color-error-fg: #8A2E12;
+    }
   `;
 
   @state() private agents: AgentRow[] = [];
@@ -110,6 +124,7 @@ export class AgentConsole extends LitElement {
         .activeId=${this.threadId}
         @pick-thread=${(e: CustomEvent) => this.open(e.detail.id)}
         @new-thread=${this.fresh}
+        @open-settings=${() => { this.settings = true; }}
       ></console-sidebar>
 
       <div class="center">
@@ -123,7 +138,6 @@ export class AgentConsole extends LitElement {
               </select>` : this.agentName()}
           </span>
           <button class="icon" title="Workspace" @click=${() => { this.panel = !this.panel; }}>🗂</button>
-          <button class="icon" title="Settings" @click=${() => { this.settings = true; }}>⚙</button>
         </header>
         <main>
           <nr-chatbot
