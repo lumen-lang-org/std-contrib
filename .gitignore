@@ -30,3 +30,5 @@
 sio-demo
 echo-server
 ws-client-demo
+tprobe
+api
