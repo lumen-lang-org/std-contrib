@@ -16,13 +16,11 @@ return a new one.
 ## Use
 
 ```ts
-import { chatMistral, system, user, renderTemplate } from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+import { chatMistral, system, user, renderTemplate, templateVar } from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
 
-let prompt = renderTemplate(
-  "Explain {{topic}} in one sentence.",
-  ["topic"],
-  ["native compilation"],
-);
+let prompt = renderTemplate("Explain {{topic}} in one sentence.", [
+  templateVar("topic", "native compilation"),
+]);
 
 let messages = [
   system("You are concise."),
@@ -48,14 +46,16 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `system(content)` | Create a system message |
 | `user(content)` | Create a user message |
 | `assistant(content)` | Create an assistant message |
-| `renderTemplate(template, keys, values)` | Replace `{{key}}` placeholders |
-| `partialTemplate(template, keys, values)` | Replace known placeholders and leave unknown ones intact |
+| `templateVar(name, value)` | One `{{name}}` binding — the name beside its value |
+| `renderTemplate(template, vars)` | Replace `{{name}}` placeholders |
+| `partialTemplate(template, vars)` | Replace known placeholders and leave unknown ones intact |
 | `missingVariables(template, keys)` | Return placeholder names not present in `keys` |
 | `unusedVariables(template, keys)` | Return provided keys not used by the template |
-| `systemTemplate(template, keys, values)` | Render a system message template |
-| `userTemplate(template, keys, values)` | Render a user message template |
-| `assistantTemplate(template, keys, values)` | Render an assistant message template |
-| `renderChatPrompt(roles, templates, keys, values)` | Render flat `role/content` chat prompt entries |
+| `systemTemplate(template, vars)` | Render a system message template |
+| `userTemplate(template, vars)` | Render a user message template |
+| `assistantTemplate(template, vars)` | Render an assistant message template |
+| `promptPart(role, template)` | One chat prompt entry — a role and its template |
+| `renderChatPrompt(parts, vars)` | Render flat `role/content` chat prompt entries |
 | `chatPromptRole(entry)` | Read the role from a rendered chat prompt entry |
 | `chatPromptContent(entry)` | Read the content from a rendered chat prompt entry |
 | `chatRequest(provider, model, messages, temperature, maxTokens)` | Build a provider-neutral chat request |

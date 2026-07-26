@@ -5,7 +5,7 @@
 // Run: lumen test packages/ai/ai.ts
 
 import { systemMessage, userMessage, assistantMessage } from "./core/messages.ts";
-import { renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
+import { TemplateVar, ChatPromptPart, makeTemplateVar, makeChatPromptPart, renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
 import { buildChatRequest } from "./core/request.ts";
 // providers/chat.ts imports makeModelConfig and modelBaseUrl from core/model.ts
 // unaliased, so they are imported unaliased here too. The public wrappers below
@@ -87,12 +87,29 @@ export function assistant(content: string): Message {
   return assistantMessage(content);
 }
 
-export function renderTemplate(template: string, keys: string[], values: string[]): string {
-  return renderPromptTemplate(template, keys, values);
+// One {{name}} binding. Kept beside its value rather than in parallel arrays,
+// so a call site reads as what it renders:
+//
+//   renderTemplate("Explain {{topic}} in one sentence.", [
+//     templateVar("topic", "native compilation"),
+//   ]);
+export function templateVar(name: string, value: string): TemplateVar {
+  return makeTemplateVar(name, value);
 }
 
-export function partialTemplate(template: string, keys: string[], values: string[]): string {
-  return renderPromptTemplate(template, keys, values);
+// A chat prompt entry: its role and its template, as one value.
+export function promptPart(role: string, template: string): ChatPromptPart {
+  return makeChatPromptPart(role, template);
+}
+
+export function renderTemplate(template: string, vars: TemplateVar[]): string {
+  return renderPromptTemplate(template, vars);
+}
+
+// The same rendering; a placeholder with no binding survives verbatim for a
+// later pass, which is what makes it "partial".
+export function partialTemplate(template: string, vars: TemplateVar[]): string {
+  return renderPromptTemplate(template, vars);
 }
 
 export function missingVariables(template: string, keys: string[]): string[] {
@@ -103,20 +120,20 @@ export function unusedVariables(template: string, keys: string[]): string[] {
   return readUnusedTemplateVariables(template, keys);
 }
 
-export function systemTemplate(template: string, keys: string[], values: string[]): Message {
-  return system(renderPromptTemplate(template, keys, values));
+export function systemTemplate(template: string, vars: TemplateVar[]): Message {
+  return system(renderPromptTemplate(template, vars));
 }
 
-export function userTemplate(template: string, keys: string[], values: string[]): Message {
-  return user(renderPromptTemplate(template, keys, values));
+export function userTemplate(template: string, vars: TemplateVar[]): Message {
+  return user(renderPromptTemplate(template, vars));
 }
 
-export function assistantTemplate(template: string, keys: string[], values: string[]): Message {
-  return assistant(renderPromptTemplate(template, keys, values));
+export function assistantTemplate(template: string, vars: TemplateVar[]): Message {
+  return assistant(renderPromptTemplate(template, vars));
 }
 
-export function renderChatPrompt(roles: string[], templates: string[], keys: string[], values: string[]): string[] {
-  return renderFlatChatPrompt(roles, templates, keys, values);
+export function renderChatPrompt(parts: ChatPromptPart[], vars: TemplateVar[]): string[] {
+  return renderFlatChatPrompt(parts, vars);
 }
 
 export function chatPromptRole(entry: string): string {
