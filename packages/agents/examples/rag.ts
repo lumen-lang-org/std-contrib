@@ -46,13 +46,16 @@ function main(): void {
   if (problem != "") { console.error(problem); return; }
 
   // A small corpus of things the model cannot know.
-  indexDocument(db, embedder, "d1", "plume", "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name.", stored);
-  indexDocument(db, embedder, "d2", "plume", "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order.", stored);
-  indexDocument(db, embedder, "d3", "rest", "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds.", stored);
+  indexDocument(db, embedder, "d1", "plume", "/specs/plume", "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name.", stored);
+  indexDocument(db, embedder, "d2", "plume", "/specs/plume", "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order.", stored);
+  indexDocument(db, embedder, "d3", "rest", "/specs/rest", "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds.", stored);
   console.log("indexed 3 documents");
 
   let question = "Why does plume refuse an unordered page?";
-  let found = retrieve(db, embedder, question, 2, stored);
+  // Granted /specs, so both folders under it are readable; granting
+  // /specs/plume alone would leave the rest chunk out.
+  let granted: string[] = ["/specs"];
+  let found = retrieve(db, embedder, granted, question, 2, stored);
   if (!found.ok) { console.error(found.error); return; }
   console.log("");
   let i: int = 0;
