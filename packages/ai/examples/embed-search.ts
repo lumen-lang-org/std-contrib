@@ -17,7 +17,7 @@ import { modelConfig, embedBatchWithConfig, cosine, splitDocument, loadText, doc
 import { requireEnv } from "./env.ts";
 
 let apiKey = requireEnv("MISTRAL_API_KEY");
-let embedCfg = modelConfig("mistral", "mistral-embed", apiKey);
+let embedCfg = modelConfig({ provider: "mistral", model: "mistral-embed", apiKey: apiKey });
 
 let question = "what starts instantly?";
 if (process.argv.length >= 2) { question = process.argv[1]; }

@@ -651,7 +651,7 @@ test("mcp surface through the barrel", () => {
 });
 
 test("a model config carries provider, model, key and options", () => {
-  let m = modelConfig("mistral", "mistral-large-latest", "k");
+  let m = modelConfig({ provider: "mistral", model: "mistral-large-latest", apiKey: "k" });
   expect(m.provider == "mistral");
   expect(m.model == "mistral-large-latest");
   expect(m.apiKey == "k");
@@ -661,7 +661,7 @@ test("a model config carries provider, model, key and options", () => {
 });
 
 test("config helpers return a new value and never mutate", () => {
-  let base = modelConfig("openai", "gpt-4o", "k");
+  let base = modelConfig({ provider: "openai", model: "gpt-4o", apiKey: "k" });
   let hot = withTemperature(base, 0.1);
   let big = withMaxTokens(hot, 4096);
   expect(base.temperature == 0.7);
@@ -672,14 +672,14 @@ test("config helpers return a new value and never mutate", () => {
 });
 
 test("baseUrl overrides the provider default and survives other edits", () => {
-  let m = withBaseUrl(modelConfig("openai", "llama3", "k"), "http://127.0.0.1:11434/v1");
+  let m = withBaseUrl(modelConfig({ provider: "openai", model: "llama3", apiKey: "k" }), "http://127.0.0.1:11434/v1");
   expect(modelEndpoint(m) == "http://127.0.0.1:11434/v1");
   expect(modelEndpoint(withTemperature(m, 0.3)) == "http://127.0.0.1:11434/v1");
   expect(withApiKey(m, "other").apiKey == "other");
 });
 
 test("an unknown provider without a baseUrl is unroutable, not guessed", () => {
-  let m = modelConfig("acme", "x", "k");
+  let m = modelConfig({ provider: "acme", model: "x", apiKey: "k" });
   expect(modelEndpoint(m) == "");
   let r = chat(m, [user("hi")]);
   expect(!r.ok);
