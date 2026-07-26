@@ -34,7 +34,11 @@ export type PromptRow = {
   id: string;
   promptName: string;
   version: number;
-  content: string;
+  // `body`, not `content` — the column and the record both call it that. The
+  // console called it `content`, so every read was undefined and the whole
+  // Prompts tab threw while rendering and drew nothing at all.
+  body: string;
+  createdAt: string;
 };
 
 export type ServerRow = {
@@ -65,7 +69,17 @@ export type TranscriptTurn = { role: string; text: string };
 
 export type ScopeNode = { path: string; documents: number; total: number };
 
-export type SourceListing = { source: string; scope: string; chunks: number; bytes: number };
+export type SourceListing = {
+  source: string; scope: string; chunks: number; bytes: number;
+  // queued, indexing, failed or indexed. A file uploaded a moment ago has no
+  // chunks yet, and saying so is the point — otherwise it looks lost.
+  status: string; error: string;
+};
+
+export type IndexJob = {
+  id: string; source: string; scope: string; status: string;
+  chunks: number; error: string; createdAt: string;
+};
 
 export type WorkspaceFile = { name: string; mime: string; origin: string };
 
@@ -140,10 +154,12 @@ export const createConfig = (row: ModelConfigRow) =>
   call<ModelConfigRow>("/model-configs", { method: "POST", body: JSON.stringify(row) });
 
 export const listPrompts = () => call<PromptRow[]>("/prompts");
-export const createPrompt = (promptName: string, content: string) =>
+// The server assigns the id and the version — a caller picking either is how
+// two writers both become version 4.
+export const createPrompt = (promptName: string, body: string) =>
   call<PromptRow>("/prompts", {
     method: "POST",
-    body: JSON.stringify({ id: "", promptName, version: 0, content, createdAt: "" }),
+    body: JSON.stringify({ id: "", promptName, version: 0, body, createdAt: "" }),
   });
 
 export const listServers = () => call<ServerRow[]>("/servers");
@@ -172,6 +188,7 @@ export const uploadDocument = (source: string, scope: string, body: string, mode
     method: "POST",
     body: JSON.stringify({ source, scope, body }),
   });
+export const listJobs = () => call<IndexJob[]>("/jobs");
 export const deleteSource = (source: string) =>
   call<unknown>(`/documents/${encodeURIComponent(source)}`, { method: "DELETE" });
 

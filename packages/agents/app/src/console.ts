@@ -88,6 +88,15 @@ export class AgentConsole extends LitElement {
 
   private fresh() { this.threadId = ""; this.messages = []; }
 
+  private async reloadAgents() {
+    const listed = await listAgents().catch(() => this.agents);
+    this.agents = listed.filter((a) => a.enabled);
+    // An agent disabled while it was selected must not stay selected.
+    if (!this.agents.some((a) => a.id === this.agentId)) {
+      this.agentId = this.agents.length > 0 ? this.agents[0].id : "";
+    }
+  }
+
   private async send(text: string) {
     if (this.busy || text.trim() === "") return;
     this.busy = true;
@@ -156,7 +165,14 @@ export class AgentConsole extends LitElement {
       </div>
 
       ${this.panel ? html`<workspace-panel .threadId=${this.threadId}></workspace-panel>` : ""}
-      ${this.settings ? html`<console-settings @close=${() => { this.settings = false; }}></console-settings>` : ""}
+      ${this.settings ? html`<console-settings @close=${() => {
+        this.settings = false;
+        // The settings tab says a change takes effect on the next message with
+        // no restart. That was only true of the server: the header, the agent
+        // picker and the placeholder all read a list fetched once at startup,
+        // so a rename or a disable was invisible here until a page reload.
+        void this.reloadAgents();
+      }}></console-settings>` : ""}
     `;
   }
 }

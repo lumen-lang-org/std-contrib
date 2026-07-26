@@ -56,6 +56,11 @@ export function json(status: int, body: string): Reply {
 export function ok(body: string): Reply { return json(200, body); }
 export function created(body: string): Reply { return json(201, body); }
 
+// The work was taken but is not done — a queued job, not a finished one.
+// Answering 201 for something merely accepted tells a client the resource
+// exists when it does not yet.
+export function accepted(body: string): Reply { return json(202, body); }
+
 export function noContent(): Reply {
   return reply(204, "", "application/json");
 }

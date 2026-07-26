@@ -1,0 +1,287 @@
+// Settings: every field a person can fill, and what the server does with it.
+//
+// These assert the *sentence* a refusal comes back with rather than a status
+// code, because the sentence is what the console shows and what a user acts
+// on. A refusal that arrives as an unreadable 500 passes a status assertion
+// and fails a person.
+
+import { expect, test } from "@playwright/test";
+import { errorOf, openSettings, openTab, settings, shell } from "./console.js";
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await expect(shell(page)).toBeVisible();
+  await openSettings(page);
+});
+
+// --- agents ---------------------------------------------------------------------------
+
+test("the agents tab lists every agent with its model config and prompt", async ({ page }) => {
+  await openTab(page, "Agents");
+  const rows = settings(page).locator("tr");
+  const listed = (await page.request.get("/api/agents").then((r) => r.json())) as unknown[];
+  await expect(rows).toHaveCount(listed.length + 1); // + the header
+  await expect(rows.nth(1).locator("button")).toHaveText("Edit");
+});
+
+test("the edit form offers every editable field", async ({ page }) => {
+  await openTab(page, "Agents");
+  await settings(page).locator("tr").nth(1).locator("button").click();
+
+  const form = settings(page).locator(".row");
+  await expect(form.filter({ hasText: "Name" }).locator("input")).toBeVisible();
+  await expect(form.filter({ hasText: "Description" }).locator("input")).toBeVisible();
+  await expect(form.filter({ hasText: "Model config" }).locator("select")).toBeVisible();
+  await expect(form.filter({ hasText: "Prompt" }).locator("select")).toBeVisible();
+  await expect(form.filter({ hasText: "Enabled" }).locator("input[type=checkbox]")).toBeVisible();
+});
+
+test("cancel leaves the agent as it was", async ({ page }) => {
+  await openTab(page, "Agents");
+  const before = await settings(page).locator("tr").nth(1).textContent();
+
+  await settings(page).locator("tr").nth(1).locator("button").click();
+  await settings(page).locator(".row input").nth(1).fill("typed then abandoned");
+  await settings(page).locator("button", { hasText: "Cancel" }).click();
+
+  await expect(settings(page).locator("tr").nth(1)).toHaveText(before ?? "");
+});
+
+test("editing an agent saves and the row shows it", async ({ page }) => {
+  await openTab(page, "Agents");
+  const mark = `edited at ${Date.now()}`;
+
+  await settings(page).locator("tr").nth(1).locator("button").click();
+  await settings(page).locator(".row input").nth(1).fill(mark);
+  await settings(page).locator("button", { hasText: "Save" }).click();
+
+  await expect(settings(page).locator("tr").nth(1)).toContainText(mark);
+  // And it is in the database, not only on the screen.
+  const agents = (await page.request.get("/api/agents").then((r) => r.json())) as { description: string }[];
+  expect(agents.some((a) => a.description === mark)).toBe(true);
+});
+
+test("an agent cannot be pointed at a model config that does not exist", async ({ page }) => {
+  // Only the row's own columns: GET answers the full view with prompt, config,
+  // servers and sub-agents nested, and JSON.parse refuses fields the record
+  // does not declare. This is the same trap the console fell into.
+  const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
+    { id: string; agentName: string; description: string; promptId: string; enabled: boolean }[];
+  const a = agents[0];
+  const res = await page.request.put(`/api/agents/${a.id}`, {
+    data: {
+      id: a.id, agentName: a.agentName, description: a.description,
+      modelConfigId: "no-such-config", promptId: a.promptId,
+      enabled: a.enabled, updatedAt: "now",
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("no model config");
+});
+
+// --- models ---------------------------------------------------------------------------
+
+test("only one embedding model is enabled at a time", async ({ page }) => {
+  await openTab(page, "Models");
+  const embedRows = settings(page).locator("tr", { has: page.locator("input[type=radio]") });
+  const count = await embedRows.count();
+  test.skip(count < 2, "needs two embedding models to observe the exchange");
+
+  await embedRows.nth(1).locator("input").check();
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as
+    { kind: string; enabled: boolean }[];
+  const on = models.filter((m) => m.kind === "embedding" && m.enabled);
+  expect(on).toHaveLength(1);
+});
+
+test("embedding models are one-of and chat models are not", async ({ page }) => {
+  await openTab(page, "Models");
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as
+    { kind: string }[];
+  const embedders = models.filter((m) => m.kind === "embedding").length;
+  const chats = models.filter((m) => m.kind === "chat").length;
+
+  // In the table only — the add-model row has an "enabled" checkbox of its own.
+  await expect(settings(page).locator("table input[type=radio]")).toHaveCount(embedders);
+  await expect(settings(page).locator("table input[type=checkbox]")).toHaveCount(chats);
+});
+
+test("a model id that is already taken is refused rather than overwriting", async ({ page }) => {
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as { id: string }[];
+  const res = await page.request.post("/api/models", {
+    data: {
+      id: models[0].id, label: "Impostor", apiName: "x", provider: "mistral",
+      kind: "chat", dimensions: 0, enabled: true,
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("already exists");
+});
+
+// --- prompts --------------------------------------------------------------------------
+
+test("the prompts tab renders its rows and its form", async ({ page }) => {
+  // It rendered neither for a while: the client called the column `content`
+  // and the API answers `body`, so the template threw and drew nothing.
+  await openTab(page, "Prompts");
+  await expect(settings(page).locator("table tr")).not.toHaveCount(0);
+  await expect(settings(page).locator("input[name=name]")).toBeVisible();
+  await expect(settings(page).locator("textarea[name=content]")).toBeVisible();
+});
+
+test("saving a prompt creates a new version rather than editing one", async ({ page }) => {
+  await openTab(page, "Prompts");
+  const name = `e2e_${Date.now()}`;
+
+  await settings(page).locator("input[name=name]").fill(name);
+  await settings(page).locator("textarea[name=content]").fill("First version.");
+  await settings(page).locator("button", { hasText: "Save version" }).click();
+  await expect(settings(page).locator("tr", { hasText: name })).toHaveCount(1);
+
+  await settings(page).locator("input[name=name]").fill(name);
+  await settings(page).locator("textarea[name=content]").fill("Second version.");
+  await settings(page).locator("button", { hasText: "Save version" }).click();
+
+  // Two rows, two versions — the first is still there.
+  await expect(settings(page).locator("tr", { hasText: name })).toHaveCount(2);
+  const prompts = (await page.request.get("/api/prompts").then((r) => r.json())) as
+    { promptName: string; version: number; body: string }[];
+  const mine = prompts.filter((p) => p.promptName === name).map((p) => p.version).sort();
+  expect(mine).toEqual([1, 2]);
+});
+
+// --- providers ------------------------------------------------------------------------
+
+test("a stored credential is never handed back", async ({ page }) => {
+  await openTab(page, "Providers");
+  const res = await page.request.get("/api/providers");
+  const body = await res.text();
+  // Names only. If this ever contains "sk-" the store is leaking.
+  expect(body).not.toContain("sk-");
+  expect(body).not.toContain("envelope");
+});
+
+test("an empty api key is refused, because an empty envelope is unreadable", async ({ page }) => {
+  const res = await page.request.put("/api/providers/mistral/key", { data: { apiKey: "" } });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("empty");
+});
+
+// --- tracing --------------------------------------------------------------------------
+
+test("an unknown tracing backend is refused when it is set, not later", async ({ page }) => {
+  const res = await page.request.put("/api/tracing", {
+    data: {
+      id: "default", backend: "datadog", endpoint: "https://example.test/v1/traces",
+      publicKey: "", serviceName: "e2e", environment: "test", enabled: true,
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("unknown backend");
+});
+
+test("the tracing tab offers exactly the backends the tracer understands", async ({ page }) => {
+  await openTab(page, "Tracing");
+  const offered = await settings(page).locator("select[name=backend] option").allTextContents();
+  expect(offered.map((s) => s.trim()).sort()).toEqual(
+    ["arize", "braintrust", "langfuse", "langsmith", "otlp", "phoenix"],
+  );
+});
+
+test("a partial tracing body is answered, not fatal", async ({ page }) => {
+  // The record declares fields this body omits. It must come back as a
+  // readable 400 — this used to kill the server outright.
+  const res = await page.request.put("/api/tracing", { data: { backend: "otlp" } });
+  expect(res.status()).toBe(400);
+  // And the server is still there.
+  await expect(page.request.get("/api/agents").then((r) => r.status())).resolves.toBe(200);
+});
+
+// --- the findings the settings audit confirmed ----------------------------------------
+
+test("an agent cannot be saved with a blank name", async ({ page }) => {
+  // A nameless agent sorts first — the list is ordered by name — so it becomes
+  // the console's default and every new conversation opens against it.
+  const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
+    { id: string; description: string; modelConfigId: string; promptId: string; enabled: boolean }[];
+  const a = agents[0];
+  const res = await page.request.put(`/api/agents/${a.id}`, {
+    data: {
+      id: a.id, agentName: "   ", description: a.description,
+      modelConfigId: a.modelConfigId, promptId: a.promptId,
+      enabled: a.enabled, updatedAt: "now",
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("needs a name");
+});
+
+test("an embedding model must say how wide its vectors are", async ({ page }) => {
+  const res = await page.request.post("/api/models", {
+    data: {
+      id: `e2e_nodim_${Date.now()}`, label: "No Width", apiName: "mistral-embed",
+      provider: "mistral", kind: "embedding", dimensions: 0, enabled: false,
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("how wide");
+});
+
+test("a model naming a provider nothing can reach is refused", async ({ page }) => {
+  const res = await page.request.post("/api/models", {
+    data: {
+      id: `e2e_nowhere_${Date.now()}`, label: "Nowhere", apiName: "x",
+      provider: "nowhere", kind: "chat", dimensions: 0, enabled: false,
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("no chat endpoint");
+});
+
+test("a model that is neither chat nor embedding is refused", async ({ page }) => {
+  const res = await page.request.post("/api/models", {
+    data: {
+      id: `e2e_kind_${Date.now()}`, label: "Odd", apiName: "x",
+      provider: "mistral", kind: "reranker", dimensions: 0, enabled: false,
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("chat or embedding");
+});
+
+test("the models form asks for dimensions only when the kind needs them", async ({ page }) => {
+  await openTab(page, "Models");
+  await expect(settings(page).locator("input[name=dimensions]")).toHaveCount(0);
+  await settings(page).locator("select[name=kind]").selectOption("embedding");
+  await expect(settings(page).locator("input[name=dimensions]")).toBeVisible();
+});
+
+test("saving tracing keeps the service name and environment it was given", async ({ page }) => {
+  // These were constants in the form, so opening the tab and pressing Save
+  // refiled a staging deployment's traces under "production".
+  await page.request.put("/api/tracing", {
+    data: {
+      id: "default", backend: "otlp", endpoint: "http://127.0.0.1:4318/v1/traces",
+      publicKey: "", serviceName: "e2e-service", environment: "staging", enabled: false,
+    },
+  });
+  // Settings reads the row when it mounts, and beforeEach already opened it —
+  // so the change above has to be made visible by opening it again.
+  await page.reload();
+  await openSettings(page);
+  await openTab(page, "Tracing");
+  await expect(settings(page).locator("input[name=serviceName]")).toHaveValue("e2e-service");
+  await expect(settings(page).locator("input[name=environment]")).toHaveValue("staging");
+
+  await settings(page).locator("button", { hasText: "Save" }).click();
+  const after = (await page.request.get("/api/tracing").then((r) => r.json())) as
+    { serviceName: string; environment: string };
+  expect(after.serviceName).toBe("e2e-service");
+  expect(after.environment).toBe("staging");
+});
+
+test("every provider the console offers is one the code can reach", async ({ page }) => {
+  await openTab(page, "Providers");
+  const offered = await settings(page).locator("select[name=provider] option").allTextContents();
+  expect(offered.map((s) => s.trim()).sort()).toEqual(["anthropic", "mistral", "openai"]);
+});

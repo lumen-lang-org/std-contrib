@@ -11,6 +11,10 @@ import {
   listSources, uploadDocument,
 } from "./api.js";
 
+// How often to look again while something is indexing. Only runs while there
+// is work — a page watching an idle queue is a page polling for nothing.
+const WATCH_MS = 1500;
+
 // A folder and what hangs under it. Intermediate folders are synthesized: a
 // scope exists by carrying documents, so nothing is filed at /engineering
 // when /engineering/plume has everything — but the branch still has to be
@@ -97,6 +101,11 @@ export class KnowledgePage extends LitElement {
     .note { color: var(--muted); }
     .err { color: #B3261E; }
     .title { font: 600 17px var(--serif); margin: 0 0 12px; }
+    .status { font-size: 12px; border-radius: 999px; padding: 2px 9px;
+              border: 1px solid var(--border); color: var(--muted); }
+    .status.indexed { color: #2F6F4E; border-color: #BFD8C9; }
+    .status.queued, .status.indexing { color: #8A5A2B; border-color: #E6D2B8; }
+    .status.failed { color: #B3261E; border-color: #E8C0BC; }
   `;
 
   @state() private scopes: ScopeNode[] = [];
@@ -109,6 +118,24 @@ export class KnowledgePage extends LitElement {
   @state() private embedder: ModelRow | null = null;
   @state() private problem = "";
   @state() private busy = "";
+  private watch: number = 0;
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.watch !== 0) { clearInterval(this.watch); this.watch = 0; }
+  }
+
+  // Poll while anything is queued or indexing, and stop when it settles.
+  private keepWatching() {
+    const pending = this.sources.some((s) => s.status === "queued" || s.status === "indexing");
+    if (pending && this.watch === 0) {
+      this.watch = window.setInterval(() => void this.refresh(), WATCH_MS);
+    }
+    if (!pending && this.watch !== 0) {
+      clearInterval(this.watch);
+      this.watch = 0;
+    }
+  }
 
   async connectedCallback() {
     super.connectedCallback();
@@ -125,6 +152,7 @@ export class KnowledgePage extends LitElement {
       this.scopes = await listScopes();
       if (this.scope === "/" && this.scopes.length > 0) this.scope = this.scopes[0].path;
       this.sources = await listSources(this.scope);
+      this.keepWatching();
     } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
   }
 
@@ -162,6 +190,8 @@ export class KnowledgePage extends LitElement {
     const kids = n.children.length > 0;
     return html`
       <div class="scope ${n.path === this.scope ? "on" : ""}"
+        data-path=${n.path}
+        data-open=${kids ? String(open) : "leaf"}
         style="padding-left: ${8 + depth * 14}px" @click=${() => this.pick(n.path)}>
         <span class="twist" @click=${(e: Event) => { e.stopPropagation(); this.twist(n.path); }}>
           ${kids ? (open ? "▾" : "▸") : ""}
@@ -219,22 +249,29 @@ export class KnowledgePage extends LitElement {
           before uploading.</p>` : html`
           <p class="note">Indexed with <strong>${this.embedder.label}</strong>.</p>`}
         <div class="scroll"><table>
-          <tr><th>Name</th><th>Chunks</th><th>Size</th><th></th></tr>
+          <tr><th>Name</th><th>Status</th><th>Chunks</th><th>Size</th><th></th></tr>
           ${this.parentOf(this.scope) === "" ? "" : html`<tr class="folder"
             @click=${() => this.pick(this.parentOf(this.scope))}>
-            <td colspan="4" class="note">↩ ${this.parentOf(this.scope)}</td>
+            <td colspan="5" class="note">↩ ${this.parentOf(this.scope)}</td>
           </tr>`}
           ${this.childrenOf(this.scope).map((n) => html`<tr class="folder"
             @click=${() => this.pick(n.path)}>
             <td>📁 ${n.name}</td>
             <td class="note">—</td>
+            <td class="note">—</td>
             <td class="note">${n.total} ${n.total === 1 ? "document" : "documents"}</td>
             <td></td>
           </tr>`)}
           ${this.sources.map((s) => html`<tr>
-            <td>${s.source}</td><td>${s.chunks}</td><td>${(s.bytes / 1024).toFixed(1)} kB</td>
-            <td><button class="ghost" @click=${() =>
-              deleteSource(s.source).then(() => this.refresh())}>Delete</button></td>
+            <td>${s.source}</td>
+            <td><span class="status ${s.status}" title=${s.error}>${s.status}</span></td>
+            <td>${s.status === "indexed" ? s.chunks : html`<span class="note">—</span>`}</td>
+            <td>${s.status === "indexed"
+              ? (s.bytes / 1024).toFixed(1) + " kB"
+              : html`<span class="note">—</span>`}</td>
+            <td>${s.status === "indexed" || s.status === "failed" ? html`
+              <button class="ghost" @click=${() =>
+                deleteSource(s.source).then(() => this.refresh())}>Delete</button>` : ""}</td>
           </tr>`)}
         </table></div>
         ${this.sources.length === 0 && this.childrenOf(this.scope).length === 0
