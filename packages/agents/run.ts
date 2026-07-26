@@ -25,7 +25,8 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
+import { jsonText } from "./scan.ts";
 
 // How many times a run may go back to the model after calling tools.
 //
@@ -38,6 +39,16 @@ import { Mounted, mountTools, toolSpecs, callMounted, serverOf } from "./tools.t
 // Eight is enough for a research loop and short enough that a model stuck in
 // one costs seconds rather than an afternoon.
 const MAX_TOOL_STEPS: int = 8;
+
+// How deep delegation may go. A parent asking a specialist which asks another
+// is reasonable; a chain longer than this is a graph the builder should look
+// at rather than a plan.
+//
+// This is a bound, not the cycle check. `agent_sub_agents` accepts a cycle —
+// the schema's own suite inserts one to prove it — so a run also refuses to
+// enter an agent already on its path, which stops A→B→A immediately rather
+// than three levels later.
+const MAX_DEPTH: int = 3;
 
 // model_configs declares a hasOne("model") relation, so its document carries
 // the model nested. Named here because a record type must declare every key
@@ -102,6 +113,17 @@ function failed(agentName: string, why: string): AgentRun {
 // Run a user's text through an agent. Every refusal names what was missing,
 // because "it did not answer" is the least useful thing a caller can be told.
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
+  let path: string[] = [];
+  return runAgentAt(db, agentId, userText, master, 0, path);
+}
+
+// The same run, at a depth, knowing which agents are already above it.
+//
+// `path` is the chain of agent ids from the top down, so a child that would
+// re-enter one is refused by name. Passed rather than tracked in a global: a
+// server runs handlers on many threads, and one run's path is nothing to do
+// with another's.
+export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[]): AgentRun {
   // Read each row on its own rather than through agentsFull. A relation that
   // matches nothing is null, and a run needs its prompt, config and model to
   // exist — so a dangling reference should be named, not turned into a parse
@@ -139,6 +161,48 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
   let mounted = mountTools(db, agent.id);
   let specs = toolSpecs(mounted);
 
+  // Mounting's problems, plus delegation's, in one list. Copied rather than
+  // appended to in place: a record's field is not a place to accumulate.
+  let notes: string[] = [];
+  let n: int = 0;
+  while (n < mounted.problems.length) { notes.push(mounted.problems[n]); n = n + 1; }
+
+  // The children, as tools beside the servers' — one loop covers both, so a
+  // delegation shows up in the same trace and against the same budget as a
+  // file read.
+  //
+  // At the depth limit an agent still runs; it just runs alone. Refusing the
+  // whole run because a child was out of reach would turn a bounded plan into
+  // no answer at all.
+  let children: AgentRow[] = [];
+  let deeper = depth + 1;
+  if (depth < MAX_DEPTH) {
+    let offered = agentChildren(db, agent.id);
+    let c: int = 0;
+    while (c < offered.length) {
+      let child = offered[c];
+      let name = delegateToolName(child.agentName);
+      if (!child.enabled) {
+        notes.push(child.agentName + " is disabled, so it cannot be delegated to");
+      } else if (onPath(path, child.id) || child.id == agent.id) {
+        // A cycle. Naming it beats descending until the depth limit stops it,
+        // because the limit would report the wrong cause.
+        notes.push("delegating to " + child.agentName + " would go back to an agent already in this chain");
+      } else if (nameTaken(specs, name)) {
+        notes.push("a tool is already called \"" + name + "\", so " + child.agentName + " was not offered");
+      } else {
+        specs.push(toolSpec(name, delegateDescription(child), delegateSchema()));
+        children.push(child);
+      }
+      c = c + 1;
+    }
+  } else if (agentChildren(db, agent.id).length > 0) {
+    notes.push("at depth " + `${depth}` + " this agent runs alone: its children are past the delegation limit");
+  }
+
+  let below = path;
+  below.push(agent.id);
+
   let context: Turn[] = [userTurn(userText)];
   let steps: AgentStep[] = [];
   let answer = "";
@@ -149,7 +213,7 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
     last = completeTurns(model, configRow, prompt.body, context, specs, key);
     rounds = rounds + 1;
     if (!last.ok) {
-      let refused = report(agent, prompt, model, mounted, context, steps, last, "", "refused", rounds);
+      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds);
       return refused;
     }
 
@@ -161,7 +225,7 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
       // `said.text` so a reply in an unrecognised shape is handed back whole
       // instead of as an empty answer.
       answer = replyText(model.provider, last.text);
-      return report(agent, prompt, model, mounted, context, steps, last, answer, "final", rounds);
+      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds);
     }
 
     context.push(assistantTurn(said.text, calls));
@@ -172,31 +236,122 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
       // for an unbounded number of them, so without this a single round could
       // run arbitrarily many side effects.
       if (steps.length >= MAX_TOOL_STEPS) {
-        return report(agent, prompt, model, mounted, context, steps, last, said.text, "max_steps", rounds);
+        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds);
       }
-      let answered = callMounted(mounted, calls[i].name, calls[i].args);
+      // A child first: a delegation and a tool call are the same thing to the
+      // model, and they should be the same thing to the trace.
+      let child = childFor(children, calls[i].name);
+      let resultText = "";
+      let resultOk = false;
+      let from = serverOf(mounted, calls[i].name);
+      if (child.id != "") {
+        let question = jsonText(calls[i].args, "question");
+        if (question == "") {
+          resultText = "Ask a question: this agent takes {\"question\":\"...\"} and cannot see your conversation.";
+        } else {
+          let asked = runAgentAt(db, child.id, question, master, deeper, below);
+          resultOk = asked.ok;
+          resultText = asked.text;
+          if (!asked.ok) {
+            // What the child could not do, in words the parent can act on —
+            // it may know another way to get the answer.
+            resultText = child.agentName + " could not answer: " + asked.error;
+          }
+          // A child whose own tool calls failed can still answer confidently,
+          // and the parent has no way to see that: it gets text, not a trace.
+          // Observed doing exactly that — a lookup failed and the child
+          // reported "no stock" — so the failure is recorded where an operator
+          // reading the run will find it. In the notes rather than in the
+          // result, because the result goes to the model and a warning it can
+          // quote is a warning that reaches the user as an answer.
+          let broke = failedSteps(asked.steps);
+          if (broke > 0) {
+            notes.push(child.agentName + " answered after " + `${broke}` + " of its own tool calls failed; its answer may not be grounded");
+          }
+          // The child's notes are the parent's business too: an operator
+          // reading one run should not have to fetch three to find out a
+          // server was down.
+          let cn: int = 0;
+          while (cn < asked.notes.length) {
+            notes.push(child.agentName + ": " + asked.notes[cn]);
+            cn = cn + 1;
+          }
+          // The child's own steps are its run's business, but the parent's
+          // trace should say a delegation happened and to whom.
+          from = child.agentName;
+        }
+      } else {
+        let answered = callMounted(mounted, calls[i].name, calls[i].args);
+        resultOk = answered.ok;
+        resultText = answered.text;
+      }
       let step: AgentStep = {
         index: steps.length,
         tool: calls[i].name,
-        server: serverOf(mounted, calls[i].name),
+        server: from,
         args: calls[i].args,
-        result: answered.text,
-        ok: answered.ok,
+        result: resultText,
+        ok: resultOk,
       };
       steps.push(step);
       // A failed call goes back as the result, not as a dead run: the model
       // asked for something and is owed an answer it can act on.
-      context.push(toolTurn(calls[i].id, calls[i].name, answered.text));
+      context.push(toolTurn(calls[i].id, calls[i].name, resultText));
       i = i + 1;
     }
   }
 
-  return report(agent, prompt, model, mounted, context, steps, last, answer, "max_steps", rounds);
+  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds);
+}
+
+// How many of a run's tool calls failed.
+function failedSteps(steps: AgentStep[]): int {
+  let n: int = 0;
+  let i: int = 0;
+  while (i < steps.length) {
+    if (!steps[i].ok) { n = n + 1; }
+    i = i + 1;
+  }
+  return n;
+}
+
+// Whether an agent is already somewhere above this run.
+function onPath(path: string[], agentId: string): bool {
+  let i: int = 0;
+  while (i < path.length) {
+    if (path[i] == agentId) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
+// Whether a tool of this name is already offered. A server's tool wins: it was
+// mounted first, and renaming a child out from under the person who named it
+// would be worse than not offering it.
+function nameTaken(specs: ToolSpec[], name: string): bool {
+  let i: int = 0;
+  while (i < specs.length) {
+    if (specs[i].name == name) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
+// The child a tool name stands for, or a row with an empty id when the name is
+// a server's tool rather than an agent.
+function childFor(children: AgentRow[], name: string): AgentRow {
+  let i: int = 0;
+  while (i < children.length) {
+    if (delegateToolName(children[i].agentName) == name) { return children[i]; }
+    i = i + 1;
+  }
+  let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", enabled: false, updatedAt: "" };
+  return none;
 }
 
 // One place builds the result, so a run that ended four different ways still
 // reports which agent, prompt and model served it.
-function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, mounted: Mounted, context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int): AgentRun {
+function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int): AgentRun {
   let why = last.error;
   if (stopReason == "max_steps" && why == "") {
     why = "stopped after " + `${MAX_TOOL_STEPS}` + " tool steps without a final answer";
@@ -214,7 +369,7 @@ function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, mounted: Mo
     steps: steps,
     stopReason: stopReason,
     rounds: rounds,
-    notes: mounted.problems,
+    notes: notes,
   };
   return out;
 }
