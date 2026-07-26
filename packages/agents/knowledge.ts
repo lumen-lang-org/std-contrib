@@ -9,7 +9,8 @@
 // only retrieve against Postgres.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbRepository, field, repository, execute, executeWith, findById, placeholderAt, safeIdentifier } from "../plume/plume.ts";
+import { DbField, DbRepository, field, repository, execute, executeWith, findById, placeholderAt, safeIdentifier, createTableSql } from "../plume/plume.ts";
+import { Migration, migration } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping } from "./schema.ts";
 import { Embedding, embedText } from "./provider.ts";
 
@@ -396,4 +397,99 @@ export function scopeCounts(db: Db, prefix: string): ScopeNode[] {
     p = p + 1;
   }
   return out;
+}
+
+// --- an agent's knowledge ---------------------------------------------------------------
+
+// What an agent may read, and how it reads it.
+//
+// A separate table rather than columns on `agents`, because an agent that does
+// not retrieve has no row here at all — and because adding four columns to a
+// table every test constructs would make retrieval everybody's problem.
+export type AgentRetrievalRow = {
+  agentId: string,
+  // Which model embedded the documents this agent reads. One per agent:
+  // vectors from two models are not comparable, so an agent whose scopes span
+  // both would be ranking noise.
+  embeddingModelId: string,
+  topK: int,
+  // Cosine distance past which a passage is not worth showing. 2 is the
+  // maximum, so a large value means "keep whatever ranked".
+  maxDistance: number,
+  enabled: bool,
+};
+
+export function agentRetrievalMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("agentId", "agent_id", "text"),
+    field("embeddingModelId", "embedding_model_id", "text"),
+    field("topK", "top_k", "int"),
+    field("maxDistance", "max_distance", "float8"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("agent_retrieval", "agentId", "agent_id", fs);
+}
+
+// The tables. Appended to the same plan as everything else.
+export function knowledgePlan(db: Db): Migration[] {
+  let plan: Migration[] = [
+    // A link table holds two keys and no entity, so it is written by hand like
+    // the others.
+    migration("16", "agent scopes",
+      "CREATE TABLE IF NOT EXISTS agent_scopes ("
+      + "agent_id " + db.textType + " NOT NULL, "
+      + "scope " + db.textType + " NOT NULL)"),
+    migration("17", "agent retrieval", createTableSql(db, agentRetrievalMapping())),
+    migration("18", "scopes by agent",
+      "CREATE INDEX IF NOT EXISTS scopes_by_agent ON agent_scopes (agent_id)"),
+  ];
+  return plan;
+}
+
+// The scopes an agent has been granted, normalised.
+export function agentScopes(db: Db, agentId: string): string[] {
+  let out: string[] = [];
+  if (!db.query("SELECT scope FROM agent_scopes WHERE agent_id = " + placeholderAt(db, 1)
+                + " ORDER BY scope", [agentId])) {
+    return out;
+  }
+  let i: int = 0;
+  while (i < db.rows()) {
+    out.push(normalScope(db.value(i, 0)));
+    i = i + 1;
+  }
+  return out;
+}
+
+// Grant a scope. Idempotent: granting twice is not an error and does not
+// duplicate the row, because a grant is a fact rather than an event.
+export function grantScope(db: Db, agentId: string, scope: string): string {
+  let path = normalScope(scope);
+  let already = agentScopes(db, agentId);
+  let i: int = 0;
+  while (i < already.length) {
+    if (already[i] == path) { return ""; }
+    i = i + 1;
+  }
+  let written = executeWith(db, "INSERT INTO agent_scopes (agent_id, scope) VALUES ("
+    + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ")", [agentId, path]);
+  if (!written.ok) { return written.error; }
+  return "";
+}
+
+export function revokeScope(db: Db, agentId: string, scope: string): string {
+  let removed = executeWith(db, "DELETE FROM agent_scopes WHERE agent_id = " + placeholderAt(db, 1)
+    + " AND scope = " + placeholderAt(db, 2), [agentId, normalScope(scope)]);
+  if (!removed.ok) { return removed.error; }
+  return "";
+}
+
+// How an agent retrieves, or a row saying it does not.
+export function retrievalFor(db: Db, agentId: string): AgentRetrievalRow {
+  let off: AgentRetrievalRow = {
+    agentId: agentId, embeddingModelId: "", topK: 0, maxDistance: 0.0, enabled: false,
+  };
+  let document = findById(db, agentRetrievalMapping(), agentId);
+  if (document == "") { return off; }
+  return JSON.parse<AgentRetrievalRow>(document);
 }

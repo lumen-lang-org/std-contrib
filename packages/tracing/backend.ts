@@ -88,7 +88,7 @@ export type TraceBackend = {
 
 // --- the backends -----------------------------------------------------------------
 
-export function header(name: string, value: string): TraceHeader {
+export function traceHeader(name: string, value: string): TraceHeader {
   let h: TraceHeader = { name: name, value: value };
   return h;
 }
@@ -100,7 +100,7 @@ export function langfuseBackend(base: string, publicKey: string, secretKey: stri
   let root = withoutTrailingSlash(base);
   // Without this header Langfuse may take minutes to process a trace; with it
   // the trace is available as soon as it lands.
-  let extras: TraceHeader[] = [header("x-langfuse-ingestion-version", "4")];
+  let extras: TraceHeader[] = [traceHeader("x-langfuse-ingestion-version", "4")];
   let b: TraceBackend = {
     name: "langfuse",
     authHeader: "Authorization",
@@ -139,7 +139,7 @@ export function otlpBackend(endpoint: string, headerName: string, headerValue: s
 // carries, so no vendor scheme is emitted.
 export function braintrustBackend(base: string, apiKey: string, parent: string): TraceBackend {
   let extras: TraceHeader[] = [];
-  if (parent != "") { extras.push(header("x-bt-parent", parent)); }
+  if (parent != "") { extras.push(traceHeader("x-bt-parent", parent)); }
   let b: TraceBackend = {
     name: "braintrust",
     authHeader: "Authorization",
@@ -161,7 +161,7 @@ export function braintrustBackend(base: string, apiKey: string, parent: string):
 // project is a second one.
 export function langsmithBackend(base: string, apiKey: string, project: string): TraceBackend {
   let extras: TraceHeader[] = [];
-  if (project != "") { extras.push(header("Langsmith-Project", project)); }
+  if (project != "") { extras.push(traceHeader("Langsmith-Project", project)); }
   let b: TraceBackend = {
     name: "langsmith",
     authHeader: "x-api-key",
@@ -201,7 +201,7 @@ export function phoenixBackend(endpoint: string, apiKey: string): TraceBackend {
 // Arize AX. Two headers, neither of them an Authorization — the reason
 // `extraHeaders` is a list.
 export function arizeBackend(endpoint: string, spaceId: string, apiKey: string): TraceBackend {
-  let extras: TraceHeader[] = [header("api_key", apiKey)];
+  let extras: TraceHeader[] = [traceHeader("api_key", apiKey)];
   let b: TraceBackend = {
     name: "arize",
     authHeader: "space_id",

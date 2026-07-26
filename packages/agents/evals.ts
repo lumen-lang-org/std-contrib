@@ -34,6 +34,10 @@ export type EvalItem = {
   // Empty when the case does not care, which is the common one.
   expectedTools: string[],
   expectedAgents: string[],
+  // Which folders the answer should have been drawn from. Catches the failure
+  // the other two cannot: a right answer that retrieved nothing, recited from
+  // pre-training and about to go stale the day the documents change.
+  expectedScopes: string[],
 };
 
 // What one case did.
@@ -55,6 +59,11 @@ export type EvalResult = {
   calledAgents: string[],
   missingTools: string[],
   missingAgents: string[],
+  // Which folders the run actually drew on, and which the case asked for and
+  // did not get.
+  usedScopes: string[],
+  missingScopes: string[],
+  scopeScore: number,
   // 1 when everything the case named was reached, 0 when none was, and the
   // fraction in between. 1 when the case named nothing — a case with no route
   // expectation cannot fail one.
@@ -145,6 +154,7 @@ export function datasetItems(base: string, auth: string, dataset: string, maxIte
         expected: expected,
         expectedTools: namesIn(jsonRaw(expectedRaw, "tools")),
         expectedAgents: namesIn(jsonRaw(expectedRaw, "agents")),
+        expectedScopes: namesIn(jsonRaw(expectedRaw, "scopes")),
       };
       if (item.id != "" && item.question != "") { out.push(item); }
       i = i + 1;
@@ -455,6 +465,22 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
     // The route the run actually took, and what the case asked for and did
     // not get. Computed whether or not the answer was judged: a run that
     // failed still went somewhere, and where it went is the first clue.
+    // The folders the passages came from, each once.
+    let usedScopes: string[] = [];
+    let r: int = 0;
+    while (r < answered.retrieved.length) {
+      if (!hasName(usedScopes, answered.retrieved[r].scope)) {
+        usedScopes.push(answered.retrieved[r].scope);
+      }
+      r = r + 1;
+    }
+    let missingScopes = missingFrom(items[i].expectedScopes, usedScopes);
+    let scopeScore = reachedScore(items[i].expectedScopes, usedScopes);
+    if (items[i].expectedScopes.length > 0) {
+      postScore(base, auth, caseTrace, "retrieval", scopeScore,
+        missingReason("scopes", missingScopes, usedScopes));
+    }
+
     let missingTools = missingFrom(items[i].expectedTools, answered.calledTools);
     let missingAgents = missingFrom(items[i].expectedAgents, answered.calledAgents);
     let toolScore = reachedScore(items[i].expectedTools, answered.calledTools);
@@ -484,6 +510,9 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
       calledAgents: answered.calledAgents,
       missingTools: missingTools,
       missingAgents: missingAgents,
+      usedScopes: usedScopes,
+      missingScopes: missingScopes,
+      scopeScore: scopeScore,
       toolScore: toolScore,
       agentScore: agentScore,
       ran: answered.ok,
