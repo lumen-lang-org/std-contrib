@@ -4,16 +4,16 @@
 //   lumen compile packages/ai/examples/prompt-snapshot.ts
 //   ./prompt-snapshot
 
-import { chatPromptContent, chatPromptRole, renderChatPrompt, promptPart, templateVar } from "../ai.ts";
+import { chatPromptContent, chatPromptRole, renderChatPrompt } from "../ai.ts";
 
 let entries = renderChatPrompt(
   [
-    promptPart("system", "You are {{tone}}."),
-    promptPart("user", "Explain {{topic}} in one sentence."),
+    { role: "system", template: "You are {{tone}}." },
+    { role: "user", template: "Explain {{topic}} in one sentence." },
   ],
   [
-    templateVar("tone", "concise"),
-    templateVar("topic", "Lumen"),
+    { name: "tone", value: "concise" },
+    { name: "topic", value: "Lumen" },
   ],
 );
 

@@ -5,7 +5,7 @@
 // Run: lumen test packages/ai/ai.ts
 
 import { systemMessage, userMessage, assistantMessage } from "./core/messages.ts";
-import { TemplateVar, ChatPromptPart, makeTemplateVar, makeChatPromptPart, renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
+import { TemplateVar as TemplateVarRecord, ChatPromptPart as ChatPromptPartRecord, renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
 import { buildChatRequest } from "./core/request.ts";
 // providers/chat.ts imports makeModelConfig and modelBaseUrl from core/model.ts
 // unaliased, so they are imported unaliased here too. The public wrappers below
@@ -87,20 +87,19 @@ export function assistant(content: string): Message {
   return assistantMessage(content);
 }
 
-// One {{name}} binding. Kept beside its value rather than in parallel arrays,
-// so a call site reads as what it renders:
+// One {{name}} binding. A plain record, written where it is used, so a call
+// site reads as what it renders:
 //
 //   renderTemplate("Explain {{topic}} in one sentence.", [
-//     templateVar("topic", "native compilation"),
+//     { name: "topic", value: "native compilation" },
 //   ]);
-export function templateVar(name: string, value: string): TemplateVar {
-  return makeTemplateVar(name, value);
-}
+//
+// No builder function: a record literal in argument position already carries
+// its field names, which is the whole point.
+export type TemplateVar = TemplateVarRecord;
 
 // A chat prompt entry: its role and its template, as one value.
-export function promptPart(role: string, template: string): ChatPromptPart {
-  return makeChatPromptPart(role, template);
-}
+export type ChatPromptPart = ChatPromptPartRecord;
 
 export function renderTemplate(template: string, vars: TemplateVar[]): string {
   return renderPromptTemplate(template, vars);

@@ -52,22 +52,12 @@ export type TemplateVar = {
   value: string,
 };
 
-export function makeTemplateVar(name: string, value: string): TemplateVar {
-  let v: TemplateVar = { name: name, value: value };
-  return v;
-}
-
 // One entry of a chat prompt: a role and its template, together for the same
 // reason a binding is.
 export type ChatPromptPart = {
   role: string,
   template: string,
 };
-
-export function makeChatPromptPart(role: string, template: string): ChatPromptPart {
-  let p: ChatPromptPart = { role: role, template: template };
-  return p;
-}
 
 export function renderPromptTemplate(template: string, vars: TemplateVar[]): string {
   let out = template;
