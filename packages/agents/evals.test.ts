@@ -12,7 +12,8 @@ import { EvalItem, Verdict, evalApiBase, readVerdict, judgePrompt, compareNumber
 
 function item(question: string, expected: string): EvalItem {
   let none: string[] = [];
-  let it: EvalItem = { id: "i1", question: question, expected: expected, expectedTools: none, expectedAgents: none };
+  let it: EvalItem = { id: "i1", question: question, expected: expected,
+    expectedTools: none, expectedAgents: none, expectedScopes: none };
   return it;
 }
 
@@ -173,4 +174,20 @@ test("a satisfied route expectation says what was reached", () => {
   let why = missingReason("tools", none, reached);
   expect(why.indexOf("every expected tool was reached") >= 0);
   expect(why.indexOf("warehouse_stock") >= 0);
+});
+
+test("a case can name the folders an answer should come from", () => {
+  // The failure the other route checks miss: a right answer that retrieved
+  // nothing, recited from pre-training and wrong the day the documents change.
+  let expected: string[] = ["/specs/plume"];
+  let usedNothing: string[] = [];
+  expect(reachedScore(expected, usedNothing) == 0.0);
+  expect(missingFrom(expected, usedNothing)[0] == "/specs/plume");
+
+  let usedRight: string[] = ["/specs/plume"];
+  expect(reachedScore(expected, usedRight) == 1.0);
+
+  // And drawn from the wrong shelf, which reads as correct until you check.
+  let usedWrong: string[] = ["/policies"];
+  expect(reachedScore(expected, usedWrong) == 0.0);
 });

@@ -25,6 +25,7 @@ import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersW
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
+import { ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
@@ -35,6 +36,9 @@ type ChildLink = { childId: string };
 type KeyBody = { apiKey: string };
 type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
+type ScopeGrant = { scope: string };
+type DocumentUpload = { source: string, scope: string, body: string };
+type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number, enabled: bool };
 
 // The backends this API will write into a trace_config row. Checked here
 // rather than at the tracer, because a typo should be refused when it is set
@@ -240,6 +244,76 @@ class AgentApi {
     executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder
       + " AND server_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "serverId")]);
     return ok(findById(this.db, this.full, param(req, "id")));
+  }
+
+  // What this agent may read. A grant is a fact, so granting twice is not an
+  // error and does not duplicate the row.
+  @get("/:id/scopes")
+  scopes(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    let granted = agentScopes(this.db, param(req, "id"));
+    let out = "[";
+    let i: int = 0;
+    while (i < granted.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + JSON.stringify(granted[i]);
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
+  @post("/:id/scopes")
+  grant(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required: {\"scope\":\"/specs\"}"); }
+    let body: ScopeGrant = JSON.parse<ScopeGrant>(req.body);
+    if (body.scope == "") { return badRequest("a scope is required"); }
+    let problem = grantScope(this.db, param(req, "id"), body.scope);
+    if (problem != "") { return badRequest(problem); }
+    return this.scopes(req);
+  }
+
+  @del("/:id/scopes/:scope")
+  revoke(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    // A path cannot survive a URL segment, so the scope arrives with its
+    // slashes as `~` — "/specs/plume" is "~specs~plume". Ugly, and better than
+    // a route that cannot express the thing it grants.
+    let problem = revokeScope(this.db, param(req, "id"), param(req, "scope").replaceAll("~", "/"));
+    if (problem != "") { return badRequest(problem); }
+    return this.scopes(req);
+  }
+
+  // How this agent retrieves: which embedding model, how many passages, how
+  // far is too far. Absent until set, which is how an agent that does not
+  // retrieve is spelled.
+  @put("/:id/retrieval")
+  setRetrieval(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: RetrievalSetup = JSON.parse<RetrievalSetup>(req.body);
+    if (embeddingModel(this.db, body.embeddingModelId).id == "") {
+      return badRequest("no usable embedding model " + body.embeddingModelId);
+    }
+    if (body.topK <= 0 || body.topK > 100) { return badRequest("topK must be between 1 and 100"); }
+    let row: AgentRetrievalRow = {
+      agentId: param(req, "id"),
+      embeddingModelId: body.embeddingModelId,
+      topK: body.topK,
+      maxDistance: body.maxDistance,
+      enabled: body.enabled,
+    };
+    let written = persist(this.db, agentRetrievalMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, agentRetrievalMapping(), param(req, "id")));
   }
 
   // Run the agent against a user's text. The reply is the conversation's side
@@ -592,6 +666,78 @@ function maxVersion(db: Db, name: string): int {
   return rows[0].version;
 }
 
+// Documents and the folders they live in.
+//
+// Retrieval is PostgreSQL only — pgvector has no SQLite equivalent — so every
+// route here reports that rather than failing at the query. A deployment on
+// SQLite is not misconfigured; it just cannot do this.
+@controller("/documents")
+class DocumentApi {
+  db: Db;
+  master: string;
+
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
+
+  // Upload a document: split, embedded and filed under one scope. Re-uploading
+  // the same source replaces its chunks.
+  @post("/")
+  upload(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: DocumentUpload = JSON.parse<DocumentUpload>(req.body);
+    if (body.scope == "") { return badRequest("a document needs a scope: \"/specs/plume\""); }
+
+    // Which model embeds is a row, and it has to be named — a document
+    // embedded by the wrong model is invisible to every agent reading that
+    // folder, silently.
+    let modelId = queryParam(req, "model", "");
+    if (modelId == "") { return badRequest("name the embedding model: ?model=e1"); }
+    let embedder = embeddingModel(this.db, modelId);
+    if (embedder.id == "") { return badRequest("no usable embedding model " + modelId); }
+    let key = credentialFor(this.db, embedder.provider, this.master);
+    if (key == "") { return badRequest("no credential for " + embedder.provider); }
+
+    let stored = uploadDocument(this.db, embedder, body.source, body.scope, body.body, key);
+    if (!stored.ok) { return badRequest(stored.error); }
+    return created("{\"source\":" + JSON.stringify(body.source)
+      + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
+      + ",\"chunks\":" + `${stored.chunks}` + "}");
+  }
+
+  @del("/:source")
+  remove(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    executeWith(this.db, "DELETE FROM documents WHERE source = " + this.db.placeholder, [param(req, "source")]);
+    return noContent();
+  }
+}
+
+// The folder tree, as the documents describe it.
+//
+// Derived, not stored: there is no folder table to keep in step with the rows,
+// so a folder exists exactly as long as something is in it.
+@controller("/scopes")
+class ScopeApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  tree(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    return ok(scopesJson(scopeCounts(this.db, queryParam(req, "prefix", ""))));
+  }
+}
+
 // The trace side. One route, because a run is written once and read whole:
 // the row and every step, one query.
 @controller("/runs")
@@ -631,6 +777,20 @@ function createProblem(db: Db, repo: DbRepository, document: string): string {
   return "";
 }
 
+// A list of folders with their counts.
+function scopesJson(nodes: ScopeNode[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < nodes.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + "{\"path\":" + JSON.stringify(nodes[i].path)
+      + ",\"documents\":" + `${nodes[i].documents}`
+      + ",\"total\":" + `${nodes[i].total}` + "}";
+    i = i + 1;
+  }
+  return out + "]";
+}
+
 // An id read out of a posted document, so a create can answer with the whole
 // agent rather than the fragment it was given.
 function jsonId(document: string): string {
@@ -657,6 +817,9 @@ function openDatabase(): Db {
   let traces = tracePlan(db);
   let t: int = 0;
   while (t < traces.length) { plan.push(traces[t]); t = t + 1; }
+  let knowledge = knowledgePlan(db);
+  let k: int = 0;
+  while (k < knowledge.length) { plan.push(knowledge[k]); k = k + 1; }
   let ran = migrate(db, plan);
   if (!ran.ok) { console.error(ran.error); }
   return db;
@@ -714,6 +877,10 @@ function main(): void {
   bound.set("addChild", (req: Request) => { return api.addChild(req); });
   bound.set("removeChild", (req: Request) => { return api.removeChild(req); });
   bound.set("run", (req: Request) => { return api.run(req); });
+  bound.set("scopes", (req: Request) => { return api.scopes(req); });
+  bound.set("grant", (req: Request) => { return api.grant(req); });
+  bound.set("revoke", (req: Request) => { return api.revoke(req); });
+  bound.set("setRetrieval", (req: Request) => { return api.setRetrieval(req); });
   bound.set("runs", (req: Request) => { return api.runs(req); });
   bound.set("remove", (req: Request) => { return api.remove(req); });
 
@@ -723,6 +890,13 @@ function main(): void {
   bound.set("pclearKey", (req: Request) => { return providers.clearKey(req); });
 
   bound.set("rfind", (req: Request) => { return traces.find(req); });
+
+  let documents = new DocumentApi(db, master);
+  bound.set("dupload", (req: Request) => { return documents.upload(req); });
+  bound.set("dremove", (req: Request) => { return documents.remove(req); });
+
+  let scopeApi = new ScopeApi(db);
+  bound.set("kstree", (req: Request) => { return scopeApi.tree(req); });
 
   let tracingApi = new TraceApi(db, master);
   bound.set("tstatus", (req: Request) => { return tracingApi.status(req); });
@@ -785,6 +959,18 @@ function main(): void {
     let r = controllerPromptApi[pr];
     table.push(route(r.method, r.pattern, "prompt" + r.handler));
     pr = pr + 1;
+  }
+  let dc: int = 0;
+  while (dc < controllerDocumentApi.length) {
+    let r = controllerDocumentApi[dc];
+    table.push(route(r.method, r.pattern, "d" + r.handler));
+    dc = dc + 1;
+  }
+  let sc: int = 0;
+  while (sc < controllerScopeApi.length) {
+    let r = controllerScopeApi[sc];
+    table.push(route(r.method, r.pattern, "ks" + r.handler));
+    sc = sc + 1;
   }
   let tr: int = 0;
   while (tr < controllerTraceApi.length) {

@@ -9,6 +9,7 @@ import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
 import { schemaPlan } from "./schema.ts";
 import { AgentRun, AgentStep } from "./run.ts";
 import { RecordedSpan } from "../tracing/tracing.ts";
+import { Retrieved } from "./knowledge.ts";
 import { Turn } from "./provider.ts";
 import { RunRow, runsMapping, runStepsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 
@@ -50,11 +51,12 @@ function sampleRun(withSteps: int): AgentRun {
   let notes: string[] = [];
   let spans: RecordedSpan[] = [];
   let noNames: string[] = [];
+  let noPassages: Retrieved[] = [];
   let r: AgentRun = {
     ok: true, text: "37 units in Rotterdam.", body: "{}", status: 200,
     agentName: "parts-desk", promptVersion: 3, modelApiName: "mistral-small-latest",
     error: "", context: context, steps: steps, stopReason: "final", rounds: 2, notes: notes,
-    calledTools: noNames, calledAgents: noNames, spans: spans,
+    calledTools: noNames, calledAgents: noNames, retrieved: noPassages, spans: spans,
   };
   return r;
 }
@@ -119,12 +121,13 @@ test("a failed run is logged like any other", () => {
   let notes: string[] = ["parts is disabled"];
   let spans: RecordedSpan[] = [];
   let noNames: string[] = [];
+  let noPassages: Retrieved[] = [];
   let bad: AgentRun = {
     ok: false, text: "", body: "", status: 0,
     agentName: "parts-desk", promptVersion: 3, modelApiName: "",
     error: "no usable credential for mistral",
     context: context, steps: steps, stopReason: "refused", rounds: 0, notes: notes,
-    calledTools: noNames, calledAgents: noNames, spans: spans,
+    calledTools: noNames, calledAgents: noNames, retrieved: noPassages, spans: spans,
   };
   let id = recordRun(database, "a1", "anything", bad);
   expect(id != "");

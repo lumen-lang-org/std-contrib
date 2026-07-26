@@ -27,7 +27,8 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
 import { jsonText } from "./scan.ts";
-import { Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL } from "../tracing/tracing.ts";
+import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, asContext } from "./knowledge.ts";
+import { Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL, TRACE_RETRIEVER } from "../tracing/tracing.ts";
 
 // How many times a run may go back to the model after calling tools.
 //
@@ -88,6 +89,10 @@ export type AgentRun = {
   error: string,
   // Everything the model was shown, in order. Not for display.
   context: Turn[],
+  // The passages retrieved for this run, if it retrieves. Returned so a caller
+  // can show sources and an evaluation can check which folder an answer came
+  // off — the answer alone cannot tell you.
+  retrieved: Retrieved[],
   // Every tool call the run made.
   steps: AgentStep[],
   // "final", "max_steps" or "refused".
@@ -123,11 +128,12 @@ function failed(agentName: string, why: string): AgentRun {
   let noSpans: RecordedSpan[] = [];
   let noTools: string[] = [];
   let noAgents: string[] = [];
+  let noPassages: Retrieved[] = [];
   let r: AgentRun = {
     ok: false, text: "", body: "", status: 0,
     agentName: agentName, promptVersion: 0, modelApiName: "", error: why,
     context: noContext, steps: noSteps, stopReason: "refused", rounds: 0, notes: noNotes,
-    calledTools: noTools, calledAgents: noAgents, spans: noSpans,
+    calledTools: noTools, calledAgents: noAgents, retrieved: noPassages, spans: noSpans,
   };
   return r;
 }
@@ -234,7 +240,70 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let below = path;
   below.push(agent.id);
 
-  let context: Turn[] = [userTurn(userText)];
+  // One span for the whole agent, and everything below hangs off it — the
+  // model calls, the tool calls, and a delegated child's entire tree. That is
+  // the shape the run log cannot hold: a row has no parent.
+  let trace = tracer;
+  let on = tracing(tracer);
+  let agentSpan = startSpan(agent.agentName, TRACE_AGENT, parentSpan);
+
+  // What this agent knows, fetched once and put in front of the question.
+  //
+  // Once, on the user's text: re-retrieving each round would need a query the
+  // model has not written, and re-embedding after every tool result is cost
+  // with no signal.
+  //
+  // Every way this can come up short leaves the run going and lands in `notes`.
+  // An agent that answers without its documents looks exactly like one that
+  // answered from them, which is the failure this package keeps meeting.
+  let retrieved: Retrieved[] = [];
+  let want = retrievalFor(db, agent.id);
+  // The span opens before the work and closes after it whether or not anything
+  // came back: a retrieval that found nothing is exactly the one somebody wants
+  // to look at, and a missing span reads as a step that never ran.
+  let retrieveSpan = startSpan("retrieve", TRACE_RETRIEVER, agentSpan.id);
+  if (want.embeddingModelId != "") {
+    if (!want.enabled) {
+      notes.push("retrieval is switched off for " + agent.agentName);
+    } else if (db.name != "postgres") {
+      notes.push("retrieval needs PostgreSQL (pgvector); this runs on " + db.name + ", so " + agent.agentName + " answered without its documents");
+    } else {
+      let embedder = embeddingModel(db, want.embeddingModelId);
+      let granted = agentScopes(db, agent.id);
+      if (embedder.id == "") {
+        notes.push("no usable embedding model " + want.embeddingModelId + " — it must exist and be an embedding model, not a chat one");
+      } else if (granted.length == 0) {
+        notes.push(agent.agentName + " has no scopes granted, so it read nothing");
+      } else {
+        let embedKey = credentialFor(db, embedder.provider, master);
+        if (embedKey == "") {
+          notes.push("no credential for " + embedder.provider + ", so nothing was retrieved");
+        } else {
+          let found = retrieve(db, embedder, granted, userText, want.topK, embedKey);
+          if (!found.ok) {
+            notes.push("retrieval failed: " + found.error);
+          } else {
+            retrieved = withinDistance(found.found, want.maxDistance);
+            if (retrieved.length == 0) {
+              notes.push("nothing within " + `${want.maxDistance}` + " of the question in " + granted.join(", "));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (on && want.embeddingModelId != "") {
+    trace = endSpan(trace, retrieveSpan, userText, passageSummary(retrieved));
+  }
+
+  let context: Turn[] = [];
+  if (retrieved.length > 0) {
+    // Before the question, and in the context rather than the conversation:
+    // the model reads it, the transcript does not.
+    context.push(userTurn(asContext(retrieved)));
+  }
+  context.push(userTurn(userText));
   let steps: AgentStep[] = [];
   let calledTools: string[] = [];
   let calledAgents: string[] = [];
@@ -242,12 +311,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let last: Completion = { ok: false, text: "", status: 0, error: "" };
   let rounds: int = 0;
 
-  // One span for the whole agent, and everything below hangs off it — the
-  // model calls, the tool calls, and a delegated child's entire tree. That is
-  // the shape the run log cannot hold: a row has no parent.
-  let trace = tracer;
-  let on = tracing(tracer);
-  let agentSpan = startSpan(agent.agentName, TRACE_AGENT, parentSpan);
 
   while (rounds < MAX_TOOL_STEPS) {
     let modelSpan = startSpan(model.apiName, TRACE_GENERATION, agentSpan.id);
@@ -260,7 +323,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         trace = endSpanFailed(trace, modelSpan, userText, last.error);
         trace = endSpanFailed(trace, agentSpan, userText, last.error);
       }
-      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds, spansOf(on, trace), calledTools, calledAgents);
+      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
       return refused;
     }
     if (on) {
@@ -277,7 +340,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // instead of as an empty answer.
       answer = replyText(model.provider, last.text);
       if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
-      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace), calledTools, calledAgents);
+      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
     }
 
     context.push(assistantTurn(said.text, calls));
@@ -289,7 +352,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // run arbitrarily many side effects.
       if (steps.length >= MAX_TOOL_STEPS) {
         if (on) { trace = endSpan(trace, agentSpan, userText, said.text); }
-        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents);
+        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
       }
       // A child first: a delegation and a tool call are the same thing to the
       // model, and they should be the same thing to the trace.
@@ -369,7 +432,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   }
 
   if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
-  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents);
+  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
 }
 
 // A run's spans, or nothing when tracing is off. Reading them from a tracer
@@ -403,6 +466,34 @@ export function hasName(names: string[], name: string): bool {
     i = i + 1;
   }
   return false;
+}
+
+// What a retrieval found, for the span's output: which folder each passage
+// came off and how far away it was. The bodies are in the context already, and
+// repeating them here would put the corpus in the trace twice.
+function passageSummary(found: Retrieved[]): string {
+  if (found.length == 0) { return "nothing retrieved"; }
+  let out = "";
+  let i: int = 0;
+  while (i < found.length) {
+    if (i > 0) { out = out + "\n"; }
+    out = out + found[i].scope + "/" + found[i].source + "  distance " + `${found[i].distance}`;
+    i = i + 1;
+  }
+  return out;
+}
+
+// The passages close enough to be worth showing. `distance` is cosine, so 0 is
+// identical and 2 is opposite; a caller that wants everything sets the maximum
+// high rather than this returning everything by default.
+function withinDistance(found: Retrieved[], maxDistance: number): Retrieved[] {
+  let out: Retrieved[] = [];
+  let i: int = 0;
+  while (i < found.length) {
+    if (found[i].distance <= maxDistance) { out.push(found[i]); }
+    i = i + 1;
+  }
+  return out;
 }
 
 // How many of a run's tool calls failed.
@@ -452,7 +543,7 @@ function childFor(children: AgentRow[], name: string): AgentRow {
 
 // One place builds the result, so a run that ended four different ways still
 // reports which agent, prompt and model served it.
-function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: RecordedSpan[], calledTools: string[], calledAgents: string[]): AgentRun {
+function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: RecordedSpan[], calledTools: string[], calledAgents: string[], retrieved: Retrieved[]): AgentRun {
   let why = last.error;
   if (stopReason == "max_steps" && why == "") {
     why = "stopped after " + `${MAX_TOOL_STEPS}` + " tool steps without a final answer";
@@ -473,6 +564,7 @@ function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: stri
     notes: notes,
     calledTools: calledTools,
     calledAgents: calledAgents,
+    retrieved: retrieved,
     spans: spans,
   };
   return out;
