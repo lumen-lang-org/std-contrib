@@ -124,7 +124,8 @@ class AgentApi {
 
   @post("/")
   create(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
+    let problem = createProblem(this.db, this.flat, req.body);
+    if (problem != "") { return badRequest(problem); }
     let written = persist(this.db, this.flat, req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, this.full, jsonId(req.body)));
@@ -307,7 +308,8 @@ class ModelApi {
 
   @post("/")
   create(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
+    let problem = createProblem(this.db, modelsMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
     let written = persist(this.db, modelsMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, modelsMapping(), jsonId(req.body)));
@@ -353,7 +355,8 @@ class ConfigApi {
 
   @post("/")
   create(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
+    let problem = createProblem(this.db, modelConfigsMapping(this.db), req.body);
+    if (problem != "") { return badRequest(problem); }
     let body: ModelConfigRow = JSON.parse<ModelConfigRow>(req.body);
     if (!existsById(this.db, modelsMapping(), body.modelId)) {
       return badRequest("no model " + body.modelId + "; create it first");
@@ -393,20 +396,33 @@ class PromptApi {
     return ok(listOrdered(this.db, promptsMapping(), "prompt_name = " + this.db.placeholder, [name], newest));
   }
 
-  // A prompt row is never edited, so the only write is a new version. The
-  // version is assigned here — max + 1 for the name — because letting the
-  // caller pick one is how two writers both create version 4.
+  // A prompt row is never edited, so the only write is a new version. Both
+  // the version and the id are assigned here rather than taken from the
+  // caller:
+  //
+  // - the version, because letting a caller pick one is how two writers both
+  //   create version 4;
+  // - the id, because a caller with no id to hand reaches for one it already
+  //   knows, and an id that is already a row turns a create into an edit. A
+  //   POST that reused an id was observed replacing version 3's text in place
+  //   while every agent pointing at it silently changed behaviour. An id it
+  //   sends is still honoured, and still refused if taken.
   @post("/")
   create(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required"); }
     let body: PromptRow = JSON.parse<PromptRow>(req.body);
     if (body.promptName == "") { return badRequest("promptName is required"); }
     if (body.body == "") { return badRequest("an empty prompt is not a version"); }
+    let id = body.id;
+    if (id == "") { id = crypto.randomUUID(); }
+    if (existsById(this.db, promptsMapping(), id)) {
+      return badRequest("prompt \"" + id + "\" already exists; a new version is a new row, so leave \"id\" out or send an unused one");
+    }
     let next = 1 + maxVersion(this.db, body.promptName);
-    let row: PromptRow = { id: body.id, promptName: body.promptName, version: next, body: body.body, createdAt: body.createdAt };
+    let row: PromptRow = { id: id, promptName: body.promptName, version: next, body: body.body, createdAt: body.createdAt };
     let written = persist(this.db, promptsMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
-    return created(findById(this.db, promptsMapping(), body.id));
+    return created(findById(this.db, promptsMapping(), id));
   }
 }
 
@@ -423,7 +439,8 @@ class ServerApi {
 
   @post("/")
   create(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
+    let problem = createProblem(this.db, mcpServersMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
     let body: McpServerRow = JSON.parse<McpServerRow>(req.body);
     if (body.transport != "http" && body.transport != "stdio") {
       return badRequest("transport must be \"http\" or \"stdio\", not \"" + body.transport + "\"");
@@ -482,6 +499,27 @@ class RunApi {
     if (document == "") { return notFound("run " + param(req, "id")); }
     return ok(document);
   }
+}
+
+// Why a POST cannot be written.
+//
+// `persist` is an upsert -- the right default for a mapper, and the wrong one
+// for a create. A POST carrying an id that already exists would edit that row
+// and answer as if it had made a new one. For prompts that is not untidy but
+// destructive: a prompt row is never edited *is the thing rollback depends
+// on*, and a POST reusing an id was observed replacing version 3's text with
+// version 4's while every agent pointing at it silently changed behaviour.
+//
+// So every create refuses a taken id, by name. Changing a row is what PUT is
+// for, and for prompts the answer is a new version, which is a new id.
+function createProblem(db: Db, repo: DbRepository, document: string): string {
+  if (document == "") { return "a body is required"; }
+  let id = jsonId(document);
+  if (id == "") { return "an \"id\" is required"; }
+  if (existsById(db, repo, id)) {
+    return "\"" + id + "\" already exists; a POST creates, and changing a row is a PUT";
+  }
+  return "";
 }
 
 // An id read out of a posted document, so a create can answer with the whole
