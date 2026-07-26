@@ -55,6 +55,7 @@ function sampleRun(withSteps: int): AgentRun {
   let r: AgentRun = {
     ok: true, text: "37 units in Rotterdam.", body: "{}", status: 200,
     agentName: "parts-desk", promptVersion: 3, modelApiName: "mistral-small-latest",
+    inputTokens: 120, outputTokens: 40,
     error: "", context: context, steps: steps, stopReason: "final", rounds: 2, notes: notes,
     calledTools: noNames, calledAgents: noNames, retrieved: noPassages, spans: spans,
   };
@@ -125,6 +126,7 @@ test("a failed run is logged like any other", () => {
   let bad: AgentRun = {
     ok: false, text: "", body: "", status: 0,
     agentName: "parts-desk", promptVersion: 3, modelApiName: "",
+    inputTokens: 0, outputTokens: 0,
     error: "no usable credential for mistral",
     context: context, steps: steps, stopReason: "refused", rounds: 0, notes: notes,
     calledTools: noNames, calledAgents: noNames, retrieved: noPassages, spans: spans,

@@ -97,8 +97,11 @@ export type AgentRun = {
   steps: AgentStep[],
   // "final", "max_steps" or "refused".
   stopReason: string,
-  // How many times the model was asked.
+  // How many times the model was asked, and what it cost — this run and
+  // everything it delegated to. Zero when the provider did not say.
   rounds: int,
+  inputTokens: int,
+  outputTokens: int,
   // What could not be mounted. An agent whose server is down still answers,
   // and whoever reads the run should know it answered with one hand tied.
   notes: string[],
@@ -132,6 +135,7 @@ function failed(agentName: string, why: string): AgentRun {
   let r: AgentRun = {
     ok: false, text: "", body: "", status: 0,
     agentName: agentName, promptVersion: 0, modelApiName: "", error: why,
+    inputTokens: 0, outputTokens: 0,
     context: noContext, steps: noSteps, stopReason: "refused", rounds: 0, notes: noNotes,
     calledTools: noTools, calledAgents: noAgents, retrieved: noPassages, spans: noSpans,
   };
@@ -308,7 +312,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let calledTools: string[] = [];
   let calledAgents: string[] = [];
   let answer = "";
-  let last: Completion = { ok: false, text: "", status: 0, error: "" };
+  let last: Completion = { ok: false, text: "", status: 0, error: "", inputTokens: 0, outputTokens: 0, counted: false };
+  // Summed across rounds and across children: what the whole run cost, which
+  // is the only figure a budget can act on.
+  let inputTokens: int = 0;
+  let outputTokens: int = 0;
   let rounds: int = 0;
 
 
@@ -323,13 +331,16 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         trace = endSpanFailed(trace, modelSpan, userText, last.error);
         trace = endSpanFailed(trace, agentSpan, userText, last.error);
       }
-      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
+      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       return refused;
     }
     if (on) {
       trace = endGeneration(trace, modelSpan, model.apiName, configRow.temperature, configRow.maxTokens,
-        userText, replyText(model.provider, last.text), 0, 0);
+        userText, replyText(model.provider, last.text), last.inputTokens, last.outputTokens);
     }
+
+    inputTokens = inputTokens + last.inputTokens;
+    outputTokens = outputTokens + last.outputTokens;
 
     let calls = toolCallsFrom(model.provider, last.text);
     let said = assistantText(model.provider, last.text);
@@ -340,7 +351,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // instead of as an empty answer.
       answer = replyText(model.provider, last.text);
       if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
-      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
+      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
     }
 
     context.push(assistantTurn(said.text, calls));
@@ -352,7 +363,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // run arbitrarily many side effects.
       if (steps.length >= MAX_TOOL_STEPS) {
         if (on) { trace = endSpan(trace, agentSpan, userText, said.text); }
-        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
+        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       }
       // A child first: a delegation and a tool call are the same thing to the
       // model, and they should be the same thing to the trace.
@@ -375,6 +386,8 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           // What the child reached counts as reached: an evaluation asking
           // whether the stock tool was called does not care which agent
           // called it.
+          inputTokens = inputTokens + asked.inputTokens;
+          outputTokens = outputTokens + asked.outputTokens;
           calledAgents.push(child.agentName);
           calledAgents = withAll(calledAgents, asked.calledAgents);
           calledTools = withAll(calledTools, asked.calledTools);
@@ -432,7 +445,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   }
 
   if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
-  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved);
+  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
 }
 
 // A run's spans, or nothing when tracing is off. Reading them from a tracer
@@ -543,7 +556,7 @@ function childFor(children: AgentRow[], name: string): AgentRow {
 
 // One place builds the result, so a run that ended four different ways still
 // reports which agent, prompt and model served it.
-function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: RecordedSpan[], calledTools: string[], calledAgents: string[], retrieved: Retrieved[]): AgentRun {
+function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: RecordedSpan[], calledTools: string[], calledAgents: string[], retrieved: Retrieved[], inputTokens: int, outputTokens: int): AgentRun {
   let why = last.error;
   if (stopReason == "max_steps" && why == "") {
     why = "stopped after " + `${MAX_TOOL_STEPS}` + " tool steps without a final answer";
@@ -561,6 +574,8 @@ function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: stri
     steps: steps,
     stopReason: stopReason,
     rounds: rounds,
+    inputTokens: inputTokens,
+    outputTokens: outputTokens,
     notes: notes,
     calledTools: calledTools,
     calledAgents: calledAgents,
