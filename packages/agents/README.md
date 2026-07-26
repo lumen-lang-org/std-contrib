@@ -42,7 +42,8 @@ that the named columns do not, so an unfamiliar parameter needs no migration.
 
 **Sub-agents read one level at a time.** `subAgents` names an agent's children,
 not its grandchildren. A cycle in the delegation graph is therefore a row
-rather than an infinite query — and the suite inserts one to prove it.
+rather than an infinite query — and the suite inserts one to prove it. What
+refuses to *walk* the cycle is the run; see Delegation below.
 
 **The schema is generated from the mappings.** `schemaPlan` builds each
 `CREATE TABLE` with `createTableSql`, so the schema a program expects and the
@@ -240,6 +241,53 @@ the schema `input_schema`, carries calls as content blocks, and needs every
 result of one turn inside a single user message. Those are the differences, and
 `wire.test.ts` is the record of them.
 
+## Delegation
+
+An agent's children are tools too. A parent that can ask a specialist is the
+same shape as a parent that can read a file — a name, a description of when to
+use it, one argument — so one loop, one trace and one budget cover both.
+
+```
+user      Can we ship 40 units of A-114 from Rotterdam today, and what is the bill?
+
+0 ok  parts-desk.ask_parts-desk {"question":"What is the price and stock level
+                                 of part A-114 in Rotterdam?"}
+      -> A-114 costs €12.50 per unit, and there are 37 units in Rotterdam.
+1 ok  parts-desk.ask_parts-desk {"question":"Can we ship 40 units of A-114
+                                 from Rotterdam today?"}
+      -> No, only 37 units are available in Rotterdam.
+
+lead      We cannot ship 40 units today, as only 37 are in stock; the bill for
+          37 would be €462.50.
+```
+
+`examples/delegate.ts`. The lead reaches no MCP server at all — two rows give
+it everything: one links the desk to the parts server, one makes the desk the
+lead's child.
+
+**A child is a separate run.** It has its own prompt, its own model, its own
+tools and its own context. It cannot see the parent's conversation, which is
+why the argument's description insists the question repeat every name it
+depends on. That is not a style note: asked *"stock of A-114?"* with Rotterdam
+left out, a child picked a warehouse, its lookup failed, and it answered "no
+stock" — which the parent passed on as fact. The wording that stops it is in
+`delegateSchema`, and the reason is in the comment beside it.
+
+**A cycle is refused by name, not by the depth limit.** `agent_sub_agents`
+accepts a cycle deliberately — the schema suite inserts one — so a run also
+refuses to enter an agent already on its path. Stopping three levels down
+would report the wrong cause.
+
+**Past the depth limit an agent runs alone**, rather than not at all. Refusing
+the whole run because a child was out of reach turns a bounded plan into no
+answer.
+
+**What went wrong below surfaces above.** A child's own notes are re-reported
+under its name, and a child that answered *after* its tool calls failed is
+recorded as such — in the notes, never in the result, because the result goes
+to the model and a warning it can quote is a warning that reaches the user as
+an answer.
+
 ## Retrieval
 
 pgvector, so PostgreSQL only — SQLite and MySQL have no vector type. An agent
@@ -297,6 +345,8 @@ lumen test scan.test.ts       # 16, reading a document no type can declare
 lumen test wire.test.ts       # 18, the three providers' tool formats
 lumen test mcp.test.ts        # 3, the refusals — the live half is an example
 lumen test tools.test.ts      # 8, which tools an agent gets, and why not
+lumen test delegate.test.ts   # 13, children as tools, cycles, the depth limit
+lumen test runlog.test.ts     # 7, what a run leaves behind
 lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
 lumen test run.test.ts        # 11, every refusal on the run path
