@@ -41,11 +41,39 @@ function findFrom(src: string, pattern: string, start: int): int {
   return -1;
 }
 
-export function renderPromptTemplate(template: string, keys: string[], values: string[]): string {
+// One template binding: the name beside its value.
+//
+// The earlier shape was two parallel arrays — keys and values paired up by
+// position — which reads fine at one entry and stops reading at two: nothing
+// keeps the lists aligned, and swapping two values compiles and renders the
+// wrong prompt. A binding is one value, so the pair cannot drift apart.
+export type TemplateVar = {
+  name: string,
+  value: string,
+};
+
+export function makeTemplateVar(name: string, value: string): TemplateVar {
+  let v: TemplateVar = { name: name, value: value };
+  return v;
+}
+
+// One entry of a chat prompt: a role and its template, together for the same
+// reason a binding is.
+export type ChatPromptPart = {
+  role: string,
+  template: string,
+};
+
+export function makeChatPromptPart(role: string, template: string): ChatPromptPart {
+  let p: ChatPromptPart = { role: role, template: template };
+  return p;
+}
+
+export function renderPromptTemplate(template: string, vars: TemplateVar[]): string {
   let out = template;
   let i: int = 0;
-  while (i < keys.length && i < values.length) {
-    out = replaceAllText(out, "{{" + keys[i] + "}}", values[i]);
+  while (i < vars.length) {
+    out = replaceAllText(out, "{{" + vars[i].name + "}}", vars[i].value);
     i = i + 1;
   }
   return out;
@@ -93,12 +121,12 @@ export function unusedTemplateVariables(template: string, keys: string[]): strin
   return out.split("\n");
 }
 
-export function renderChatPrompt(roles: string[], templates: string[], keys: string[], values: string[]): string[] {
+export function renderChatPrompt(parts: ChatPromptPart[], vars: TemplateVar[]): string[] {
   let out = "";
   let i: int = 0;
-  while (i < roles.length && i < templates.length) {
+  while (i < parts.length) {
     if (out != "") { out = out + "\n"; }
-    out = out + roles[i] + "\t" + renderPromptTemplate(templates[i], keys, values);
+    out = out + parts[i].role + "\t" + renderPromptTemplate(parts[i].template, vars);
     i = i + 1;
   }
   if (out == "") {
