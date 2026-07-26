@@ -1,6 +1,6 @@
 // Provider-neutral error helpers.
 
-type ProviderError = {
+export type ProviderError = {
   provider: string,
   status: int,
   message: string,

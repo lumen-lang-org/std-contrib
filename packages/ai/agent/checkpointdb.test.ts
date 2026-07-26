@@ -6,7 +6,7 @@
 //   cd packages/ai/agent && lumen test checkpointdb.test.ts
 
 import { CheckpointStore, storeKeyOk } from "./checkpointstore.ts";
-import { Db } from "../../plume/driver.ts";
+import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, dropTable, execute } from "../../plume/plume.ts";
 import { dbCheckpointStore, createCheckpointTable, checkpointRepository } from "./checkpointdb.ts";
@@ -18,7 +18,8 @@ function storeTable(): string {
 }
 
 function freshStore(): CheckpointStore {
-  connectDatabase(database, "/tmp/ai_checkpointdb_test.db");
+  let cfg: DbConfig = { filename: "/tmp/ai_checkpointdb_test.db" };
+  connectDatabase(database, cfg);
   dropTable(database, checkpointRepository(storeTable()));
   createCheckpointTable(database, storeTable());
   return dbCheckpointStore(database, storeTable());
@@ -75,7 +76,8 @@ test("an empty value is stored and read back as empty, not as missing", () => {
 });
 
 test("the suite leaves nothing behind", () => {
-  connectDatabase(database, "/tmp/ai_checkpointdb_test.db");
+  let cfg: DbConfig = { filename: "/tmp/ai_checkpointdb_test.db" };
+  connectDatabase(database, cfg);
   expect(dropTable(database, checkpointRepository(storeTable())).ok);
   database.close();
 });

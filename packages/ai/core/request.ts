@@ -2,7 +2,7 @@
 
 import { systemMessage } from "./messages.ts";
 
-type ChatRequest = {
+export type ChatRequest = {
   provider: string,
   model: string,
   messages: Message[],

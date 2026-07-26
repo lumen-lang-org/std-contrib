@@ -13,7 +13,7 @@ import { bearerJsonHeaders } from "../core/headers.ts";
 // fragment), and a tool-result turn (`tool_call_id` matches an id in the
 // preceding assistant turn). declared without `export`; module inlining exposes
 // it to importers.
-type ChatTurn = {
+export type ChatTurn = {
   role: string,
   content: string,
   tool_call_id: string,

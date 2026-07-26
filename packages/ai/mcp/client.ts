@@ -4,13 +4,13 @@
 
 import { makeTool } from "../agent/tools.ts";
 
-type McpTool = {
+export type McpTool = {
   name: string,
   description: string,
   schema: string,
 };
 
-type McpResult = {
+export type McpResult = {
   ok: bool,
   content: string,
   error: string,

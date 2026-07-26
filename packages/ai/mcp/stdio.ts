@@ -17,7 +17,7 @@ import { makeTool } from "../agent/tools.ts";
 // counter — records and arrays are immutable (no `s.nextId = ...` or `a[i] =
 // ...` assignment), but a Map is a shared reference whose `.set` is visible
 // through every by-value copy of the session.
-type McpStdioSession = {
+export type McpStdioSession = {
   child: ChildProcess,
   nextId: Map<string, int>,
 };

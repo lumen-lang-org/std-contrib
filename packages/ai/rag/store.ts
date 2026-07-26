@@ -3,12 +3,12 @@
 import { cosineSimilarity, fakeEmbedding } from "./vector.ts";
 import { makeDocument, withMetadata, documentMetadata } from "./document.ts";
 
-type VectorStore = {
+export type VectorStore = {
   docs: Document[],
   vectors: number[][],
 };
 
-type SearchHit = {
+export type SearchHit = {
   doc: Document,
   score: number,
 };

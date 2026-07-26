@@ -2,7 +2,7 @@
 
 import { makeTool } from "./tools.ts";
 
-type ToolCall = {
+export type ToolCall = {
   id: string,
   name: string,
   arguments: string,
@@ -336,8 +336,11 @@ function tcScanFinishReason(raw: string): string {
 }
 
 function tcToolDefEntry(entry: Tool): ToolCallDefEntry {
+  // What the model is told the single parameter means. A tool that declared
+  // none still needs a description, and "entry" here was this function's own
+  // variable name leaking into text a model reads.
   let hint = entry.params;
-  if (hint == "") { hint = "Input for the " + entry.name + " entry."; }
+  if (hint == "") { hint = "Input for the " + entry.name + " tool."; }
   return {
     type: "function",
     function: {
