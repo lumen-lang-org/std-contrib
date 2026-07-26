@@ -1,6 +1,6 @@
 // Tests for ai.
 
-import { addDocs, addVector, agentChatTurns, agentStep, agentSystemPrompt, agentTrace, aiResult, appendMessage, applySummary, assistant, assistantTemplate, authHeaders, budgetMemory, chatPromptContent, chatPromptRole, chatRequest, cosine, defaultModelOptions, defineTool, deleteDoc, distance, docMetadata, document, dot, embeddingBody, embeddingBodyBatch, estimateTokens, fakeAnswer, fakeModel, fakeToolCall, filterDocs, findTool, finishReason, firstFencedBlock, firstJsonObject, formatContext, hasTool, hasToolCalls, hashEmbedding, historyChars, keywordRetrieve, keywordScore, loadHistory, mcpAsTool, mcpAsTools, mcpCallBody, mcpConnectBody, mcpErrorMessage, mcpIsError, mcpListToolsBody, mcpParseTools, mcpReplyId, mcpRequestBody, mcpResultField, missingVariables, mistralAgent, mistralAuthHeaders, mistralChatBody, mistralChatBodyWithStops, mistralToolBody, modelOptions, norm, normalize, openAIAgent, openAIChatBody, openAIChatBodyWithStops, openAIToolBody, parseChoice, parseEmbedding, parseEmbeddingBatch, parseHistory, parseLines, parseMcpResult, parseMistralContent, parseMistralError, parseMistralResult, parseMistralTokenUsage, parseMistralToolCalls, parseOpenAIContent, parseOpenAIError, parseOpenAIResult, parseOpenAITokenUsage, parseStringList, parseText, partialTemplate, providerChatBody, providerError, queryTerms, ragMessages, ragPrompt, recall, registerTool, remember, renderChatPrompt, renderTemplate, retrieve, retryPrompt, runAgent, runAgentWithPolicy, runTool, runToolGuarded, saveHistory, search, searchVector, serializeHistory, serializeToolDefs, serializeToolDefsMistral, splitDocuments, splitParagraphs, splitText, splitTextRecursive, storeSize, summaryPrompt, system, systemTemplate, templateVar, promptPart, templateVar, promptPart, toolCall, toolCallArg, toolCalls, toolDescriptions, toolInput, toolMessage, toolNames, toolRegistry, transcript, typedJsonInput, unusedVariables, user, userTemplate, vectorRetrieve, vectorStore, windowMemory, withDocMetadata } from "./ai.ts";
+import { addDocs, addVector, agentChatTurns, agentStep, agentSystemPrompt, agentTrace, aiResult, appendMessage, applySummary, assistant, assistantTemplate, authHeaders, budgetMemory, chatPromptContent, chatPromptRole, chatRequest, cosine, defaultModelOptions, defineTool, deleteDoc, distance, docMetadata, document, dot, embeddingBody, embeddingBodyBatch, estimateTokens, fakeAnswer, fakeModel, fakeToolCall, filterDocs, findTool, finishReason, firstFencedBlock, firstJsonObject, formatContext, hasTool, hasToolCalls, hashEmbedding, historyChars, keywordRetrieve, keywordScore, loadHistory, mcpAsTool, mcpAsTools, mcpCallBody, mcpConnectBody, mcpErrorMessage, mcpIsError, mcpListToolsBody, mcpParseTools, mcpReplyId, mcpRequestBody, mcpResultField, missingVariables, mistralAgent, mistralAuthHeaders, mistralChatBody, mistralChatBodyWithStops, mistralToolBody, modelOptions, norm, normalize, openAIAgent, openAIChatBody, openAIChatBodyWithStops, openAIToolBody, parseChoice, parseEmbedding, parseEmbeddingBatch, parseHistory, parseLines, parseMcpResult, parseMistralContent, parseMistralError, parseMistralResult, parseMistralTokenUsage, parseMistralToolCalls, parseOpenAIContent, parseOpenAIError, parseOpenAIResult, parseOpenAITokenUsage, parseStringList, parseText, partialTemplate, providerChatBody, providerError, queryTerms, ragMessages, ragPrompt, recall, registerTool, remember, renderChatPrompt, renderTemplate, retrieve, retryPrompt, runAgent, runAgentWithPolicy, runTool, runToolGuarded, saveHistory, search, searchVector, serializeHistory, serializeToolDefs, serializeToolDefsMistral, splitDocuments, splitParagraphs, splitText, splitTextRecursive, storeSize, summaryPrompt, system, systemTemplate, toolCall, toolCallArg, toolCalls, toolDescriptions, toolInput, toolMessage, toolNames, toolRegistry, transcript, typedJsonInput, unusedVariables, user, userTemplate, vectorRetrieve, vectorStore, windowMemory, withDocMetadata } from "./ai.ts";
 
 test("message helpers", () => {
   let s = system("You are concise.");
@@ -14,8 +14,8 @@ test("message helpers", () => {
 
 test("render template", () => {
   let out = renderTemplate("Write a {{tone}} note to {{name}}. {{tone}} matters.", [
-    templateVar("tone", "short"),
-    templateVar("name", "Aymen"),
+    { name: "tone", value: "short" },
+    { name: "name", value: "Aymen" },
   ]);
   expect(out == "Write a short note to Aymen. short matters.");
 });
@@ -34,14 +34,14 @@ test("unused variables", () => {
 });
 
 test("partial template", () => {
-  let out = partialTemplate("Hello {{name}} from {{place}}", [templateVar("name", "Aymen")]);
+  let out = partialTemplate("Hello {{name}} from {{place}}", [{ name: "name", value: "Aymen" }]);
   expect(out == "Hello Aymen from {{place}}");
 });
 
 test("render chat prompt", () => {
   let entries = renderChatPrompt(
-    [promptPart("system", "You are {{tone}}."), promptPart("user", "Explain {{topic}}.")],
-    [templateVar("tone", "concise"), templateVar("topic", "Lumen")],
+    [{ role: "system", template: "You are {{tone}}." }, { role: "user", template: "Explain {{topic}}." }],
+    [{ name: "tone", value: "concise" }, { name: "topic", value: "Lumen" }],
   );
   expect(entries.length == 2);
   expect(chatPromptRole(entries[0]) == "system");
@@ -51,9 +51,9 @@ test("render chat prompt", () => {
 });
 
 test("message templates", () => {
-  let s = systemTemplate("You are {{tone}}.", [templateVar("tone", "brief")]);
-  let u = userTemplate("Explain {{topic}}.", [templateVar("topic", "Lumen")]);
-  let a = assistantTemplate("Answer: {{answer}}", [templateVar("answer", "ok")]);
+  let s = systemTemplate("You are {{tone}}.", [{ name: "tone", value: "brief" }]);
+  let u = userTemplate("Explain {{topic}}.", [{ name: "topic", value: "Lumen" }]);
+  let a = assistantTemplate("Answer: {{answer}}", [{ name: "answer", value: "ok" }]);
   expect(s.role == "system");
   expect(s.content == "You are brief.");
   expect(u.role == "user");

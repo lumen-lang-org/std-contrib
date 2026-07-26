@@ -16,10 +16,10 @@ return a new one.
 ## Use
 
 ```ts
-import { chatMistral, system, user, renderTemplate, templateVar } from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
+import { chatMistral, system, user, renderTemplate } from "https://lumen-lang.org/package/std-contrib/ai/ai.ts";
 
 let prompt = renderTemplate("Explain {{topic}} in one sentence.", [
-  templateVar("topic", "native compilation"),
+  { name: "topic", value: "native compilation" },
 ]);
 
 let messages = [
@@ -46,16 +46,14 @@ lumen compile packages/ai/examples/mistral-chat.ts
 | `system(content)` | Create a system message |
 | `user(content)` | Create a user message |
 | `assistant(content)` | Create an assistant message |
-| `templateVar(name, value)` | One `{{name}}` binding — the name beside its value |
-| `renderTemplate(template, vars)` | Replace `{{name}}` placeholders |
+| `renderTemplate(template, vars)` | Replace `{{name}}` placeholders; a var is `{ name, value }` |
 | `partialTemplate(template, vars)` | Replace known placeholders and leave unknown ones intact |
 | `missingVariables(template, keys)` | Return placeholder names not present in `keys` |
 | `unusedVariables(template, keys)` | Return provided keys not used by the template |
 | `systemTemplate(template, vars)` | Render a system message template |
 | `userTemplate(template, vars)` | Render a user message template |
 | `assistantTemplate(template, vars)` | Render an assistant message template |
-| `promptPart(role, template)` | One chat prompt entry — a role and its template |
-| `renderChatPrompt(parts, vars)` | Render flat `role/content` chat prompt entries |
+| `renderChatPrompt(parts, vars)` | Render `role/content` entries; a part is `{ role, template }` |
 | `chatPromptRole(entry)` | Read the role from a rendered chat prompt entry |
 | `chatPromptContent(entry)` | Read the content from a rendered chat prompt entry |
 | `chatRequest(provider, model, messages, temperature, maxTokens)` | Build a provider-neutral chat request |
