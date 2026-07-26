@@ -6,7 +6,7 @@ Server-sent events: one-way push over an HTTP response that never ends.
 serveEvents(9010, (stream: EventStream) => {
   pushEvent(stream, "token", "Hel");
   pushEvent(stream, "token", "lo ");
-  pushEventWithId(stream, "7", "done", "complete");
+  pushEventWithId(stream, { id: "7", name: "done", data: "complete" });
 });
 ```
 

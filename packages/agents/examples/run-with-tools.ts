@@ -67,7 +67,7 @@ function main(): void {
   // away again, on the next run, with nothing rebuilt.
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a1','s1')");
 
-  storeCredential(db, "mistral", apiKey, master, "2026-07-25");
+  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-25" });
 
   // --- what the agent can reach ---------------------------------------------
 

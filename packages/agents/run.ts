@@ -145,11 +145,32 @@ function failed(agentName: string, why: string): AgentRun {
 
 // Run a user's text through an agent. Every refusal names what was missing,
 // because "it did not answer" is the least useful thing a caller can be told.
+// Where a run sits: how deep, under which span, in which thread, with what
+// already said and what has already been shown.
+//
+// These were seven more positional parameters on the end of an eleven-argument
+// call. `parentSpan` and `threadId` are both ids, both "" at the top, and only
+// a Turn[] apart — swapped, spans hang off a thread id while the workspace
+// tools scope to a span id, so the agent silently loses its file tools and the
+// trace silently reparents. Neither reports anything.
+export type RunContext = {
+  depth: int,
+  // The chain of agent ids from the top down, so a child that would re-enter
+  // one is refused by name.
+  path: string[],
+  tracer: Tracer,
+  parentSpan: string,
+  prior: Turn[],
+  threadId: string,
+  excludeChunks: string[],
+};
+
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path, noTracer(), "", fresh, "", noChunks);
+  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks };
+  return runAgentAt(db, agentId, userText, master, top);
 }
 
 // The same run, traced. The tracer carries the collector's address and the
@@ -160,7 +181,8 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path, tracer, "", fresh, "", noChunks);
+  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks };
+  return runAgentAt(db, agentId, userText, master, top);
 }
 
 // The same run, at a depth, knowing which agents are already above it.
@@ -169,7 +191,14 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
 // re-enter one is refused by name. Passed rather than tracked in a global: a
 // server runs handlers on many threads, and one run's path is nothing to do
 // with another's.
-export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[], tracer: Tracer, parentSpan: string, prior: Turn[], threadId: string, excludeChunks: string[]): AgentRun {
+export function runAgentAt(db: Db, agentId: string, userText: string, master: string, where: RunContext): AgentRun {
+  let depth = where.depth;
+  let path = where.path;
+  let tracer = where.tracer;
+  let parentSpan = where.parentSpan;
+  let prior = where.prior;
+  let threadId = where.threadId;
+  let excludeChunks = where.excludeChunks;
   // Read each row on its own rather than through agentsFull. A relation that
   // matches nothing is null, and a run needs its prompt, config and model to
   // exist — so a dangling reference should be named, not turned into a parse
@@ -434,7 +463,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           // conversation — so the child gets the files too: it is doing the
           // parent's work on the parent's material.
           let noChildChunks: string[] = [];
-          let asked = runAgentAt(db, child.id, question, master, deeper, below, tracerForCallee(trace), callSpan.id, childPrior, threadId, noChildChunks);
+          let below2: RunContext = {
+            depth: deeper, path: below, tracer: tracerForCallee(trace),
+            parentSpan: callSpan.id, prior: childPrior, threadId: threadId,
+            excludeChunks: noChildChunks,
+          };
+          let asked = runAgentAt(db, child.id, question, master, below2);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }
           // What the child reached counts as reached: an evaluation asking
           // whether the stock tool was called does not care which agent

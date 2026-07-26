@@ -41,19 +41,6 @@ export type SubAgent = {
   maxSteps: int,
 };
 
-export function makeSubAgent(name: string, description: string, provider: string, apiKey: string, model: string, systemPrompt: string, tools: Tool[], maxSteps: int): SubAgent {
-  let s: SubAgent = {
-    name: name,
-    description: description,
-    provider: provider,
-    apiKey: apiKey,
-    model: model,
-    systemPrompt: systemPrompt,
-    tools: tools,
-    maxSteps: maxSteps,
-  };
-  return s;
-}
 
 // Run a task through a child loop with any model — the seam tests drive with a
 // fake, and the live runners below drive with providers.

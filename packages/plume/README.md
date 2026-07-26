@@ -294,12 +294,16 @@ Through a link table, including the case where both sides are the same table:
 
 ```ts
 let rs: DbRelation[] = [
-  hasManyThrough("servers", "mcp_servers", "id",
-                 "agent_mcp_servers", "agent_id", "server_id",
-                 "id", "id, server_name AS \"serverName\", url"),
-  hasManyThrough("subAgents", "agents", "id",
-                 "agent_children", "parent_id", "child_id",
-                 "id", "id, agent_name AS \"agentName\""),
+  hasManyThrough({
+    field: "servers", table: "mcp_servers", foreignColumn: "id",
+    linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
+    localColumn: "id", columns: "id, server_name AS \"serverName\", url",
+  }),
+  hasManyThrough({
+    field: "subAgents", table: "agents", foreignColumn: "id",
+    linkTable: "agent_children", linkLocalColumn: "parent_id", linkForeignColumn: "child_id",
+    localColumn: "id", columns: "id, agent_name AS \"agentName\"",
+  }),
 ];
 ```
 

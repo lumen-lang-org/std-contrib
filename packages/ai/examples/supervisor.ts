@@ -13,7 +13,7 @@
 //   lumen compile packages/ai/examples/supervisor.ts
 //   ./supervisor
 
-import { subAgent, subAgentTools, mistralAgent, runAgent, agentTrace, defineTool, system, user } from "../ai.ts";
+import { subAgentTools, mistralAgent, runAgent, agentTrace, defineTool, system, user } from "../ai.ts";
 import { requireEnv } from "./env.ts";
 
 let apiKey = requireEnv("MISTRAL_API_KEY");
@@ -56,20 +56,26 @@ function noTools(): Tool[] {
 // deciding whom to delegate to.
 let calcTools: Tool[] = [sumTool()];
 let subs: SubAgent[] = [
-  subAgent(
-    "calculator",
-    "Does arithmetic. Use it for any question involving numbers.",
-    "mistral", apiKey, MODEL,
-    "You are a careful calculator. Use the sum tool for addition rather than computing yourself.",
-    calcTools, 4,
-  ),
-  subAgent(
-    "poet",
-    "Writes short verse. Use it when the user wants creative text.",
-    "mistral", apiKey, MODEL,
-    "You write exactly two rhyming lines, nothing more.",
-    noTools(), 2,
-  ),
+  {
+    name: "calculator",
+    description: "Does arithmetic. Use it for any question involving numbers.",
+    provider: "mistral",
+    apiKey: apiKey,
+    model: MODEL,
+    systemPrompt: "You are a careful calculator. Use the sum tool for addition rather than computing yourself.",
+    tools: calcTools,
+    maxSteps: 4,
+  },
+  {
+    name: "poet",
+    description: "Writes short verse. Use it when the user wants creative text.",
+    provider: "mistral",
+    apiKey: apiKey,
+    model: MODEL,
+    systemPrompt: "You write exactly two rhyming lines, nothing more.",
+    tools: noTools(),
+    maxSteps: 2,
+  },
 ];
 
 let tools = subAgentTools(subs);

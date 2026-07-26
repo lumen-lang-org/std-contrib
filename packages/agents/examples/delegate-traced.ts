@@ -66,7 +66,7 @@ function main(): void {
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a2','s1')");
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
 
-  storeCredential(db, "mistral", apiKey, master, "2026-07-26");
+  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
 
   // --- tracing on, by two rows ----------------------------------------------
 
@@ -80,7 +80,7 @@ function main(): void {
     enabled: true,
   };
   persist(db, traceConfigMapping(), JSON.stringify(traceRow));
-  storeCredential(db, "tracing", process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-demo", master, "2026-07-26");
+  storeCredential(db, { provider: "tracing", apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-demo", masterKey: master, now: "2026-07-26" });
 
   let tracer = tracerFor(db, master);
   console.log("tracing   " + `${tracing(tracer)}` + " -> " + collector);

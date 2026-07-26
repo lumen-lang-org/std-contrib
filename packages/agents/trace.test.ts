@@ -44,7 +44,7 @@ function save(row: TraceConfigRow): void {
 }
 
 function withSecret(): void {
-  storeCredential(database, "tracing", "sk-lf-secret", MASTER, "2026-07-26T00:00:00Z");
+  storeCredential(database, { provider: "tracing", apiKey: "sk-lf-secret", masterKey: MASTER, now: "2026-07-26T00:00:00Z" });
 }
 
 // --- the four ways to be off ----------------------------------------------------------

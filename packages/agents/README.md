@@ -126,7 +126,7 @@ failing obscurely.
 A provider's API key is a row, encrypted:
 
 ```ts
-storeCredential(db, "mistral", "sk-...", masterKey(), now);
+storeCredential(db, { provider: "mistral", apiKey: "sk-...", masterKey: masterKey(), now: now });
 complete(model, config, prompt, text, credentialFor(db, "mistral", masterKey()));
 ```
 
@@ -303,7 +303,14 @@ programmer. Running them is a request, not a deployment — the agent, its
 sub-agents, its tools and the judge are all rows.
 
 ```ts
-let out = runEvals(db, "a1", "judge1", "parts-desk-evals", "nightly", tracerFor(db, master), master, 50);
+let out = runEvals(db, {
+  agentId: "a1",
+  judgeAgentId: "judge1",
+  dataset: "parts-desk-evals",
+  runName: "nightly",
+  master: master,
+  maxItems: 50,
+}, tracerFor(db, master));
 ```
 
 A case says what to ask, what a good answer looks like, and — when it cares —
@@ -436,9 +443,12 @@ runs anywhere; it retrieves against Postgres.
 ```ts
 let width = embedText(embedModel, "probe", key).dimensions;   // ask the model
 createDocuments(db, width);
-indexDocument(db, embedModel, "d1", "plume", "Plume maps records to tables…", key);
+indexDocument(db, embedModel, {
+  id: "d1", source: "plume", scope: "/specs/plume",
+  body: "Plume maps records to tables…",
+}, key);
 
-let found = retrieve(db, embedModel, "Why is an unordered page refused?", 2, key);
+let found = retrieve(db, embedModel, ["/specs/plume"], "Why is an unordered page refused?", 2, key);
 runAgent(db, "a1", asContext(found.found) + "\nQuestion: " + question, masterKey());
 ```
 

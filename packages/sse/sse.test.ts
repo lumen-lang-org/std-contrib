@@ -20,21 +20,21 @@ test("the headers say what a proxy must not do", () => {
 test("an event is data plus a blank line", () => {
   // Without the blank line the browser never delivers it, and the stream
   // looks perfectly correct in a log.
-  expect(eventFrame("", "", "hello") == "data: hello\n\n");
+  expect(eventFrame({ id: "", name: "", data: "hello" }) == "data: hello\n\n");
 });
 
 test("a named event carries its name first", () => {
-  expect(eventFrame("", "token", "Hel") == "event: token\ndata: Hel\n\n");
+  expect(eventFrame({ id: "", name: "token", data: "Hel" }) == "event: token\ndata: Hel\n\n");
 });
 
 test("an id comes before the name", () => {
-  expect(eventFrame("7", "token", "x") == "id: 7\nevent: token\ndata: x\n\n");
+  expect(eventFrame({ id: "7", name: "token", data: "x" }) == "id: 7\nevent: token\ndata: x\n\n");
 });
 
 test("every line of the data gets its own prefix", () => {
   // A newline inside a value would otherwise end the event early and deliver
   // half of it.
-  expect(eventFrame("", "", "one\ntwo") == "data: one\ndata: two\n\n");
+  expect(eventFrame({ id: "", name: "", data: "one\ntwo" }) == "data: one\ndata: two\n\n");
 });
 
 test("retry and comments are their own frames", () => {
@@ -94,7 +94,7 @@ test("a comment is consumed, not mistaken for data", () => {
 });
 
 test("an id survives the round trip, which is what resumption needs", () => {
-  let got = readEvent(eventFrame("42", "tick", "on"));
+  let got = readEvent(eventFrame({ id: "42", name: "tick", data: "on" }));
   expect(got.id == "42");
   expect(got.name == "tick");
   expect(got.data == "on");

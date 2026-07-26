@@ -30,12 +30,8 @@ function serversRepo(): DbRepository {
 // and the second pointing back at the same table it lives in.
 function agentsRepo(): DbRepository {
   let rs: DbRelation[] = [
-    hasManyThrough("servers", "lk_servers", "id",
-                   "lk_agent_servers", "agent_id", "server_id",
-                   "id", "id, server_name AS \"serverName\", url"),
-    hasManyThrough("subAgents", "lk_agents", "id",
-                   "lk_agent_children", "parent_id", "child_id",
-                   "id", "id, agent_name AS \"agentName\""),
+    hasManyThrough({ field: "servers", table: "lk_servers", foreignColumn: "id", linkTable: "lk_agent_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id", localColumn: "id", columns: "id, server_name AS \"serverName\", url" }),
+    hasManyThrough({ field: "subAgents", table: "lk_agents", foreignColumn: "id", linkTable: "lk_agent_children", linkLocalColumn: "parent_id", linkForeignColumn: "child_id", localColumn: "id", columns: "id, agent_name AS \"agentName\"" }),
   ];
   return repositoryWith("lk_agents", "id", "id", agentsFlat().fields, rs);
 }
@@ -72,7 +68,7 @@ function seeded(): DbRepository {
 // --- offline ----------------------------------------------------------------
 
 test("a link relation states both halves of the join", () => {
-  let r = hasManyThrough("servers", "lk_servers", "id", "lk_agent_servers", "agent_id", "server_id", "id", "id");
+  let r = hasManyThrough({ field: "servers", table: "lk_servers", foreignColumn: "id", linkTable: "lk_agent_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id", localColumn: "id", columns: "id" });
   expect(r.kind == "many");
   expect(r.linkTable == "lk_agent_servers");
   expect(r.linkLocalColumn == "agent_id");
@@ -81,9 +77,9 @@ test("a link relation states both halves of the join", () => {
 });
 
 test("an unsafe name anywhere in the join refuses the relation", () => {
-  expect(!relationValid(hasManyThrough("s", "lk_servers", "id", "x; DROP TABLE y", "agent_id", "server_id", "id", "id")));
-  expect(!relationValid(hasManyThrough("s", "lk_servers", "id", "lk_agent_servers", "agent_id; --", "server_id", "id", "id")));
-  expect(!relationValid(hasManyThrough("s", "lk_servers", "id", "lk_agent_servers", "agent_id", "server_id) --", "id", "id")));
+  expect(!relationValid(hasManyThrough({ field: "s", table: "lk_servers", foreignColumn: "id", linkTable: "x; DROP TABLE y", linkLocalColumn: "agent_id", linkForeignColumn: "server_id", localColumn: "id", columns: "id" })));
+  expect(!relationValid(hasManyThrough({ field: "s", table: "lk_servers", foreignColumn: "id", linkTable: "lk_agent_servers", linkLocalColumn: "agent_id; --", linkForeignColumn: "server_id", localColumn: "id", columns: "id" })));
+  expect(!relationValid(hasManyThrough({ field: "s", table: "lk_servers", foreignColumn: "id", linkTable: "lk_agent_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id) --", localColumn: "id", columns: "id" })));
 });
 
 test("a to-one through a link table is refused, since a link yields many", () => {

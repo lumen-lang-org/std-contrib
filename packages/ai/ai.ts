@@ -64,7 +64,7 @@ import { McpStdioSession, mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as r
 import { SchemaField, Structured, schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
 import { ApprovalRun, runAgentWithApproval as runGatedAgent, resumeAgent as resumeGatedAgent, saveCheckpoint as writeCheckpoint, loadCheckpoint as readCheckpoint, APPROVAL_SENTINEL } from "./agent/approval.ts";
 import { CheckpointStore, fileCheckpointStore as makeFileCheckpointStore, memoryCheckpointStore as makeMemoryCheckpointStore } from "./agent/checkpointstore.ts";
-import { SubAgent, makeSubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer, subAgentAsGatedTool as wrapGatedSubAgent, decideChildPause as recordChildVerdict, childPausePending as readChildPausePending } from "./agent/subagent.ts";
+import { SubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer, subAgentAsGatedTool as wrapGatedSubAgent, decideChildPause as recordChildVerdict, childPausePending as readChildPausePending } from "./agent/subagent.ts";
 import { Budget, makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
 import { Chunk, splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
 import { LoadResult, loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
@@ -757,9 +757,6 @@ export function childPausePending(store: CheckpointStore, subName: string): bool
 // final message returns — a child that makes twenty tool calls costs the
 // parent one message.
 
-export function subAgent(name: string, description: string, provider: string, apiKey: string, model: string, systemPrompt: string, tools: Tool[], maxSteps: int): SubAgent {
-  return defineSubAgent(name, description, provider, apiKey, model, systemPrompt, tools, maxSteps);
-}
 
 export function subAgentTool(sub: SubAgent): Tool {
   return wrapSubAgent(sub);

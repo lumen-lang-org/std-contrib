@@ -1,7 +1,8 @@
 // Retrieval: the documents an agent may draw on, and finding the ones a
 // question is about.
 //
-//   indexDocument(db, embedModel, "d1", "agents", "Plume maps records to tables.", key);
+//   indexDocument(db, embedModel, { id: "d1", source: "agents", scope: "/specs",
+//                                    body: "Plume maps records to tables." }, key);
 //   let found = retrieve(db, embedModel, "How do I map a record?", 3, key);
 //
 // PostgreSQL only. Similarity search here is pgvector's `<=>` operator, and
@@ -97,7 +98,26 @@ export function createDocuments(db: Db, model: ModelRow): string {
 
 // Embed a chunk and store it. Replaces the row if the id is already there, so
 // re-indexing a corpus is idempotent.
-export function indexDocument(db: Db, model: ModelRow, id: string, source: string, scope: string, body: string, apiKey: string): string {
+// One document to index.
+//
+// `id` and `source` were adjacent strings, both plain names, and at the only
+// non-example call site one is derived from the other — so the two read as
+// interchangeable. Swapped, every chunk of a document gets the same id, each
+// one deleting and rewriting the last, and a ten-chunk document indexes as a
+// single row. Both pass safeIdentifier, the insert succeeds, and retrieval
+// just quietly returns one passage.
+export type DocumentChunk = {
+  id: string,
+  source: string,
+  scope: string,
+  body: string,
+};
+
+export function indexDocument(db: Db, model: ModelRow, chunk: DocumentChunk, apiKey: string): string {
+  let id = chunk.id;
+  let source = chunk.source;
+  let scope = chunk.scope;
+  let body = chunk.body;
   if (!safeIdentifier(id)) { return "a document id must be a plain name"; }
   if (model.kind != "embedding") { return model.label + " is not an embedding model"; }
   let vector = embedText(model, body, apiKey);
@@ -358,7 +378,8 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
   let written: int = 0;
   let i: int = 0;
   while (i < chunks.length) {
-    let problem = indexDocument(db, model, source + "_" + `${i}`, source, scope, chunks[i], apiKey);
+    let part: DocumentChunk = { id: source + "_" + `${i}`, source: source, scope: scope, body: chunks[i] };
+    let problem = indexDocument(db, model, part, apiKey);
     if (problem != "") {
       // Partial on purpose: what was stored is real and retrievable, and the
       // count says how far it got. Rolling back would lose work over a

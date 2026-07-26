@@ -135,14 +135,14 @@ test("a cycle is named, not descended into", () => {
   // what a delegation from a1 does — because at depth 0 nothing is above the
   // run and there is no cycle to find yet.
   seeded();
-  storeCredential(database, "mistral", "sk-fake-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   agent("a1", "lead", "delegates");
   agent("a2", "scout", "searches");
   delegates("a1", "a2");
   delegates("a2", "a1");
 
   let above: string[] = ["a1"];
-  let child = runAgentAt(database, "a2", "anything", testKey(), 1, above, noTracer(), "", fresh(), "", fresh2());
+  let child = runAgentAt(database, "a2", "anything", testKey(), { depth: 1, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2() });
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
   expect(child.notes[0].indexOf("already in this chain") >= 0);
@@ -154,7 +154,7 @@ test("a cycle is named, not descended into", () => {
 
 test("an agent that would delegate to itself is refused", () => {
   seeded();
-  storeCredential(database, "mistral", "sk-fake-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   agent("a1", "lead", "delegates");
   delegates("a1", "a1");
   let r = runAgent(database, "a1", "anything", testKey());
@@ -166,13 +166,13 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
   // Refusing the whole run because a child was out of reach would turn a
   // bounded plan into no answer.
   seeded();
-  storeCredential(database, "mistral", "sk-fake-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   agent("a1", "lead", "delegates");
   agent("a2", "scout", "searches");
   delegates("a1", "a2");
 
   let above: string[] = ["x1", "x2", "x3"];
-  let deep = runAgentAt(database, "a1", "anything", testKey(), 3, above, noTracer(), "", fresh(), "", fresh2());
+  let deep = runAgentAt(database, "a1", "anything", testKey(), { depth: 3, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2() });
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
   // It still reached the provider — the run happened.
@@ -181,7 +181,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
 
 test("a disabled child is not offered, and the run says why", () => {
   seeded();
-  storeCredential(database, "mistral", "sk-fake-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   agent("a1", "lead", "delegates");
   let off: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c1", promptId: "p1", enabled: false, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(off));
@@ -195,7 +195,7 @@ test("a disabled child is not offered, and the run says why", () => {
 
 test("a child that does not exist is simply not there", () => {
   seeded();
-  storeCredential(database, "mistral", "sk-fake-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   agent("a1", "lead", "delegates");
   delegates("a1", "gone");
   let r = runAgent(database, "a1", "anything", testKey());

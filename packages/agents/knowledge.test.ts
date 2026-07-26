@@ -68,7 +68,7 @@ test("a corpus cannot be created without a width", () => {
 test("indexing with a chat model is refused before a request is made", () => {
   fresh();
   let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"enabled\":true}");
-  expect(indexDocument(database, chat, "d1", "s", "/x", "body", "sk-fake").indexOf("not an embedding model") >= 0);
+  expect(indexDocument(database, chat, { id: "d1", source: "s", scope: "/x", body: "body" }, "sk-fake").indexOf("not an embedding model") >= 0);
 });
 
 test("searching with a chat model is refused too", () => {
@@ -92,7 +92,7 @@ test("k is bounded, so a search cannot ask for everything", () => {
 test("a document id must be a plain name", () => {
   fresh();
   let m = embeddingModel(database, "e1");
-  expect(indexDocument(database, m, "a b; DROP TABLE documents", "s", "/x", "body", "sk-fake").indexOf("plain name") >= 0);
+  expect(indexDocument(database, m, { id: "a b; DROP TABLE documents", source: "s", scope: "/x", body: "body" }, "sk-fake").indexOf("plain name") >= 0);
 });
 
 test("context is labelled with where each chunk came from", () => {

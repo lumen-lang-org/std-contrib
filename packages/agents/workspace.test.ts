@@ -52,8 +52,8 @@ test("a separator of any kind is not a name", () => {
 
 test("writing a name that exists replaces it", () => {
   fresh();
-  expect(putFile(database, "t1", "notes.md", "text/markdown", "uploaded", "first", "", "now") == "");
-  expect(putFile(database, "t1", "notes.md", "text/markdown", "generated", "second", "", "now") == "");
+  expect(putFile(database, { threadId: "t1", fileName: "notes.md", mime: "text/markdown", origin: "uploaded", body: "first", documentId: "", now: "now" }) == "");
+  expect(putFile(database, { threadId: "t1", fileName: "notes.md", mime: "text/markdown", origin: "generated", body: "second", documentId: "", now: "now" }) == "");
   let file = getFile(database, "t1", "notes.md");
   expect(file.body == "second");
   expect(file.origin == "generated");
@@ -62,8 +62,8 @@ test("writing a name that exists replaces it", () => {
 
 test("threads do not see each other's files", () => {
   fresh();
-  putFile(database, "t1", "mine.md", "text/markdown", "uploaded", "a", "", "now");
-  putFile(database, "t2", "theirs.md", "text/markdown", "uploaded", "b", "", "now");
+  putFile(database, { threadId: "t1", fileName: "mine.md", mime: "text/markdown", origin: "uploaded", body: "a", documentId: "", now: "now" });
+  putFile(database, { threadId: "t2", fileName: "theirs.md", mime: "text/markdown", origin: "uploaded", body: "b", documentId: "", now: "now" });
   expect(listFiles(database, "t1").length == 1);
   expect(listFiles(database, "t1")[0].fileName == "mine.md");
   expect(getFile(database, "t1", "theirs.md").id == "");
@@ -71,13 +71,13 @@ test("threads do not see each other's files", () => {
 
 test("an unknown origin is refused", () => {
   fresh();
-  expect(putFile(database, "t1", "x.md", "text/plain", "conjured", "b", "", "now").indexOf("origin") >= 0);
+  expect(putFile(database, { threadId: "t1", fileName: "x.md", mime: "text/plain", origin: "conjured", body: "b", documentId: "", now: "now" }).indexOf("origin") >= 0);
 });
 
 test("deleting removes one file, not the workspace", () => {
   fresh();
-  putFile(database, "t1", "keep.md", "text/plain", "uploaded", "a", "", "now");
-  putFile(database, "t1", "drop.md", "text/plain", "uploaded", "b", "", "now");
+  putFile(database, { threadId: "t1", fileName: "keep.md", mime: "text/plain", origin: "uploaded", body: "a", documentId: "", now: "now" });
+  putFile(database, { threadId: "t1", fileName: "drop.md", mime: "text/plain", origin: "uploaded", body: "b", documentId: "", now: "now" });
   expect(deleteFile(database, "t1", "drop.md") == "");
   expect(listFiles(database, "t1").length == 1);
   expect(listFiles(database, "t1")[0].fileName == "keep.md");

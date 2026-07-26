@@ -70,7 +70,7 @@ function main(): void {
   persist(db, modelConfigsMapping(db), JSON.stringify(config));
   let prompt: PromptRow = { id: "p1", promptName: "librarian", version: 1, createdAt: "2026-07-26", body: "Answer only from the passages you are given. If they do not say, reply that your documents do not cover it. Two sentences at most." };
   persist(db, promptsMapping(), JSON.stringify(prompt));
-  storeCredential(db, "mistral", apiKey, master, "2026-07-26");
+  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
 
   let embedder = embeddingModel(db, "e1");
   let made = createDocuments(db, embedder);
@@ -131,7 +131,7 @@ function main(): void {
     serviceName: "lumen-agents", environment: "rag-evals", enabled: true,
   };
   persist(db, traceConfigMapping(), JSON.stringify(traceRow));
-  storeCredential(db, "tracing", process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo", master, "2026-07-26");
+  storeCredential(db, { provider: "tracing", apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo", masterKey: master, now: "2026-07-26" });
 
   // --- the run ---------------------------------------------------------------
 
@@ -141,7 +141,14 @@ function main(): void {
 
   console.log("");
   console.log("-- " + dataset + " against " + agentId + " ------------------------------");
-  let out = runEvals(db, agentId, "judge", dataset, runName, tracerFor(db, master), master, 50);
+  let out = runEvals(db, {
+  agentId: agentId,
+  judgeAgentId: "judge",
+  dataset: dataset,
+  runName: runName,
+  master: master,
+  maxItems: 50,
+}, tracerFor(db, master));
   if (!out.ok) { console.log("refused   " + out.error); db.close(); return; }
 
   let i: int = 0;

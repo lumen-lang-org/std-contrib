@@ -73,7 +73,7 @@ function main(): void {
   persist(db, agentsMapping(), JSON.stringify(judge));
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a2','s1')");
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
-  storeCredential(db, "mistral", apiKey, master, "2026-07-26");
+  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
 
   let traceRow: TraceConfigRow = {
     id: "default", backend: "langfuse", endpoint: collector,
@@ -81,13 +81,20 @@ function main(): void {
     serviceName: "lumen-agents", environment: "evals", enabled: true,
   };
   persist(db, traceConfigMapping(), JSON.stringify(traceRow));
-  storeCredential(db, "tracing", process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo", master, "2026-07-26");
+  storeCredential(db, { provider: "tracing", apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo", masterKey: master, now: "2026-07-26" });
 
   console.log("dataset   " + dataset);
   console.log("run       " + runName);
   console.log("");
 
-  let out = runEvals(db, "a1", "judge1", dataset, runName, tracerFor(db, master), master, 50);
+  let out = runEvals(db, {
+  agentId: "a1",
+  judgeAgentId: "judge1",
+  dataset: dataset,
+  runName: runName,
+  master: master,
+  maxItems: 50,
+}, tracerFor(db, master));
   if (!out.ok) {
     console.log("refused   " + out.error);
     db.close();
