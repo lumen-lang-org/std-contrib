@@ -5,8 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Agent Console</title>
   <style>
+    /* The Claude console palette: warm cream, near-black warm text, one
+       terracotta accent, serif display. Held as variables at the root so
+       every element inherits one vocabulary. */
+    :root {
+      --bg: #FAF9F5;          /* page */
+      --bg-rail: #F5F4EE;     /* sidebar, panels */
+      --bg-card: #FFFFFF;
+      --bg-user: #F0EEE6;     /* the user's message block */
+      --fg: #1F1E1D;
+      --muted: #73726C;
+      --border: #E5E3DA;
+      --accent: #D97757;
+      --accent-hover: #C9633F;
+      --accent-fg: #FFFFFF;
+      --serif: Georgia, "Times New Roman", serif;
+    }
     html, body { height: 100%; margin: 0; }
-    body { font: 15px system-ui, sans-serif; background: #0e1116; color: #e6edf3; }
+    body { font: 15px system-ui, sans-serif; background: var(--bg); color: var(--fg); }
     agent-console { display: flex; height: 100%; }
   </style>
 </head>
