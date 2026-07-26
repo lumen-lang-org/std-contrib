@@ -7,10 +7,11 @@
 //
 //   cd packages/agents && lumen test evals.test.ts
 
-import { EvalItem, Verdict, langfuseBase, readVerdict, judgePrompt, compareNumbers, numbersIn } from "./evals.ts";
+import { EvalItem, Verdict, langfuseBase, readVerdict, judgePrompt, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
 
 function item(question: string, expected: string): EvalItem {
-  let it: EvalItem = { id: "i1", question: question, expected: expected };
+  let none: string[] = [];
+  let it: EvalItem = { id: "i1", question: question, expected: expected, expectedTools: none, expectedAgents: none };
   return it;
 }
 
@@ -111,4 +112,63 @@ test("a reference with no numbers is not graded by this judge", () => {
   let v = compareNumbers(item("who should I ask?", "Ask the parts desk."), "Ask the parts desk.");
   expect(!v.ok);
   expect(v.reason.indexOf("no numbers to compare") >= 0);
+});
+
+// --- the route, not just the answer -----------------------------------------------
+
+test("a case can name the tools and agents it expects", () => {
+  expect(namesIn("[\"warehouse_stock\",\"part_price\"]").length == 2);
+  expect(namesIn("[\"warehouse_stock\"]")[0] == "warehouse_stock");
+  // A case that wrote one name without a list meant a list of one.
+  expect(namesIn("\"parts-desk\"")[0] == "parts-desk");
+  expect(namesIn("").length == 0);
+  expect(namesIn("[]").length == 0);
+});
+
+test("what was expected and not reached is named", () => {
+  let expected: string[] = ["warehouse_stock", "part_price"];
+  let reached: string[] = ["warehouse_stock"];
+  let missing = missingFrom(expected, reached);
+  expect(missing.length == 1);
+  expect(missing[0] == "part_price");
+});
+
+test("reaching everything scores 1, reaching none scores 0", () => {
+  let both: string[] = ["a", "b"];
+  let one: string[] = ["a"];
+  let neither: string[] = ["z"];
+  expect(reachedScore(both, both) == 1.0);
+  expect(reachedScore(both, one) == 0.5);
+  expect(reachedScore(both, neither) == 0.0);
+});
+
+test("a case expecting no route cannot fail one", () => {
+  // Most cases only care about the answer, and they must not be dragged to
+  // zero by a check they never asked for.
+  let none: string[] = [];
+  let used: string[] = ["warehouse_stock"];
+  expect(reachedScore(none, used) == 1.0);
+  expect(reachedScore(none, none) == 1.0);
+  expect(missingFrom(none, used).length == 0);
+});
+
+test("a route failure says what was missed and what ran instead", () => {
+  let missing: string[] = ["warehouse_stock"];
+  let reached: string[] = ["part_price"];
+  let why = missingReason("tools", missing, reached);
+  expect(why.indexOf("never reached warehouse_stock") >= 0);
+  expect(why.indexOf("part_price") >= 0);
+
+  // And a run that reached nothing at all says so rather than reading as an
+  // empty list.
+  let nothing: string[] = [];
+  expect(missingReason("tools", missing, nothing).indexOf("nothing") >= 0);
+});
+
+test("a satisfied route expectation says what was reached", () => {
+  let none: string[] = [];
+  let reached: string[] = ["warehouse_stock", "part_price"];
+  let why = missingReason("tools", none, reached);
+  expect(why.indexOf("every expected tool was reached") >= 0);
+  expect(why.indexOf("warehouse_stock") >= 0);
 });

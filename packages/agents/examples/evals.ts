@@ -99,9 +99,12 @@ function main(): void {
     let r = out.results[i];
     let mark = "PASS";
     if (!r.ran) { mark = "FAIL"; } else if (r.score < 0.7) { mark = "POOR"; }
-    console.log(mark + "  " + `${r.score}` + "  " + r.question);
-    console.log("      answered: " + r.answer.slice(0, 96));
+    console.log(mark + "  answer " + `${r.score}` + "  tools " + `${r.toolScore}` + "  agents " + `${r.agentScore}` + "   " + r.question);
+    console.log("      answered: " + r.answer.slice(0, 90));
     if (r.reason != "") { console.log("      judge   : " + r.reason); }
+    console.log("      route   : tools [" + r.calledTools.join(", ") + "]  agents [" + r.calledAgents.join(", ") + "]");
+    if (r.missingTools.length > 0) { console.log("      MISSING tools : " + r.missingTools.join(", ")); }
+    if (r.missingAgents.length > 0) { console.log("      MISSING agents: " + r.missingAgents.join(", ")); }
     if (r.error != "") { console.log("      error   : " + r.error); }
     console.log("      trace   : " + r.traceId + "  (" + `${r.delegations}` + " delegations, " + `${r.rounds}` + " rounds)");
     i = i + 1;

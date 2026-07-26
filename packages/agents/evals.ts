@@ -14,15 +14,25 @@
 // the tool returned — instead of a diff.
 
 import { Db } from "../plume/driver.ts";
-import { AgentRun, runAgentTraced } from "./run.ts";
+import { AgentRun, runAgentTraced, hasName } from "./run.ts";
 import { Tracer, traceId, tracerForCallee, flush, tracerWithMoreSpans, tracing, noTracer, resetTracer } from "../tracing/tracing.ts";
-import { jsonRaw, jsonText, jsonList, jsonStringMember } from "./scan.ts";
+import { jsonRaw, jsonText, jsonList, jsonStringMember, jsonUnescape } from "./scan.ts";
 
-// One case: what to ask, and what a good answer looks like.
+// One case: what to ask, what a good answer looks like, and — when the case
+// says so — the route it should have taken to get there.
+//
+// An answer can be right by the wrong road: reached without the tool that owns
+// the number, or answered by the parent when a specialist should have been
+// asked. Those are the failures that survive an outcome-only suite and then
+// break the first time the data changes, so a case may name the tools and the
+// sub-agents it expects and have them checked separately from the words.
 export type EvalItem = {
   id: string,
   question: string,
   expected: string,
+  // Empty when the case does not care, which is the common one.
+  expectedTools: string[],
+  expectedAgents: string[],
 };
 
 // What one case did.
@@ -36,6 +46,19 @@ export type EvalResult = {
   // words the expected output never used.
   score: number,
   reason: string,
+  // What the run actually reached, anywhere in the tree, and what the case
+  // asked for and did not get. Reported even when the case expected nothing,
+  // because "which tools did this touch" is the first question asked of a
+  // surprising answer.
+  calledTools: string[],
+  calledAgents: string[],
+  missingTools: string[],
+  missingAgents: string[],
+  // 1 when everything the case named was reached, 0 when none was, and the
+  // fraction in between. 1 when the case named nothing — a case with no route
+  // expectation cannot fail one.
+  toolScore: number,
+  agentScore: number,
   // Whether the *run* worked, which is not whether the answer was good. A run
   // that failed has no score worth reading.
   ran: bool,
@@ -114,10 +137,15 @@ export function datasetItems(base: string, auth: string, dataset: string, maxIte
       let expected = jsonText(expectedRaw, "answer");
       if (expected == "") { expected = expectedRaw; }
 
+      // The route, if the case names one. Read from the expected output
+      // beside the answer rather than from metadata: it is part of what the
+      // run was supposed to produce, not a note about the case.
       let item: EvalItem = {
         id: jsonText(items[i], "id"),
         question: question,
         expected: expected,
+        expectedTools: namesIn(jsonRaw(expectedRaw, "tools")),
+        expectedAgents: namesIn(jsonRaw(expectedRaw, "agents")),
       };
       if (item.id != "" && item.question != "") { out.push(item); }
       i = i + 1;
@@ -130,6 +158,51 @@ export function datasetItems(base: string, auth: string, dataset: string, maxIte
     page = page + 1;
   }
   return out;
+}
+
+// The strings of a JSON array, ignoring anything that is not one. A case
+// that wrote `"tools": "warehouse_stock"` meant a list of one, and refusing it
+// over a bracket would be pedantry.
+export function namesIn(array: string): string[] {
+  let out: string[] = [];
+  if (array == "") { return out; }
+  if (array.startsWith("\"")) {
+    out.push(jsonUnescape(array.slice(1, array.length - 1)));
+    return out;
+  }
+  let items = jsonList(array);
+  let i: int = 0;
+  while (i < items.length) {
+    if (items[i].startsWith("\"")) {
+      out.push(jsonUnescape(items[i].slice(1, items[i].length - 1)));
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// What a case asked for and did not get.
+export function missingFrom(expected: string[], actual: string[]): string[] {
+  let out: string[] = [];
+  let i: int = 0;
+  while (i < expected.length) {
+    if (!hasName(actual, expected[i])) { out.push(expected[i]); }
+    i = i + 1;
+  }
+  return out;
+}
+
+// The fraction of what was expected that was reached. A case expecting
+// nothing scores 1: it cannot fail an expectation it never had.
+export function reachedScore(expected: string[], actual: string[]): number {
+  if (expected.length == 0) { return 1.0; }
+  let hit: int = 0;
+  let i: int = 0;
+  while (i < expected.length) {
+    if (hasName(actual, expected[i])) { hit = hit + 1; }
+    i = i + 1;
+  }
+  return (hit + 0.0) / (expected.length + 0.0);
 }
 
 // Attach a run's trace to the case it answered, so Langfuse shows the dataset
@@ -289,6 +362,16 @@ function judgeTracer(): Tracer {
   return noTracer();
 }
 
+// What to say about a route expectation, in words rather than a bare number.
+export function missingReason(kind: string, missing: string[], reached: string[]): string {
+  if (missing.length == 0) {
+    return "every expected " + kind.slice(0, kind.length - 1) + " was reached (" + reached.join(", ") + ")";
+  }
+  let saw = "nothing";
+  if (reached.length > 0) { saw = reached.join(", "); }
+  return "never reached " + missing.join(", ") + "; the run used " + saw;
+}
+
 // A run that did not happen, and why.
 function noEvals(dataset: string, runName: string, why: string): EvalRun {
   let none: EvalResult[] = [];
@@ -368,6 +451,26 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
       }
     }
 
+    // The route the run actually took, and what the case asked for and did
+    // not get. Computed whether or not the answer was judged: a run that
+    // failed still went somewhere, and where it went is the first clue.
+    let missingTools = missingFrom(items[i].expectedTools, answered.calledTools);
+    let missingAgents = missingFrom(items[i].expectedAgents, answered.calledAgents);
+    let toolScore = reachedScore(items[i].expectedTools, answered.calledTools);
+    let agentScore = reachedScore(items[i].expectedAgents, answered.calledAgents);
+
+    // Posted as their own scores rather than folded into the answer's. An
+    // answer that is right by the wrong route and an answer that is wrong are
+    // different failures, and averaging them into one number hides both.
+    if (items[i].expectedTools.length > 0) {
+      postScore(base, tracer.auth, caseTrace, "tool-use", toolScore,
+        missingReason("tools", missingTools, answered.calledTools));
+    }
+    if (items[i].expectedAgents.length > 0) {
+      postScore(base, tracer.auth, caseTrace, "delegation", agentScore,
+        missingReason("agents", missingAgents, answered.calledAgents));
+    }
+
     let result: EvalResult = {
       itemId: items[i].id,
       question: items[i].question,
@@ -376,6 +479,12 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
       traceId: caseTrace,
       score: score,
       reason: reason,
+      calledTools: answered.calledTools,
+      calledAgents: answered.calledAgents,
+      missingTools: missingTools,
+      missingAgents: missingAgents,
+      toolScore: toolScore,
+      agentScore: agentScore,
       ran: answered.ok,
       error: why,
       delegations: delegations,
