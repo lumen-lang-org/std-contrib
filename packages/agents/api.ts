@@ -25,6 +25,7 @@ import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersW
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
+import { openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
 import { ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
@@ -37,6 +38,7 @@ type KeyBody = { apiKey: string };
 type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
 type ScopeGrant = { scope: string };
+type ThreadStart = { agentId: string };
 type DocumentUpload = { source: string, scope: string, body: string };
 type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number, enabled: bool };
 
@@ -666,6 +668,81 @@ function maxVersion(db: Db, name: string): int {
   return rows[0].version;
 }
 
+// A conversation that continues.
+//
+// The whole context is replayed into every turn — the tool calls, their
+// results, the passages — so a follow-up means what it says. The transcript a
+// person reads is the same rows with the working left out.
+@controller("/threads")
+class ThreadApi {
+  db: Db;
+  master: string;
+
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
+
+  @post("/")
+  open(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required: {\"agentId\":\"a1\"}"); }
+    let body: ThreadStart = JSON.parse<ThreadStart>(req.body);
+    if (!existsById(this.db, agentsMapping(), body.agentId)) {
+      return badRequest("no agent " + body.agentId);
+    }
+    let id = openThread(this.db, body.agentId, "now");
+    if (id == "") { return badRequest("the thread could not be opened"); }
+    return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(body.agentId) + "}");
+  }
+
+  // Ask the thread. The reply is this turn's answer; the transcript is a GET.
+  @post("/:id/messages")
+  say(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
+    let body: RunBody = JSON.parse<RunBody>(req.body);
+    if (body.text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
+
+    let tracer = tracerFor(this.db, this.master);
+    let answered = runInThread(this.db, param(req, "id"), body.text, this.master, tracer);
+    let runId = recordRun(this.db, threadAgent(this.db, param(req, "id")), body.text, answered);
+
+    let traced = "";
+    if (tracing(tracer) && answered.spans.length > 0) {
+      if (flush(tracerWithMoreSpans(tracer, answered.spans)).ok) { traced = traceId(tracer); }
+    }
+    return ok("{\"runId\":" + JSON.stringify(runId)
+      + ",\"ok\":" + `${answered.ok}`
+      + ",\"text\":" + JSON.stringify(answered.text)
+      + ",\"toolCalls\":" + `${answered.steps.length}`
+      + ",\"inputTokens\":" + `${answered.inputTokens}`
+      + ",\"outputTokens\":" + `${answered.outputTokens}`
+      + ",\"traceId\":" + JSON.stringify(traced)
+      + ",\"error\":" + JSON.stringify(answered.error) + "}");
+  }
+
+  // What a person reads: the questions and the answers. The tool calls and the
+  // passages are in the trace, which is where somebody debugging looks.
+  @get("/:id")
+  transcript(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let said = threadMessages(this.db, param(req, "id"));
+    let out = "[";
+    let i: int = 0;
+    while (i < said.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"role\":" + JSON.stringify(said[i].role)
+        + ",\"text\":" + JSON.stringify(said[i].text) + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+}
+
 // Documents and the folders they live in.
 //
 // Retrieval is PostgreSQL only — pgvector has no SQLite equivalent — so every
@@ -820,6 +897,9 @@ function openDatabase(): Db {
   let knowledge = knowledgePlan(db);
   let k: int = 0;
   while (k < knowledge.length) { plan.push(knowledge[k]); k = k + 1; }
+  let conversations = threadPlan(db);
+  let c: int = 0;
+  while (c < conversations.length) { plan.push(conversations[c]); c = c + 1; }
   let ran = migrate(db, plan);
   if (!ran.ok) { console.error(ran.error); }
   return db;
@@ -891,6 +971,11 @@ function main(): void {
 
   bound.set("rfind", (req: Request) => { return traces.find(req); });
 
+  let threads = new ThreadApi(db, master);
+  bound.set("hopen", (req: Request) => { return threads.open(req); });
+  bound.set("hsay", (req: Request) => { return threads.say(req); });
+  bound.set("htranscript", (req: Request) => { return threads.transcript(req); });
+
   let documents = new DocumentApi(db, master);
   bound.set("dupload", (req: Request) => { return documents.upload(req); });
   bound.set("dremove", (req: Request) => { return documents.remove(req); });
@@ -959,6 +1044,12 @@ function main(): void {
     let r = controllerPromptApi[pr];
     table.push(route(r.method, r.pattern, "prompt" + r.handler));
     pr = pr + 1;
+  }
+  let th: int = 0;
+  while (th < controllerThreadApi.length) {
+    let r = controllerThreadApi[th];
+    table.push(route(r.method, r.pattern, "h" + r.handler));
+    th = th + 1;
   }
   let dc: int = 0;
   while (dc < controllerDocumentApi.length) {

@@ -19,6 +19,8 @@ import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql, execute } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
+import { AgentRun, runAgentAt } from "./run.ts";
+import { Tracer, noTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonList, jsonText } from "./scan.ts";
 
 // A thread belongs to one agent. Moving a conversation to a different agent
@@ -229,4 +231,69 @@ function turnSize(turn: Turn): int {
 
 export function threadBudget(): int {
   return THREAD_BUDGET_CHARS;
+}
+
+// The opening of what asContext writes. Kept here beside the check that uses
+// it so the two cannot drift apart silently.
+const CONTEXT_PREFIX = "Use only the following context.";
+
+// --- continuing a conversation ---------------------------------------------------
+
+// Ask a thread. Everything it already holds is replayed, this question is
+// added, and whatever the run produced is appended.
+//
+// Retrieval still happens for the new question: the passages already in the
+// thread were fetched for older ones, and "and in Rotterdam?" needs its own.
+export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): AgentRun {
+  let agentId = threadAgent(db, threadId);
+  if (agentId == "") {
+    let noThread: Turn[] = [];
+    let path: string[] = [];
+    // Runs against an agent that does not exist, which reports "no agent " and
+    // is the truth: this thread names nothing runnable.
+    return runAgentAt(db, "", userText, master, 0, path, tracer, "", noThread);
+  }
+
+  let held = threadTurns(db, threadId);
+  let replayed = withinBudget(held, threadBudget());
+  let path: string[] = [];
+  let run = runAgentAt(db, agentId, userText, master, 0, path, tracer, "", replayed);
+
+  // What this run added: everything in its context past what was replayed.
+  // Stored under the thread's own numbering, which continues from what is
+  // there rather than from what was replayed — trimming affects what the model
+  // is shown, never what is kept.
+  let added: Turn[] = [];
+  let i: int = replayed.length;
+  while (i < run.context.length) { added.push(run.context[i]); i = i + 1; }
+  if (run.text != "") {
+    let noCalls: ToolCall[] = [];
+    added.push(assistantTurn(run.text, noCalls));
+  }
+  appendTurns(db, threadId, added, held.length);
+  return run;
+}
+
+// The conversation a person reads: the questions and the answers, without the
+// tool calls, the results or the passages.
+//
+// The same rows serve both — what differs is which turns are shown. A model
+// needs the working; a reader needs the conclusion.
+export function threadMessages(db: Db, threadId: string): Turn[] {
+  let out: Turn[] = [];
+  let all = threadTurns(db, threadId);
+  let i: int = 0;
+  while (i < all.length) {
+    // A user turn carrying retrieved passages is context, not something the
+    // person typed, and an assistant turn that is only tool calls said nothing.
+    //
+    // The passages are recognised by the sentence asContext puts in front of
+    // them. Matching on text is a seam — a marker on the turn would be better —
+    // but Turn is the provider's shape and a field the wire does not carry has
+    // to be justified by more than this.
+    if (all[i].role == "user" && !all[i].text.startsWith(CONTEXT_PREFIX)) { out.push(all[i]); }
+    else if (all[i].role == "assistant" && all[i].text != "" && all[i].calls.length == 0) { out.push(all[i]); }
+    i = i + 1;
+  }
+  return out;
 }
