@@ -15,22 +15,24 @@
 
 import { controller } from "../rest/controller.ts";
 import { Route, route } from "../rest/router.ts";
-import { Request, Reply, Handler, serve, ok, created, noContent, notFound, badRequest, param, queryParam } from "../rest/server.ts";
+import { Request, Reply, Handler, serve, ok, created, accepted, noContent, notFound, badRequest, param, queryParam } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, DbRepository, asc, desc, placeholderAt, connectDatabase, persist, findById, listOrdered, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
+import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
+import { chatEndpoint, embeddingEndpoint } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonText } from "./scan.ts";
 import { ThreadListing, listThreads, openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
-import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
+import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
+import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
@@ -92,7 +94,7 @@ class ProviderApi {
     if (problem != "") { return badRequest(problem); }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: KeyBody = JSON.parse<KeyBody>(req.body);
-    let stored = storeCredential(this.db, { provider: param(req, "provider"), apiKey: body.apiKey, masterKey: this.master, now: "now" });
+    let stored = storeCredential(this.db, { provider: param(req, "provider"), apiKey: body.apiKey, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
     return ok("{\"provider\":" + JSON.stringify(param(req, "provider")) + ",\"configured\":true}");
   }
@@ -143,6 +145,18 @@ class AgentApi {
   create(req: Request): Reply {
     let problem = createProblem(this.db, this.flat, req.body);
     if (problem != "") { return badRequest(problem); }
+    // The same guards the edit form gets. A create was the one way in that
+    // skipped them, so an agent could be born nameless or pointing at a
+    // config that does not exist.
+    let fresh: AgentRow = JSON.parse<AgentRow>(req.body);
+    let named = agentNameProblem(fresh.agentName);
+    if (named != "") { return badRequest(named); }
+    if (!existsById(this.db, modelConfigsMapping(this.db), fresh.modelConfigId)) {
+      return badRequest("no model config " + fresh.modelConfigId);
+    }
+    if (!existsById(this.db, promptsMapping(), fresh.promptId)) {
+      return badRequest("no prompt " + fresh.promptId);
+    }
     let written = persist(this.db, this.flat, req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, this.full, jsonId(req.body)));
@@ -167,6 +181,8 @@ class AgentApi {
     if (!existsById(this.db, promptsMapping(), row.promptId)) {
       return badRequest("no prompt " + row.promptId);
     }
+    let named = agentNameProblem(row.agentName);
+    if (named != "") { return badRequest(named); }
     let written = persist(this.db, this.flat, req.body);
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, this.full, param(req, "id")));
@@ -484,7 +500,7 @@ class TraceApi {
     if (problem != "") { return badRequest(problem); }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: TraceSecret = JSON.parse<TraceSecret>(req.body);
-    let stored = storeCredential(this.db, { provider: "tracing", apiKey: body.secretKey, masterKey: this.master, now: "now" });
+    let stored = storeCredential(this.db, { provider: "tracing", apiKey: body.secretKey, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
     return this.status(req);
   }
@@ -514,6 +530,9 @@ class ModelApi {
   create(req: Request): Reply {
     let problem = createProblem(this.db, modelsMapping(), req.body);
     if (problem != "") { return badRequest(problem); }
+    let m: ModelRow = JSON.parse<ModelRow>(req.body);
+    let wrong = modelProblem(m);
+    if (wrong != "") { return badRequest(wrong); }
     let written = persist(this.db, modelsMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, modelsMapping(), jsonId(req.body)));
@@ -741,7 +760,7 @@ class ThreadApi {
     if (!existsById(this.db, agentsMapping(), body.agentId)) {
       return badRequest("no agent " + body.agentId);
     }
-    let id = openThread(this.db, body.agentId, "now");
+    let id = openThread(this.db, body.agentId, stamp());
     if (id == "") { return badRequest("the thread could not be opened"); }
     return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(body.agentId) + "}");
   }
@@ -835,7 +854,7 @@ class WorkspaceApi {
     }
     if (req.body == "") { return badRequest("a body is required: {\"name\":\"notes.md\",\"content\":\"...\"}"); }
     let body: FileUpload = JSON.parse<FileUpload>(req.body);
-    let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "uploaded", body: body.content, documentId: "", now: "now" });
+    let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "uploaded", body: body.content, documentId: "", now: stamp() });
     if (problem != "") { return badRequest(problem); }
     return created("{\"name\":" + JSON.stringify(body.name) + ",\"bytes\":" + `${body.content.length}` + "}");
   }
@@ -873,7 +892,7 @@ class WorkspaceApi {
     let document = findById(this.db, documentsMapping(), body.documentId);
     if (document == "") { return badRequest("no document " + body.documentId); }
     let content = jsonText(document, "body");
-    let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "retrieved", body: content, documentId: body.documentId, now: "now" });
+    let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "retrieved", body: content, documentId: body.documentId, now: stamp() });
     if (problem != "") { return badRequest(problem); }
     return created("{\"name\":" + JSON.stringify(body.name) + ",\"documentId\":" + JSON.stringify(body.documentId) + "}");
   }
@@ -893,7 +912,7 @@ class WorkspaceApi {
     let key = credentialFor(this.db, embedder.provider, this.master);
     if (key == "") { return badRequest("no credential for " + embedder.provider); }
 
-    let stored = promoteFile(this.db, embedder, param(req, "id"), param(req, "name"), body.scope, key, "now");
+    let stored = promoteFile(this.db, embedder, param(req, "id"), param(req, "name"), body.scope, key, stamp());
     if (!stored.ok) { return badRequest(stored.error); }
     return ok("{\"name\":" + JSON.stringify(param(req, "name"))
       + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
@@ -924,15 +943,33 @@ class DocumentApi {
     if (this.db.name != "postgres") {
       return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
     }
-    let rows = listSources(this.db, queryParam(req, "scope", "/"));
+    let scope = normalScope(queryParam(req, "scope", "/"));
+
+    // Waiting and failed jobs first, then what is actually indexed. A file
+    // uploaded a second ago has no chunks and no size yet, and saying so is
+    // the point — otherwise it simply is not in the list and looks lost.
+    let waiting = pendingJobs(this.db, scope);
     let out = "[";
+    let w: int = 0;
+    while (w < waiting.length) {
+      if (w > 0) { out = out + ","; }
+      out = out + "{\"source\":" + JSON.stringify(waiting[w].source)
+        + ",\"scope\":" + JSON.stringify(waiting[w].scope)
+        + ",\"chunks\":0,\"bytes\":0"
+        + ",\"status\":" + JSON.stringify(waiting[w].status)
+        + ",\"error\":" + JSON.stringify(waiting[w].error) + "}";
+      w = w + 1;
+    }
+
+    let rows = listSources(this.db, scope);
     let i: int = 0;
     while (i < rows.length) {
-      if (i > 0) { out = out + ","; }
+      if (w + i > 0) { out = out + ","; }
       out = out + "{\"source\":" + JSON.stringify(rows[i].source)
         + ",\"scope\":" + JSON.stringify(rows[i].scope)
         + ",\"chunks\":" + `${rows[i].chunks}`
-        + ",\"bytes\":" + `${rows[i].bytes}` + "}";
+        + ",\"bytes\":" + `${rows[i].bytes}`
+        + ",\"status\":\"indexed\",\"error\":\"\"}";
       i = i + 1;
     }
     return ok(out + "]");
@@ -959,11 +996,30 @@ class DocumentApi {
     let key = credentialFor(this.db, embedder.provider, this.master);
     if (key == "") { return badRequest("no credential for " + embedder.provider); }
 
-    let stored = uploadDocument(this.db, embedder, body.source, body.scope, body.body, key);
-    if (!stored.ok) { return badRequest(stored.error); }
-    return created("{\"source\":" + JSON.stringify(body.source)
+    // What the worker would refuse, refused here. Moving indexing onto a
+    // queue moved these checks into the worker with it, so a name that can
+    // never be filed — chunk ids are built from it and must be plain — was
+    // accepted with a 202 and failed minutes later in a job row. A caller
+    // should learn at the moment of asking.
+    let badName = sourceProblem(body.source, body.body);
+    if (badName != "") { return badRequest(badName); }
+
+    // The corpus table is made on demand, from the embedder's own width. It
+    // was only ever created by an example, so a fresh deployment could queue a
+    // document and watch the worker fail on a table nobody had made.
+    let ready = createDocuments(this.db, embedder);
+    if (ready != "") { return badRequest(ready); }
+
+    // Queued, not indexed here. Embedding a document is one model call per
+    // chunk: a large file would hold this connection past any proxy's timeout,
+    // and a browser would show nothing until it finished. The worker drains
+    // the queue; the job row is what the console watches.
+    let jobId = enqueue(this.db, body.source, normalScope(body.scope), embedder.id, body.body, `${Date.now()}`);
+    if (jobId == "") { return badRequest("the document could not be queued"); }
+    return accepted("{\"job\":" + JSON.stringify(jobId)
+      + ",\"source\":" + JSON.stringify(body.source)
       + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
-      + ",\"chunks\":" + `${stored.chunks}` + "}");
+      + ",\"status\":" + JSON.stringify(JOB_QUEUED) + "}");
   }
 
   @del("/:source")
@@ -980,6 +1036,35 @@ class DocumentApi {
 //
 // Derived, not stored: there is no folder table to keep in step with the rows,
 // so a folder exists exactly as long as something is in it.
+// What the indexer is doing, across every folder. The console polls this
+// while anything is in flight.
+@controller("/jobs")
+class JobApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  list(req: Request): Reply {
+    if (this.db.name != "postgres") { return ok("[]"); }
+    let rows = pendingJobs(this.db, "");
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
+        + ",\"source\":" + JSON.stringify(rows[i].source)
+        + ",\"scope\":" + JSON.stringify(rows[i].scope)
+        + ",\"status\":" + JSON.stringify(rows[i].status)
+        + ",\"chunks\":" + `${rows[i].chunks}`
+        + ",\"error\":" + JSON.stringify(rows[i].error)
+        + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt) + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+}
+
 @controller("/scopes")
 class ScopeApi {
   db: Db;
@@ -1032,6 +1117,59 @@ class RunApi {
 // which is also what turns the RAG endpoints on, since documents need
 // pgvector. Unset means the sqlite file this always used, so nothing changes
 // for anyone running it bare.
+// An agent with no name sorts first — `GET /agents` orders by agent_name — so
+// it becomes the console's default agent and every new conversation opens
+// against it, with an empty entry in the picker. The column is NOT NULL but ""
+// is not NULL, so nothing caught this.
+function agentNameProblem(name: string): string {
+  if (name.trim() == "") { return "an agent needs a name"; }
+  // The name becomes a tool name when another agent delegates to it, and
+  // providers cap those at 64 characters — after this package has already
+  // expanded every unusual character to an underscore.
+  if (name.length > 48) { return "an agent name is at most 48 characters"; }
+  return "";
+}
+
+// What the rest of the package can actually reach. A model row naming a
+// provider with no endpoint is accepted today and fails at the first run with
+// a blank URL; a model row naming no width is accepted and fails when the
+// corpus table is made, long after anyone connects the two.
+function modelProblem(m: ModelRow): string {
+  if (m.label.trim() == "") { return "a model needs a label"; }
+  if (m.apiName.trim() == "") { return "a model needs the provider's own name for it"; }
+  if (m.kind != "chat" && m.kind != "embedding") {
+    return "a model is chat or embedding, not \"" + m.kind + "\"";
+  }
+  if (m.kind == "chat" && chatEndpoint(m.provider) == "") {
+    return "no chat endpoint for provider \"" + m.provider + "\"";
+  }
+  if (m.kind == "embedding" && embeddingEndpoint(m.provider) == "") {
+    return "no embedding endpoint for provider \"" + m.provider + "\"";
+  }
+  if (m.kind == "embedding" && m.dimensions <= 0) {
+    return "an embedding model must say how wide its vectors are";
+  }
+  return "";
+}
+
+// The document checks that used to happen inside the request, kept there now
+// that the indexing itself does not. These are the ones knowable without a
+// model: everything else is the worker's to report on the job.
+function sourceProblem(source: string, body: string): string {
+  if (source.trim() == "") { return "a document needs a source to be filed under"; }
+  if (!safeIdentifier(source)) {
+    return "a source must be a plain name: letters, digits, _ and -";
+  }
+  if (body.trim() == "") { return "an empty document has nothing to retrieve"; }
+  return "";
+}
+
+// One clock for every row this API writes. Six routes wrote the four letters
+// "now" into a timestamp column, which reads as a value and sorts as garbage.
+function stamp(): string {
+  return `${Date.now()}`;
+}
+
 function openDatabase(): Db {
   let pgHost = process.env("AGENTS_PG_HOST") ?? "";
   if (pgHost != "") {
@@ -1070,6 +1208,9 @@ function migrated(db: Db): Db {
   let files = workspacePlan(db);
   let w: int = 0;
   while (w < files.length) { plan.push(files[w]); w = w + 1; }
+  let jobs = indexingPlan(db);
+  let ij: int = 0;
+  while (ij < jobs.length) { plan.push(jobs[ij]); ij = ij + 1; }
   let ran = migrate(db, plan);
   if (!ran.ok) { console.error(ran.error); }
   return db;
@@ -1276,6 +1417,12 @@ function main(): void {
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
 
+  let jobsApi = new JobApi(db);
+  bound.set("jlist", (req: Request) => {
+    try { return jobsApi.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+
   let scopeApi = new ScopeApi(db);
   bound.set("kstree", (req: Request) => {
     try { return scopeApi.tree(req); }
@@ -1415,6 +1562,12 @@ function main(): void {
     let r = controllerScopeApi[sc];
     table.push(route(r.method, r.pattern, "ks" + r.handler));
     sc = sc + 1;
+  }
+  let jb: int = 0;
+  while (jb < controllerJobApi.length) {
+    let r = controllerJobApi[jb];
+    table.push(route(r.method, r.pattern, "j" + r.handler));
+    jb = jb + 1;
   }
   let tr: int = 0;
   while (tr < controllerTraceApi.length) {

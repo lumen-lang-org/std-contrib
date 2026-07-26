@@ -39,6 +39,24 @@ services:
       db:
         condition: service_healthy
 
+  # The queue drainer. Its own service because embedding a corpus must not
+  # compete with serving requests, and because scaling it is just running more
+  # of them — the claim is atomic, so two workers never take the same job.
+  indexer:
+    build:
+      context: ../..
+      dockerfile: packages/agents/Dockerfile
+    entrypoint: ["agents-indexer"]
+    environment:
+      LUMEN_MASTER_KEY: ${LUMEN_MASTER_KEY:?set LUMEN_MASTER_KEY in .env}
+      AGENTS_PG_HOST: db
+      AGENTS_PG_DATABASE: agents
+      AGENTS_PG_USER: agents
+      AGENTS_PG_PASSWORD: ${AGENTS_PG_PASSWORD:-agents}
+    depends_on:
+      db:
+        condition: service_healthy
+
   web:
     build: ./app
     ports:

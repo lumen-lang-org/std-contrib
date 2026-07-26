@@ -55,6 +55,9 @@ export class ConsoleSettings extends LitElement {
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
   @state() private editing: AgentRow | null = null;
+  // Which kind the "add model" row is on, so the dimensions input appears only
+  // for an embedding model, where it is required.
+  @state() private newKind = "chat";
 
   async connectedCallback() {
     super.connectedCallback();
@@ -179,14 +182,26 @@ export class ConsoleSettings extends LitElement {
         <input name="id" placeholder="id" style="width:70px" />
         <input name="label" placeholder="Label" />
         <input name="apiName" placeholder="api name" />
-        <select name="provider"><option>mistral</option><option>openai</option></select>
-        <select name="kind"><option>chat</option><option>embedding</option></select>
+        <select name="provider">
+          <option>mistral</option><option>openai</option><option>anthropic</option>
+        </select>
+        <select name="kind" @change=${(e: Event) => {
+          this.newKind = (e.target as HTMLSelectElement).value;
+        }}><option>chat</option><option>embedding</option></select>
+        ${this.newKind === "embedding" ? html`
+          <input name="dimensions" type="number" min="1" placeholder="dimensions"
+            style="width:120px" title="How wide this model's vectors are — 1024 for mistral-embed" />` : ""}
+        <label><input name="enabled" type="checkbox" checked /> enabled</label>
         <button @click=${(e: Event) => {
           const f = (e.target as HTMLElement).parentElement!;
           this.act(() => createModel({
             id: this.field(f, "id"), label: this.field(f, "label"),
             apiName: this.field(f, "apiName"), provider: this.field(f, "provider"),
-            kind: this.field(f, "kind"), dimensions: 0, enabled: true,
+            kind: this.field(f, "kind"),
+            // Not a constant: an embedding model that lies about its width
+            // builds a vector column the provider's own answers do not fit.
+            dimensions: parseInt(this.field(f, "dimensions") || "0", 10),
+            enabled: (f.querySelector("[name=enabled]") as HTMLInputElement).checked,
           }));
         }}>Add</button>
       </div>
@@ -199,7 +214,7 @@ export class ConsoleSettings extends LitElement {
         <tr><th>Name</th><th>Version</th><th>Content</th></tr>
         ${this.prompts.map((p) => html`<tr>
           <td>${p.promptName}</td><td>v${p.version}</td>
-          <td class="note">${p.content.slice(0, 90)}${p.content.length > 90 ? "…" : ""}</td>
+          <td class="note">${p.body.slice(0, 90)}${p.body.length > 90 ? "…" : ""}</td>
         </tr>`)}
       </table>
       <div class="row" id="newPrompt" style="align-items:flex-start">
@@ -227,11 +242,13 @@ export class ConsoleSettings extends LitElement {
         <input name="id" placeholder="id" style="width:70px" />
         <input name="serverName" placeholder="Name" />
         <input name="endpoint" placeholder="http://…" style="flex:1" />
+        <select name="transport"><option>http</option><option>sse</option></select>
         <button @click=${(e: Event) => {
           const f = (e.target as HTMLElement).parentElement!;
           this.act(() => createServer({
             id: this.field(f, "id"), serverName: this.field(f, "serverName"),
-            endpoint: this.field(f, "endpoint"), transport: "http", enabled: true,
+            endpoint: this.field(f, "endpoint"), transport: this.field(f, "transport"),
+            enabled: true,
           }));
         }}>Add</button>
       </div>
@@ -242,7 +259,9 @@ export class ConsoleSettings extends LitElement {
     return html`
       <p>Credentials stored (names only — the API never returns a key): ${this.providers.join(", ") || "none"}</p>
       <div class="row" id="newKey">
-        <select name="provider"><option>mistral</option><option>openai</option></select>
+        <select name="provider">
+          <option>mistral</option><option>openai</option><option>anthropic</option>
+        </select>
         <input name="apiKey" placeholder="sk-…" type="password" style="flex:1" />
         <button @click=${(e: Event) => {
           const f = (e.target as HTMLElement).parentElement!;
@@ -264,12 +283,19 @@ export class ConsoleSettings extends LitElement {
         </select>
         <input name="endpoint" placeholder="https://…/v1/traces" .value=${t?.endpoint ?? ""} style="flex:1" />
         <input name="publicKey" placeholder="public key / project / space" />
+        <input name="serviceName" placeholder="service name" .value=${t?.serviceName ?? "lumen-agents"} />
+        <input name="environment" placeholder="environment" .value=${t?.environment ?? "production"} />
         <label><input name="enabled" type="checkbox" ?checked=${t?.active ?? false} /> enabled</label>
         <button @click=${(e: Event) => {
           const f = (e.target as HTMLElement).parentElement!;
           this.act(() => configureTracing({
             id: "default", backend: this.field(f, "backend"), endpoint: this.field(f, "endpoint"),
-            publicKey: this.field(f, "publicKey"), serviceName: "lumen-agents", environment: "production",
+            publicKey: this.field(f, "publicKey"),
+            // Read back from the form, which was filled from the row. These
+            // were constants, so anyone who opened this tab and pressed Save
+            // filed a staging deployment's traces under "production".
+            serviceName: this.field(f, "serviceName"),
+            environment: this.field(f, "environment"),
             enabled: (f.querySelector("[name=enabled]") as HTMLInputElement).checked,
           }));
         }}>Save</button>

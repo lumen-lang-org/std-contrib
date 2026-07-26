@@ -12,13 +12,14 @@ WORKDIR /src
 # The API imports its siblings by relative path, so the build context is the
 # repository root and the whole packages tree comes along.
 COPY packages ./packages
-RUN cd packages/agents && lumen compile api.ts && ls -la api
+RUN cd packages/agents && lumen compile api.ts && lumen compile indexer.ts
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --system --home /data agents && mkdir -p /data && chown agents /data
 COPY --from=build /src/packages/agents/api /usr/local/bin/agents-api
+COPY --from=build /src/packages/agents/indexer /usr/local/bin/agents-indexer
 USER agents
 WORKDIR /data
 EXPOSE 8100

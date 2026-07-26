@@ -35,3 +35,7 @@ api
 .env
 node_modules
 dist
+indexer
+test-results/
+playwright-report/
+tkg

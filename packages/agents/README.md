@@ -534,6 +534,35 @@ exists by carrying documents — and a settings overlay reached from the account
 block: agents (an edit form per agent), models, prompt versions, MCP servers,
 provider keys and tracing.
 
+### Indexing is a queue
+
+Uploading a document writes a job and answers `202` — the work is taken, not
+done. A worker drains the queue: `agents-indexer`, its own process in the
+compose file, because embedding a corpus is one model call per chunk and must
+not compete with serving requests. Two workers can run against one database;
+the claim is a single `UPDATE … FOR UPDATE SKIP LOCKED`, so they never take the
+same job.
+
+The queue is a table rather than a broker. PostgreSQL is already required for
+documents, so a job table adds no service — and the rows are the journal the
+console renders, which a broker would not keep. `GET /jobs` is that journal;
+`GET /documents?scope=` puts queued and failed rows above the indexed ones, so
+a file you just dropped is visible instead of looking lost.
+
+### End-to-end tests
+
+`app/e2e` drives the console with Playwright against a live API — it starts no
+fake, because a suite checking its own fake is checking its own fake:
+
+```sh
+cd packages/agents/app
+npx playwright test              # needs the API and vite dev running
+```
+
+The knowledge specs skip themselves when the API is on sqlite: it answers
+"documents need PostgreSQL (pgvector)", and reporting correct behaviour as a
+failure teaches people to ignore the suite.
+
 For development against a locally running API:
 
 ```sh
