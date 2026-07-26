@@ -69,8 +69,11 @@ export function disconnect(client: Client): void {
 // is per *message*, with nowhere to keep any of it. The state lives in local
 // variables of a loop that owns the connection.
 //
-// That reason stands on its own, unlike the reshuffling in the sse package,
-// which works around a backend rejection nobody has reduced.
+// That reason stands on its own. The sse package's similar-looking shape is
+// not the same thing: it works around a backend rejection, now characterised
+// in the comment on `serveEvents` — a closure cannot call a function value
+// that arrived as a parameter. This one is a design choice about where state
+// lives.
 //
 // The framing is still websocket's. Only the loop is here.
 export function serveSocketIO(port: int, onEvent: (client: Client, name: string, argsJson: string) => void): void {
