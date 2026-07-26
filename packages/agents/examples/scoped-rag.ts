@@ -58,7 +58,7 @@ function main(): void {
   persist(db, modelConfigsMapping(db), JSON.stringify(config));
   let prompt: PromptRow = { id: "p1", promptName: "librarian", version: 1, createdAt: "2026-07-26", body: "Answer only from the passages you are given. If they do not say, reply that your documents do not cover it. Two sentences at most." };
   persist(db, promptsMapping(), JSON.stringify(prompt));
-  storeCredential(db, "mistral", apiKey, master, "2026-07-26");
+  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
 
   let embedder = embeddingModel(db, "e1");
   let made = createDocuments(db, embedder);

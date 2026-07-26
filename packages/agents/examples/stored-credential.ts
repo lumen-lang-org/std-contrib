@@ -44,7 +44,7 @@ function main(): void {
   // API and never again.
   let fromEnv = process.env("MISTRAL_API_KEY") ?? "";
   if (fromEnv != "") {
-    let stored = storeCredential(db, "mistral", fromEnv, master, "2026-07-25");
+    let stored = storeCredential(db, { provider: "mistral", apiKey: fromEnv, masterKey: master, now: "2026-07-25" });
     if (stored != "") { console.error(stored); return; }
   }
   console.log("stored for " + providersWithCredentials(db).join(", "));

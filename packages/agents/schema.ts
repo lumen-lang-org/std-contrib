@@ -189,14 +189,23 @@ export function agentsFull(db: Db): DbRepository {
            "id, prompt_name AS \"promptName\", version, body"),
     hasOne("config", "model_configs", "model_config_id", "id",
            "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra"),
-    hasManyThrough("servers", "mcp_servers", "id",
-                   "agent_mcp_servers", "agent_id", "server_id", "id",
-                   "id, server_name AS \"serverName\", transport, endpoint, "
-                   + boolColumn(db, "enabled") + " AS \"enabled\""),
-    hasManyThrough("subAgents", "agents", "id",
-                   "agent_sub_agents", "parent_id", "child_id", "id",
-                   "id, agent_name AS \"agentName\", "
-                   + boolColumn(db, "enabled") + " AS \"enabled\""),
+    hasManyThrough({
+      field: "servers", table: "mcp_servers", foreignColumn: "id",
+      linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
+      localColumn: "id",
+      columns: "id, server_name AS \"serverName\", transport, endpoint, "
+        + boolColumn(db, "enabled") + " AS \"enabled\"",
+    }),
+    hasManyThrough({
+      field: "subAgents", table: "agents", foreignColumn: "id",
+      // The far table is this one: an agent's sub-agents are agents. The
+      // generated subquery aliases the link table, which is what lets both
+      // sides be named — and what makes swapping these two silent.
+      linkTable: "agent_sub_agents", linkLocalColumn: "parent_id", linkForeignColumn: "child_id",
+      localColumn: "id",
+      columns: "id, agent_name AS \"agentName\", "
+        + boolColumn(db, "enabled") + " AS \"enabled\"",
+    }),
   ];
   return repositoryWith("agents", "id", "id", agentsMapping().fields, rs);
 }

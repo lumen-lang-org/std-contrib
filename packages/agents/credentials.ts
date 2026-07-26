@@ -1,7 +1,8 @@
 // Provider API keys, encrypted at rest.
 //
 //   let key = masterKey();                       // from the environment
-//   storeCredential(db, "mistral", "sk-...", key);
+//   storeCredential(db, { provider: "mistral", apiKey: "sk-...",
+//                          masterKey: key, now: now });
 //   let secret = credentialFor(db, "mistral", key);
 //
 // The ciphertext is a row and the master key is not. Encrypting a credential
@@ -37,7 +38,28 @@ function credentialId(provider: string): string {
   return "cred-" + provider;
 }
 
-export function storeCredential(db: Db, provider: string, apiKey: string, key: string, now: string): string {
+// A credential to store.
+//
+// `apiKey` and `masterKey` were adjacent parameters named `apiKey` and `key`,
+// both secrets, both opaque strings, differing by one word. Swapped, this
+// encrypts the MASTER key under a value handed to a vendor: masterKeyProblem
+// only checks length and hex, so a 32-hex-character provider token passes and
+// the row is written. credentialFor then returns "" forever, which this file
+// deliberately makes indistinguishable from a wrong master key — so the only
+// symptom is an empty string, and your master key is in the table encrypted
+// under something a third party issued.
+export type CredentialWrite = {
+  provider: string,
+  apiKey: string,
+  masterKey: string,
+  now: string,
+};
+
+export function storeCredential(db: Db, write: CredentialWrite): string {
+  let provider = write.provider;
+  let apiKey = write.apiKey;
+  let key = write.masterKey;
+  let now = write.now;
   let problem = masterKeyProblem(key);
   if (problem != "") { return problem; }
   // An empty plaintext encrypts to a valid envelope that decrypts to "", which

@@ -35,7 +35,7 @@ function main(): void {
   persist(db, agentsMapping(), JSON.stringify(calc));
 
   let fromEnv = process.env("MISTRAL_API_KEY") ?? "";
-  if (fromEnv != "") { storeCredential(db, "mistral", fromEnv, master, "2026-07-25"); }
+  if (fromEnv != "") { storeCredential(db, { provider: "mistral", apiKey: fromEnv, masterKey: master, now: "2026-07-25" }); }
 
   let first = runAgent(db, "a1", "What is 2 plus 40?", master);
   console.log("agent=" + first.agentName + " prompt=v" + `${first.promptVersion}` + " model=" + first.modelApiName);

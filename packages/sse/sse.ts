@@ -43,12 +43,31 @@ export function eventHeaders(): string {
     + "\r\n";
 }
 
+// One event to send.
+//
+// Three bare strings positionally, which at the documented call site read as
+// `("7", "done", "complete")` — nothing says which is which. Swapping id and
+// name emits a perfectly well-formed frame that no listener fires on, and the
+// browser then reconnects with `Last-Event-ID: done`, so server-side resume
+// keyed on numeric ids silently restarts from the beginning. The read side
+// already has ServerEvent; this is its counterpart.
+export type Event = {
+  // "" for an event a client cannot resume from.
+  id: string,
+  // "" for an unnamed event, which a browser delivers to `onmessage`.
+  name: string,
+  data: string,
+};
+
 // One event, framed.
 //
 // Every line of the data gets its own `data:` prefix — a newline inside a
 // value would otherwise end the event early and deliver half of it. The
 // browser rejoins them with newlines, so the round trip is exact.
-export function eventFrame(id: string, name: string, data: string): string {
+export function eventFrame(event: Event): string {
+  let id = event.id;
+  let name = event.name;
+  let data = event.data;
   let out = "";
   if (id != "") { out = out + "id: " + id + "\n"; }
   if (name != "") { out = out + "event: " + name + "\n"; }
@@ -78,14 +97,14 @@ export function commentFrame(text: string): string {
 
 export function pushEvent(stream: EventStream, name: string, data: string): void {
   if (!stream.open) { return; }
-  stream.socket.write(eventFrame("", name, data));
+  stream.socket.write(eventFrame({ id: "", name: name, data: data }));
 }
 
 // With an id, so a browser that reconnects sends `Last-Event-ID` and a server
 // can resume rather than repeat.
-export function pushEventWithId(stream: EventStream, id: string, name: string, data: string): void {
+export function pushEventWithId(stream: EventStream, event: Event): void {
   if (!stream.open) { return; }
-  stream.socket.write(eventFrame(id, name, data));
+  stream.socket.write(eventFrame(event));
 }
 
 export function pushComment(stream: EventStream, text: string): void {

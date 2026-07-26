@@ -288,7 +288,7 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     // Runs against an agent that does not exist, which reports "no agent " and
     // is the truth: this thread names nothing runnable.
     let noChunks: string[] = [];
-    return runAgentAt(db, "", userText, master, 0, path, tracer, "", noThread, "", noChunks);
+    return runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks });
   }
 
   let held = threadTurns(db, threadId);
@@ -298,7 +298,7 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   let firstReplayed = held.length - replayed.length;
   let alreadyShown = chunksShownSince(db, threadId, firstReplayed);
   let path: string[] = [];
-  let run = runAgentAt(db, agentId, userText, master, 0, path, tracer, "", replayed, threadId, alreadyShown);
+  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown });
 
   // What this run added: everything in its context past what was replayed.
   // Stored under the thread's own numbering, which continues from what is

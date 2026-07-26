@@ -46,13 +46,13 @@ test("a missing or wrong-length master key is refused, saying which", () => {
 
 test("a stored credential comes back", () => {
   fresh();
-  expect(storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t") == "");
+  expect(storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" }) == "");
   expect(credentialFor(database, "mistral", testKey()) == "sk-fake-mistral-0001");
 });
 
 test("the plaintext is nowhere in the table", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
   let row: CredentialRow = JSON.parse<CredentialRow>(findById(database, credentialsMapping(), "cred-mistral"));
   expect(row.envelope.indexOf("sk-fake") < 0);
   expect(row.envelope != "sk-fake-mistral-0001");
@@ -61,16 +61,16 @@ test("the plaintext is nowhere in the table", () => {
 
 test("two providers keep separate credentials", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t");
-  storeCredential(database, "anthropic", "sk-fake-anthropic-0002", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, { provider: "anthropic", apiKey: "sk-fake-anthropic-0002", masterKey: testKey(), now: "t" });
   expect(credentialFor(database, "mistral", testKey()) == "sk-fake-mistral-0001");
   expect(credentialFor(database, "anthropic", testKey()) == "sk-fake-anthropic-0002");
 });
 
 test("storing again replaces rather than duplicating", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-first", testKey(), "t");
-  storeCredential(database, "mistral", "sk-fake-second", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-first", masterKey: testKey(), now: "t" });
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-second", masterKey: testKey(), now: "t" });
   expect(countWhere(database, credentialsMapping(), "", []) == 1);
   expect(credentialFor(database, "mistral", testKey()) == "sk-fake-second");
 });
@@ -79,14 +79,14 @@ test("an empty key is not a credential", () => {
   fresh();
   // An empty plaintext would encrypt to a valid envelope that decrypts to "",
   // which cannot be told from a failure to open it.
-  expect(storeCredential(database, "mistral", "", testKey(), "t").indexOf("empty") >= 0);
+  expect(storeCredential(database, { provider: "mistral", apiKey: "", masterKey: testKey(), now: "t" }).indexOf("empty") >= 0);
   expect(countWhere(database, credentialsMapping(), "", []) == 0);
 });
 
 test("storing refuses outright without a usable master key", () => {
   fresh();
-  expect(storeCredential(database, "mistral", "sk-fake", "", "t").indexOf("not set") >= 0);
-  expect(storeCredential(database, "mistral", "sk-fake", "nope", "t").indexOf("32") >= 0);
+  expect(storeCredential(database, { provider: "mistral", apiKey: "sk-fake", masterKey: "", now: "t" }).indexOf("not set") >= 0);
+  expect(storeCredential(database, { provider: "mistral", apiKey: "sk-fake", masterKey: "nope", now: "t" }).indexOf("32") >= 0);
   expect(countWhere(database, credentialsMapping(), "", []) == 0);
 });
 
@@ -94,13 +94,13 @@ test("storing refuses outright without a usable master key", () => {
 
 test("the wrong master key opens nothing", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
   expect(credentialFor(database, "mistral", "fedcba9876543210fedcba9876543210") == "");
 });
 
 test("a row altered in the database refuses to open", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
   let row: CredentialRow = JSON.parse<CredentialRow>(findById(database, credentialsMapping(), "cred-mistral"));
   // Change one character of the envelope, as an attacker with write access
   // would. The tag catches it; without an authenticated cipher this would
@@ -120,7 +120,7 @@ test("a provider with no credential reads as empty, not as an error", () => {
 
 test("every failure to open looks the same", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
   // Absent, wrong key, and altered all answer "". A caller that could tell
   // them apart could use this to test master keys against the table.
   expect(credentialFor(database, "openai", testKey()) == "");
@@ -130,8 +130,8 @@ test("every failure to open looks the same", () => {
 
 test("listing names providers and never envelopes", () => {
   fresh();
-  storeCredential(database, "mistral", "sk-fake-mistral-0001", testKey(), "t");
-  storeCredential(database, "anthropic", "sk-fake-anthropic-0002", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, { provider: "anthropic", apiKey: "sk-fake-anthropic-0002", masterKey: testKey(), now: "t" });
   let names = providersWithCredentials(database);
   expect(names.length == 2);
   expect(names.indexOf("mistral") >= 0);

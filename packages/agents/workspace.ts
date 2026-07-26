@@ -1,6 +1,8 @@
 // The files a conversation is working on.
 //
-//   putFile(db, threadId, "notes.md", "text/markdown", "uploaded", body, "");
+//   putFile(db, { threadId: threadId, fileName: "notes.md",
+//                 mime: "text/markdown", origin: "uploaded", body: body,
+//                 documentId: "", now: now });
 //   ... the agent reads, writes and lists them with built-in tools ...
 //   promoteFile(db, model, threadId, "notes.md", "/specs/notes", key);
 //
@@ -84,7 +86,34 @@ export function fileNameOk(name: string): bool {
 // One row per (thread, name): writing a name that exists replaces it. Files
 // are current state — nothing points at a workspace file, which is what made
 // versioning prompts necessary and makes it dead weight here.
-export function putFile(db: Db, threadId: string, fileName: string, mime: string, origin: string, body: string, documentId: string, now: string): string {
+// A file to write into a thread's workspace.
+//
+// Seven consecutive strings positionally, of which `body` and `documentId`
+// have no validation at all: swapped, the row keeps the whole document text
+// where the audit pointer belongs and the source id where the content
+// belongs, and persist accepts it. promoteFile is the call that passes a real
+// documentId, so it is the one that would have filed a document's text as its
+// own provenance.
+export type FileWrite = {
+  threadId: string,
+  fileName: string,
+  mime: string,
+  // uploaded, generated or retrieved.
+  origin: string,
+  body: string,
+  // The knowledge-base document this came from, "" when it came from nowhere.
+  documentId: string,
+  now: string,
+};
+
+export function putFile(db: Db, write: FileWrite): string {
+  let threadId = write.threadId;
+  let fileName = write.fileName;
+  let mime = write.mime;
+  let origin = write.origin;
+  let body = write.body;
+  let documentId = write.documentId;
+  let now = write.now;
   if (!fileNameOk(fileName)) {
     return "a file name is letters, digits, dot, dash, underscore and space — not \"" + fileName + "\"";
   }
@@ -151,7 +180,7 @@ export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName:
   let stored = uploadDocument(db, model, source, scope, file.body, apiKey);
   if (!stored.ok) { return stored; }
   // The file remembers where it went.
-  putFile(db, threadId, fileName, file.mime, file.origin, file.body, source, now);
+  putFile(db, { threadId: threadId, fileName: fileName, mime: file.mime, origin: file.origin, body: file.body, documentId: source, now: now });
   return stored;
 }
 
@@ -241,7 +270,7 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
   }
 
   if (name == "write_file") {
-    let problem = putFile(db, threadId, argsName, mimeOf(argsName), "generated", argsContent, "", now);
+    let problem = putFile(db, { threadId: threadId, fileName: argsName, mime: mimeOf(argsName), origin: "generated", body: argsContent, documentId: "", now: now });
     if (problem != "") {
       let refused: FileToolResult = { handled: true, ok: false, text: problem };
       return refused;

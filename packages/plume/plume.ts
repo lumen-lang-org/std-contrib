@@ -102,9 +102,12 @@ export function hasMany(fieldName: string, table: string, localColumn: string, f
 
 // Many-to-many, through a link table.
 //
-//   hasManyThrough("servers", "mcp_servers", "id",
-//                  "agent_mcp_servers", "agent_id", "server_id",
-//                  "id", "id, name, url")
+//   hasManyThrough({
+//     field: "servers", table: "mcp_servers", foreignColumn: "id",
+//     linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id",
+//     linkForeignColumn: "server_id", localColumn: "id",
+//     columns: "id, name, url",
+//   })
 //
 // Reads as: this row's `id` matches `agent_mcp_servers.agent_id`, and
 // `agent_mcp_servers.server_id` matches `mcp_servers.id`.
@@ -112,8 +115,32 @@ export function hasMany(fieldName: string, table: string, localColumn: string, f
 // The far table may be this one — an agent's sub-agents are agents — so
 // nothing here assumes the two differ. The generated subquery aliases the link
 // table, which is what lets a self-referential relation name both sides.
-export function hasManyThrough(fieldName: string, table: string, foreignColumn: string, linkTable: string, linkLocalColumn: string, linkForeignColumn: string, localColumn: string, columns: string): DbRelation {
-  let r: DbRelation = { field: fieldName, kind: "many", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns, linkTable: linkTable, linkLocalColumn: linkLocalColumn, linkForeignColumn: linkForeignColumn };
+// A record, because eight adjacent strings have 40320 orderings that all
+// compile. The one that matters is linkLocalColumn against linkForeignColumn:
+// swapped, the subquery joins the link table backwards, and in a
+// self-referential relation — where both sides name the same table — it
+// returns parents where children were asked for. Both are safe identifiers, so
+// relationValid passes and the query succeeds.
+//
+// The parameter order also disagreed with the record's field order, so anyone
+// reading DbRelation to work out the call order got it wrong.
+export type ManyThrough = {
+  // The record field the rows land on.
+  field: string,
+  // The far table and its key.
+  table: string,
+  foreignColumn: string,
+  linkTable: string,
+  // The link column matching THIS row, then the one matching the far row.
+  linkLocalColumn: string,
+  linkForeignColumn: string,
+  // This table's key.
+  localColumn: string,
+  columns: string,
+};
+
+export function hasManyThrough(m: ManyThrough): DbRelation {
+  let r: DbRelation = { field: m.field, kind: "many", table: m.table, localColumn: m.localColumn, foreignColumn: m.foreignColumn, columns: m.columns, linkTable: m.linkTable, linkLocalColumn: m.linkLocalColumn, linkForeignColumn: m.linkForeignColumn };
   return r;
 }
 

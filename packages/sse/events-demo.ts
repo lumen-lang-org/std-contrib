@@ -14,7 +14,7 @@ function main(): void {
     // Multi-line, to prove a newline does not end the event early.
     pushEvent(stream, "note", "line one\nline two");
     // With an id, which is what a reconnect resumes from.
-    pushEventWithId(stream, "7", "done", "complete");
+    pushEventWithId(stream, { id: "7", name: "done", data: "complete" });
     pushComment(stream, "heartbeat");
   });
 }

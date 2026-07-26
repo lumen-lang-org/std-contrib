@@ -1,6 +1,8 @@
 // Evaluations: a dataset kept in Langfuse, run on demand against an agent.
 //
-//   let out = runEvals(db, "a1", "judge1", "parts-desk-evals", "nightly", master);
+//   let out = runEvals(db, { agentId: "a1", judgeAgentId: "judge1",
+//                            dataset: "parts-desk-evals", runName: "nightly",
+//                            master: master, maxItems: 50 }, tracer);
 //
 // The cases live where the people who write them work — Langfuse datasets —
 // rather than in a fixture file only a programmer can edit. Running them is a
@@ -398,7 +400,27 @@ function noEvals(dataset: string, runName: string, why: string): EvalRun {
 // `tracer` carries the collector and the credentials; each case gets its own
 // trace from it, because a dataset run is many runs and one trace holding all
 // of them would be unreadable.
-export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset: string, runName: string, tracer: Tracer, master: string, maxItems: int): EvalRun {
+// What to evaluate, and against what.
+//
+// `agentId` and `judgeAgentId` were adjacent, both agent ids, and both resolve
+// — so a swap asks the judge the questions and has the subject grade them.
+// Every score is garbage and the run still reports ok.
+export type EvalRequest = {
+  agentId: string,
+  judgeAgentId: string,
+  dataset: string,
+  runName: string,
+  master: string,
+  maxItems: int,
+};
+
+export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun {
+  let agentId = request.agentId;
+  let judgeAgentId = request.judgeAgentId;
+  let dataset = request.dataset;
+  let runName = request.runName;
+  let master = request.master;
+  let maxItems = request.maxItems;
   let results: EvalResult[] = [];
 
   if (!tracing(tracer)) {

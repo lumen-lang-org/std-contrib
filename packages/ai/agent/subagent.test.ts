@@ -2,7 +2,7 @@
 // task alone, only its final answer comes back, and a child that fails or
 // stalls reports as text rather than ending the run.
 
-import { subAgentAnswer, makeSubAgent, subAgentAsTool, subAgentsAsTools, runSubAgent, SUBAGENT_CONTRACT } from "./subagent.ts";
+import { subAgentAnswer, subAgentAsTool, subAgentsAsTools, runSubAgent, SUBAGENT_CONTRACT } from "./subagent.ts";
 import { fakeModel, agentFakeAnswer, agentFakeToolCall, runAgent } from "./agent.ts";
 import { makeTool } from "./tools.ts";
 import { systemMessage, userMessage } from "../core/messages.ts";
@@ -127,14 +127,14 @@ test("the parent's history never contains the child's intermediate output", () =
 // --- definitions and wrapping ------------------------------------------------------
 
 test("a subagent definition keeps its fields", () => {
-  let sub = makeSubAgent("writer", "Writes prose.", "mistral", "k", "mistral-large-latest", "You write.", saNoTools(), 6);
+  let sub: SubAgent = { name: "writer", description: "Writes prose.", provider: "mistral", apiKey: "k", model: "mistral-large-latest", systemPrompt: "You write.", tools: saNoTools(), maxSteps: 6 };
   expect(sub.name == "writer");
   expect(sub.provider == "mistral");
   expect(sub.maxSteps == 6);
 });
 
 test("wrapping a subagent yields a tool that warns about isolation", () => {
-  let sub = makeSubAgent("writer", "Writes prose.", "mistral", "k", "m", "You write.", saNoTools(), 6);
+  let sub: SubAgent = { name: "writer", description: "Writes prose.", provider: "mistral", apiKey: "k", model: "m", systemPrompt: "You write.", tools: saNoTools(), maxSteps: 6 };
   let tool = subAgentAsTool(sub);
   expect(tool.name == "writer");
   expect(tool.description.indexOf("Writes prose.") >= 0);
@@ -145,8 +145,8 @@ test("wrapping a subagent yields a tool that warns about isolation", () => {
 
 test("several subagents wrap into a registry", () => {
   let subs: SubAgent[] = [
-    makeSubAgent("a", "A.", "mistral", "k", "m", "p", saNoTools(), 3),
-    makeSubAgent("b", "B.", "openai", "k", "m", "p", saNoTools(), 3),
+    { name: "a", description: "A.", provider: "mistral", apiKey: "k", model: "m", systemPrompt: "p", tools: saNoTools(), maxSteps: 3 },
+    { name: "b", description: "B.", provider: "openai", apiKey: "k", model: "m", systemPrompt: "p", tools: saNoTools(), maxSteps: 3 },
   ];
   let tools = subAgentsAsTools(subs);
   expect(tools.length == 2);
@@ -155,7 +155,7 @@ test("several subagents wrap into a registry", () => {
 });
 
 test("an unknown provider reports as text, not a crash", () => {
-  let sub = makeSubAgent("x", "X.", "nowhere", "k", "m", "p", saNoTools(), 3);
+  let sub: SubAgent = { name: "x", description: "X.", provider: "nowhere", apiKey: "k", model: "m", systemPrompt: "p", tools: saNoTools(), maxSteps: 3 };
   let out = runSubAgent(sub, "task");
   expect(out.indexOf("unknown provider") >= 0);
   expect(out.indexOf("nowhere") >= 0);

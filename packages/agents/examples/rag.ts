@@ -30,7 +30,7 @@ function main(): void {
   migrate(db, schemaPlan(db));
 
   let key = process.env("MISTRAL_API_KEY") ?? "";
-  if (key != "") { storeCredential(db, "mistral", key, master, "2026-07-25"); }
+  if (key != "") { storeCredential(db, { provider: "mistral", apiKey: key, masterKey: master, now: "2026-07-25" }); }
   let stored = credentialFor(db, "mistral", master);
 
   // The embedding model is a row like every other, and it carries its own
@@ -46,9 +46,9 @@ function main(): void {
   if (problem != "") { console.error(problem); return; }
 
   // A small corpus of things the model cannot know.
-  indexDocument(db, embedder, "d1", "plume", "/specs/plume", "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name.", stored);
-  indexDocument(db, embedder, "d2", "plume", "/specs/plume", "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order.", stored);
-  indexDocument(db, embedder, "d3", "rest", "/specs/rest", "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds.", stored);
+  indexDocument(db, embedder, { id: "d1", source: "plume", scope: "/specs/plume", body: "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name." }, stored);
+  indexDocument(db, embedder, { id: "d2", source: "plume", scope: "/specs/plume", body: "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order." }, stored);
+  indexDocument(db, embedder, { id: "d3", source: "rest", scope: "/specs/rest", body: "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds." }, stored);
   console.log("indexed 3 documents");
 
   let question = "Why does plume refuse an unordered page?";

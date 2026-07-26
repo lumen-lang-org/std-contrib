@@ -79,7 +79,7 @@ test("a config pointing at nothing is reported", () => {
 
 test("a disabled model stops the call, even with a credential", () => {
   seeded();
-  storeCredential(database, "mistral", "sk-fake-0001", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   execute(database, "UPDATE models SET enabled = 0 WHERE id = 'm1'");
   let r = runAgent(database, "a1", "hi", testKey());
   expect(!r.ok);
@@ -96,7 +96,7 @@ test("the run reports which prompt version and model answered", () => {
 
 test("no refusal carries the master key or a credential", () => {
   seeded();
-  storeCredential(database, "mistral", "sk-should-never-appear", testKey(), "t");
+  storeCredential(database, { provider: "mistral", apiKey: "sk-should-never-appear", masterKey: testKey(), now: "t" });
   execute(database, "UPDATE models SET enabled = 0 WHERE id = 'm1'");
   let r = runAgent(database, "a1", "hi", testKey());
   expect(r.error.indexOf("sk-should-never-appear") < 0);

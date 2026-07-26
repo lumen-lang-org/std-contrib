@@ -91,7 +91,7 @@ class ProviderApi {
     if (problem != "") { return badRequest(problem); }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: KeyBody = JSON.parse<KeyBody>(req.body);
-    let stored = storeCredential(this.db, param(req, "provider"), body.apiKey, this.master, "now");
+    let stored = storeCredential(this.db, { provider: param(req, "provider"), apiKey: body.apiKey, masterKey: this.master, now: "now" });
     if (stored != "") { return badRequest(stored); }
     return ok("{\"provider\":" + JSON.stringify(param(req, "provider")) + ",\"configured\":true}");
   }
@@ -459,7 +459,7 @@ class TraceApi {
     if (problem != "") { return badRequest(problem); }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: TraceSecret = JSON.parse<TraceSecret>(req.body);
-    let stored = storeCredential(this.db, "tracing", body.secretKey, this.master, "now");
+    let stored = storeCredential(this.db, { provider: "tracing", apiKey: body.secretKey, masterKey: this.master, now: "now" });
     if (stored != "") { return badRequest(stored); }
     return this.status(req);
   }
@@ -778,7 +778,7 @@ class WorkspaceApi {
     }
     if (req.body == "") { return badRequest("a body is required: {\"name\":\"notes.md\",\"content\":\"...\"}"); }
     let body: FileUpload = JSON.parse<FileUpload>(req.body);
-    let problem = putFile(this.db, param(req, "id"), body.name, mimeOf(body.name), "uploaded", body.content, "", "now");
+    let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "uploaded", body: body.content, documentId: "", now: "now" });
     if (problem != "") { return badRequest(problem); }
     return created("{\"name\":" + JSON.stringify(body.name) + ",\"bytes\":" + `${body.content.length}` + "}");
   }
@@ -816,7 +816,7 @@ class WorkspaceApi {
     let document = findById(this.db, documentsMapping(), body.documentId);
     if (document == "") { return badRequest("no document " + body.documentId); }
     let content = jsonText(document, "body");
-    let problem = putFile(this.db, param(req, "id"), body.name, mimeOf(body.name), "retrieved", content, body.documentId, "now");
+    let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "retrieved", body: content, documentId: body.documentId, now: "now" });
     if (problem != "") { return badRequest(problem); }
     return created("{\"name\":" + JSON.stringify(body.name) + ",\"documentId\":" + JSON.stringify(body.documentId) + "}");
   }
