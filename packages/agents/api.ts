@@ -18,6 +18,7 @@ import { Route, route } from "../rest/router.ts";
 import { Request, Reply, Handler, serve, ok, created, noContent, notFound, badRequest, param, queryParam } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
+import { postgres } from "../plume/postgres.ts";
 import { DbOrder, DbRepository, asc, desc, placeholderAt, connectDatabase, persist, findById, listOrdered, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
@@ -27,7 +28,7 @@ import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.t
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonText } from "./scan.ts";
-import { openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
+import { ThreadListing, listThreads, openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 import { ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
@@ -677,6 +678,25 @@ class ThreadApi {
     this.master = master;
   }
 
+  // The sidebar's list: id, agent, when, and the first thing the user said.
+  @get("/")
+  list(req: Request): Reply {
+    let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
+    let offset = parseInt(queryParam(req, "offset", "0")) ?? 0;
+    let rows = listThreads(this.db, limit, offset);
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
+        + ",\"agentId\":" + JSON.stringify(rows[i].agentId)
+        + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt)
+        + ",\"title\":" + JSON.stringify(rows[i].title) + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
   @post("/")
   open(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required: {\"agentId\":\"a1\"}"); }
@@ -949,10 +969,30 @@ class RunApi {
 
 
 
+// Which database, from the environment. AGENTS_PG_HOST set means PostgreSQL —
+// which is also what turns the RAG endpoints on, since documents need
+// pgvector. Unset means the sqlite file this always used, so nothing changes
+// for anyone running it bare.
 function openDatabase(): Db {
+  let pgHost = process.env("AGENTS_PG_HOST") ?? "";
+  if (pgHost != "") {
+    let pg = postgres();
+    let server: DbConfig = {
+      host: pgHost,
+      database: process.env("AGENTS_PG_DATABASE") ?? "agents",
+      user: process.env("AGENTS_PG_USER") ?? "agents",
+      password: process.env("AGENTS_PG_PASSWORD") ?? "",
+    };
+    connectDatabase(pg, server);
+    return migrated(pg);
+  }
   let db = sqlite();
-  let cfg: DbConfig = { filename: "/tmp/agents_api.db" };
+  let cfg: DbConfig = { filename: process.env("AGENTS_DB_FILE") ?? "/tmp/agents_api.db" };
   connectDatabase(db, cfg);
+  return migrated(db);
+}
+
+function migrated(db: Db): Db {
   // One plan, extended — not two plans. A second migrate() call would be
   // handed a plan that lacks the versions already recorded, and refuse.
   let plan = schemaPlan(db);
@@ -975,6 +1015,7 @@ function openDatabase(): Db {
   if (!ran.ok) { console.error(ran.error); }
   return db;
 }
+
 
 function seed(db: Db): void {
   if (countWhere(db, agentsMapping(), "", []) > 0) { return; }
@@ -1141,6 +1182,10 @@ function main(): void {
   });
 
   let threads = new ThreadApi(db, master);
+  bound.set("hlist", (req: Request) => {
+    try { return threads.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
   bound.set("hopen", (req: Request) => {
     try { return threads.open(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }

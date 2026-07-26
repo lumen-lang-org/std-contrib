@@ -1,0 +1,50 @@
+# The agents platform, self-contained:
+#
+#   cd packages/agents
+#   cp .env.example .env        # set LUMEN_MASTER_KEY — 32 hex chars
+#   docker compose up --build
+#
+# Console on http://localhost:8080, the API behind it on /api, PostgreSQL with
+# pgvector underneath so documents and retrieval work out of the box.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: agents
+      POSTGRES_USER: agents
+      POSTGRES_PASSWORD: ${AGENTS_PG_PASSWORD:-agents}
+    volumes:
+      - agents-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agents -d agents"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      # The API imports sibling packages by relative path, so the build
+      # context is the repository root, two levels up.
+      context: ../..
+      dockerfile: packages/agents/Dockerfile
+    environment:
+      # The master key decrypts every stored provider credential. It comes
+      # from .env and nowhere else — never bake it into an image.
+      LUMEN_MASTER_KEY: ${LUMEN_MASTER_KEY:?set LUMEN_MASTER_KEY in .env}
+      AGENTS_PG_HOST: db
+      AGENTS_PG_DATABASE: agents
+      AGENTS_PG_USER: agents
+      AGENTS_PG_PASSWORD: ${AGENTS_PG_PASSWORD:-agents}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./app
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  agents-db:

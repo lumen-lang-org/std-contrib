@@ -32,3 +32,6 @@ echo-server
 ws-client-demo
 tprobe
 api
+.env
+node_modules
+dist
