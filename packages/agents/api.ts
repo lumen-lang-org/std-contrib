@@ -29,6 +29,7 @@ import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.t
 type ModelChange = { modelConfigId: string };
 type PromptChange = { promptId: string };
 type ServerLink = { serverId: string };
+type ChildLink = { childId: string };
 type KeyBody = { apiKey: string };
 type RunBody = { text: string };
 
@@ -172,6 +173,55 @@ class AgentApi {
     }
     executeWith(this.db, "INSERT INTO agent_mcp_servers (agent_id, server_id) VALUES ("
       + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [param(req, "id"), link.serverId]);
+    return ok(findById(this.db, this.full, param(req, "id")));
+  }
+
+  // Make one agent another's child. The link is what offers the child to the
+  // parent as a tool, so delegation is an INSERT like everything else.
+  //
+  // A cycle is accepted here and refused by the run. That is deliberate and
+  // not laziness: a graph is assembled a row at a time, and refusing the row
+  // that closes a loop would mean the order you build in decides whether you
+  // can build it at all. The run knows its own path and can say exactly which
+  // chain it would re-enter.
+  @post("/:id/sub-agents")
+  addChild(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    let link: ChildLink = JSON.parse<ChildLink>(req.body);
+    if (!existsById(this.db, this.flat, link.childId)) {
+      return badRequest("no agent " + link.childId);
+    }
+    if (link.childId == param(req, "id")) {
+      // The one case worth refusing at write time: it can never be anything
+      // but a mistake, and the run would only meet it later.
+      return badRequest("an agent cannot be its own sub-agent");
+    }
+    executeWith(this.db, "INSERT INTO agent_sub_agents (parent_id, child_id) VALUES ("
+      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [param(req, "id"), link.childId]);
+    return ok(findById(this.db, this.full, param(req, "id")));
+  }
+
+  @del("/:id/sub-agents/:childId")
+  removeChild(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    executeWith(this.db, "DELETE FROM agent_sub_agents WHERE parent_id = " + this.db.placeholder
+      + " AND child_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "childId")]);
+    return ok(findById(this.db, this.full, param(req, "id")));
+  }
+
+  // Detaching a server is the same shape, and was missing for the same
+  // reason: attaching one had a route and taking it away did not.
+  @del("/:id/servers/:serverId")
+  removeServer(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder
+      + " AND server_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "serverId")]);
     return ok(findById(this.db, this.full, param(req, "id")));
   }
 
@@ -510,6 +560,9 @@ function main(): void {
   bound.set("setModel", (req: Request) => { return api.setModel(req); });
   bound.set("setPrompt", (req: Request) => { return api.setPrompt(req); });
   bound.set("addServer", (req: Request) => { return api.addServer(req); });
+  bound.set("removeServer", (req: Request) => { return api.removeServer(req); });
+  bound.set("addChild", (req: Request) => { return api.addChild(req); });
+  bound.set("removeChild", (req: Request) => { return api.removeChild(req); });
   bound.set("run", (req: Request) => { return api.run(req); });
   bound.set("runs", (req: Request) => { return api.runs(req); });
   bound.set("remove", (req: Request) => { return api.remove(req); });
