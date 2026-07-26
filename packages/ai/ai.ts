@@ -4,17 +4,17 @@
 // modules so future agents, tools, and retrieval pieces have room to grow.
 // Run: lumen test packages/ai/ai.ts
 
-import { systemMessage, userMessage, assistantMessage } from "./core/messages.ts";
-import { TemplateVar as TemplateVarRecord, ChatPromptPart as ChatPromptPartRecord, renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
-import { buildChatRequest } from "./core/request.ts";
+import { Message, systemMessage, userMessage, assistantMessage } from "./core/messages.ts";
+import { TemplateVar, ChatPromptPart, TemplateVar as TemplateVarRecord, ChatPromptPart as ChatPromptPartRecord, renderPromptTemplate, missingTemplateVariables as readMissingTemplateVariables, unusedTemplateVariables as readUnusedTemplateVariables, renderChatPrompt as renderFlatChatPrompt, chatPromptRole as readChatPromptRole, chatPromptContent as readChatPromptContent } from "./prompt/prompt.ts";
+import { ChatRequest, buildChatRequest } from "./core/request.ts";
 // providers/chat.ts imports makeModelConfig and modelBaseUrl from core/model.ts
 // unaliased, so they are imported unaliased here too. The public wrappers below
 // take different names, so nothing collides.
-import { ModelConfig as ModelConfigRecord, ModelSpec as ModelSpecRecord, makeModelConfig, modelBaseUrl, modelWithTemperature, modelWithMaxTokens, modelWithBaseUrl, modelWithApiKey } from "./core/model.ts";
+import { ModelConfig, ModelSpec, ModelConfig as ModelConfigRecord, ModelSpec as ModelSpecRecord, makeModelConfig, modelBaseUrl, modelWithTemperature, modelWithMaxTokens, modelWithBaseUrl, modelWithApiKey } from "./core/model.ts";
 import { runConfiguredChat } from "./providers/chat.ts";
-import { makeAiResult } from "./core/result.ts";
-import { makeProviderError } from "./core/error.ts";
-import { makeModelOptions, defaultModelOptions as makeDefaultModelOptions } from "./core/options.ts";
+import { Result, makeAiResult } from "./core/result.ts";
+import { ProviderError, makeProviderError } from "./core/error.ts";
+import { ModelOptions, makeModelOptions, defaultModelOptions as makeDefaultModelOptions } from "./core/options.ts";
 import { buildProviderChatBody } from "./core/provider.ts";
 // structured.ts imports firstJsonObjectOutput, typedJsonInputOutput and
 // retryPromptOutput UNALIASED, so those three are imported unaliased here too;
@@ -28,26 +28,26 @@ import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buil
 // inlining renames the definition itself, so aliasing one of them would break
 // the sibling that imports it under its original name.
 import { dotProduct as computeDotProduct, vectorNorm as computeVectorNorm, normalizeVector as computeNormalizeVector, cosineSimilarity, euclideanDistance as computeEuclideanDistance, fakeEmbedding } from "./rag/vector.ts";
-import { makeDocument, documentMetadata, withMetadata, splitFixed as splitFixedText, splitRecursive as splitRecursiveText, splitParagraphs as splitParagraphText, splitToDocuments as splitTextToDocuments } from "./rag/document.ts";
+import { Document, makeDocument, documentMetadata, withMetadata, splitFixed as splitFixedText, splitRecursive as splitRecursiveText, splitParagraphs as splitParagraphText, splitToDocuments as splitTextToDocuments } from "./rag/document.ts";
 import { embeddingBody as buildEmbeddingBody, embeddingBodyBatch as buildEmbeddingBodyBatch, parseEmbeddingResponse as readEmbeddingResponse, parseEmbeddingBatch as readEmbeddingBatch, embedOpenAI as runEmbedOpenAI, embedOpenAIWithBaseUrl as runEmbedOpenAIWithBaseUrl, embedMistral as runEmbedMistral, embedBatchWithBaseUrl as runEmbedBatchWithBaseUrl, embedBatchOpenAI as runEmbedBatchOpenAI, embedBatchMistral as runEmbedBatchMistral, embedBatchWithConfig as runEmbedBatchWithConfig } from "./rag/embed.ts";
-import { emptyVectorStore, storeSize as readStoreSize, addVector as addStoreVector, addDocuments, deleteById as deleteStoreDocument, filterByMetadata as filterStoreByMetadata, searchByVector as runSearchByVector, searchByText } from "./rag/store.ts";
+import { SearchHit, VectorStore, emptyVectorStore, storeSize as readStoreSize, addVector as addStoreVector, addDocuments, deleteById as deleteStoreDocument, filterByMetadata as filterStoreByMetadata, searchByVector as runSearchByVector, searchByText } from "./rag/store.ts";
 import { tokenizeQuery as readQueryTerms, keywordScore as computeKeywordScore, keywordRetrieve as runKeywordRetrieve, vectorRetrieve as runVectorRetrieve, hybridRetrieve as runHybridRetrieve, formatContext as buildRagContext, ragPrompt as buildRagPrompt, ragMessages as buildRagMessages } from "./rag/retrieve.ts";
-import { needsCompression as historyNeedsCompression, compressHistory as foldHistory, compressIfNeeded as foldHistoryIfNeeded, appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory/memory.ts";
+import { Summarizer, needsCompression as historyNeedsCompression, compressHistory as foldHistory, compressIfNeeded as foldHistoryIfNeeded, appendMessage as pushHistoryMessage, windowMemory as applyWindowMemory, charBudgetMemory as applyCharBudgetMemory, estimateTokens as computeEstimateTokens, historyChars as computeHistoryChars, renderTranscript as buildTranscript, summaryPrompt as buildSummaryPrompt, applySummary as buildSummaryHistory, setMemoryValue as writeMemoryValue, getMemoryValue as readMemoryValue, serializeHistory as writeHistoryJson, parseHistory as readHistoryJson, saveHistory as writeHistoryFile, loadHistory as readHistoryFile } from "./memory/memory.ts";
 // Same rule for the tool and agent layers: toolcall.ts imports makeTool, and
 // agent.ts imports makeTool, describeTools, runToolWithPolicy,
 // toolResultMessage, parseToolCalls, toolCallInput, makeToolCall and
 // toolCallArgument. Those eight names are imported here WITHOUT an alias, so
 // their public wrappers below take a different name rather than renaming the
 // definition out from under a sibling.
-import { makeTool, describeTools, runToolWithPolicy, toolResultMessage, toolRegistry as emptyToolRegistry, registerTool as addToolEntry, findTool as findToolIndex, hasTool as hasToolNamed, toolNames as readToolNames, runTool as dispatchTool } from "./agent/tools.ts";
-import { makeToolCall, toolCallArgument, toolCallInput, parseToolCalls, serializeToolDefs as buildToolDefs, serializeToolDefsMistral as buildToolDefsMistral, parseMistralToolCalls as readMistralToolCalls, hasToolCalls as responseHasToolCalls, finishReason as readFinishReason } from "./agent/toolcall.ts";
-import { runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall, openAIAgentModel as makeOpenAIAgentModel, mistralAgentModel as makeMistralAgentModel, agentHistoryToTurns as buildAgentTurns } from "./agent/agent.ts";
+import { Tool, ToolResult, makeTool, describeTools, runToolWithPolicy, toolResultMessage, toolRegistry as emptyToolRegistry, registerTool as addToolEntry, findTool as findToolIndex, hasTool as hasToolNamed, toolNames as readToolNames, runTool as dispatchTool } from "./agent/tools.ts";
+import { ToolCall, makeToolCall, toolCallArgument, toolCallInput, parseToolCalls, serializeToolDefs as buildToolDefs, serializeToolDefsMistral as buildToolDefsMistral, parseMistralToolCalls as readMistralToolCalls, hasToolCalls as responseHasToolCalls, finishReason as readFinishReason } from "./agent/toolcall.ts";
+import { Model, AgentStep, AgentResult, runAgent as runAgentLoop, runAgentWithPolicy as runAgentLoopWithPolicy, agentSystemPrompt as buildAgentSystemPrompt, agentTrace as renderAgentTrace, makeAgentStep as buildAgentStep, fakeModel as makeFakeModel, agentFakeAnswer as buildFakeAnswer, agentFakeToolCall as buildFakeToolCall, openAIAgentModel as makeOpenAIAgentModel, mistralAgentModel as makeMistralAgentModel, agentHistoryToTurns as buildAgentTurns } from "./agent/agent.ts";
 // toolchat.ts is already inlined through agent.ts (which imports several of its
 // functions), so its exports are in scope under their ORIGINAL names. Importing
 // them here under an alias would not bind — the module was inlined once already.
 // So every toolchat name is imported unaliased, exactly like the sibling-shared
 // vector/tool names above, and the public wrappers below take a different name.
-import { buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./agent/toolchat.ts";
+import { ChatTurn, buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./agent/toolchat.ts";
 // mcp.ts declares McpTool / McpResult unexported; importing any value
 // from it brings those types into scope.
 // mcp_stdio.ts and mcp_sse.ts import six of mcp.ts's helpers UNALIASED
@@ -57,19 +57,33 @@ import { buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistra
 // bare references. The remaining mcp.ts names are barrel-only, so they stay
 // aliased. The two public wrappers whose name would then collide with an
 // unaliased import are exposed as mcpParseTools / mcpReplyId.
-import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId, mcpRequest as buildMcpRequest, mcpIsError as readMcpIsError, mcpErrorMessage as readMcpErrorMessage, mcpResultField as readMcpResultField, mcpInitialize as runMcpInitialize, mcpListTools as runMcpListTools, mcpCallTool as runMcpCallTool, mcpToolToLumen as adaptMcpTool, mcpToolsToRegistry as adaptMcpTools } from "./mcp/client.ts";
+import { McpTool, McpResult, mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId, mcpRequest as buildMcpRequest, mcpIsError as readMcpIsError, mcpErrorMessage as readMcpErrorMessage, mcpResultField as readMcpResultField, mcpInitialize as runMcpInitialize, mcpListTools as runMcpListTools, mcpCallTool as runMcpCallTool, mcpToolToLumen as adaptMcpTool, mcpToolsToRegistry as adaptMcpTools } from "./mcp/client.ts";
 // The stdio and SSE MCP transports (mcp_stdio.ts / mcp_sse.ts) are self-contained
 // modules; no sibling imports their names, so every one is aliased here.
-import { mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
-import { schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
-import { runAgentWithApproval as runGatedAgent, resumeAgent as resumeGatedAgent, saveCheckpoint as writeCheckpoint, loadCheckpoint as readCheckpoint, APPROVAL_SENTINEL } from "./agent/approval.ts";
-import { fileCheckpointStore as makeFileCheckpointStore, memoryCheckpointStore as makeMemoryCheckpointStore } from "./agent/checkpointstore.ts";
-import { makeSubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer, subAgentAsGatedTool as wrapGatedSubAgent, decideChildPause as recordChildVerdict, childPausePending as readChildPausePending } from "./agent/subagent.ts";
-import { makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
-import { splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
-import { loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
-import { streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString } from "./providers/stream.ts";
+import { McpStdioSession, mcpStdioSpawn as runStdioSpawn, mcpStdioListTools as runStdioListTools, mcpStdioCall as runStdioCall, mcpStdioClose as runStdioClose, mcpStdioToolToLumen as adaptStdioTool, mcpStdioToolsToRegistry as adaptStdioTools } from "./mcp/stdio.ts";
+import { SchemaField, Structured, schemaField as makeSchemaField, objectSchema as buildObjectSchema, requiredFields as readRequiredFields, jsonObjectBody as buildJsonObjectBody, jsonSchemaBody as buildJsonSchemaBody, validateStructured as checkStructured, parseStructuredResponse as readStructuredResponse, structuredRetryPrompt as buildStructuredRetryPrompt, schemaInstruction as buildSchemaInstruction, structuredChat as runStructuredChat, structuredChatWithBaseUrl as runStructuredChatWithBaseUrl, structuredOpenAI as runStructuredOpenAI, structuredOpenAIWithBaseUrl as runStructuredOpenAIWithBaseUrl, structuredMistral as runStructuredMistral, structuredJsonModeWithBaseUrl as runStructuredJsonMode } from "./prompt/structured.ts";
+import { ApprovalRun, runAgentWithApproval as runGatedAgent, resumeAgent as resumeGatedAgent, saveCheckpoint as writeCheckpoint, loadCheckpoint as readCheckpoint, APPROVAL_SENTINEL } from "./agent/approval.ts";
+import { CheckpointStore, fileCheckpointStore as makeFileCheckpointStore, memoryCheckpointStore as makeMemoryCheckpointStore } from "./agent/checkpointstore.ts";
+import { SubAgent, makeSubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAsTools as wrapSubAgents, runSubAgent as dispatchSubAgent, subAgentAnswer as runSubAgentAnswer, subAgentAsGatedTool as wrapGatedSubAgent, decideChildPause as recordChildVerdict, childPausePending as readChildPausePending } from "./agent/subagent.ts";
+import { Budget, makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
+import { Chunk, splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
+import { LoadResult, loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
+import { StreamEvent, StreamHandler, streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString } from "./providers/stream.ts";
 import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen as adaptSseTool, sseToolsToRegistry as adaptSseTools } from "./mcp/sse.ts";
+
+// --- the type names -----------------------------------------------------------
+//
+// A barrel re-exports only what it defines, so an imported type name does not
+// pass through it: without this, a caller can call `chat(...)` but cannot write
+// `let r: Result = chat(...)`. The examples in this repository compile without
+// it only because every module is inlined into one namespace and the name leaks
+// in — a caller importing this file by URL gets no such leak.
+//
+// `export { X }` rather than `export type X = Y`: the alias form declares the
+// name a second time, which in a flat namespace collides with the module that
+// defined it.
+export { AgentResult, AgentStep, ApprovalRun, Budget, ChatPromptPart, ChatRequest, ChatTurn, CheckpointStore, Chunk, Document, LoadResult, McpResult, McpStdioSession, McpTool, Message, Model, ModelConfig, ModelOptions, ModelSpec, ProviderError, Result, SchemaField, SearchHit, StreamEvent, StreamHandler, Structured, SubAgent, Summarizer, TemplateVar, TokenUsage, Tool, ToolCall, ToolResult, VectorStore };
+
 
 type JsonName = {
   name: string,

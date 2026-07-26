@@ -16,7 +16,7 @@ import { firstJsonObjectOutput, typedJsonInputOutput, retryPromptOutput } from "
 
 // `type` is a JSON Schema primitive name: "string", "integer", "number",
 // "boolean".
-type SchemaField = {
+export type SchemaField = {
   name: string,
   type: string,
   description: string,
@@ -24,7 +24,7 @@ type SchemaField = {
 };
 
 // `json` is the extracted object source on success, "" otherwise.
-type Structured = {
+export type Structured = {
   ok: bool,
   json: string,
   error: string,

@@ -1,6 +1,6 @@
 // Provider-neutral model option helpers.
 
-type ModelOptions = {
+export type ModelOptions = {
   temperature: number,
   max_tokens: int,
 };

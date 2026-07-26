@@ -1,6 +1,6 @@
 // Shared result record for AI provider calls.
 
-type Result = {
+export type Result = {
   status: int,
   ok: bool,
   content: string,

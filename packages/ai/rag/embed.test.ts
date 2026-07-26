@@ -112,7 +112,7 @@ test("an empty input list makes no request", () => {
 });
 
 test("an unroutable config yields no vectors", () => {
-  let cfg = makeModelConfig("nowhere", "m", "k");
+  let cfg = makeModelConfig({ provider: "nowhere", model: "m", apiKey: "k" });
   let inputs: string[] = ["a", "b"];
   expect(embedBatchWithConfig(cfg, inputs).length == 0);
 });

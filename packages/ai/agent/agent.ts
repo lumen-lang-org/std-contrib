@@ -7,7 +7,7 @@ import { messageTurn, assistantToolCallsTurn, toolResultTurn, runOpenAIToolChat,
 
 // one dispatched tool call. `index` is the position in the whole run, so two
 // calls made in the same model turn still get distinct trace numbers.
-type AgentStep = {
+export type AgentStep = {
   index: int,
   tool: string,
   input: string,
@@ -18,7 +18,7 @@ type AgentStep = {
 // `stopReason` is one of "final" (the model answered), "max_steps", or "error"
 // (a body with no usable message). `stepCount` counts model calls, not tool
 // calls; `steps` holds the tool calls.
-type AgentResult = {
+export type AgentResult = {
   answer: string,
   steps: AgentStep[],
   stopReason: string,
@@ -27,7 +27,7 @@ type AgentResult = {
 
 // the model is a parameter so a test can drive the loop with canned bodies. the
 // string is the raw provider response body, which the tool-call parser reads.
-type Model = (messages: Message[]) => string;
+export type Model = (messages: Message[]) => string;
 
 // fixture shapes: a response body carrying a plain answer.
 type AgentFakeMessage = {

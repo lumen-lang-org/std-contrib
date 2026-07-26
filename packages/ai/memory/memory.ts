@@ -181,7 +181,7 @@ export function applySummary(summary: string, recent: Message[]): Message[] {
 // folds older turns into a running summary on demand. the summarizer is
 // injected so this module stays free of I/O.
 
-type Summarizer = (prompt: string) => string;
+export type Summarizer = (prompt: string) => string;
 
 // the marker `applySummary` writes; lets a compressed history be recognised and
 // its prior summary folded forward instead of summarised again.

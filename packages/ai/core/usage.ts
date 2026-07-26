@@ -1,6 +1,6 @@
 // Provider-neutral token usage helpers.
 
-type TokenUsage = {
+export type TokenUsage = {
   prompt_tokens: int,
   completion_tokens: int,
   total_tokens: int,
