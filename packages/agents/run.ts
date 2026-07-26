@@ -146,7 +146,8 @@ function failed(agentName: string, why: string): AgentRun {
 // because "it did not answer" is the least useful thing a caller can be told.
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path, noTracer(), "");
+  let fresh: Turn[] = [];
+  return runAgentAt(db, agentId, userText, master, 0, path, noTracer(), "", fresh);
 }
 
 // The same run, traced. The tracer carries the collector's address and the
@@ -155,7 +156,8 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
 // trace is sent, and a child must not send half of one.
 export function runAgentTraced(db: Db, agentId: string, userText: string, master: string, tracer: Tracer): AgentRun {
   let path: string[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path, tracer, "");
+  let fresh: Turn[] = [];
+  return runAgentAt(db, agentId, userText, master, 0, path, tracer, "", fresh);
 }
 
 // The same run, at a depth, knowing which agents are already above it.
@@ -164,7 +166,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
 // re-enter one is refused by name. Passed rather than tracked in a global: a
 // server runs handlers on many threads, and one run's path is nothing to do
 // with another's.
-export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[], tracer: Tracer, parentSpan: string): AgentRun {
+export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[], tracer: Tracer, parentSpan: string, prior: Turn[]): AgentRun {
   // Read each row on its own rather than through agentsFull. A relation that
   // matches nothing is null, and a run needs its prompt, config and model to
   // exist — so a dangling reference should be named, not turned into a parse
@@ -301,7 +303,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     trace = endSpan(trace, retrieveSpan, userText, passageSummary(retrieved));
   }
 
+  // Everything the thread already holds, then this question's passages, then
+  // the question. The prior turns come first because they are what happened
+  // first — a model handed its own tool calls out of order is being told a
+  // different story than the one it took part in.
   let context: Turn[] = [];
+  let carried: int = 0;
+  while (carried < prior.length) { context.push(prior[carried]); carried = carried + 1; }
   if (retrieved.length > 0) {
     // Before the question, and in the context rather than the conversation:
     // the model reads it, the transcript does not.
@@ -381,7 +389,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           // model calls and tools sit inside the delegation that caused them.
           // It cannot hand its tracer back — records are immutable — so it
           // hands back what it recorded and this run folds it in.
-          let asked = runAgentAt(db, child.id, question, master, deeper, below, tracerForCallee(trace), callSpan.id);
+          // A child starts fresh: a thread belongs to the agent whose conversation
+          // it is, and replaying a parent's transcript into a specialist would ask
+          // it to answer questions it was never part of.
+          let childPrior: Turn[] = [];
+          let asked = runAgentAt(db, child.id, question, master, deeper, below, tracerForCallee(trace), callSpan.id, childPrior);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }
           // What the child reached counts as reached: an evaluation asking
           // whether the stock tool was called does not care which agent
