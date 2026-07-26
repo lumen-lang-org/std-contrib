@@ -25,8 +25,10 @@ import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersW
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
+import { jsonText } from "./scan.ts";
 import { openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
-import { ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope } from "./knowledge.ts";
+import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
+import { ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
@@ -39,6 +41,9 @@ type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
 type ScopeGrant = { scope: string };
 type ThreadStart = { agentId: string };
+type FileUpload = { name: string, content: string };
+type FilePromote = { scope: string, modelId: string };
+type FilePull = { name: string, documentId: string };
 type DocumentUpload = { source: string, scope: string, body: string };
 type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number, enabled: bool };
 
@@ -743,6 +748,113 @@ class ThreadApi {
   }
 }
 
+// The files a conversation is working on: uploaded by the user, written by
+// the model with its write_file tool, or pulled in from the corpus.
+@controller("/threads/:id/files")
+class WorkspaceApi {
+  db: Db;
+  master: string;
+
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let files = listFiles(this.db, param(req, "id"));
+    let out = "[";
+    let i: int = 0;
+    while (i < files.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"name\":" + JSON.stringify(files[i].fileName)
+        + ",\"mime\":" + JSON.stringify(files[i].mime)
+        + ",\"origin\":" + JSON.stringify(files[i].origin)
+        + ",\"bytes\":" + `${files[i].body.length}`
+        + ",\"documentId\":" + JSON.stringify(files[i].documentId) + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
+  // Upload. The body is JSON text; a binary file needs base64 at this edge and
+  // is not pretended to work.
+  @post("/")
+  upload(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required: {\"name\":\"notes.md\",\"content\":\"...\"}"); }
+    let body: FileUpload = JSON.parse<FileUpload>(req.body);
+    let problem = putFile(this.db, param(req, "id"), body.name, mimeOf(body.name), "uploaded", body.content, "", "now");
+    if (problem != "") { return badRequest(problem); }
+    return created("{\"name\":" + JSON.stringify(body.name) + ",\"bytes\":" + `${body.content.length}` + "}");
+  }
+
+  @get("/:name")
+  read(req: Request): Reply {
+    let file = getFile(this.db, param(req, "id"), param(req, "name"));
+    if (file.id == "") { return notFound("file " + param(req, "name")); }
+    return ok("{\"name\":" + JSON.stringify(file.fileName)
+      + ",\"mime\":" + JSON.stringify(file.mime)
+      + ",\"origin\":" + JSON.stringify(file.origin)
+      + ",\"content\":" + JSON.stringify(file.body) + "}");
+  }
+
+  @del("/:name")
+  remove(req: Request): Reply {
+    if (getFile(this.db, param(req, "id"), param(req, "name")).id == "") {
+      return notFound("file " + param(req, "name"));
+    }
+    deleteFile(this.db, param(req, "id"), param(req, "name"));
+    return noContent();
+  }
+
+  // Pull a corpus document into the workspace, as a pointer with its body. The
+  // agent can then read it whole, which retrieval never offers.
+  @post("/pull")
+  pull(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let body: FilePull = JSON.parse<FilePull>(req.body);
+    let document = findById(this.db, documentsMapping(), body.documentId);
+    if (document == "") { return badRequest("no document " + body.documentId); }
+    let content = jsonText(document, "body");
+    let problem = putFile(this.db, param(req, "id"), body.name, mimeOf(body.name), "retrieved", content, body.documentId, "now");
+    if (problem != "") { return badRequest(problem); }
+    return created("{\"name\":" + JSON.stringify(body.name) + ",\"documentId\":" + JSON.stringify(body.documentId) + "}");
+  }
+
+  // Make a file part of the corpus, under a scope. Explicit, never a side
+  // effect of saving: this is the moment a conversation's artifact becomes
+  // team knowledge, and the file's documentId is the audit trail.
+  @post("/:name/promote")
+  promote(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    if (req.body == "") { return badRequest("a body is required: {\"scope\":\"/specs\",\"modelId\":\"e1\"}"); }
+    let body: FilePromote = JSON.parse<FilePromote>(req.body);
+    let embedder = embeddingModel(this.db, body.modelId);
+    if (embedder.id == "") { return badRequest("no usable embedding model " + body.modelId); }
+    let key = credentialFor(this.db, embedder.provider, this.master);
+    if (key == "") { return badRequest("no credential for " + embedder.provider); }
+
+    let stored = promoteFile(this.db, embedder, param(req, "id"), param(req, "name"), body.scope, key, "now");
+    if (!stored.ok) { return badRequest(stored.error); }
+    return ok("{\"name\":" + JSON.stringify(param(req, "name"))
+      + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
+      + ",\"chunks\":" + `${stored.chunks}` + "}");
+  }
+}
+
 // Documents and the folders they live in.
 //
 // Retrieval is PostgreSQL only — pgvector has no SQLite equivalent — so every
@@ -900,6 +1012,9 @@ function openDatabase(): Db {
   let conversations = threadPlan(db);
   let c: int = 0;
   while (c < conversations.length) { plan.push(conversations[c]); c = c + 1; }
+  let files = workspacePlan(db);
+  let w: int = 0;
+  while (w < files.length) { plan.push(files[w]); w = w + 1; }
   let ran = migrate(db, plan);
   if (!ran.ok) { console.error(ran.error); }
   return db;
@@ -970,6 +1085,14 @@ function main(): void {
   bound.set("pclearKey", (req: Request) => { return providers.clearKey(req); });
 
   bound.set("rfind", (req: Request) => { return traces.find(req); });
+
+  let workspace = new WorkspaceApi(db, master);
+  bound.set("wlist", (req: Request) => { return workspace.list(req); });
+  bound.set("wupload", (req: Request) => { return workspace.upload(req); });
+  bound.set("wread", (req: Request) => { return workspace.read(req); });
+  bound.set("wremove", (req: Request) => { return workspace.remove(req); });
+  bound.set("wpull", (req: Request) => { return workspace.pull(req); });
+  bound.set("wpromote", (req: Request) => { return workspace.promote(req); });
 
   let threads = new ThreadApi(db, master);
   bound.set("hopen", (req: Request) => { return threads.open(req); });
@@ -1044,6 +1167,12 @@ function main(): void {
     let r = controllerPromptApi[pr];
     table.push(route(r.method, r.pattern, "prompt" + r.handler));
     pr = pr + 1;
+  }
+  let wf: int = 0;
+  while (wf < controllerWorkspaceApi.length) {
+    let r = controllerWorkspaceApi[wf];
+    table.push(route(r.method, r.pattern, "w" + r.handler));
+    wf = wf + 1;
   }
   let th: int = 0;
   while (th < controllerThreadApi.length) {

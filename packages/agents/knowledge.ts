@@ -184,6 +184,16 @@ export function scopeArgs(scopes: string[]): string[] {
 // is data like any other. `k` is checked rather than bound because a LIMIT
 // cannot take a parameter on every driver.
 export function retrieve(db: Db, model: ModelRow, scopes: string[], question: string, k: int, apiKey: string): Retrieval {
+  let none: string[] = [];
+  return retrieveExcluding(db, model, scopes, none, question, k, apiKey);
+}
+
+// The same search, skipping chunks a caller already holds.
+//
+// In the query rather than filtered after: dropping duplicates from the top k
+// silently shrinks k, and a thread on its third question about one topic would
+// retrieve nothing new without being told why.
+export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], excludeIds: string[], question: string, k: int, apiKey: string): Retrieval {
   let none: Retrieved[] = [];
   if (k <= 0 || k > 100) {
     let bad: Retrieval = { ok: false, found: none, error: "k must be between 1 and 100" };
@@ -215,14 +225,30 @@ export function retrieve(db: Db, model: ModelRow, scopes: string[], question: st
   // second agent sharing an embedding model reads the first one's documents,
   // which is not a ranking problem but a disclosure.
   let where = scopeClause(db, scopes, 3);
+  // The exclusions bind after the scopes; the ordering vector binds last.
+  let at = 3 + scopes.length * 2;
+  let notIn = "";
+  if (excludeIds.length > 0) {
+    notIn = " AND id NOT IN (";
+    let x: int = 0;
+    while (x < excludeIds.length) {
+      if (x > 0) { notIn = notIn + ", "; }
+      notIn = notIn + placeholderAt(db, at + x);
+      x = x + 1;
+    }
+    notIn = notIn + ")";
+    at = at + excludeIds.length;
+  }
   let sql = "SELECT id, source, scope, body, (embedding <=> " + placeholderAt(db, 1) + ") AS distance"
     + " FROM documents WHERE model_id = " + placeholderAt(db, 2)
-    + " AND " + where
-    + " ORDER BY embedding <=> " + placeholderAt(db, 3 + scopes.length * 2) + " LIMIT " + `${k}`;
+    + " AND " + where + notIn
+    + " ORDER BY embedding <=> " + placeholderAt(db, at) + " LIMIT " + `${k}`;
   let args: string[] = [vector.vector, model.id];
   let bound = scopeArgs(scopes);
   let b: int = 0;
   while (b < bound.length) { args.push(bound[b]); b = b + 1; }
+  let e: int = 0;
+  while (e < excludeIds.length) { args.push(excludeIds[e]); e = e + 1; }
   args.push(vector.vector);
   if (!db.query(sql, args)) {
     let refused: Retrieval = { ok: false, found: none, error: "the search was refused: " + db.lastError() };

@@ -77,8 +77,44 @@ export function threadPlan(db: Db): Migration[] {
     migration("20", "thread turns", createTableSql(db, threadTurnsMapping())),
     migration("21", "turns by thread",
       "CREATE INDEX IF NOT EXISTS turns_by_thread ON thread_turns (thread_id, seq)"),
+    // Which chunks each round showed, so the next round's retrieval can skip
+    // what the replay already carries. `seq` is the round's first turn, which
+    // is what trimming cuts on — exclusion has to follow the trim boundary,
+    // or a forgotten chunk would stay excluded and never come back.
+    migration("24", "thread chunks",
+      "CREATE TABLE IF NOT EXISTS thread_chunks ("
+      + "thread_id " + db.textType + " NOT NULL, "
+      + "seq INTEGER NOT NULL, "
+      + "chunk_id " + db.textType + " NOT NULL)"),
+    migration("25", "chunks by thread",
+      "CREATE INDEX IF NOT EXISTS chunks_by_thread ON thread_chunks (thread_id, seq)"),
   ];
   return plan;
+}
+
+// The chunk ids shown at or after a round. What the replay still carries, and
+// therefore what retrieval must not fetch again — a chunk in a trimmed round
+// is genuinely forgotten and may return.
+export function chunksShownSince(db: Db, threadId: string, fromSeq: int): string[] {
+  let out: string[] = [];
+  if (!db.query("SELECT DISTINCT chunk_id FROM thread_chunks WHERE thread_id = " + placeholderAt(db, 1)
+                + " AND seq >= " + placeholderAt(db, 2) + " ORDER BY chunk_id",
+                [threadId, `${fromSeq}`])) {
+    return out;
+  }
+  let i: int = 0;
+  while (i < db.rows()) { out.push(db.value(i, 0)); i = i + 1; }
+  return out;
+}
+
+export function recordChunks(db: Db, threadId: string, seq: int, chunkIds: string[]): void {
+  let i: int = 0;
+  while (i < chunkIds.length) {
+    executeWith(db, "INSERT INTO thread_chunks (thread_id, seq, chunk_id) VALUES ("
+      + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ", " + placeholderAt(db, 3) + ")",
+      [threadId, `${seq}`, chunkIds[i]]);
+    i = i + 1;
+  }
 }
 
 // --- reading and writing a thread ------------------------------------------------
@@ -251,13 +287,18 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     let path: string[] = [];
     // Runs against an agent that does not exist, which reports "no agent " and
     // is the truth: this thread names nothing runnable.
-    return runAgentAt(db, "", userText, master, 0, path, tracer, "", noThread);
+    let noChunks: string[] = [];
+    return runAgentAt(db, "", userText, master, 0, path, tracer, "", noThread, "", noChunks);
   }
 
   let held = threadTurns(db, threadId);
   let replayed = withinBudget(held, threadBudget());
+  // The replay's first surviving turn: chunks shown before it were trimmed
+  // away with their rounds and may be retrieved afresh.
+  let firstReplayed = held.length - replayed.length;
+  let alreadyShown = chunksShownSince(db, threadId, firstReplayed);
   let path: string[] = [];
-  let run = runAgentAt(db, agentId, userText, master, 0, path, tracer, "", replayed);
+  let run = runAgentAt(db, agentId, userText, master, 0, path, tracer, "", replayed, threadId, alreadyShown);
 
   // What this run added: everything in its context past what was replayed.
   // Stored under the thread's own numbering, which continues from what is
@@ -271,6 +312,12 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     added.push(assistantTurn(run.text, noCalls));
   }
   appendTurns(db, threadId, added, held.length);
+  // What this round showed, filed under its first turn's seq so exclusion
+  // follows the trim boundary.
+  let shown: string[] = [];
+  let r: int = 0;
+  while (r < run.retrieved.length) { shown.push(run.retrieved[r].id); r = r + 1; }
+  if (shown.length > 0) { recordChunks(db, threadId, held.length, shown); }
   return run;
 }
 

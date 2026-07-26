@@ -22,6 +22,10 @@ function fresh(): Turn[] {
   let none: Turn[] = [];
   return none;
 }
+function fresh2(): string[] {
+  let none: string[] = [];
+  return none;
+}
 import { storeCredential } from "./credentials.ts";
 
 let database: Db = sqlite();
@@ -138,7 +142,7 @@ test("a cycle is named, not descended into", () => {
   delegates("a2", "a1");
 
   let above: string[] = ["a1"];
-  let child = runAgentAt(database, "a2", "anything", testKey(), 1, above, noTracer(), "", fresh());
+  let child = runAgentAt(database, "a2", "anything", testKey(), 1, above, noTracer(), "", fresh(), "", fresh2());
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
   expect(child.notes[0].indexOf("already in this chain") >= 0);
@@ -168,7 +172,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
   delegates("a1", "a2");
 
   let above: string[] = ["x1", "x2", "x3"];
-  let deep = runAgentAt(database, "a1", "anything", testKey(), 3, above, noTracer(), "", fresh());
+  let deep = runAgentAt(database, "a1", "anything", testKey(), 3, above, noTracer(), "", fresh(), "", fresh2());
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
   // It still reached the provider — the run happened.
