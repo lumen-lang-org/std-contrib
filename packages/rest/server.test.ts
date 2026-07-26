@@ -7,7 +7,12 @@
 //   cd packages/rest && lumen test server.test.ts
 
 import { Route, route, routes } from "./router.ts";
-import { Request, Reply, Handler, dispatch, bindingProblem, ok, created, noContent, json, problem, notFound, badRequest, param, queryParam, header, bearerToken } from "./server.ts";
+import { Request, Reply, Handler, dispatch, dispatched, bindingProblem, ok, created, noContent, json, problem, notFound, badRequest, param, queryParam, header, bearerToken } from "./server.ts";
+
+// A record with a required field, to make a parse throw.
+type ThrowTarget = {
+  name: string,
+};
 
 function noHeaders(): Map<string, string> {
   return new Map<string, string>();
@@ -175,4 +180,30 @@ test("the method reaches the handler already normalised", () => {
   hs.set("list", (req: Request) => { return ok(req.method); });
   let table = routes([route("GET", "/agents", "list")]);
   expect(dispatch(table, hs, "get", "/agents", "", noHeaders()).body == "GET");
+});
+
+// --- a handler that throws --------------------------------------------------------
+
+// A handler that throws is NOT covered, and cannot be tested here — it panics
+// rather than returning, so the case that would assert it kills the test run.
+// The reduction lives in the comment on `dispatched`; the fix is a try inside
+// the handler's own lambda, which the agents API has at every binding.
+
+test("a handler that returns normally is untouched by the guard", () => {
+  let hs = new Map<string, Handler>();
+  hs.set("list", (req: Request) => { return ok("[]"); });
+  let table = routes([route("GET", "/things", "list")]);
+  let reply = dispatched(table, hs, "GET", "/things", "", noHeaders());
+  expect(reply.status == 200);
+  expect(reply.body == "[]");
+});
+
+test("the guard does not swallow a 404 or a 405", () => {
+  // Those are answers, not failures, and turning them into 400 would lose the
+  // Allow header a client needs.
+  let hs = new Map<string, Handler>();
+  hs.set("list", (req: Request) => { return ok("[]"); });
+  let table = routes([route("GET", "/things", "list")]);
+  expect(dispatched(table, hs, "GET", "/nope", "", noHeaders()).status == 404);
+  expect(dispatched(table, hs, "DELETE", "/things", "", noHeaders()).status == 405);
 });
