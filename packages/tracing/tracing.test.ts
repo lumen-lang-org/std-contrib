@@ -2,8 +2,8 @@
 // the document is valid JSON, that the OTLP shapes are exactly what a collector
 // expects, and that ids are the widths the protocol fixes.
 
-import { base64Encode, langfuseBackend, otlpBackend, noBackend, backendNamed, hasDatasets, traceEndpointFor } from "./backend.ts";
-import { makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
+import { base64Encode, langfuseBackend, otlpBackend, phoenixBackend, braintrustBackend, langsmithBackend, arizeBackend, noBackend, backendNamed, hasDatasets, canSend, traceEndpointFor, otlpPathOf, WIRE_JSON, WIRE_PROTOBUF, ATTRS_OPENINFERENCE, ATTRS_NONE } from "./backend.ts";
+import { openInferenceKind, makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
 
 function tracer(): Tracer {
   return makeTracer("http://127.0.0.1:9/v1/traces", "pk-lf-test", "sk-lf-test", "lumen-test");
@@ -367,16 +367,17 @@ test("langfuse authenticates with basic and asks for its ingestion header", () =
   // refuses the whole trace over.
   expect(b.authValue == "Basic cGs6c2s=");
   // Without this header a trace can take minutes to appear.
-  expect(b.extraHeader == "x-langfuse-ingestion-version");
-  expect(b.vendorPrefix == "langfuse");
+  expect(b.extraHeaders.length == 1);
+  expect(b.extraHeaders[0].name == "x-langfuse-ingestion-version");
+  expect(b.attributeStyle == "langfuse");
   expect(hasDatasets(b));
 });
 
 test("a plain collector gets no vendor header and no vendor attributes", () => {
   let b = otlpBackend("http://collector:4318/v1/traces", "", "");
   expect(b.authHeader == "");
-  expect(b.extraHeader == "");
-  expect(b.vendorPrefix == "");
+  expect(b.extraHeaders.length == 0);
+  expect(b.attributeStyle == ATTRS_NONE);
   // And no datasets: that is not an OpenTelemetry concept, so there is nowhere
   // for evaluation cases to live.
   expect(!hasDatasets(b));
@@ -435,4 +436,120 @@ test("base64 matches known encodings, including both pad lengths", () => {
   expect(base64Encode("a") == "YQ==");
   expect(base64Encode("hello") == "aGVsbG8=");
   expect(base64Encode("pk-lf-lumen-demo:sk-lf-lumen-demo") == "cGstbGYtbHVtZW4tZGVtbzpzay1sZi1sdW1lbi1kZW1v");
+});
+
+// --- other backends ------------------------------------------------------------------
+
+test("braintrust takes a bearer and a parent project", () => {
+  let b = braintrustBackend("https://api.braintrust.dev", "sk-bt", "project_id:abc");
+  expect(b.authValue == "Bearer sk-bt");
+  expect(b.extraHeaders[0].name == "x-bt-parent");
+  expect(b.extraHeaders[0].value == "project_id:abc");
+  // It reads the standard GenAI conventions, so no vendor scheme is sent.
+  expect(b.attributeStyle == ATTRS_NONE);
+});
+
+test("langsmith puts its key in its own header, not an authorization", () => {
+  let b = langsmithBackend("https://api.smith.langchain.com", "lsv2-key", "my-project");
+  expect(b.authHeader == "x-api-key");
+  expect(b.authValue == "lsv2-key");
+  expect(b.extraHeaders[0].name == "Langsmith-Project");
+});
+
+test("arize needs two headers, which is why extras are a list", () => {
+  // The single-slot design could not express this: neither header is an
+  // Authorization and both are required.
+  let b = arizeBackend("https://otlp.arize.com/v1", "space-1", "key-1");
+  expect(b.authHeader == "space_id");
+  expect(b.authValue == "space-1");
+  expect(b.extraHeaders.length == 1);
+  expect(b.extraHeaders[0].name == "api_key");
+});
+
+test("a backend whose datasets we cannot read reports none", () => {
+  // Braintrust and Phoenix both have datasets. This package speaks neither
+  // dialect, and saying so beats aiming Langfuse's URLs at their hosts.
+  expect(!hasDatasets(braintrustBackend("https://api.braintrust.dev", "k", "")));
+  expect(!hasDatasets(phoenixBackend("http://localhost:6006/v1/traces", "")));
+});
+
+test("each backend's otlp path is appended once, or not at all", () => {
+  expect(otlpPathOf("braintrust") == "/otel/v1/traces");
+  expect(otlpPathOf("phoenix") == "");
+  let bt = braintrustBackend("https://api.braintrust.dev", "k", "");
+  expect(traceEndpointFor(bt, "https://api.braintrust.dev") == "https://api.braintrust.dev/otel/v1/traces");
+  // Given whole, it is left alone rather than doubled.
+  expect(traceEndpointFor(bt, "https://api.braintrust.dev/otel/v1/traces") == "https://api.braintrust.dev/otel/v1/traces");
+});
+
+// --- openinference --------------------------------------------------------------------
+
+test("openinference names attributes by meaning, not by vendor", () => {
+  let t = makeTracerFor(phoenixBackend("http://localhost:6006/v1/traces", ""), "http://localhost:6006/v1/traces", "svc");
+  let s = startSpan("read_file", TRACE_TOOL, "");
+  t = endSpan(t, s, "the input", "the output");
+  let body = traceBody(t);
+  // The kind is namespaced and capitalised; the values are not namespaced.
+  expect(body.indexOf("\"openinference.span.kind\"") >= 0);
+  expect(body.indexOf("\"TOOL\"") >= 0);
+  expect(body.indexOf("\"input.value\"") >= 0);
+  expect(body.indexOf("\"output.value\"") >= 0);
+  // And nothing of the other vendor's.
+  expect(body.indexOf("langfuse.") < 0);
+});
+
+test("a model call carries openinference token counts", () => {
+  let t = makeTracerFor(phoenixBackend("http://localhost:6006/v1/traces", ""), "http://localhost:6006/v1/traces", "svc");
+  let s = startSpan("gpt", TRACE_GENERATION, "");
+  t = endGeneration(t, s, "mistral-small", 0.2, 512, "in", "out", 11, 22);
+  let body = traceBody(t);
+  expect(body.indexOf("\"llm.model_name\"") >= 0);
+  expect(body.indexOf("\"llm.token_count.prompt\"") >= 0);
+  expect(body.indexOf("\"llm.token_count.total\"") >= 0);
+  expect(body.indexOf("\"33\"") >= 0);
+  // A generation is an LLM span there, not a "generation".
+  expect(body.indexOf("\"LLM\"") >= 0);
+});
+
+test("span kinds map onto openinference's fixed vocabulary", () => {
+  expect(openInferenceKind(TRACE_GENERATION) == "LLM");
+  expect(openInferenceKind(TRACE_TOOL) == "TOOL");
+  expect(openInferenceKind(TRACE_AGENT) == "AGENT");
+  expect(openInferenceKind(TRACE_RETRIEVER) == "RETRIEVER");
+  // Nothing there is called "span"; a plain step is a chain.
+  expect(openInferenceKind(TRACE_SPAN) == "CHAIN");
+});
+
+// --- what cannot be sent at all -------------------------------------------------------
+
+test("a protobuf-only backend is refused before a request is made", () => {
+  // Verified against a running Phoenix: it answers 415 to JSON and accepts the
+  // same document as protobuf. That is not a misconfiguration to report as
+  // one — the deployment and the credentials are fine and the encoding is not
+  // something this package writes.
+  let phoenix = phoenixBackend("http://localhost:6006/v1/traces", "");
+  expect(phoenix.wire == WIRE_PROTOBUF);
+  expect(!canSend(phoenix));
+
+  let t = makeTracerFor(phoenix, "http://localhost:6006/v1/traces", "svc");
+  let s = startSpan("x", TRACE_SPAN, "");
+  t = endSpan(t, s, "", "");
+  let sent = flush(t);
+  expect(!sent.ok);
+  expect(sent.status == 0);
+  expect(sent.error.indexOf("only protobuf") >= 0);
+  expect(sent.error.indexOf("phoenix") >= 0);
+});
+
+test("the json backends can send", () => {
+  expect(canSend(langfuseBackend("http://lf", "pk", "sk")));
+  expect(canSend(otlpBackend("http://c:4318/v1/traces", "", "")));
+  expect(canSend(braintrustBackend("https://api.braintrust.dev", "k", "")));
+  expect(canSend(langsmithBackend("https://api.smith.langchain.com", "k", "")));
+});
+
+test("an empty trace is not sent anywhere, whatever the backend", () => {
+  // Nothing recorded is not a failure, and the encoding check must not turn it
+  // into one.
+  expect(flush(makeTracerFor(phoenixBackend("http://x", ""), "http://x", "svc")).ok);
 });

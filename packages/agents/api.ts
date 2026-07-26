@@ -45,7 +45,8 @@ function backendOr(name: string): string {
 }
 
 function knownBackend(name: string): bool {
-  return name == "langfuse" || name == "otlp";
+  return name == "langfuse" || name == "otlp" || name == "phoenix"
+    || name == "braintrust" || name == "langsmith" || name == "arize";
 }
 
 // Credentials, over the API. A key can be written and named; it can never be
@@ -364,7 +365,7 @@ class TraceApi {
       return badRequest("tracing cannot be enabled without an endpoint");
     }
     if (!knownBackend(backendOr(body.backend))) {
-      return badRequest("unknown backend \"" + body.backend + "\"; this understands \"langfuse\" and \"otlp\"");
+      return badRequest("unknown backend \"" + body.backend + "\"; this understands langfuse, otlp, phoenix, braintrust, langsmith and arize");
     }
     let row: TraceConfigRow = {
       id: "default",
