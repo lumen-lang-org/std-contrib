@@ -140,10 +140,17 @@ export function readEventRequest(buffer: string): EventRequest {
 // Serve. The handler is given a stream that already has its headers, and the
 // connection closes when the handler returns.
 //
-// The body is a top-level function rather than the closure it wants to be: a
-// captured parameter cannot be *called* from an inner function here, though it
-// can be passed along, so the callback is threaded through as an argument.
-// The websocket package has the same shape for the same reason.
+// The body is a top-level function rather than the closure it wants to be.
+// Writing it inline made the native backend reject the generated code — it
+// says so itself, "likely a Lumen compiler bug; please report it" — at the
+// line calling `onStream`.
+//
+// The trigger has NOT been reduced. A closure that captures and calls a
+// parameter compiles, and so does one doing that inside net.createServer's
+// callback; both were tried. So the cause is something narrower here and the
+// obvious explanation is wrong. This shape is a workaround for a bug nobody
+// has characterised, which is worth saying plainly rather than dressing up as
+// a design decision.
 export function serveEvents(port: int, onStream: (stream: EventStream) => void): void {
   net.createServer(port, (socket: Socket) => {
     handleStream(socket, onStream);
