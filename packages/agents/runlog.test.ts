@@ -8,6 +8,7 @@ import { connectDatabase, persist, execute, dropTable, findById } from "../plume
 import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
 import { schemaPlan } from "./schema.ts";
 import { AgentRun, AgentStep } from "./run.ts";
+import { RecordedSpan } from "../tracing/tracing.ts";
 import { Turn } from "./provider.ts";
 import { RunRow, runsMapping, runStepsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 
@@ -47,7 +48,7 @@ function sampleRun(withSteps: int): AgentRun {
   }
   let context: Turn[] = [];
   let notes: string[] = [];
-  let spans: string[] = [];
+  let spans: RecordedSpan[] = [];
   let noNames: string[] = [];
   let r: AgentRun = {
     ok: true, text: "37 units in Rotterdam.", body: "{}", status: 200,
@@ -116,7 +117,7 @@ test("a failed run is logged like any other", () => {
   let steps: AgentStep[] = [];
   let context: Turn[] = [];
   let notes: string[] = ["parts is disabled"];
-  let spans: string[] = [];
+  let spans: RecordedSpan[] = [];
   let noNames: string[] = [];
   let bad: AgentRun = {
     ok: false, text: "", body: "", status: 0,

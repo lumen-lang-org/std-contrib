@@ -2,8 +2,9 @@
 // the document is valid JSON, that the OTLP shapes are exactly what a collector
 // expects, and that ids are the widths the protocol fixes.
 
+import { bytesFromHex } from "./protobuf.ts";
 import { base64Encode, langfuseBackend, otlpBackend, phoenixBackend, braintrustBackend, langsmithBackend, arizeBackend, noBackend, backendNamed, hasDatasets, canSend, traceEndpointFor, otlpPathOf, WIRE_JSON, WIRE_PROTOBUF, ATTRS_OPENINFERENCE, ATTRS_NONE } from "./backend.ts";
-import { openInferenceKind, makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
+import { RecordedSpan, traceBodyProtobuf, openInferenceKind, makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
 
 function tracer(): Tracer {
   return makeTracer("http://127.0.0.1:9/v1/traces", "pk-lf-test", "sk-lf-test", "lumen-test");
@@ -321,7 +322,7 @@ test("a callee's spans can be folded into the caller's tracer", () => {
 
 test("folding in nothing changes nothing", () => {
   let t = makeTracer("http://collector", "pk", "sk", "svc");
-  let none: string[] = [];
+  let none: RecordedSpan[] = [];
   expect(spanCount(tracerWithMoreSpans(t, none)) == 0);
 });
 
@@ -522,34 +523,34 @@ test("span kinds map onto openinference's fixed vocabulary", () => {
 
 // --- what cannot be sent at all -------------------------------------------------------
 
-test("a protobuf-only backend is refused before a request is made", () => {
-  // Verified against a running Phoenix: it answers 415 to JSON and accepts the
-  // same document as protobuf. That is not a misconfiguration to report as
-  // one — the deployment and the credentials are fine and the encoding is not
-  // something this package writes.
-  let phoenix = phoenixBackend("http://localhost:6006/v1/traces", "");
-  expect(phoenix.wire == WIRE_PROTOBUF);
-  expect(!canSend(phoenix));
-
-  let t = makeTracerFor(phoenix, "http://localhost:6006/v1/traces", "svc");
-  let s = startSpan("x", TRACE_SPAN, "");
-  t = endSpan(t, s, "", "");
-  let sent = flush(t);
-  expect(!sent.ok);
-  expect(sent.status == 0);
-  expect(sent.error.indexOf("only protobuf") >= 0);
-  expect(sent.error.indexOf("phoenix") >= 0);
+test("a protobuf backend is declared as one", () => {
+  // Verified against a running Phoenix: it answers 415 to JSON and takes the
+  // same document as protobuf.
+  expect(phoenixBackend("http://localhost:6006/v1/traces", "").wire == WIRE_PROTOBUF);
+  expect(langfuseBackend("http://lf", "pk", "sk").wire == WIRE_JSON);
 });
 
-test("the json backends can send", () => {
-  expect(canSend(langfuseBackend("http://lf", "pk", "sk")));
-  expect(canSend(otlpBackend("http://c:4318/v1/traces", "", "")));
-  expect(canSend(braintrustBackend("https://api.braintrust.dev", "k", "")));
-  expect(canSend(langsmithBackend("https://api.smith.langchain.com", "k", "")));
+test("a protobuf span carries ids as bytes, not as their hex", () => {
+  // Sent the text, a receiver records an id of twice the width, which matches
+  // nothing and breaks every parent link.
+  let t = makeTracerFor(phoenixBackend("http://x", ""), "http://x", "svc");
+  let s = startSpan("call", TRACE_TOOL, "");
+  t = endSpan(t, s, "in", "out");
+  let body = traceBodyProtobuf(t);
+  // 16 raw bytes of trace id and 8 of span id, not 32 and 16 of hex.
+  expect(body.indexOf(bytesFromHex(traceId(t))) >= 0);
+  expect(body.indexOf(traceId(t)) < 0);
 });
 
-test("an empty trace is not sent anywhere, whatever the backend", () => {
-  // Nothing recorded is not a failure, and the encoding check must not turn it
-  // into one.
-  expect(flush(makeTracerFor(phoenixBackend("http://x", ""), "http://x", "svc")).ok);
+test("the protobuf document nests as OTLP requires", () => {
+  let t = makeTracerFor(phoenixBackend("http://x", ""), "http://x", "svc");
+  let s = startSpan("call", TRACE_TOOL, "");
+  t = endSpan(t, s, "in", "out");
+  let body = traceBodyProtobuf(t);
+  // resource_spans is field 1, length-delimited: the first byte is 0x0a.
+  expect(body.charCodeAt(0) == 10);
+  // The name and the attribute keys are in there as plain bytes.
+  expect(body.indexOf("call") >= 0);
+  expect(body.indexOf("openinference.span.kind") >= 0);
+  expect(body.indexOf("input.value") >= 0);
 });

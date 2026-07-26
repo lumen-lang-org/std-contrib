@@ -20,6 +20,7 @@
 //
 // Run: lumen test packages/tracing/tracing.test.ts
 
+import { varint, fieldTag, bytesField, varintField, fixed64Field, bytesFromHex } from "./protobuf.ts";
 import { TraceBackend, TraceHeader, langfuseBackend, otlpBackend, phoenixBackend, braintrustBackend, langsmithBackend, arizeBackend, noBackend, backendNamed, langfuseRootOf, base64Encode, traceEndpointFor, hasDatasets, canSend, WIRE_JSON, WIRE_PROTOBUF, ATTRS_LANGFUSE, ATTRS_OPENINFERENCE, ATTRS_NONE } from "./backend.ts";
 
 // One in-flight span. `parentId` is "" for the root.
@@ -31,11 +32,34 @@ export type TraceSpan = {
   startNs: i64,
 };
 
+// One attribute on a span, before it is encoded. Held as data rather than as
+// finished JSON because the same span has to be written two ways: a receiver
+// takes OTLP as JSON or as protobuf and may implement only one.
+export type SpanAttr = {
+  key: string,
+  text: string,
+  number: i64,
+  isInt: bool,
+};
+
+// A finished span, still structured. What the tracer accumulates.
+export type RecordedSpan = {
+  traceId: string,
+  id: string,
+  parentId: string,
+  name: string,
+  startNs: i64,
+  endNs: i64,
+  attrs: SpanAttr[],
+  isError: bool,
+  statusMessage: string,
+};
+
 // A run being traced. Records are immutable, so every call that records a span
 // returns a new tracer; thread it through the run and flush the last one.
 export type Tracer = {
   traceId: string,
-  spans: string[],
+  spans: RecordedSpan[],
   endpoint: string,
   // Which observability backend this goes to: how it authenticates, which
   // extra header it wants, and whose attribute namespace it reads. A string
@@ -136,24 +160,33 @@ function nanosText(ns: i64): string {
 
 // --- attributes ---------------------------------------------------------------
 
-// An OTLP attribute. Values are a typed union in the protobuf, so a string is
-// `{"stringValue": ...}` rather than a bare JSON string.
-function attrString(key: string, value: string): string {
-  return "{\"key\":" + jsonString(key) + ",\"value\":{\"stringValue\":" + jsonString(value) + "}}";
+// An OTLP attribute. A typed union on the wire in both encodings, so which of
+// the two values is meant is carried rather than inferred.
+function attrString(key: string, value: string): SpanAttr {
+  let a: SpanAttr = { key: key, text: value, number: 0, isInt: false };
+  return a;
 }
 
-function attrInt(key: string, value: int): string {
-  // An integer attribute is carried as a string in OTLP's JSON mapping, since
-  // JSON numbers cannot hold the full 64-bit range.
-  return "{\"key\":" + jsonString(key) + ",\"value\":{\"intValue\":\"" + `${value}` + "\"}}";
+function attrInt(key: string, value: int): SpanAttr {
+  let a: SpanAttr = { key: key, text: "", number: value, isInt: true };
+  return a;
 }
 
-function joinAttrs(attrs: string[]): string {
+// One attribute in OTLP's JSON mapping. An integer is a *string* there, since
+// JSON numbers cannot hold the full 64-bit range.
+function attrJson(a: SpanAttr): string {
+  if (a.isInt) {
+    return "{\"key\":" + jsonString(a.key) + ",\"value\":{\"intValue\":\"" + `${a.number}` + "\"}}";
+  }
+  return "{\"key\":" + jsonString(a.key) + ",\"value\":{\"stringValue\":" + jsonString(a.text) + "}}";
+}
+
+function joinAttrs(attrs: SpanAttr[]): string {
   let out = "";
   let i: int = 0;
   while (i < attrs.length) {
     if (i > 0) { out = out + ","; }
-    out = out + attrs[i];
+    out = out + attrJson(attrs[i]);
     i = i + 1;
   }
   return out;
@@ -165,7 +198,7 @@ function joinAttrs(attrs: string[]): string {
 // `https://cloud.langfuse.com/api/public/otel/v1/traces`, or the same path on a
 // self-hosted instance.
 export function makeTracer(endpoint: string, publicKey: string, secretKey: string, serviceName: string): Tracer {
-  let none: string[] = [];
+  let none: RecordedSpan[] = [];
   let t: Tracer = {
     traceId: newTraceId(),
     spans: none,
@@ -215,7 +248,7 @@ export function tracerBackend(t: Tracer): TraceBackend {
 // this with a Langfuse backend built from a public and secret key, kept
 // because it is what every existing caller uses.
 export function makeTracerFor(backend: TraceBackend, endpoint: string, serviceName: string): Tracer {
-  let none: string[] = [];
+  let none: RecordedSpan[] = [];
   let t: Tracer = {
     traceId: newTraceId(),
     spans: none,
@@ -237,14 +270,14 @@ export function makeTracerFor(backend: TraceBackend, endpoint: string, serviceNa
 // caller folds it in with `tracerWithMoreSpans`. Without that pair, the
 // callee's spans are recorded and then dropped on the floor, which looks
 // exactly like work that never happened.
-export function tracerSpans(t: Tracer): string[] {
+export function tracerSpans(t: Tracer): RecordedSpan[] {
   return t.spans;
 }
 
 // Take spans recorded elsewhere into this tracer. They keep whatever parent
 // they were opened with, so a child's tree hangs where it belongs.
-export function tracerWithMoreSpans(t: Tracer, spans: string[]): Tracer {
-  let all = t.spans;
+export function tracerWithMoreSpans(t: Tracer, spans: RecordedSpan[]): Tracer {
+  let all: RecordedSpan[] = t.spans;
   let i: int = 0;
   while (i < spans.length) {
     all = [...all, spans[i]];
@@ -267,7 +300,7 @@ export function tracerWithMoreSpans(t: Tracer, spans: string[]): Tracer {
 // it starts a new trace, which would leave the callee's work in a different
 // tree altogether.
 export function tracerForCallee(t: Tracer): Tracer {
-  let none: string[] = [];
+  let none: RecordedSpan[] = [];
   let out: Tracer = {
     traceId: t.traceId, spans: none, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: t.environment,
@@ -280,7 +313,7 @@ export function tracerForCallee(t: Tracer): Tracer {
 // configured, and every call site should be able to run without asking whether
 // it is: an unconfigured tracer is threaded through exactly like a real one.
 export function noTracer(): Tracer {
-  let none: string[] = [];
+  let none: RecordedSpan[] = [];
   let t: Tracer = {
     traceId: "", spans: none, endpoint: "", backend: noBackend(),
     serviceName: "", environment: "", sessionId: "", userId: "",
@@ -309,7 +342,7 @@ export function startSpan(name: string, kind: string, parentId: string): TraceSp
   return s;
 }
 
-function withSpan(t: Tracer, encoded: string): Tracer {
+function withSpan(t: Tracer, encoded: RecordedSpan): Tracer {
   let out: Tracer = {
     traceId: t.traceId, spans: [...t.spans, encoded], endpoint: t.endpoint,
     backend: t.backend, serviceName: t.serviceName, environment: t.environment,
@@ -319,8 +352,8 @@ function withSpan(t: Tracer, encoded: string): Tracer {
 }
 
 // The attributes every span carries, whatever its kind.
-function baseAttrs(t: Tracer, span: TraceSpan, input: string, output: string, level: string, statusMessage: string): string[] {
-  let attrs: string[] = [];
+function baseAttrs(t: Tracer, span: TraceSpan, input: string, output: string, level: string, statusMessage: string): SpanAttr[] {
+  let attrs: SpanAttr[] = [];
   // The standard attributes go to everyone: a collector that has never heard
   // of this program still shows the span's name, kind and timing.
   attrs = [...attrs, attrString("otel.span.kind", span.kind)];
@@ -367,8 +400,24 @@ function baseAttrs(t: Tracer, span: TraceSpan, input: string, output: string, le
   return attrs;
 }
 
-function encodeSpan(t: Tracer, span: TraceSpan, endNs: i64, attrs: string[], isError: bool, statusMessage: string): string {
-  let out = "{\"traceId\":" + jsonString(t.traceId)
+function recordSpan(t: Tracer, span: TraceSpan, endNs: i64, attrs: SpanAttr[], isError: bool, statusMessage: string): RecordedSpan {
+  let r: RecordedSpan = {
+    traceId: t.traceId,
+    id: span.id,
+    parentId: span.parentId,
+    name: span.name,
+    startNs: span.startNs,
+    endNs: endNs,
+    attrs: attrs,
+    isError: isError,
+    statusMessage: statusMessage,
+  };
+  return r;
+}
+
+// One span in OTLP's JSON mapping.
+function spanJson(span: RecordedSpan): string {
+  let out = "{\"traceId\":" + jsonString(span.traceId)
     + ",\"spanId\":" + jsonString(span.id);
   if (span.parentId != "") {
     out = out + ",\"parentSpanId\":" + jsonString(span.parentId);
@@ -378,18 +427,18 @@ function encodeSpan(t: Tracer, span: TraceSpan, endNs: i64, attrs: string[], isE
     // outbound RPC as OTLP means those.
     + ",\"kind\":1"
     + ",\"startTimeUnixNano\":\"" + nanosText(span.startNs) + "\""
-    + ",\"endTimeUnixNano\":\"" + nanosText(endNs) + "\""
-    + ",\"attributes\":[" + joinAttrs(attrs) + "]";
+    + ",\"endTimeUnixNano\":\"" + nanosText(span.endNs) + "\""
+    + ",\"attributes\":[" + joinAttrs(span.attrs) + "]";
   // Status codes: 0 unset, 1 ok, 2 error. Only error is worth stating; a span
   // that did not fail is left unset, as the specification prefers.
   //
   // The message goes in the status as well as in a Langfuse attribute: a
   // collector that knows nothing of Langfuse shows this field and would
   // otherwise report a failure with no reason attached.
-  if (isError) {
+  if (span.isError) {
     out = out + ",\"status\":{\"code\":2";
-    if (statusMessage != "") {
-      out = out + ",\"message\":" + jsonString(statusMessage);
+    if (span.statusMessage != "") {
+      out = out + ",\"message\":" + jsonString(span.statusMessage);
     }
     out = out + "}";
   }
@@ -399,14 +448,14 @@ function encodeSpan(t: Tracer, span: TraceSpan, endNs: i64, attrs: string[], isE
 // Close a span and record it.
 export function endSpan(t: Tracer, span: TraceSpan, input: string, output: string): Tracer {
   let attrs = baseAttrs(t, span, input, output, TRACE_DEFAULT, "");
-  return withSpan(t, encodeSpan(t, span, nowNanos(), attrs, false, ""));
+  return withSpan(t, recordSpan(t, span, nowNanos(), attrs, false, ""));
 }
 
 // Close a span that failed. The message is what a reader sees first when they
 // open the trace, so it should say what went wrong rather than name a type.
 export function endSpanFailed(t: Tracer, span: TraceSpan, input: string, message: string): Tracer {
   let attrs = baseAttrs(t, span, input, "", TRACE_ERROR, message);
-  return withSpan(t, encodeSpan(t, span, nowNanos(), attrs, true, message));
+  return withSpan(t, recordSpan(t, span, nowNanos(), attrs, true, message));
 }
 
 // Close a model call, with the model's name, its settings and what it cost.
@@ -439,7 +488,7 @@ export function endGeneration(t: Tracer, span: TraceSpan, model: string, tempera
   attrs = [...attrs, attrString("gen_ai.request.model", model)];
   attrs = [...attrs, attrInt("gen_ai.usage.input_tokens", inputTokens)];
   attrs = [...attrs, attrInt("gen_ai.usage.output_tokens", outputTokens)];
-  return withSpan(t, encodeSpan(t, span, nowNanos(), attrs, false, ""));
+  return withSpan(t, recordSpan(t, span, nowNanos(), attrs, false, ""));
 }
 
 // Close a tool dispatch.
@@ -453,7 +502,7 @@ export function endTool(t: Tracer, span: TraceSpan, input: string, output: strin
   let attrs = baseAttrs(t, span, input, output, level, message);
   attrs = [...attrs, attrString("gen_ai.operation.name", "execute_tool")];
   attrs = [...attrs, attrString("gen_ai.tool.name", span.name)];
-  return withSpan(t, encodeSpan(t, span, nowNanos(), attrs, !ok, message));
+  return withSpan(t, recordSpan(t, span, nowNanos(), attrs, !ok, message));
 }
 
 // This package's span kinds in OpenInference's vocabulary, which is a fixed
@@ -475,14 +524,86 @@ export function traceBody(t: Tracer): string {
   let i: int = 0;
   while (i < t.spans.length) {
     if (i > 0) { spans = spans + ","; }
-    spans = spans + t.spans[i];
+    spans = spans + spanJson(t.spans[i]);
     i = i + 1;
   }
+  let resource: SpanAttr[] = [
+    attrString("service.name", t.serviceName),
+    attrString("deployment.environment.name", t.environment),
+  ];
   return "{\"resourceSpans\":[{\"resource\":{\"attributes\":["
-    + attrString("service.name", t.serviceName) + ","
-    + attrString("deployment.environment.name", t.environment)
+    + joinAttrs(resource)
     + "]},\"scopeSpans\":[{\"scope\":{\"name\":\"lumen-ai\"},\"spans\":["
     + spans + "]}]}]}";
+}
+
+// The same document, protobuf-encoded.
+//
+// Field numbers are OTLP's, and they are not guessable: a receiver reads by
+// number, so a wrong one is silently the wrong field rather than an error.
+//   ExportTraceServiceRequest { resource_spans = 1 }
+//   ResourceSpans { resource = 1, scope_spans = 2 }
+//   Resource { attributes = 1 }
+//   ScopeSpans { scope = 1, spans = 2 }
+//   Span { trace_id=1 span_id=2 parent_span_id=4 name=5 kind=6
+//          start=7 end=8 attributes=9 status=15 }
+//   KeyValue { key = 1, value = 2 }
+//   AnyValue { string_value = 1, int_value = 3 }
+//   Status { message = 2, code = 3 }
+export function traceBodyProtobuf(t: Tracer): string {
+  let resource = bytesField(1, attrProto(attrString("service.name", t.serviceName)))
+    + bytesField(1, attrProto(attrString("deployment.environment.name", t.environment)));
+
+  let spans = "";
+  let i: int = 0;
+  while (i < t.spans.length) {
+    spans = spans + bytesField(2, spanProto(t.spans[i]));
+    i = i + 1;
+  }
+
+  let scope = bytesField(1, bytesField(1, "lumen-ai")) + spans;
+  let resourceSpans = bytesField(1, resource) + bytesField(2, scope);
+  return bytesField(1, resourceSpans);
+}
+
+// One attribute as a KeyValue.
+function attrProto(a: SpanAttr): string {
+  let value = "";
+  if (a.isInt) {
+    value = varintField(3, a.number);
+  } else {
+    value = bytesField(1, a.text);
+  }
+  return bytesField(1, a.key) + bytesField(2, value);
+}
+
+// One span. Ids go as the bytes their hex stands for, not as the hex: a
+// receiver sent the text would record an id of twice the width, matching
+// nothing and breaking every parent link.
+function spanProto(span: RecordedSpan): string {
+  let out = bytesField(1, bytesFromHex(span.traceId))
+    + bytesField(2, bytesFromHex(span.id));
+  if (span.parentId != "") {
+    out = out + bytesField(4, bytesFromHex(span.parentId));
+  }
+  out = out + bytesField(5, span.name)
+    // 1 is INTERNAL, as in the JSON encoding.
+    + varintField(6, 1)
+    + fixed64Field(7, span.startNs)
+    + fixed64Field(8, span.endNs);
+
+  let a: int = 0;
+  while (a < span.attrs.length) {
+    out = out + bytesField(9, attrProto(span.attrs[a]));
+    a = a + 1;
+  }
+
+  if (span.isError) {
+    let status = varintField(3, 2);
+    if (span.statusMessage != "") { status = bytesField(2, span.statusMessage) + status; }
+    out = out + bytesField(15, status);
+  }
+  return out;
 }
 
 // Send what has been recorded. Returns without a request when nothing has been.
@@ -491,22 +612,22 @@ export function flush(t: Tracer): TraceResult {
     let empty: TraceResult = { ok: true, status: 0, error: "" };
     return empty;
   }
-  // Refused here rather than at the far end. This package writes OTLP's JSON
-  // mapping; a backend implementing only the protobuf one answers 415, and
-  // "unsupported content type" from someone else's server is a worse account
-  // of what happened than this.
-  if (!canSend(t.backend)) {
-    let wrongWire: TraceResult = {
-      ok: false, status: 0,
-      error: "the " + t.backend.name + " backend accepts only protobuf-encoded OTLP, and this writes JSON",
-    };
-    return wrongWire;
-  }
+
   // The headers are the backend's, not this file's. A collector wanting no
   // credential gets no Authorization header rather than an empty one, and a
   // vendor's extra header is sent only to that vendor.
+  // The encoding is the backend's too. OTLP defines both mappings and a
+  // receiver may implement one: Langfuse takes JSON, Phoenix takes only
+  // protobuf and answers 415 to the other.
+  let body = traceBody(t);
+  let contentType = "application/json";
+  if (t.backend.wire == WIRE_PROTOBUF) {
+    body = traceBodyProtobuf(t);
+    contentType = "application/x-protobuf";
+  }
+
   let headers = new Map<string, string>();
-  headers.set("Content-Type", "application/json");
+  headers.set("Content-Type", contentType);
   if (t.backend.authHeader != "") { headers.set(t.backend.authHeader, t.backend.authValue); }
   let h: int = 0;
   while (h < t.backend.extraHeaders.length) {
@@ -514,7 +635,7 @@ export function flush(t: Tracer): TraceResult {
     h = h + 1;
   }
 
-  let res = http.request(traceEndpointFor(t.backend, t.endpoint), "POST", traceBody(t), headers);
+  let res = http.request(traceEndpointFor(t.backend, t.endpoint), "POST", body, headers);
   if (res.status < 200 || res.status >= 300) {
     let failed: TraceResult = {
       ok: false,
@@ -530,7 +651,7 @@ export function flush(t: Tracer): TraceResult {
 // Drop what has been recorded, keeping the connection settings. Useful after a
 // flush when a program traces several runs.
 export function resetTracer(t: Tracer): Tracer {
-  let none: string[] = [];
+  let none: RecordedSpan[] = [];
   let out: Tracer = {
     traceId: newTraceId(), spans: none, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: t.environment,

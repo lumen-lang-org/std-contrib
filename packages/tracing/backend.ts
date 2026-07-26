@@ -299,13 +299,10 @@ function withPath(endpoint: string, path: string): string {
   return withoutTrailingSlash(endpoint) + path;
 }
 
-// Whether this package can send to this backend at all.
-//
-// Separate from every other check because it is not a configuration mistake:
-// the deployment is right, the credentials are right, and the encoding is one
-// this package does not write.
+// Whether this package can send to this backend at all. Both encodings are
+// written now, so the only backend it cannot reach is one with no address.
 export function canSend(backend: TraceBackend): bool {
-  return backend.wire == WIRE_JSON;
+  return backend.name != "none";
 }
 
 // Whether evaluation cases can be read from this backend.

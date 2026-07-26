@@ -27,7 +27,7 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
 import { jsonText } from "./scan.ts";
-import { Tracer, TraceSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL } from "../tracing/tracing.ts";
+import { Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL } from "../tracing/tracing.ts";
 
 // How many times a run may go back to the model after calling tools.
 //
@@ -113,14 +113,14 @@ export type AgentRun = {
   // Spans rather than a tracer because records are immutable: a child cannot
   // hand its tracer back, so it hands back what it recorded and the caller
   // folds it in. The top of the run flushes.
-  spans: string[],
+  spans: RecordedSpan[],
 };
 
 function failed(agentName: string, why: string): AgentRun {
   let noContext: Turn[] = [];
   let noSteps: AgentStep[] = [];
   let noNotes: string[] = [];
-  let noSpans: string[] = [];
+  let noSpans: RecordedSpan[] = [];
   let noTools: string[] = [];
   let noAgents: string[] = [];
   let r: AgentRun = {
@@ -375,9 +375,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 // A run's spans, or nothing when tracing is off. Reading them from a tracer
 // that recorded none is harmless; the guard is here so the intent is legible
 // at the call sites rather than implied.
-function spansOf(on: bool, t: Tracer): string[] {
+function spansOf(on: bool, t: Tracer): RecordedSpan[] {
   if (!on) {
-    let none: string[] = [];
+    let none: RecordedSpan[] = [];
     return none;
   }
   return tracerSpans(t);
@@ -452,7 +452,7 @@ function childFor(children: AgentRow[], name: string): AgentRow {
 
 // One place builds the result, so a run that ended four different ways still
 // reports which agent, prompt and model served it.
-function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: string[], calledTools: string[], calledAgents: string[]): AgentRun {
+function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: RecordedSpan[], calledTools: string[], calledAgents: string[]): AgentRun {
   let why = last.error;
   if (stopReason == "max_steps" && why == "") {
     why = "stopped after " + `${MAX_TOOL_STEPS}` + " tool steps without a final answer";
