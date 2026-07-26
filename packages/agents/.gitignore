@@ -1,7 +1,19 @@
 # Compiled programs: lumen writes the binary into the working directory,
 # named for its source and with no extension to tell it apart.
+# Named one by one because a compiled program has no extension to match on,
+# and every example adds another. Two of these (rag, run-agent) were committed
+# before this list existed -- 8 MB each, in the history for good now, which is
+# the reason the list is worth keeping current.
 api
 mount-mcp
 call-model
+run-agent
+rag
+run-with-tools
+delegate
+delegate-traced
+prompt-ab
+evals
+stored-credential
 zz*
 .lumen-*

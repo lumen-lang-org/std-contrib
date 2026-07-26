@@ -36,6 +36,18 @@ type KeyBody = { apiKey: string };
 type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
 
+// The backends this API will write into a trace_config row. Checked here
+// rather than at the tracer, because a typo should be refused when it is set
+// and not silently turn tracing off later.
+function backendOr(name: string): string {
+  if (name == "") { return "langfuse"; }
+  return name;
+}
+
+function knownBackend(name: string): bool {
+  return name == "langfuse" || name == "otlp";
+}
+
 // Credentials, over the API. A key can be written and named; it can never be
 // read back. Anything that returns one is a leak waiting for a log line, and
 // the caller who set it already knows what they set.
@@ -332,6 +344,7 @@ class TraceApi {
     // Three ways to be configured and still silent, so it is answered rather
     // than left to be inferred from the other fields.
     return ok("{\"configured\":true,\"active\":" + `${tracing(tracerFor(this.db, this.master))}`
+      + ",\"backend\":" + JSON.stringify(backendOr(row.backend))
       + ",\"endpoint\":" + JSON.stringify(row.endpoint)
       + ",\"publicKey\":" + JSON.stringify(row.publicKey)
       + ",\"serviceName\":" + JSON.stringify(row.serviceName)
@@ -350,8 +363,12 @@ class TraceApi {
     if (body.enabled && body.endpoint == "") {
       return badRequest("tracing cannot be enabled without an endpoint");
     }
+    if (!knownBackend(backendOr(body.backend))) {
+      return badRequest("unknown backend \"" + body.backend + "\"; this understands \"langfuse\" and \"otlp\"");
+    }
     let row: TraceConfigRow = {
       id: "default",
+      backend: backendOr(body.backend),
       endpoint: body.endpoint,
       publicKey: body.publicKey,
       serviceName: body.serviceName,

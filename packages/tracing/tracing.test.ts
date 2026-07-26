@@ -2,7 +2,8 @@
 // the document is valid JSON, that the OTLP shapes are exactly what a collector
 // expects, and that ids are the widths the protocol fixes.
 
-import { makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, base64Encode, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
+import { base64Encode, langfuseBackend, otlpBackend, noBackend, backendNamed, hasDatasets, traceEndpointFor } from "./backend.ts";
+import { makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
 
 function tracer(): Tracer {
   return makeTracer("http://127.0.0.1:9/v1/traces", "pk-lf-test", "sk-lf-test", "lumen-test");
@@ -294,7 +295,8 @@ test("resetting keeps the settings and takes a new trace id", () => {
   expect(spanCount(fresh) == 0);
   expect(traceId(fresh) != traceId(used));
   expect(fresh.serviceName == used.serviceName);
-  expect(fresh.auth == used.auth);
+  expect(fresh.backend.authValue == used.backend.authValue);
+  expect(fresh.backend.name == used.backend.name);
 });
 
 // --- spans recorded elsewhere ---------------------------------------------------
@@ -352,4 +354,85 @@ test("a callee starts from an empty tracer in the same trace", () => {
   forChild = endSpan(forChild, below, "in", "out");
   let merged = tracerWithMoreSpans(parent, tracerSpans(forChild));
   expect(spanCount(merged) == 2);
+});
+
+// --- backends -----------------------------------------------------------------------
+
+test("langfuse authenticates with basic and asks for its ingestion header", () => {
+  let b = langfuseBackend("https://cloud.langfuse.com", "pk", "sk");
+  expect(b.authHeader == "Authorization");
+  // Against a value computed elsewhere, not against base64Encode itself: a
+  // test that encodes the same string with the same function passes however
+  // wrong the function is, and this header is the one thing a collector
+  // refuses the whole trace over.
+  expect(b.authValue == "Basic cGs6c2s=");
+  // Without this header a trace can take minutes to appear.
+  expect(b.extraHeader == "x-langfuse-ingestion-version");
+  expect(b.vendorPrefix == "langfuse");
+  expect(hasDatasets(b));
+});
+
+test("a plain collector gets no vendor header and no vendor attributes", () => {
+  let b = otlpBackend("http://collector:4318/v1/traces", "", "");
+  expect(b.authHeader == "");
+  expect(b.extraHeader == "");
+  expect(b.vendorPrefix == "");
+  // And no datasets: that is not an OpenTelemetry concept, so there is nowhere
+  // for evaluation cases to live.
+  expect(!hasDatasets(b));
+});
+
+test("a backend is chosen by name, not sniffed from a url", () => {
+  let lf = backendNamed("langfuse", "https://lf.example/api/public/otel/v1/traces", "pk", "sk");
+  expect(lf.name == "langfuse");
+  expect(lf.apiBase == "https://lf.example");
+
+  // A collector with a token takes it as a bearer; one without takes no
+  // header at all.
+  let withToken = backendNamed("otlp", "http://c:4318/v1/traces", "", "tok");
+  expect(withToken.authValue == "Bearer tok");
+  expect(backendNamed("otlp", "http://c:4318/v1/traces", "", "").authHeader == "");
+
+  // An unknown name sends nowhere rather than guessing.
+  expect(backendNamed("something-else", "http://x", "", "").name == "none");
+});
+
+test("the trace url is the backend's, whichever way it was given", () => {
+  let lf = langfuseBackend("https://lf.example", "pk", "sk");
+  expect(traceEndpointFor(lf, "https://lf.example") == "https://lf.example/api/public/otel/v1/traces");
+  // Already complete, so it is left alone rather than doubled.
+  expect(traceEndpointFor(lf, "https://lf.example/api/public/otel/v1/traces") == "https://lf.example/api/public/otel/v1/traces");
+  // A collector's path is its own and is never rewritten.
+  let otel = otlpBackend("http://c:4318/v1/traces", "", "");
+  expect(traceEndpointFor(otel, "http://c:4318/v1/traces") == "http://c:4318/v1/traces");
+});
+
+test("a plain collector still gets the standard attributes", () => {
+  let t = makeTracerFor(otlpBackend("http://c:4318/v1/traces", "", ""), "http://c:4318/v1/traces", "svc");
+  let s = startSpan("call", TRACE_TOOL, "");
+  t = endSpan(t, s, "in", "out");
+  let body = traceBody(t);
+  expect(body.indexOf("otel.span.kind") >= 0);
+  expect(body.indexOf("deployment.environment.name") >= 0);
+  // And none of the vendor's.
+  expect(body.indexOf("langfuse.") < 0);
+});
+
+test("langfuse still gets its own attributes", () => {
+  let t = makeTracer("https://lf.example/api/public/otel/v1/traces", "pk", "sk", "svc");
+  let s = startSpan("call", TRACE_TOOL, "");
+  t = endSpan(t, s, "in", "out");
+  let body = traceBody(t);
+  expect(body.indexOf("langfuse.observation.type") >= 0);
+  expect(body.indexOf("langfuse.observation.input") >= 0);
+});
+
+test("base64 matches known encodings, including both pad lengths", () => {
+  // Checked against values from another implementation. Encoding a string and
+  // comparing it to the same call proves nothing.
+  expect(base64Encode("abc") == "YWJj");
+  expect(base64Encode("ab") == "YWI=");
+  expect(base64Encode("a") == "YQ==");
+  expect(base64Encode("hello") == "aGVsbG8=");
+  expect(base64Encode("pk-lf-lumen-demo:sk-lf-lumen-demo") == "cGstbGYtbHVtZW4tZGVtbzpzay1sZi1sdW1lbi1kZW1v");
 });

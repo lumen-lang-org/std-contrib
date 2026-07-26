@@ -76,7 +76,7 @@ function main(): void {
   storeCredential(db, "mistral", apiKey, master, "2026-07-26");
 
   let traceRow: TraceConfigRow = {
-    id: "default", endpoint: collector,
+    id: "default", backend: "langfuse", endpoint: collector,
     publicKey: process.env("LANGFUSE_PUBLIC_KEY") ?? "pk-lf-lumen-demo",
     serviceName: "lumen-agents", environment: "evals", enabled: true,
   };

@@ -15,7 +15,8 @@
 
 import { Db } from "../plume/driver.ts";
 import { AgentRun, runAgentTraced, hasName } from "./run.ts";
-import { Tracer, traceId, tracerForCallee, flush, tracerWithMoreSpans, tracing, noTracer, resetTracer } from "../tracing/tracing.ts";
+import { TraceBackend, hasDatasets } from "../tracing/backend.ts";
+import { Tracer, traceId, tracerForCallee, tracerBackend, flush, tracerWithMoreSpans, tracing, noTracer, resetTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonText, jsonList, jsonStringMember, jsonUnescape } from "./scan.ts";
 
 // One case: what to ask, what a good answer looks like, and — when the case
@@ -87,17 +88,15 @@ const PASS_MARK: number = 0.7;
 
 // --- talking to Langfuse ---------------------------------------------------------
 
-// The API root, from the OTLP endpoint tracing already knows.
+// Where this backend keeps its cases, or "" when it keeps none.
 //
-// Derived rather than stored as its own column: the two are the same
-// deployment, and a second field is a second thing to get wrong. A collector
-// that is not Langfuse has no datasets, and this returns "" so the caller can
-// say so instead of building a URL that will 404.
-export function langfuseBase(endpoint: string): string {
-  let marker = "/api/public/otel/v1/traces";
-  let at = endpoint.indexOf(marker);
-  if (at < 0) { return ""; }
-  return endpoint.slice(0, at);
+// The backend says so rather than this file guessing from a URL. Datasets,
+// dataset runs and scores are not an OpenTelemetry concept, so a backend
+// either has an API for them or does not, and sniffing a path suffix was a
+// guess dressed up as a derivation.
+export function evalApiBase(backend: TraceBackend): string {
+  if (!hasDatasets(backend)) { return ""; }
+  return backend.apiBase;
 }
 
 function jsonHeaders(auth: string): Map<string, string> {
@@ -395,12 +394,14 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
   if (!tracing(tracer)) {
     return noEvals(dataset, runName, "tracing is not configured, and the cases live in Langfuse");
   }
-  let base = langfuseBase(tracer.endpoint);
+  let backend = tracerBackend(tracer);
+  let base = evalApiBase(backend);
   if (base == "") {
-    return noEvals(dataset, runName, "the trace endpoint is not a Langfuse instance, so it has no datasets");
+    return noEvals(dataset, runName, "the \"" + backend.name + "\" backend keeps no datasets, so there are no cases to run");
   }
+  let auth = backend.authValue;
 
-  let items = datasetItems(base, tracer.auth, dataset, maxItems);
+  let items = datasetItems(base, auth, dataset, maxItems);
   if (items.length == 0) {
     return noEvals(dataset, runName, "no cases in dataset \"" + dataset + "\"");
   }
@@ -429,7 +430,7 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
     // The trace goes up whatever happened: a case that failed to run is the
     // one someone most wants to look at.
     flush(tracerWithMoreSpans(caseTracer, answered.spans));
-    linkRunItem(base, tracer.auth, runName, items[i].id, caseTrace);
+    linkRunItem(base, auth, runName, items[i].id, caseTrace);
 
     // Judged only if it ran. A run that never reached the model has no answer
     // to score, and a 0 there would read as a wrong answer rather than no
@@ -445,7 +446,7 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
         scored = scored + 1;
         total = total + verdict.score;
         if (verdict.score >= PASS_MARK) { passed = passed + 1; }
-        postScore(base, tracer.auth, caseTrace, "correctness", verdict.score, verdict.reason);
+        postScore(base, auth, caseTrace, "correctness", verdict.score, verdict.reason);
       } else {
         why = verdict.reason;
       }
@@ -463,11 +464,11 @@ export function runEvals(db: Db, agentId: string, judgeAgentId: string, dataset:
     // answer that is right by the wrong route and an answer that is wrong are
     // different failures, and averaging them into one number hides both.
     if (items[i].expectedTools.length > 0) {
-      postScore(base, tracer.auth, caseTrace, "tool-use", toolScore,
+      postScore(base, auth, caseTrace, "tool-use", toolScore,
         missingReason("tools", missingTools, answered.calledTools));
     }
     if (items[i].expectedAgents.length > 0) {
-      postScore(base, tracer.auth, caseTrace, "delegation", agentScore,
+      postScore(base, auth, caseTrace, "delegation", agentScore,
         missingReason("agents", missingAgents, answered.calledAgents));
     }
 

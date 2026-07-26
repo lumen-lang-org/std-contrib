@@ -20,6 +20,8 @@
 //
 // Run: lumen test packages/tracing/tracing.test.ts
 
+import { TraceBackend, langfuseBackend, otlpBackend, noBackend, backendNamed, langfuseRootOf, base64Encode, traceEndpointFor, hasDatasets } from "./backend.ts";
+
 // One in-flight span. `parentId` is "" for the root.
 export type TraceSpan = {
   id: string,
@@ -35,7 +37,11 @@ export type Tracer = {
   traceId: string,
   spans: string[],
   endpoint: string,
-  auth: string,
+  // Which observability backend this goes to: how it authenticates, which
+  // extra header it wants, and whose attribute namespace it reads. A string
+  // of credentials was enough while there was one backend; naming the backend
+  // is what stops the vendor being assumed in three separate files.
+  backend: TraceBackend,
   serviceName: string,
   environment: string,
   sessionId: string,
@@ -108,43 +114,6 @@ function hexByte(v: int): string {
 
 // --- base64 -----------------------------------------------------------------
 
-const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-// Standard base64. Needed for the Basic auth header, which is the only place
-// this package encodes anything.
-export function base64Encode(s: string): string {
-  let out = "";
-  let i: int = 0;
-  while (i < s.length) {
-    let b0 = s.charCodeAt(i);
-    let b1: int = 0;
-    let b2: int = 0;
-    let have: int = 1;
-    if (i + 1 < s.length) { b1 = s.charCodeAt(i + 1); have = 2; }
-    if (i + 2 < s.length) { b2 = s.charCodeAt(i + 2); have = 3; }
-
-    out = out + B64_ALPHABET.charAt(b0 / 4);
-    out = out + B64_ALPHABET.charAt((b0 % 4) * 16 + b1 / 16);
-    if (have > 1) {
-      out = out + B64_ALPHABET.charAt((b1 % 16) * 4 + b2 / 64);
-    } else {
-      out = out + "=";
-    }
-    if (have > 2) {
-      out = out + B64_ALPHABET.charAt(b2 % 64);
-    } else {
-      out = out + "=";
-    }
-    i = i + 3;
-  }
-  return out;
-}
-
-// --- identifiers and time ----------------------------------------------------
-
-// OTLP wants a 32-hex-character trace id and a 16-hex-character span id — fixed
-// widths, not a UUID's dashed form. `crypto.randomBytes(n)` returns 2n hex
-// characters, so the sizes line up exactly.
 export function newTraceId(): string {
   return crypto.randomBytes(16);
 }
@@ -201,7 +170,7 @@ export function makeTracer(endpoint: string, publicKey: string, secretKey: strin
     traceId: newTraceId(),
     spans: none,
     endpoint: endpoint,
-    auth: "Basic " + base64Encode(publicKey + ":" + secretKey),
+    backend: langfuseBackend(langfuseRootOf(endpoint), publicKey, secretKey),
     serviceName: serviceName,
     environment: "production",
     sessionId: "",
@@ -212,7 +181,7 @@ export function makeTracer(endpoint: string, publicKey: string, secretKey: strin
 
 export function tracerWithEnvironment(t: Tracer, environment: string): Tracer {
   let out: Tracer = {
-    traceId: t.traceId, spans: t.spans, endpoint: t.endpoint, auth: t.auth,
+    traceId: t.traceId, spans: t.spans, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: environment,
     sessionId: t.sessionId, userId: t.userId,
   };
@@ -224,7 +193,7 @@ export function tracerWithEnvironment(t: Tracer, environment: string): Tracer {
 // value set only on the root would not be found.
 export function tracerWithSession(t: Tracer, sessionId: string, userId: string): Tracer {
   let out: Tracer = {
-    traceId: t.traceId, spans: t.spans, endpoint: t.endpoint, auth: t.auth,
+    traceId: t.traceId, spans: t.spans, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: t.environment,
     sessionId: sessionId, userId: userId,
   };
@@ -233,6 +202,31 @@ export function tracerWithSession(t: Tracer, sessionId: string, userId: string):
 
 export function traceId(t: Tracer): string {
   return t.traceId;
+}
+
+// The backend this tracer sends to. A caller doing more than sending spans —
+// fetching evaluation cases, posting scores — needs to know where its API is
+// and whether it has one.
+export function tracerBackend(t: Tracer): TraceBackend {
+  return t.backend;
+}
+
+// A tracer for a backend the caller has already chosen. `makeTracer` above is
+// this with a Langfuse backend built from a public and secret key, kept
+// because it is what every existing caller uses.
+export function makeTracerFor(backend: TraceBackend, endpoint: string, serviceName: string): Tracer {
+  let none: string[] = [];
+  let t: Tracer = {
+    traceId: newTraceId(),
+    spans: none,
+    endpoint: endpoint,
+    backend: backend,
+    serviceName: serviceName,
+    environment: "production",
+    sessionId: "",
+    userId: "",
+  };
+  return t;
 }
 
 // The encoded spans recorded so far.
@@ -257,7 +251,7 @@ export function tracerWithMoreSpans(t: Tracer, spans: string[]): Tracer {
     i = i + 1;
   }
   let out: Tracer = {
-    traceId: t.traceId, spans: all, endpoint: t.endpoint, auth: t.auth,
+    traceId: t.traceId, spans: all, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: t.environment,
     sessionId: t.sessionId, userId: t.userId,
   };
@@ -275,7 +269,7 @@ export function tracerWithMoreSpans(t: Tracer, spans: string[]): Tracer {
 export function tracerForCallee(t: Tracer): Tracer {
   let none: string[] = [];
   let out: Tracer = {
-    traceId: t.traceId, spans: none, endpoint: t.endpoint, auth: t.auth,
+    traceId: t.traceId, spans: none, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: t.environment,
     sessionId: t.sessionId, userId: t.userId,
   };
@@ -288,7 +282,7 @@ export function tracerForCallee(t: Tracer): Tracer {
 export function noTracer(): Tracer {
   let none: string[] = [];
   let t: Tracer = {
-    traceId: "", spans: none, endpoint: "", auth: "",
+    traceId: "", spans: none, endpoint: "", backend: noBackend(),
     serviceName: "", environment: "", sessionId: "", userId: "",
   };
   return t;
@@ -318,7 +312,7 @@ export function startSpan(name: string, kind: string, parentId: string): TraceSp
 function withSpan(t: Tracer, encoded: string): Tracer {
   let out: Tracer = {
     traceId: t.traceId, spans: [...t.spans, encoded], endpoint: t.endpoint,
-    auth: t.auth, serviceName: t.serviceName, environment: t.environment,
+    backend: t.backend, serviceName: t.serviceName, environment: t.environment,
     sessionId: t.sessionId, userId: t.userId,
   };
   return out;
@@ -327,15 +321,26 @@ function withSpan(t: Tracer, encoded: string): Tracer {
 // The attributes every span carries, whatever its kind.
 function baseAttrs(t: Tracer, span: TraceSpan, input: string, output: string, level: string, statusMessage: string): string[] {
   let attrs: string[] = [];
-  attrs = [...attrs, attrString("langfuse.observation.type", span.kind)];
-  attrs = [...attrs, attrString("langfuse.environment", t.environment)];
-  if (input != "") { attrs = [...attrs, attrString("langfuse.observation.input", input)]; }
-  if (output != "") { attrs = [...attrs, attrString("langfuse.observation.output", output)]; }
-  if (level != "" && level != TRACE_DEFAULT) {
-    attrs = [...attrs, attrString("langfuse.observation.level", level)];
-  }
-  if (statusMessage != "") {
-    attrs = [...attrs, attrString("langfuse.observation.status_message", statusMessage)];
+  // The standard attributes go to everyone: a collector that has never heard
+  // of this program still shows the span's name, kind and timing.
+  attrs = [...attrs, attrString("otel.span.kind", span.kind)];
+  attrs = [...attrs, attrString("deployment.environment.name", t.environment)];
+
+  // The vendor's namespace goes only to that vendor. Sending langfuse.* to a
+  // plain OpenTelemetry collector is harmless and pointless, and it puts every
+  // span's input and output on the wire a second time.
+  let vendor = t.backend.vendorPrefix;
+  if (vendor != "") {
+    attrs = [...attrs, attrString(vendor + ".observation.type", span.kind)];
+    attrs = [...attrs, attrString(vendor + ".environment", t.environment)];
+    if (input != "") { attrs = [...attrs, attrString(vendor + ".observation.input", input)]; }
+    if (output != "") { attrs = [...attrs, attrString(vendor + ".observation.output", output)]; }
+    if (level != "" && level != TRACE_DEFAULT) {
+      attrs = [...attrs, attrString(vendor + ".observation.level", level)];
+    }
+    if (statusMessage != "") {
+      attrs = [...attrs, attrString(vendor + ".observation.status_message", statusMessage)];
+    }
   }
   // Repeated on every span rather than the root alone: a collector filters
   // span by span, and the SDKs achieve this with a baggage processor that
@@ -394,12 +399,15 @@ export function endSpanFailed(t: Tracer, span: TraceSpan, input: string, message
 // reporting something beyond input and output has somewhere to put it.
 export function endGeneration(t: Tracer, span: TraceSpan, model: string, temperature: number, maxTokens: int, input: string, output: string, inputTokens: int, outputTokens: int): Tracer {
   let attrs = baseAttrs(t, span, input, output, TRACE_DEFAULT, "");
-  attrs = [...attrs, attrString("langfuse.observation.model.name", model)];
-  attrs = [...attrs, attrString("langfuse.observation.model.parameters",
-    "{\"temperature\":" + `${temperature}` + ",\"max_tokens\":" + `${maxTokens}` + "}")];
-  attrs = [...attrs, attrString("langfuse.observation.usage_details",
-    "{\"input\":" + `${inputTokens}` + ",\"output\":" + `${outputTokens}`
-    + ",\"total\":" + `${inputTokens + outputTokens}` + "}")];
+  let vendor = t.backend.vendorPrefix;
+  if (vendor != "") {
+    attrs = [...attrs, attrString(vendor + ".observation.model.name", model)];
+    attrs = [...attrs, attrString(vendor + ".observation.model.parameters",
+      "{\"temperature\":" + `${temperature}` + ",\"max_tokens\":" + `${maxTokens}` + "}")];
+    attrs = [...attrs, attrString(vendor + ".observation.usage_details",
+      "{\"input\":" + `${inputTokens}` + ",\"output\":" + `${outputTokens}`
+      + ",\"total\":" + `${inputTokens + outputTokens}` + "}")];
+  }
   // The standard OpenTelemetry attribute for a model call. A collector that
   // knows nothing of Langfuse still classifies the span correctly from this.
   attrs = [...attrs, attrString("gen_ai.operation.name", "chat")];
@@ -447,14 +455,15 @@ export function flush(t: Tracer): TraceResult {
     let empty: TraceResult = { ok: true, status: 0, error: "" };
     return empty;
   }
+  // The headers are the backend's, not this file's. A collector wanting no
+  // credential gets no Authorization header rather than an empty one, and a
+  // vendor's extra header is sent only to that vendor.
   let headers = new Map<string, string>();
   headers.set("Content-Type", "application/json");
-  headers.set("Authorization", t.auth);
-  // Without this header Langfuse may take minutes to process a trace; with it
-  // the trace is available as soon as it lands.
-  headers.set("x-langfuse-ingestion-version", "4");
+  if (t.backend.authHeader != "") { headers.set(t.backend.authHeader, t.backend.authValue); }
+  if (t.backend.extraHeader != "") { headers.set(t.backend.extraHeader, t.backend.extraValue); }
 
-  let res = http.request(t.endpoint, "POST", traceBody(t), headers);
+  let res = http.request(traceEndpointFor(t.backend, t.endpoint), "POST", traceBody(t), headers);
   if (res.status < 200 || res.status >= 300) {
     let failed: TraceResult = {
       ok: false,
@@ -472,7 +481,7 @@ export function flush(t: Tracer): TraceResult {
 export function resetTracer(t: Tracer): Tracer {
   let none: string[] = [];
   let out: Tracer = {
-    traceId: newTraceId(), spans: none, endpoint: t.endpoint, auth: t.auth,
+    traceId: newTraceId(), spans: none, endpoint: t.endpoint, backend: t.backend,
     serviceName: t.serviceName, environment: t.environment,
     sessionId: t.sessionId, userId: t.userId,
   };

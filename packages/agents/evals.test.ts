@@ -7,7 +7,8 @@
 //
 //   cd packages/agents && lumen test evals.test.ts
 
-import { EvalItem, Verdict, langfuseBase, readVerdict, judgePrompt, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
+import { langfuseBackend, otlpBackend, noBackend } from "../tracing/backend.ts";
+import { EvalItem, Verdict, evalApiBase, readVerdict, judgePrompt, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
 
 function item(question: string, expected: string): EvalItem {
   let none: string[] = [];
@@ -17,16 +18,17 @@ function item(question: string, expected: string): EvalItem {
 
 // --- where the datasets live ------------------------------------------------------
 
-test("the api root is the trace endpoint without the otlp path", () => {
-  expect(langfuseBase("http://localhost:3000/api/public/otel/v1/traces") == "http://localhost:3000");
-  expect(langfuseBase("https://cloud.langfuse.com/api/public/otel/v1/traces") == "https://cloud.langfuse.com");
+test("the backend says where its cases live", () => {
+  // Asked, not sniffed from a URL: whether a backend has datasets is a fact
+  // about the backend, and a path suffix is a guess.
+  expect(evalApiBase(langfuseBackend("http://localhost:3000", "pk", "sk")) == "http://localhost:3000");
 });
 
-test("a collector that is not langfuse has no datasets", () => {
-  // Reported as absent rather than guessed at: building a URL that 404s would
+test("a backend with no datasets says so rather than offering a url", () => {
+  // Datasets are not an OpenTelemetry concept. Building a URL that 404s would
   // be a worse answer than saying there is nowhere to look.
-  expect(langfuseBase("http://otel-collector:4318/v1/traces") == "");
-  expect(langfuseBase("") == "");
+  expect(evalApiBase(otlpBackend("http://otel-collector:4318/v1/traces", "", "")) == "");
+  expect(evalApiBase(noBackend()) == "");
 });
 
 // --- reading a judge --------------------------------------------------------------
