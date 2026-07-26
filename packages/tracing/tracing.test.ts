@@ -2,7 +2,7 @@
 // the document is valid JSON, that the OTLP shapes are exactly what a collector
 // expects, and that ids are the widths the protocol fixes.
 
-import { makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, base64Encode, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN } from "./tracing.ts";
+import { makeTracer, tracerWithEnvironment, tracerWithSession, traceId, spanCount, startSpan, endSpan, endSpanFailed, endGeneration, endTool, traceBody, flush, resetTracer, jsonString, base64Encode, newTraceId, newSpanId, nowNanos, TRACE_SPAN, TRACE_GENERATION, TRACE_TOOL, TRACE_CHAIN, TRACE_AGENT, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing } from "./tracing.ts";
 
 function tracer(): Tracer {
   return makeTracer("http://127.0.0.1:9/v1/traces", "pk-lf-test", "sk-lf-test", "lumen-test");
@@ -295,4 +295,61 @@ test("resetting keeps the settings and takes a new trace id", () => {
   expect(traceId(fresh) != traceId(used));
   expect(fresh.serviceName == used.serviceName);
   expect(fresh.auth == used.auth);
+});
+
+// --- spans recorded elsewhere ---------------------------------------------------
+
+test("a callee's spans can be folded into the caller's tracer", () => {
+  // A sub-agent runs as a separate call and cannot hand a tracer back, because
+  // records are immutable and its additions are on its own copy.
+  let parent = makeTracer("http://collector", "pk", "sk", "svc");
+  let root = startSpan("parent", TRACE_AGENT, "");
+  parent = endSpan(parent, root, "in", "out");
+
+  let child = makeTracer("http://collector", "pk", "sk", "svc");
+  let below = startSpan("child", TRACE_AGENT, root.id);
+  child = endSpan(child, below, "in", "out");
+  expect(spanCount(child) == 1);
+
+  let merged = tracerWithMoreSpans(parent, tracerSpans(child));
+  expect(spanCount(merged) == 2);
+  // And the child still names the parent it was opened under.
+  expect(traceBody(merged).indexOf(root.id) >= 0);
+});
+
+test("folding in nothing changes nothing", () => {
+  let t = makeTracer("http://collector", "pk", "sk", "svc");
+  let none: string[] = [];
+  expect(spanCount(tracerWithMoreSpans(t, none)) == 0);
+});
+
+test("a tracer that is not configured sends nothing", () => {
+  // Tracing is off unless configured, and a caller should not have to ask:
+  // the same code threads a real tracer or this one.
+  let off = noTracer();
+  expect(!tracing(off));
+  expect(tracing(makeTracer("http://collector", "pk", "sk", "svc")));
+  // Flushing it makes no request and reports no failure.
+  expect(flush(off).ok);
+});
+
+test("a callee starts from an empty tracer in the same trace", () => {
+  // Handing a callee your own tracer means it accumulates on top of your
+  // spans and hands them back with its own — folding that in records
+  // everything below the call twice. Observed as a duplicated sub-agent
+  // subtree in a real run.
+  let parent = makeTracer("http://collector", "pk", "sk", "svc");
+  let root = startSpan("parent", TRACE_AGENT, "");
+  parent = endSpan(parent, root, "in", "out");
+  expect(spanCount(parent) == 1);
+
+  let forChild = tracerForCallee(parent);
+  expect(spanCount(forChild) == 0);
+  // Same trace, or the child's work lands in a different tree entirely.
+  expect(traceId(forChild) == traceId(parent));
+
+  let below = startSpan("child", TRACE_AGENT, root.id);
+  forChild = endSpan(forChild, below, "in", "out");
+  let merged = tracerWithMoreSpans(parent, tracerSpans(forChild));
+  expect(spanCount(merged) == 2);
 });

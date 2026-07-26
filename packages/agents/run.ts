@@ -27,6 +27,7 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
 import { jsonText } from "./scan.ts";
+import { Tracer, TraceSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL } from "../tracing/tracing.ts";
 
 // How many times a run may go back to the model after calling tools.
 //
@@ -96,16 +97,25 @@ export type AgentRun = {
   // What could not be mounted. An agent whose server is down still answers,
   // and whoever reads the run should know it answered with one hand tied.
   notes: string[],
+  // The trace this run recorded, encoded, including everything its children
+  // recorded below it. Empty when tracing is off, which is the default.
+  //
+  // Spans rather than a tracer because records are immutable: a child cannot
+  // hand its tracer back, so it hands back what it recorded and the caller
+  // folds it in. The top of the run flushes.
+  spans: string[],
 };
 
 function failed(agentName: string, why: string): AgentRun {
   let noContext: Turn[] = [];
   let noSteps: AgentStep[] = [];
   let noNotes: string[] = [];
+  let noSpans: string[] = [];
   let r: AgentRun = {
     ok: false, text: "", body: "", status: 0,
     agentName: agentName, promptVersion: 0, modelApiName: "", error: why,
     context: noContext, steps: noSteps, stopReason: "refused", rounds: 0, notes: noNotes,
+    spans: noSpans,
   };
   return r;
 }
@@ -114,7 +124,16 @@ function failed(agentName: string, why: string): AgentRun {
 // because "it did not answer" is the least useful thing a caller can be told.
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
-  return runAgentAt(db, agentId, userText, master, 0, path);
+  return runAgentAt(db, agentId, userText, master, 0, path, noTracer(), "");
+}
+
+// The same run, traced. The tracer carries the collector's address and the
+// trace id; every span this run and its children open hangs under `parentSpan`,
+// which is "" at the top. The caller flushes — a run does not decide when a
+// trace is sent, and a child must not send half of one.
+export function runAgentTraced(db: Db, agentId: string, userText: string, master: string, tracer: Tracer): AgentRun {
+  let path: string[] = [];
+  return runAgentAt(db, agentId, userText, master, 0, path, tracer, "");
 }
 
 // The same run, at a depth, knowing which agents are already above it.
@@ -123,7 +142,7 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
 // re-enter one is refused by name. Passed rather than tracked in a global: a
 // server runs handlers on many threads, and one run's path is nothing to do
 // with another's.
-export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[]): AgentRun {
+export function runAgentAt(db: Db, agentId: string, userText: string, master: string, depth: int, path: string[], tracer: Tracer, parentSpan: string): AgentRun {
   // Read each row on its own rather than through agentsFull. A relation that
   // matches nothing is null, and a run needs its prompt, config and model to
   // exist — so a dangling reference should be named, not turned into a parse
@@ -209,12 +228,30 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let last: Completion = { ok: false, text: "", status: 0, error: "" };
   let rounds: int = 0;
 
+  // One span for the whole agent, and everything below hangs off it — the
+  // model calls, the tool calls, and a delegated child's entire tree. That is
+  // the shape the run log cannot hold: a row has no parent.
+  let trace = tracer;
+  let on = tracing(tracer);
+  let agentSpan = startSpan(agent.agentName, TRACE_AGENT, parentSpan);
+
   while (rounds < MAX_TOOL_STEPS) {
+    let modelSpan = startSpan(model.apiName, TRACE_GENERATION, agentSpan.id);
     last = completeTurns(model, configRow, prompt.body, context, specs, key);
     rounds = rounds + 1;
     if (!last.ok) {
-      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds);
+      // Token counts are not read back: a failed call has none, and inventing
+      // zeroes would put a real-looking number on a request that never ran.
+      if (on) {
+        trace = endSpanFailed(trace, modelSpan, userText, last.error);
+        trace = endSpanFailed(trace, agentSpan, userText, last.error);
+      }
+      let refused = report(agent, prompt, model, notes, context, steps, last, "", "refused", rounds, spansOf(on, trace));
       return refused;
+    }
+    if (on) {
+      trace = endGeneration(trace, modelSpan, model.apiName, configRow.temperature, configRow.maxTokens,
+        userText, replyText(model.provider, last.text), 0, 0);
     }
 
     let calls = toolCallsFrom(model.provider, last.text);
@@ -225,7 +262,8 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // `said.text` so a reply in an unrecognised shape is handed back whole
       // instead of as an empty answer.
       answer = replyText(model.provider, last.text);
-      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds);
+      if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
+      return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace));
     }
 
     context.push(assistantTurn(said.text, calls));
@@ -236,7 +274,8 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // for an unbounded number of them, so without this a single round could
       // run arbitrarily many side effects.
       if (steps.length >= MAX_TOOL_STEPS) {
-        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds);
+        if (on) { trace = endSpan(trace, agentSpan, userText, said.text); }
+        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace));
       }
       // A child first: a delegation and a tool call are the same thing to the
       // model, and they should be the same thing to the trace.
@@ -244,12 +283,18 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let resultText = "";
       let resultOk = false;
       let from = serverOf(mounted, calls[i].name);
+      let callSpan = startSpan(calls[i].name, TRACE_TOOL, agentSpan.id);
       if (child.id != "") {
         let question = jsonText(calls[i].args, "question");
         if (question == "") {
           resultText = "Ask a question: this agent takes {\"question\":\"...\"} and cannot see your conversation.";
         } else {
-          let asked = runAgentAt(db, child.id, question, master, deeper, below);
+          // The child opens its own agent span under this call's span, so its
+          // model calls and tools sit inside the delegation that caused them.
+          // It cannot hand its tracer back — records are immutable — so it
+          // hands back what it recorded and this run folds it in.
+          let asked = runAgentAt(db, child.id, question, master, deeper, below, tracerForCallee(trace), callSpan.id);
+          if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }
           resultOk = asked.ok;
           resultText = asked.text;
           if (!asked.ok) {
@@ -285,6 +330,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = answered.ok;
         resultText = answered.text;
       }
+      if (on) { trace = endTool(trace, callSpan, calls[i].args, resultText, resultOk); }
       let step: AgentStep = {
         index: steps.length,
         tool: calls[i].name,
@@ -301,7 +347,19 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     }
   }
 
-  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds);
+  if (on) { trace = endSpan(trace, agentSpan, userText, answer); }
+  return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace));
+}
+
+// A run's spans, or nothing when tracing is off. Reading them from a tracer
+// that recorded none is harmless; the guard is here so the intent is legible
+// at the call sites rather than implied.
+function spansOf(on: bool, t: Tracer): string[] {
+  if (!on) {
+    let none: string[] = [];
+    return none;
+  }
+  return tracerSpans(t);
 }
 
 // How many of a run's tool calls failed.
@@ -351,7 +409,7 @@ function childFor(children: AgentRow[], name: string): AgentRow {
 
 // One place builds the result, so a run that ended four different ways still
 // reports which agent, prompt and model served it.
-function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int): AgentRun {
+function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: string[]): AgentRun {
   let why = last.error;
   if (stopReason == "max_steps" && why == "") {
     why = "stopped after " + `${MAX_TOOL_STEPS}` + " tool steps without a final answer";
@@ -370,6 +428,7 @@ function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: stri
     stopReason: stopReason,
     rounds: rounds,
     notes: notes,
+    spans: spans,
   };
   return out;
 }

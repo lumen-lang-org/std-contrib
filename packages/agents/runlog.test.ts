@@ -47,10 +47,12 @@ function sampleRun(withSteps: int): AgentRun {
   }
   let context: Turn[] = [];
   let notes: string[] = [];
+  let spans: string[] = [];
   let r: AgentRun = {
     ok: true, text: "37 units in Rotterdam.", body: "{}", status: 200,
     agentName: "parts-desk", promptVersion: 3, modelApiName: "mistral-small-latest",
     error: "", context: context, steps: steps, stopReason: "final", rounds: 2, notes: notes,
+    spans: spans,
   };
   return r;
 }
@@ -113,11 +115,13 @@ test("a failed run is logged like any other", () => {
   let steps: AgentStep[] = [];
   let context: Turn[] = [];
   let notes: string[] = ["parts is disabled"];
+  let spans: string[] = [];
   let bad: AgentRun = {
     ok: false, text: "", body: "", status: 0,
     agentName: "parts-desk", promptVersion: 3, modelApiName: "",
     error: "no usable credential for mistral",
     context: context, steps: steps, stopReason: "refused", rounds: 0, notes: notes,
+    spans: spans,
   };
   let id = recordRun(database, "a1", "anything", bad);
   expect(id != "");
