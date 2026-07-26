@@ -12,7 +12,47 @@ export type Completion = {
   text: string,
   status: int,
   error: string,
+  // What the provider said this cost. Zero when it did not say — which is not
+  // the same as zero tokens, and `counted` is how a caller tells them apart.
+  inputTokens: int,
+  outputTokens: int,
+  counted: bool,
 };
+
+// The token counts a reply reports.
+//
+// Read here because this is the only place that sees the provider's reply. A
+// collector can price tokens and chart them; it cannot invent them, and a model
+// whose tokenizer it does not know is charted at zero forever.
+export type Usage = {
+  inputTokens: int,
+  outputTokens: int,
+  counted: bool,
+};
+
+// The counts out of a reply. Two spellings, because the providers disagree:
+// OpenAI and Mistral say prompt_tokens and completion_tokens, Anthropic says
+// input_tokens and output_tokens.
+export function usageFrom(provider: string, body: string): Usage {
+  let none: Usage = { inputTokens: 0, outputTokens: 0, counted: false };
+  let usage = jsonRaw(body, "usage");
+  if (usage == "") { return none; }
+
+  let inKey = "prompt_tokens";
+  let outKey = "completion_tokens";
+  if (provider == "anthropic") { inKey = "input_tokens"; outKey = "output_tokens"; }
+
+  let inRaw = jsonRaw(usage, inKey);
+  let outRaw = jsonRaw(usage, outKey);
+  if (inRaw == "" && outRaw == "") { return none; }
+
+  let out: Usage = {
+    inputTokens: parseInt(inRaw) ?? 0,
+    outputTokens: parseInt(outRaw) ?? 0,
+    counted: true,
+  };
+  return out;
+}
 
 // Where a provider's embedding endpoint lives. Empty when this does not know
 // of one, which is not the same as the provider having none.
@@ -412,27 +452,31 @@ export function complete(model: ModelRow, config: ModelConfigRow, systemPrompt: 
 export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string): Completion {
   let endpoint = chatEndpoint(model.provider);
   if (endpoint == "") {
-    let unknown: Completion = { ok: false, text: "", status: 0, error: "no endpoint for provider \"" + model.provider + "\"" };
+    let unknown: Completion = { ok: false, text: "", status: 0, error: "no endpoint for provider \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
     return unknown;
   }
   if (!model.enabled) {
-    let off: Completion = { ok: false, text: "", status: 0, error: model.label + " is disabled" };
+    let off: Completion = { ok: false, text: "", status: 0, error: model.label + " is disabled", inputTokens: 0, outputTokens: 0, counted: false };
     return off;
   }
   if (apiKey == "") {
-    let keyless: Completion = { ok: false, text: "", status: 0, error: "no API key for " + model.provider };
+    let keyless: Completion = { ok: false, text: "", status: 0, error: "no API key for " + model.provider, inputTokens: 0, outputTokens: 0, counted: false };
     return keyless;
   }
 
   let res = http.request(endpoint, "POST", requestBody(model, config, systemPrompt, turns, tools), authHeaders(model.provider, apiKey));
   if (!res.ok) {
-    let dead: Completion = { ok: false, text: "", status: 0, error: "no answer from " + endpoint };
+    let dead: Completion = { ok: false, text: "", status: 0, error: "no answer from " + endpoint, inputTokens: 0, outputTokens: 0, counted: false };
     return dead;
   }
   if (res.status != 200) {
-    let refused: Completion = { ok: false, text: res.body, status: res.status, error: "HTTP " + `${res.status}` };
+    let refused: Completion = { ok: false, text: res.body, status: res.status, error: "HTTP " + `${res.status}`, inputTokens: 0, outputTokens: 0, counted: false };
     return refused;
   }
-  let answered: Completion = { ok: true, text: res.body, status: 200, error: "" };
+  let counts = usageFrom(model.provider, res.body);
+  let answered: Completion = {
+    ok: true, text: res.body, status: 200, error: "",
+    inputTokens: counts.inputTokens, outputTokens: counts.outputTokens, counted: counts.counted,
+  };
   return answered;
 }

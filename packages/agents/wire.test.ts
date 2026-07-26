@@ -7,7 +7,7 @@
 //
 //   cd packages/agents && lumen test wire.test.ts
 
-import { ToolSpec, Turn, ToolCall, toolSpec, toolCall, userTurn, assistantTurn, toolTurn, toolsJson, messagesJson, toolCallsFrom, assistantText, replyText } from "./provider.ts";
+import { ToolSpec, Turn, ToolCall, toolSpec, toolCall, userTurn, assistantTurn, toolTurn, toolsJson, messagesJson, toolCallsFrom, assistantText, replyText, usageFrom } from "./provider.ts";
 
 function tools(): ToolSpec[] {
   let out: ToolSpec[] = [
@@ -179,4 +179,36 @@ test("reading a reply still works as it did before tools existed", () => {
   expect(replyText("mistral", "{\"choices\":[{\"message\":{\"content\":\"42\"}}]}") == "42");
   expect(replyText("anthropic", "{\"content\":[{\"type\":\"text\",\"text\":\"42\"}]}") == "42");
   expect(replyText("mistral", "{\"unexpected\":true}") == "{\"unexpected\":true}");
+});
+
+// --- what a call cost -----------------------------------------------------------------
+
+test("token counts are read from a reply", () => {
+  // Only this layer sees the provider's reply. A collector prices tokens; it
+  // cannot invent them, and a model whose tokenizer it does not know is
+  // charted at zero forever.
+  let mistral = "{\"usage\":{\"prompt_tokens\":412,\"completion_tokens\":58,\"total_tokens\":470},\"choices\":[]}";
+  let u = usageFrom("mistral", mistral);
+  expect(u.counted);
+  expect(u.inputTokens == 412);
+  expect(u.outputTokens == 58);
+});
+
+test("anthropic spells them differently", () => {
+  let anthropic = "{\"usage\":{\"input_tokens\":91,\"output_tokens\":17},\"content\":[]}";
+  let u = usageFrom("anthropic", anthropic);
+  expect(u.counted);
+  expect(u.inputTokens == 91);
+  expect(u.outputTokens == 17);
+});
+
+test("a reply that says nothing about tokens is not zero tokens", () => {
+  // The difference matters to anything that adds them up: unknown and none
+  // are not the same, and `counted` is how a caller tells them apart.
+  let u = usageFrom("mistral", "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}");
+  expect(!u.counted);
+  expect(u.inputTokens == 0);
+
+  // A usage object with neither key is the same as none.
+  expect(!usageFrom("mistral", "{\"usage\":{\"something_else\":3}}").counted);
 });
