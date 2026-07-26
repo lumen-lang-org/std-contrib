@@ -351,9 +351,22 @@ from — those are different problems, and grading anyway would hide one. A judg
 answering in prose has not judged, which is not the same as scoring zero.
 
 **The backend is a row, not an assumption.** `trace_config.backend` names it —
-`"langfuse"` or `"otlp"` — and the tracing package turns that name into how a
-request authenticates, which extra header it wants, and whose attribute
-namespace it reads. Against a plain OpenTelemetry collector the same run
+`langfuse`, `otlp`, `braintrust`, `langsmith`, `phoenix`, `arize` — and the
+tracing package turns that name into how a request authenticates, which extra
+headers it wants, which attribute scheme it reads, and which encoding it takes.
+
+Researching five vendors changed the design twice. One extra header was not
+enough: Arize AX wants `space_id` and `api_key` together, so extras are a list.
+And an attribute *prefix* was the wrong abstraction entirely — OpenInference
+names things by meaning, not by vendor (`openinference.span.kind`,
+`input.value`, `llm.model_name`), which no prefix substitution reaches. What
+varies is the whole scheme.
+
+Sending to a real Phoenix then found a third thing, which no amount of reading
+had: it answers `415 Unsupported content type: application/json`. OTLP defines
+a JSON mapping and a protobuf one, and a receiver may implement either. This
+package writes JSON, so a protobuf-only backend is refused before the request
+is made rather than after someone else's server rejects it. Against a plain OpenTelemetry collector the same run
 produces the same 15-span tree with the standard `gen_ai.*` attributes and no
 `langfuse.*` at all; against Langfuse it carries both. Datasets are the one
 thing that does not generalise — they are not an OpenTelemetry concept, so a

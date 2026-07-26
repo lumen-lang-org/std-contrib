@@ -20,7 +20,7 @@
 //
 // Run: lumen test packages/tracing/tracing.test.ts
 
-import { TraceBackend, langfuseBackend, otlpBackend, noBackend, backendNamed, langfuseRootOf, base64Encode, traceEndpointFor, hasDatasets } from "./backend.ts";
+import { TraceBackend, TraceHeader, langfuseBackend, otlpBackend, phoenixBackend, braintrustBackend, langsmithBackend, arizeBackend, noBackend, backendNamed, langfuseRootOf, base64Encode, traceEndpointFor, hasDatasets, canSend, WIRE_JSON, WIRE_PROTOBUF, ATTRS_LANGFUSE, ATTRS_OPENINFERENCE, ATTRS_NONE } from "./backend.ts";
 
 // One in-flight span. `parentId` is "" for the root.
 export type TraceSpan = {
@@ -326,20 +326,37 @@ function baseAttrs(t: Tracer, span: TraceSpan, input: string, output: string, le
   attrs = [...attrs, attrString("otel.span.kind", span.kind)];
   attrs = [...attrs, attrString("deployment.environment.name", t.environment)];
 
-  // The vendor's namespace goes only to that vendor. Sending langfuse.* to a
-  // plain OpenTelemetry collector is harmless and pointless, and it puts every
-  // span's input and output on the wire a second time.
-  let vendor = t.backend.vendorPrefix;
-  if (vendor != "") {
-    attrs = [...attrs, attrString(vendor + ".observation.type", span.kind)];
-    attrs = [...attrs, attrString(vendor + ".environment", t.environment)];
-    if (input != "") { attrs = [...attrs, attrString(vendor + ".observation.input", input)]; }
-    if (output != "") { attrs = [...attrs, attrString(vendor + ".observation.output", output)]; }
+  // The vendor's scheme goes only to a backend that reads it. Sending one a
+  // backend does not know is harmless and pointless, and it puts every span's
+  // input and output on the wire a second time.
+  let style = t.backend.attributeStyle;
+
+  if (style == ATTRS_LANGFUSE) {
+    attrs = [...attrs, attrString("langfuse.observation.type", span.kind)];
+    attrs = [...attrs, attrString("langfuse.environment", t.environment)];
+    if (input != "") { attrs = [...attrs, attrString("langfuse.observation.input", input)]; }
+    if (output != "") { attrs = [...attrs, attrString("langfuse.observation.output", output)]; }
     if (level != "" && level != TRACE_DEFAULT) {
-      attrs = [...attrs, attrString(vendor + ".observation.level", level)];
+      attrs = [...attrs, attrString("langfuse.observation.level", level)];
     }
     if (statusMessage != "") {
-      attrs = [...attrs, attrString(vendor + ".observation.status_message", statusMessage)];
+      attrs = [...attrs, attrString("langfuse.observation.status_message", statusMessage)];
+    }
+  }
+
+  // OpenInference names attributes by what they mean rather than by who reads
+  // them: the kind is namespaced, the input and output are not, and the kinds
+  // themselves are a fixed vocabulary in capitals. None of that is reachable
+  // by pasting a prefix, which is why the backend selects a scheme.
+  if (style == ATTRS_OPENINFERENCE) {
+    attrs = [...attrs, attrString("openinference.span.kind", openInferenceKind(span.kind))];
+    if (input != "") {
+      attrs = [...attrs, attrString("input.value", input)];
+      attrs = [...attrs, attrString("input.mime_type", "text/plain")];
+    }
+    if (output != "") {
+      attrs = [...attrs, attrString("output.value", output)];
+      attrs = [...attrs, attrString("output.mime_type", "text/plain")];
     }
   }
   // Repeated on every span rather than the root alone: a collector filters
@@ -399,14 +416,22 @@ export function endSpanFailed(t: Tracer, span: TraceSpan, input: string, message
 // reporting something beyond input and output has somewhere to put it.
 export function endGeneration(t: Tracer, span: TraceSpan, model: string, temperature: number, maxTokens: int, input: string, output: string, inputTokens: int, outputTokens: int): Tracer {
   let attrs = baseAttrs(t, span, input, output, TRACE_DEFAULT, "");
-  let vendor = t.backend.vendorPrefix;
-  if (vendor != "") {
-    attrs = [...attrs, attrString(vendor + ".observation.model.name", model)];
-    attrs = [...attrs, attrString(vendor + ".observation.model.parameters",
+  let style = t.backend.attributeStyle;
+  if (style == ATTRS_LANGFUSE) {
+    attrs = [...attrs, attrString("langfuse.observation.model.name", model)];
+    attrs = [...attrs, attrString("langfuse.observation.model.parameters",
       "{\"temperature\":" + `${temperature}` + ",\"max_tokens\":" + `${maxTokens}` + "}")];
-    attrs = [...attrs, attrString(vendor + ".observation.usage_details",
+    attrs = [...attrs, attrString("langfuse.observation.usage_details",
       "{\"input\":" + `${inputTokens}` + ",\"output\":" + `${outputTokens}`
       + ",\"total\":" + `${inputTokens + outputTokens}` + "}")];
+  }
+  if (style == ATTRS_OPENINFERENCE) {
+    attrs = [...attrs, attrString("llm.model_name", model)];
+    attrs = [...attrs, attrString("llm.invocation_parameters",
+      "{\"temperature\":" + `${temperature}` + ",\"max_tokens\":" + `${maxTokens}` + "}")];
+    attrs = [...attrs, attrInt("llm.token_count.prompt", inputTokens)];
+    attrs = [...attrs, attrInt("llm.token_count.completion", outputTokens)];
+    attrs = [...attrs, attrInt("llm.token_count.total", inputTokens + outputTokens)];
   }
   // The standard OpenTelemetry attribute for a model call. A collector that
   // knows nothing of Langfuse still classifies the span correctly from this.
@@ -429,6 +454,17 @@ export function endTool(t: Tracer, span: TraceSpan, input: string, output: strin
   attrs = [...attrs, attrString("gen_ai.operation.name", "execute_tool")];
   attrs = [...attrs, attrString("gen_ai.tool.name", span.name)];
   return withSpan(t, encodeSpan(t, span, nowNanos(), attrs, !ok, message));
+}
+
+// This package's span kinds in OpenInference's vocabulary, which is a fixed
+// list in capitals. `span` has no equivalent and becomes CHAIN, which is what
+// OpenInference calls a step that is neither a model call nor a tool.
+export function openInferenceKind(kind: string): string {
+  if (kind == TRACE_GENERATION) { return "LLM"; }
+  if (kind == TRACE_TOOL) { return "TOOL"; }
+  if (kind == TRACE_AGENT) { return "AGENT"; }
+  if (kind == TRACE_RETRIEVER) { return "RETRIEVER"; }
+  return "CHAIN";
 }
 
 // --- export --------------------------------------------------------------------
@@ -455,13 +491,28 @@ export function flush(t: Tracer): TraceResult {
     let empty: TraceResult = { ok: true, status: 0, error: "" };
     return empty;
   }
+  // Refused here rather than at the far end. This package writes OTLP's JSON
+  // mapping; a backend implementing only the protobuf one answers 415, and
+  // "unsupported content type" from someone else's server is a worse account
+  // of what happened than this.
+  if (!canSend(t.backend)) {
+    let wrongWire: TraceResult = {
+      ok: false, status: 0,
+      error: "the " + t.backend.name + " backend accepts only protobuf-encoded OTLP, and this writes JSON",
+    };
+    return wrongWire;
+  }
   // The headers are the backend's, not this file's. A collector wanting no
   // credential gets no Authorization header rather than an empty one, and a
   // vendor's extra header is sent only to that vendor.
   let headers = new Map<string, string>();
   headers.set("Content-Type", "application/json");
   if (t.backend.authHeader != "") { headers.set(t.backend.authHeader, t.backend.authValue); }
-  if (t.backend.extraHeader != "") { headers.set(t.backend.extraHeader, t.backend.extraValue); }
+  let h: int = 0;
+  while (h < t.backend.extraHeaders.length) {
+    headers.set(t.backend.extraHeaders[h].name, t.backend.extraHeaders[h].value);
+    h = h + 1;
+  }
 
   let res = http.request(traceEndpointFor(t.backend, t.endpoint), "POST", traceBody(t), headers);
   if (res.status < 200 || res.status >= 300) {
