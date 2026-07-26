@@ -55,12 +55,21 @@ makes a live stream arrive in lumps minutes late.
 says nothing for a minute or two; `: ping` costs nothing and every client
 ignores it.
 
-## A compiler limit worth knowing
+## A workaround for an unreduced compiler bug
 
 `serveEvents` puts its body in a top-level function rather than the closure it
-wants to be. A captured parameter can be *passed along* from an inner function
-but not *called* from one, so the callback is threaded through as an argument.
-The websocket package has the same shape for the same reason.
+wants to be, because writing it inline makes the native backend reject the
+generated code — it reports "likely a Lumen compiler bug; please report it".
+
+**The trigger is not understood.** A closure that captures and calls a
+parameter compiles fine, and so does one doing it inside `net.createServer`'s
+callback. Both were tried after the fact, and both disprove the tidy
+explanation this file used to carry. Something narrower is at fault and nobody
+has reduced it.
+
+This is recorded as an open bug rather than a design decision, because a
+plausible-sounding rationale for a workaround is worse than no rationale: it
+stops the next person looking.
 
 ## Testing
 
