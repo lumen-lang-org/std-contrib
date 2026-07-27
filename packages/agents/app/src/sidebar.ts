@@ -74,6 +74,8 @@ export class ConsoleSidebar extends LitElement {
       </nav>
       <div class="thread" style="margin: 0 8px 4px" @click=${() =>
         this.dispatchEvent(new CustomEvent("open-knowledge"))}>📚 Knowledge</div>
+      <div class="thread" style="margin: 0 8px 4px" @click=${() =>
+        this.dispatchEvent(new CustomEvent("open-canvas"))}>🕸 Agent graph</div>
       <footer>
         ${this.menu ? html`<div class="menu">
           <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>

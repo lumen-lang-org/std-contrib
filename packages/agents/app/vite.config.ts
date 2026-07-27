@@ -9,9 +9,26 @@ export default defineConfig({
   // Its socket.io-client dependency chain is CommonJS, though, and skipping
   // the optimizer skips the CJS conversion too, so that chain is re-included
   // explicitly.
+  //
+  // The canvas bundle brings another one: highlight.js, which it uses to draw
+  // code inside a node. It is CommonJS, so without this the browser asks for a
+  // `default` export the served module does not have — and because that throws
+  // while the module graph is loading, nothing renders at all. The console
+  // went blank, not just the canvas.
   optimizeDeps: {
     exclude: ["@nuraly/lumenui"],
-    include: ["socket.io-client", "lit", "dayjs"],
+    include: [
+      "socket.io-client", "lit", "dayjs",
+      "highlight.js/lib/core",
+      "highlight.js/lib/languages/css",
+      "highlight.js/lib/languages/javascript",
+      "highlight.js/lib/languages/json",
+      "highlight.js/lib/languages/markdown",
+      "highlight.js/lib/languages/python",
+      "highlight.js/lib/languages/sql",
+      "highlight.js/lib/languages/typescript",
+      "highlight.js/lib/languages/xml",
+    ],
   },
   server: {
     port: 5173,

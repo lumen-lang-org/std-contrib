@@ -22,6 +22,10 @@ export function knowledge(page: Page): Locator {
   return shell(page).locator("knowledge-page");
 }
 
+export function canvas(page: Page): Locator {
+  return shell(page).locator("agent-canvas");
+}
+
 export function settings(page: Page): Locator {
   return shell(page).locator("console-settings");
 }
@@ -45,6 +49,11 @@ export async function openKnowledge(page: Page) {
 // Whether the API is backed by PostgreSQL. The document routes answer a plain
 // sentence when it is not, and the knowledge specs skip on that rather than
 // reporting a failure for behaviour that is correct.
+export async function openCanvas(page: Page) {
+  await sidebar(page).locator(".thread", { hasText: "Agent graph" }).click();
+  await expect(canvas(page)).toBeVisible();
+}
+
 export async function hasPostgres(page: Page): Promise<boolean> {
   const res = await page.request.get("/api/documents?scope=/");
   if (res.ok()) return true;
