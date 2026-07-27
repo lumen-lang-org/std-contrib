@@ -6,7 +6,7 @@
 // and fails a person.
 
 import { expect, test } from "@playwright/test";
-import { errorOf, openSettings, openTab, settings, shell } from "./console.js";
+import { agentRow, modelRow, errorOf, openSettings, openTab, settings, shell } from "./console.js";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -66,14 +66,9 @@ test("an agent cannot be pointed at a model config that does not exist", async (
   // servers and sub-agents nested, and JSON.parse refuses fields the record
   // does not declare. This is the same trap the console fell into.
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
-    { id: string; agentName: string; description: string; promptId: string; enabled: boolean }[];
-  const a = agents[0];
-  const res = await page.request.put(`/api/agents/${a.id}`, {
-    data: {
-      id: a.id, agentName: a.agentName, description: a.description,
-      modelConfigId: "no-such-config", promptId: a.promptId,
-      enabled: a.enabled, updatedAt: "now",
-    },
+    Record<string, unknown>[];
+  const res = await page.request.put(`/api/agents/${agents[0].id}`, {
+    data: agentRow(agents[0], { modelConfigId: "no-such-config" }),
   });
   expect(res.status()).toBe(400);
   expect(await errorOf(res)).toContain("no model config");
@@ -111,7 +106,7 @@ test("a model id that is already taken is refused rather than overwriting", asyn
   const res = await page.request.post("/api/models", {
     data: {
       id: models[0].id, label: "Impostor", apiName: "x", provider: "mistral",
-      kind: "chat", dimensions: 0, enabled: true,
+      kind: "chat", dimensions: 0, baseUrl: "", enabled: true,
     },
   });
   expect(res.status()).toBe(400);
@@ -203,14 +198,9 @@ test("an agent cannot be saved with a blank name", async ({ page }) => {
   // A nameless agent sorts first — the list is ordered by name — so it becomes
   // the console's default and every new conversation opens against it.
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
-    { id: string; description: string; modelConfigId: string; promptId: string; enabled: boolean }[];
-  const a = agents[0];
-  const res = await page.request.put(`/api/agents/${a.id}`, {
-    data: {
-      id: a.id, agentName: "   ", description: a.description,
-      modelConfigId: a.modelConfigId, promptId: a.promptId,
-      enabled: a.enabled, updatedAt: "now",
-    },
+    Record<string, unknown>[];
+  const res = await page.request.put(`/api/agents/${agents[0].id}`, {
+    data: agentRow(agents[0], { agentName: "   " }),
   });
   expect(res.status()).toBe(400);
   expect(await errorOf(res)).toContain("needs a name");
@@ -218,10 +208,7 @@ test("an agent cannot be saved with a blank name", async ({ page }) => {
 
 test("an embedding model must say how wide its vectors are", async ({ page }) => {
   const res = await page.request.post("/api/models", {
-    data: {
-      id: `e2e_nodim_${Date.now()}`, label: "No Width", apiName: "mistral-embed",
-      provider: "mistral", kind: "embedding", dimensions: 0, enabled: false,
-    },
+    data: modelRow({ id: `e2e_nodim_${Date.now()}`, label: "No Width", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 0, enabled: false }),
   });
   expect(res.status()).toBe(400);
   expect(await errorOf(res)).toContain("how wide");
@@ -229,10 +216,7 @@ test("an embedding model must say how wide its vectors are", async ({ page }) =>
 
 test("a model naming a provider nothing can reach is refused", async ({ page }) => {
   const res = await page.request.post("/api/models", {
-    data: {
-      id: `e2e_nowhere_${Date.now()}`, label: "Nowhere", apiName: "x",
-      provider: "nowhere", kind: "chat", dimensions: 0, enabled: false,
-    },
+    data: modelRow({ id: `e2e_nowhere_${Date.now()}`, label: "Nowhere", apiName: "x", provider: "nowhere", kind: "chat", dimensions: 0, enabled: false }),
   });
   expect(res.status()).toBe(400);
   expect(await errorOf(res)).toContain("no chat endpoint");
@@ -240,10 +224,7 @@ test("a model naming a provider nothing can reach is refused", async ({ page }) 
 
 test("a model that is neither chat nor embedding is refused", async ({ page }) => {
   const res = await page.request.post("/api/models", {
-    data: {
-      id: `e2e_kind_${Date.now()}`, label: "Odd", apiName: "x",
-      provider: "mistral", kind: "reranker", dimensions: 0, enabled: false,
-    },
+    data: modelRow({ id: `e2e_kind_${Date.now()}`, label: "Odd", apiName: "x", provider: "mistral", kind: "reranker", dimensions: 0, enabled: false }),
   });
   expect(res.status()).toBe(400);
   expect(await errorOf(res)).toContain("chat or embedding");
@@ -284,4 +265,137 @@ test("every provider the console offers is one the code can reach", async ({ pag
   await openTab(page, "Providers");
   const offered = await settings(page).locator("select[name=provider] option").allTextContents();
   expect(offered.map((s) => s.trim()).sort()).toEqual(["anthropic", "mistral", "openai"]);
+});
+
+
+// --- every field round-trips through its row PUT ---------------------------------------
+
+test("a model's whole row round-trips, base url included", async ({ page }) => {
+  const id = `e2e_row_${Date.now()}`;
+  await page.request.post("/api/models", {
+    data: {
+      id, label: "Row Probe", apiName: "mistral-small-latest", provider: "mistral",
+      kind: "chat", dimensions: 0, baseUrl: "", enabled: false,
+    },
+  });
+  const res = await page.request.put(`/api/models/${id}`, {
+    data: {
+      id, label: "Row Probe Edited", apiName: "mistral-large-latest", provider: "mistral",
+      kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434/v1", enabled: false,
+    },
+  });
+  expect(res.status()).toBe(200);
+
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; label: string; apiName: string; baseUrl: string }[];
+  const mine = models.find((m) => m.id === id);
+  expect(mine?.label).toBe("Row Probe Edited");
+  expect(mine?.apiName).toBe("mistral-large-latest");
+  expect(mine?.baseUrl).toBe("http://127.0.0.1:11434/v1");
+  await page.request.delete(`/api/models/${id}`);
+});
+
+test("enabling an embedder through the row PUT still disables the others", async ({ page }) => {
+  // The rule has to hold through this door too — that was the whole point of
+  // folding it into the row write.
+  const id = `e2e_emb_${Date.now()}`;
+  const before = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; label: string; apiName: string; provider: string; kind: string;
+      dimensions: number; baseUrl: string; enabled: boolean }[];
+  const was = before.find((m) => m.kind === "embedding" && m.enabled);
+
+  await page.request.post("/api/models", {
+    data: {
+      id, label: "Second Embedder", apiName: "mistral-embed", provider: "mistral",
+      kind: "embedding", dimensions: 1024, baseUrl: "", enabled: false,
+    },
+  });
+  await page.request.put(`/api/models/${id}`, {
+    data: {
+      id, label: "Second Embedder", apiName: "mistral-embed", provider: "mistral",
+      kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true,
+    },
+  });
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; kind: string; enabled: boolean }[];
+  expect(models.filter((m) => m.kind === "embedding" && m.enabled)).toHaveLength(1);
+
+  // Put the corpus back the way it was found. Deleting the winner without
+  // re-enabling the previous embedder leaves none active, and later specs
+  // that need one skip themselves — a test quietly shrinking the suite's own
+  // coverage is worse than a test that fails.
+  await page.request.delete(`/api/models/${id}`);
+  if (was) {
+    await page.request.put(`/api/models/${was.id}`, { data: modelRow({ ...was, enabled: true }) });
+  }
+});
+
+test("exactly one agent is the default, whichever door sets it", async ({ page }) => {
+  const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
+    { id: string; agentName: string; description: string; modelConfigId: string;
+      promptId: string; enabled: boolean }[];
+  test.skip(agents.length < 2, "needs two agents");
+
+  for (const a of agents.slice(0, 2)) {
+    await page.request.put(`/api/agents/${a.id}`, {
+      data: agentRow(a as unknown as Record<string, unknown>, { isDefault: true }),
+    });
+  }
+  const after = (await page.request.get("/api/agents").then((r) => r.json())) as
+    { isDefault: boolean }[];
+  expect(after.filter((a) => a.isDefault)).toHaveLength(1);
+});
+
+test("a server's auth is set without the token ever coming back", async ({ page }) => {
+  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
+    { id: string }[];
+  test.skip(servers.length === 0, "no MCP server to configure");
+
+  const res = await page.request.put(`/api/servers/${servers[0].id}/auth`, {
+    data: { authKind: "bearer", authHeader: "", token: "secret-e2e-token" },
+  });
+  expect(res.status()).toBe(200);
+  const body = await res.text();
+  expect(body).not.toContain("secret-e2e-token");
+  expect(body).toContain("bearer");
+
+  const listed = await page.request.get("/api/servers").then((r) => r.text());
+  expect(listed).not.toContain("secret-e2e-token");
+});
+
+test("a custom header with no name is refused", async ({ page }) => {
+  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
+    { id: string }[];
+  test.skip(servers.length === 0, "no MCP server to configure");
+  const res = await page.request.put(`/api/servers/${servers[0].id}/auth`, {
+    data: { authKind: "header", authHeader: "  ", token: "t" },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("needs a name");
+});
+
+test("a transport the client cannot speak is refused", async ({ page }) => {
+  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
+    { id: string; serverName: string; endpoint: string; authKind: string;
+      authHeader: string; enabled: boolean }[];
+  test.skip(servers.length === 0, "no MCP server to edit");
+  const s = servers[0];
+  const res = await page.request.put(`/api/servers/${s.id}`, {
+    data: { ...s, transport: "stdio" },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toContain("subprocess");
+});
+
+test("testing a model says what the provider actually answered", async ({ page }) => {
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; provider: string; enabled: boolean; kind: string }[];
+  const mistral = models.find((m) => m.provider === "mistral" && m.kind === "chat");
+  test.skip(!mistral, "no mistral chat model configured");
+
+  const res = await page.request.post(`/api/models/${mistral!.id}/test`);
+  expect(res.status()).toBe(200);
+  const out = (await res.json()) as { ok: boolean; reply?: string; error?: string };
+  // Either it answered or it said why — never a bare failure with no reason.
+  if (out.ok) { expect(out.reply).toBeTruthy(); } else { expect(out.error).toBeTruthy(); }
 });

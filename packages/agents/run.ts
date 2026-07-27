@@ -233,7 +233,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // Only now, once the run is going to happen: mounting asks every linked
   // server what it offers, and a refused run should not have made a network
   // call to work out what it was refusing.
-  let mounted = mountTools(db, agent.id);
+  let mounted = mountTools(db, agent.id, master);
   let specs = toolSpecs(mounted);
 
   // In a thread, the conversation's files are tools like any others: a write
@@ -637,7 +637,7 @@ function childFor(children: AgentRow[], name: string): AgentRow {
     if (delegateToolName(children[i].agentName) == name) { return children[i]; }
     i = i + 1;
   }
-  let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", enabled: false, updatedAt: "" };
+  let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", isDefault: false, enabled: false, updatedAt: "" };
   return none;
 }
 

@@ -30,8 +30,19 @@ export type McpCall = {
 // here, because a record cannot hold a counter and a global would be shared
 // across the server's worker threads.
 function rpc(endpoint: string, id: int, method: string, params: string): McpCall {
+  let none = new Map<string, string>();
+  return rpcWith(endpoint, none, id, method, params);
+}
+
+// The same, carrying whatever the server needs to let us in. The token is
+// passed by the caller because it comes out of the encrypted store and this
+// file has no business reading credentials.
+function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: string, params: string): McpCall {
   let headers = new Map<string, string>();
   headers.set("content-type", "application/json");
+  for (const name of extra.keys()) {
+    headers.set(name, extra.get(name) ?? "");
+  }
   let body = "{\"jsonrpc\":\"2.0\",\"id\":" + `${id}` + ",\"method\":" + JSON.stringify(method);
   if (params != "") { body = body + ",\"params\":" + params; }
   body = body + "}";
@@ -55,7 +66,24 @@ function rpc(endpoint: string, id: int, method: string, params: string): McpCall
 
 // The handshake. A server that will not initialise is not mounted, and saying
 // so beats discovering it on the first tool call.
-export function initialize(server: McpServerRow): McpCall {
+
+// What a server's auth setting means on the wire. "none" sends nothing;
+// "bearer" is the usual Authorization header; "header" is whatever name the
+// row carries, for a server that wants its own.
+export function authHeaders(server: McpServerRow, token: string): Map<string, string> {
+  let out = new Map<string, string>();
+  if (token == "" || server.authKind == "none" || server.authKind == "") { return out; }
+  if (server.authKind == "bearer") {
+    out.set("authorization", "Bearer " + token);
+    return out;
+  }
+  if (server.authKind == "header" && server.authHeader != "") {
+    out.set(server.authHeader.toLowerCase(), token);
+  }
+  return out;
+}
+
+export function initialize(server: McpServerRow, token: string): McpCall {
   if (server.transport != "http") {
     let unsupported: McpCall = { ok: false, text: "", error: "transport \"" + server.transport + "\" needs a subprocess, which this cannot spawn" };
     return unsupported;
@@ -64,7 +92,7 @@ export function initialize(server: McpServerRow): McpCall {
     let off: McpCall = { ok: false, text: "", error: server.serverName + " is disabled" };
     return off;
   }
-  return rpc(server.endpoint, 1, "initialize", "{}");
+  return rpcWith(server.endpoint, authHeaders(server, token), 1, "initialize", "{}");
 }
 
 // What the server offers, in the order it listed them.
@@ -72,10 +100,10 @@ export function initialize(server: McpServerRow): McpCall {
 // Read by scanning rather than with JSON.parse: a tool's input schema is an
 // arbitrary shape by design, and a strict parse would refuse the whole reply
 // over a key it had never been told about.
-export function listTools(server: McpServerRow): McpTool[] {
+export function listTools(server: McpServerRow, token: string): McpTool[] {
   let out: McpTool[] = [];
   if (server.transport != "http" || !server.enabled) { return out; }
-  let listed = rpc(server.endpoint, 2, "tools/list", "");
+  let listed = rpcWith(server.endpoint, authHeaders(server, token), 2, "tools/list", "");
   if (!listed.ok) { return out; }
 
   let items = jsonList(jsonRaw(listed.text, "tools"));
@@ -103,9 +131,9 @@ export function listTools(server: McpServerRow): McpTool[] {
 }
 
 // Just the names, for a caller that only wants to know what is there.
-export function toolNames(server: McpServerRow): string[] {
+export function toolNames(server: McpServerRow, token: string): string[] {
   let out: string[] = [];
-  let tools = listTools(server);
+  let tools = listTools(server, token);
   let i: int = 0;
   while (i < tools.length) {
     out.push(tools[i].name);
@@ -137,11 +165,11 @@ export function resultText(document: string): string {
 
 // Call a tool. `args` is a JSON object as text, because its shape is the
 // tool's and not something this file can know.
-export function callTool(server: McpServerRow, toolName: string, args: string): McpCall {
+export function callTool(server: McpServerRow, toolName: string, args: string, token: string): McpCall {
   let body = args;
   if (body == "") { body = "{}"; }
   let params = "{\"name\":" + JSON.stringify(toolName) + ",\"arguments\":" + body + "}";
-  let answered = rpc(server.endpoint, 3, "tools/call", params);
+  let answered = rpcWith(server.endpoint, authHeaders(server, token), 3, "tools/call", params);
   if (!answered.ok) { return answered; }
   // A tool that reports failure says so in the result rather than in a JSON-RPC
   // error, and the model is the one that has to recover from it — so the text

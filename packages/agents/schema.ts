@@ -10,7 +10,7 @@
 //   cd packages/agents && lumen test schema.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, hasManyThrough, createTableSql, boolColumn } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, hasManyThrough, createTableSql, dialectType, boolColumn } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 // --- rows --------------------------------------------------------------------
@@ -30,6 +30,10 @@ export type ModelRow = {
   // asked for on every use: it is a fact about the model, it never changes,
   // and a document table is created this wide.
   dimensions: int,
+  // Empty means the provider's own address; anything else is an
+  // OpenAI-compatible host answering the same wire format at a different
+  // place — a gateway, a proxy, a local server.
+  baseUrl: string,
   enabled: bool,
 };
 
@@ -63,6 +67,9 @@ export type McpServerRow = {
   serverName: string,
   transport: string,
   endpoint: string,
+  // "none", "bearer" or "header". The token lives in the credential store.
+  authKind: string,
+  authHeader: string,
   enabled: bool,
 };
 
@@ -89,10 +96,54 @@ export type AgentRow = {
   modelConfigId: string,
   promptId: string,
   enabled: bool,
+  // The agent a new conversation opens against.
+  isDefault: bool,
   updatedAt: string,
 };
 
 // --- mappings ----------------------------------------------------------------
+
+// The shapes migrations 1, 4 and 5 create, frozen as they were when those
+// migrations were recorded. The live mappings below grow; these cannot, or the
+// generated CREATE drifts from the checksum the history holds and every
+// existing database refuses to migrate. A new column is an ALTER at a new
+// version, never an edit here.
+function modelsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("apiName", "api_name", "text"),
+    field("provider", "provider", "text"),
+    field("kind", "kind", "text"),
+    field("dimensions", "dimensions", "int"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("models", "id", "id", fs);
+}
+
+function mcpServersMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("serverName", "server_name", "text"),
+    field("transport", "transport", "text"),
+    field("endpoint", "endpoint", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("mcp_servers", "id", "id", fs);
+}
+
+function agentsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("agentName", "agent_name", "text"),
+    field("description", "description", "text"),
+    field("modelConfigId", "model_config_id", "text"),
+    field("promptId", "prompt_id", "text"),
+    field("enabled", "enabled", "bool"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("agents", "id", "id", fs);
+}
 
 export function modelsMapping(): DbRepository {
   let fs: DbField[] = [
@@ -102,6 +153,11 @@ export function modelsMapping(): DbRepository {
     field("provider", "provider", "text"),
     field("kind", "kind", "text"),
     field("dimensions", "dimensions", "int"),
+    // Where to send the request, when it is not the provider's own address.
+    // An OpenAI-compatible gateway — Ollama, vLLM, Groq, a company proxy — is
+    // the same wire format at a different host, so it is a column and not a
+    // provider of its own.
+    field("baseUrl", "base_url", "text"),
     field("enabled", "enabled", "bool"),
   ];
   return repository("models", "id", "id", fs);
@@ -142,6 +198,12 @@ export function mcpServersMapping(): DbRepository {
     field("serverName", "server_name", "text"),
     field("transport", "transport", "text"),
     field("endpoint", "endpoint", "text"),
+    // How to authenticate: "none", "bearer", or "header". The token itself is
+    // NOT here — it goes through the same encrypted store as a provider key,
+    // because a secret beside the thing it authenticates is decoration.
+    field("authKind", "auth_kind", "text"),
+    // Which header carries it, when the kind is "header".
+    field("authHeader", "auth_header", "text"),
     field("enabled", "enabled", "bool"),
   ];
   return repository("mcp_servers", "id", "id", fs);
@@ -166,6 +228,10 @@ export function agentsMapping(): DbRepository {
     field("modelConfigId", "model_config_id", "text"),
     field("promptId", "prompt_id", "text"),
     field("enabled", "enabled", "bool"),
+    // The agent a new conversation opens against. Without it the console took
+    // whichever sorted first by name, which is how a blank name became the
+    // default for everyone.
+    field("isDefault", "is_default", "bool"),
     field("updatedAt", "updated_at", "text"),
   ];
   return repository("agents", "id", "id", fs);
@@ -220,11 +286,11 @@ export function agentsFull(db: Db): DbRepository {
 // there is no mapping for them to be generated from.
 export function schemaPlan(db: Db): Migration[] {
   let plan: Migration[] = [
-    migration("1", "models", createTableSql(db, modelsMapping())),
+    migration("1", "models", createTableSql(db, modelsMappingV1())),
     migration("2", "model configs", createTableSql(db, modelConfigsMapping(db))),
     migration("3", "prompts", createTableSql(db, promptsMapping())),
-    migration("4", "mcp servers", createTableSql(db, mcpServersMapping())),
-    migration("5", "agents", createTableSql(db, agentsMapping())),
+    migration("4", "mcp servers", createTableSql(db, mcpServersMappingV1())),
+    migration("5", "agents", createTableSql(db, agentsMappingV1())),
     migration("6", "agent to mcp server",
       "CREATE TABLE IF NOT EXISTS agent_mcp_servers ("
       + "agent_id " + db.textType + " NOT NULL, "
@@ -238,6 +304,14 @@ export function schemaPlan(db: Db): Migration[] {
     migration("8", "provider credentials", createTableSql(db, credentialsMapping())),
     migration("9", "prompts by name",
       "CREATE INDEX IF NOT EXISTS prompts_by_name ON prompts (prompt_name)"),
+    migration("42", "model base url",
+      "ALTER TABLE models ADD COLUMN base_url " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("43", "mcp auth kind",
+      "ALTER TABLE mcp_servers ADD COLUMN auth_kind " + db.textType + " NOT NULL DEFAULT 'none'"),
+    migration("44", "mcp auth header",
+      "ALTER TABLE mcp_servers ADD COLUMN auth_header " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("45", "default agent",
+      "ALTER TABLE agents ADD COLUMN is_default " + dialectType(db, "bool") + " NOT NULL DEFAULT false"),
   ];
   return plan;
 }

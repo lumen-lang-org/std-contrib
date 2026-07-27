@@ -31,12 +31,12 @@ function seeded(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let a: AgentRow = { id: "a1", agentName: "researcher", description: "d", modelConfigId: "c1", promptId: "p1", enabled: true, updatedAt: "t" };
+  let a: AgentRow = { id: "a1", agentName: "researcher", description: "d", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 
 function server(id: string, name: string, transport: string, endpoint: string, enabled: bool): void {
-  let s: McpServerRow = { id: id, serverName: name, transport: transport, endpoint: endpoint, enabled: enabled };
+  let s: McpServerRow = { id: id, serverName: name, transport: transport, endpoint: endpoint, authKind: "none", authHeader: "", enabled: enabled };
   persist(database, mcpServersMapping(), JSON.stringify(s));
 }
 
@@ -46,7 +46,7 @@ function link(agentId: string, serverId: string): void {
 
 test("an agent with no servers has no tools and nothing to report", () => {
   seeded();
-  let mounted = mountTools(database, "a1");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
   expect(mounted.tools.length == 0);
   expect(mounted.servers.length == 0);
   expect(mounted.problems.length == 0);
@@ -66,7 +66,7 @@ test("a disabled server is named, not silently skipped", () => {
   seeded();
   server("s1", "filesystem", "http", "http://127.0.0.1:1", false);
   link("a1", "s1");
-  let mounted = mountTools(database, "a1");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
   expect(mounted.tools.length == 0);
   expect(mounted.problems.length == 1);
   expect(mounted.problems[0].indexOf("filesystem") >= 0);
@@ -77,7 +77,7 @@ test("a stdio server says what is missing, rather than failing to connect", () =
   seeded();
   server("s1", "local-fs", "stdio", "mcp-fs", true);
   link("a1", "s1");
-  let mounted = mountTools(database, "a1");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
   expect(mounted.tools.length == 0);
   expect(mounted.problems[0].indexOf("subprocess") >= 0);
 });
@@ -87,7 +87,7 @@ test("an unreachable server leaves the agent short a tool, and says so", () => {
   seeded();
   server("s1", "github", "http", "http://127.0.0.1:1", true);
   link("a1", "s1");
-  let mounted = mountTools(database, "a1");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
   expect(mounted.tools.length == 0);
   expect(mounted.problems.length == 1);
   expect(mounted.problems[0].indexOf("github") >= 0);
@@ -95,7 +95,7 @@ test("an unreachable server leaves the agent short a tool, and says so", () => {
 
 test("a tool the model invented is refused in words it can act on", () => {
   seeded();
-  let mounted = mountTools(database, "a1");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
   let answered = callMounted(mounted, "delete_everything", "{}");
   expect(!answered.ok);
   // The text goes back to the model, so it has to read as an instruction
@@ -107,9 +107,9 @@ test("a tool the model invented is refused in words it can act on", () => {
 
 test("nothing is mounted, so nothing is described", () => {
   seeded();
-  expect(toolSpecs(mountTools(database, "a1")).length == 0);
-  expect(mountedIndex(mountTools(database, "a1").tools, "anything") < 0);
-  expect(serverOf(mountTools(database, "a1"), "anything") == "");
+  expect(toolSpecs(mountTools(database, "a1", "0123456789abcdef0123456789abcdef")).length == 0);
+  expect(mountedIndex(mountTools(database, "a1", "0123456789abcdef0123456789abcdef").tools, "anything") < 0);
+  expect(serverOf(mountTools(database, "a1", "0123456789abcdef0123456789abcdef"), "anything") == "");
 });
 
 test("the suite leaves nothing behind", () => {

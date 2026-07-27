@@ -12,14 +12,6 @@
 import { mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId } from "./client.ts";
 import { makeTool } from "../agent/tools.ts";
 
-// declared without `export` (an exported type is rejected); a caller pulls it
-// into scope by importing parseUrl.
-type UrlParts = {
-  host: string,
-  port: int,
-  path: string,
-};
-
 function noStrings(): string[] {
   let e: string[] = [];
   return e;
