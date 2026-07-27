@@ -21,15 +21,40 @@
 // shape rather than a gap. When this console grows file upload or a stop
 // button, they get added here deliberately.
 
-import { openThread, say, transcript } from "./api.js";
+import { WireRef, openThread, say, transcript } from "./api.js";
 
 export type ChatMessage = {
   id: string;
   sender: "user" | "bot";
   text: string;
   timestamp: string;
+  // The artifacts this turn saved, as slot@version references. The component
+  // does not read this property; the console does, to draw its own cards.
+  refs: WireRef[];
   error?: boolean;
 };
+
+// Every body this session hands the component goes through here first. The
+// component renders message text with unsafeHTML in both of its branches
+// (message.template.ts), so unescaped markup in a reply — or in a document a
+// reply quotes — would become part of the console's own origin, with the
+// session cookie and the whole /api surface behind it. The session is the last
+// owner of the raw string on both paths, live sends and open()'s transcript
+// reload (which bypasses the plugins entirely), so escaping lives here and not
+// in a plugin that one of the two paths never runs. Character loop, not
+// replace(): the house style bans RegExp, and chained split/join reads worse.
+function escapeHtml(raw: string): string {
+  let out = "";
+  for (const ch of raw) {
+    if (ch === "&") out += "&amp;";
+    else if (ch === "<") out += "&lt;";
+    else if (ch === ">") out += "&gt;";
+    else if (ch === '"') out += "&quot;";
+    else if (ch === "'") out += "&#39;";
+    else out += ch;
+  }
+  return out;
+}
 
 type Listener = (payload: unknown) => void;
 
@@ -91,7 +116,12 @@ export class ChatSession {
     const said = text.trim();
     if (said === "" || this.state.isTyping) return;
 
-    this.push({ id: `u${this.state.messages.length}`, sender: "user", text: said });
+    // The raw text goes to the API; the escaped copy goes on screen. A user
+    // pasting an HTML snippet to ask about it must see the snippet, not run it.
+    this.push({
+      id: `u${this.state.messages.length}`, sender: "user",
+      text: escapeHtml(said), refs: EMPTY,
+    });
     this.emit("message:sent", { text: said });
     this.setTyping(true);
 
@@ -107,14 +137,18 @@ export class ChatSession {
       this.push({
         id: reply.runId,
         sender: "bot",
-        text: reply.ok ? reply.text : reply.error,
+        text: escapeHtml(reply.ok ? reply.text : reply.error),
+        refs: reply.refs,
         error: !reply.ok,
       });
       this.emit("message:received", { ok: reply.ok });
       this.bridge.onTurnDone();
     } catch (e) {
       const said2 = e instanceof Error ? e.message : String(e);
-      this.push({ id: `e${this.state.messages.length}`, sender: "bot", text: said2, error: true });
+      this.push({
+        id: `e${this.state.messages.length}`, sender: "bot",
+        text: escapeHtml(said2), refs: EMPTY, error: true,
+      });
       this.emit("error", { message: said2 });
     } finally {
       this.setTyping(false);
@@ -135,7 +169,8 @@ export class ChatSession {
     this.setMessages(turns.map((t, i) => ({
       id: `t${i}`,
       sender: t.role === "user" ? "user" : "bot" as const,
-      text: t.text,
+      text: escapeHtml(t.text),
+      refs: t.refs,
       timestamp: new Date().toISOString(),
     })));
   }
