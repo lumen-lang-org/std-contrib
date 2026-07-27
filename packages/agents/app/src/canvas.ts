@@ -578,12 +578,14 @@ export class AgentCanvas extends LitElement {
       <div class="sub">MCP server · ${v.id}</div>
 
       <nr-input id="s-name" .value=${v.serverName} placeholder="What this server is called"
-        @nr-input=${(e: Event) => this.editServer("serverName", valueOf(e))}>
+        @nr-input=${(e: Event) => this.editServer("serverName", valueOf(e))}
+        @input=${(e: Event) => this.editServer("serverName", valueOf(e))}>
         <span slot="label">Name</span>
       </nr-input>
 
       <nr-input id="s-endpoint" .value=${v.endpoint} placeholder="https://…"
-        @nr-input=${(e: Event) => this.editServer("endpoint", valueOf(e))}>
+        @nr-input=${(e: Event) => this.editServer("endpoint", valueOf(e))}
+        @input=${(e: Event) => this.editServer("endpoint", valueOf(e))}>
         <span slot="label">Endpoint</span>
       </nr-input>
 
@@ -605,7 +607,8 @@ export class AgentCanvas extends LitElement {
 
       ${v.authKind === "header" ? html`
         <nr-input id="s-authheader" .value=${v.authHeader} placeholder="X-Api-Key"
-          @nr-input=${(e: Event) => this.editServer("authHeader", valueOf(e))}>
+          @nr-input=${(e: Event) => this.editServer("authHeader", valueOf(e))}
+        @input=${(e: Event) => this.editServer("authHeader", valueOf(e))}>
           <span slot="label">Header name</span>
         </nr-input>` : ""}
 
@@ -681,14 +684,23 @@ export class AgentCanvas extends LitElement {
       <h3>${d.agentName}</h3>
       <div class="sub">${d.id}</div>
 
+      <!-- Each field listens to the component's nr-input AND the native input
+           event. The native one bubbles composed from the shadow input, so a
+           keystroke that lands before the component's own listeners attach —
+           a fast typist on a fresh render, or a test — still reaches the
+           draft. Both handlers set the same field, so hearing an edit twice
+           costs nothing; missing it cost a save that honestly said "saved"
+           while persisting the unedited row. -->
       <nr-input id="c-name" .value=${d.agentName} placeholder="What this agent is called"
-        @nr-input=${(e: Event) => this.edit("agentName", valueOf(e))}>
+        @nr-input=${(e: Event) => this.edit("agentName", valueOf(e))}
+        @input=${(e: Event) => this.edit("agentName", valueOf(e))}>
         <span slot="label">Name</span>
       </nr-input>
 
       <nr-textarea id="c-desc" .value=${d.description} rows="3"
         placeholder="What it is for"
-        @nr-input=${(e: Event) => this.edit("description", valueOf(e))}>
+        @nr-input=${(e: Event) => this.edit("description", valueOf(e))}
+        @input=${(e: Event) => this.edit("description", valueOf(e))}>
         <span slot="label">Description</span>
       </nr-textarea>
 

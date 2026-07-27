@@ -25,8 +25,8 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool } from "./tools.ts";
-import { artifactBriefing } from "./artifacts.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, FILE_FENCE } from "./tools.ts";
+import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -179,13 +179,19 @@ export type RunContext = {
   prior: Turn[],
   threadId: string,
   excludeChunks: string[],
+  // The thread's turn seq at this round's base — the number every artifact
+  // write of the round is stamped with, whichever door and whichever agent
+  // makes it. A delegated child inherits its parent's, because the child's
+  // writes belong to the round that delegated. TURN_SEQ_NONE for a run no
+  // thread holds, where the artifact tools are not offered anyway.
+  baseSeq: int,
 };
 
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks };
+  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, baseSeq: TURN_SEQ_NONE };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -197,7 +203,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks };
+  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, baseSeq: TURN_SEQ_NONE };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -400,6 +406,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // file: the model can only choose a file it has been shown exists.
   let system = prompt.body;
   if (threadId != "") {
+    // The fence convention rides the system prompt, not a tool description:
+    // a model decides how to answer before it considers any particular tool,
+    // and a fence is not a tool call. Same condition as the artifact tools —
+    // a fence saves into the thread they address.
+    system = system + "\n\n" + FILE_FENCE;
     let briefing = artifactBriefing(db, threadId);
     if (briefing != "") { system = system + "\n\n" + briefing; }
   }
@@ -487,7 +498,8 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // own fixed names, so asking both costs two string comparisons and
       // cannot write twice: no name belongs to both.
       let artifactAnswer = callArtifactTool(db, {
-        threadId: threadId, name: calls[i].name, args: calls[i].args, now: now,
+        threadId: threadId, name: calls[i].name, args: calls[i].args,
+        turnSeq: where.baseSeq, now: now,
       });
       if (fileAnswer.handled) {
         resultOk = fileAnswer.ok;
@@ -520,6 +532,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             depth: deeper, path: below, tracer: tracerForCallee(trace),
             parentSpan: callSpan.id, prior: childPrior, threadId: threadId,
             excludeChunks: noChildChunks,
+            // The parent's round, not a fresh one: the child's writes belong
+            // to the round that delegated, which is what lets the round join
+            // see them.
+            baseSeq: where.baseSeq,
           };
           let asked = runAgentAt(db, child.id, question, master, below2);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }

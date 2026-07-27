@@ -30,11 +30,12 @@ import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trac
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText } from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { ThreadListing, listThreads, openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
+import { ThreadListing, ThreadTurnRow, listThreads, openThread, threadAgent, threadMessageRows, runInThread, threadPlan } from "./threads.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
-import { ArtifactRow, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact } from "./artifacts.ts";
+import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
+import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
@@ -887,40 +888,108 @@ class ThreadApi {
 
     let tracer = tracerFor(this.db, this.master);
     let answered = runInThread(this.db, param(req, "id"), body.text, this.master, tracer);
-    let runId = recordRun(this.db, threadAgent(this.db, param(req, "id")), body.text, answered);
+    let run = answered.run;
+    // The run log keeps the RAW reply — `run.text`, fences and bodies intact —
+    // because the log is the audit trail of what the model actually said.
+    // Extraction's notes fold in beside the run's own, so a refused fence is
+    // read where an operator reads every other warning about the run.
+    let runId = recordRun(this.db, threadAgent(this.db, param(req, "id")), body.text, withNotes(run, answered.notes));
 
     let traced = "";
-    if (tracing(tracer) && answered.spans.length > 0) {
-      if (flush(tracerWithMoreSpans(tracer, answered.spans)).ok) { traced = traceId(tracer); }
+    if (tracing(tracer) && run.spans.length > 0) {
+      if (flush(tracerWithMoreSpans(tracer, run.spans)).ok) { traced = traceId(tracer); }
     }
+    // The wire answers the rewritten text with its nonce stripped, plus the
+    // refs a card resolves by. Never `run.text`: the raw reply is the log's,
+    // and the marker's nonce must not reach a DOM.
+    let view = wireView(answered.text);
     return ok("{\"runId\":" + JSON.stringify(runId)
-      + ",\"ok\":" + `${answered.ok}`
-      + ",\"text\":" + JSON.stringify(answered.text)
-      + ",\"toolCalls\":" + `${answered.steps.length}`
-      + ",\"inputTokens\":" + `${answered.inputTokens}`
-      + ",\"outputTokens\":" + `${answered.outputTokens}`
+      + ",\"ok\":" + `${run.ok}`
+      + ",\"text\":" + JSON.stringify(view.text)
+      + ",\"refs\":" + refsJson(view.refs)
+      + ",\"seq\":" + `${answered.baseSeq}`
+      + ",\"toolCalls\":" + `${run.steps.length}`
+      + ",\"inputTokens\":" + `${run.inputTokens}`
+      + ",\"outputTokens\":" + `${run.outputTokens}`
       + ",\"traceId\":" + JSON.stringify(traced)
-      + ",\"error\":" + JSON.stringify(answered.error) + "}");
+      + ",\"error\":" + JSON.stringify(run.error) + "}");
   }
 
   // What a person reads: the questions and the answers. The tool calls and the
   // passages are in the trace, which is where somebody debugging looks.
+  //
+  // Each message carries its stored seq and its structured refs, and its text
+  // passes through wireView — the reference nonce stays on the server, and a
+  // client maps cards by slot@version from `refs`, never by text order.
   @get("/:id")
   transcript(req: Request): Reply {
     if (threadAgent(this.db, param(req, "id")) == "") {
       return notFound("thread " + param(req, "id"));
     }
-    let said = threadMessages(this.db, param(req, "id"));
+    let said: ThreadTurnRow[] = threadMessageRows(this.db, param(req, "id"));
     let out = "[";
     let i: int = 0;
     while (i < said.length) {
       if (i > 0) { out = out + ","; }
-      out = out + "{\"role\":" + JSON.stringify(said[i].role)
-        + ",\"text\":" + JSON.stringify(said[i].text) + "}";
+      // Assistant rows only. Storage neutralises lookalike markers in the
+      // assistant reply, so a genuine marker there is extraction's own — but
+      // a USER row is stored verbatim, and running the marker-to-card
+      // conversion over it would let pasted third-party text mint a
+      // "[saved …]" caption and a card for any slot@version the thread
+      // holds. A user's words are served as words, with no refs.
+      if (said[i].role == "assistant") {
+        let view = wireView(said[i].text);
+        out = out + "{\"role\":" + JSON.stringify(said[i].role)
+          + ",\"seq\":" + `${said[i].seq}`
+          + ",\"text\":" + JSON.stringify(view.text)
+          + ",\"refs\":" + refsJson(view.refs) + "}";
+      } else {
+        let none: WireRef[] = [];
+        out = out + "{\"role\":" + JSON.stringify(said[i].role)
+          + ",\"seq\":" + `${said[i].seq}`
+          + ",\"text\":" + JSON.stringify(said[i].text)
+          + ",\"refs\":" + refsJson(none) + "}";
+      }
       i = i + 1;
     }
     return ok(out + "]");
   }
+}
+
+// A run with more notes folded in. A copy, because records are immutable and
+// the extraction notes belong to the round, not to the run that produced the
+// raw text — they meet only in the log.
+function withNotes(run: AgentRun, more: string[]): AgentRun {
+  let notes: string[] = [];
+  let i: int = 0;
+  while (i < run.notes.length) { notes.push(run.notes[i]); i = i + 1; }
+  let m: int = 0;
+  while (m < more.length) { notes.push(more[m]); m = m + 1; }
+  let out: AgentRun = {
+    ok: run.ok, text: run.text, body: run.body, status: run.status,
+    agentName: run.agentName, promptVersion: run.promptVersion,
+    modelApiName: run.modelApiName, error: run.error,
+    context: run.context, retrieved: run.retrieved, steps: run.steps,
+    stopReason: run.stopReason, rounds: run.rounds,
+    inputTokens: run.inputTokens, outputTokens: run.outputTokens,
+    notes: notes, calledTools: run.calledTools, calledAgents: run.calledAgents,
+    spans: run.spans,
+  };
+  return out;
+}
+
+// References as the wire carries them.
+function refsJson(refs: WireRef[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < refs.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + "{\"slot\":" + `${refs[i].slot}`
+      + ",\"version\":" + `${refs[i].version}`
+      + ",\"path\":" + JSON.stringify(refs[i].path) + "}";
+    i = i + 1;
+  }
+  return out + "]";
 }
 
 // The files a conversation is working on: uploaded by the user, written by
@@ -1119,13 +1188,55 @@ class ArtifactApi {
     // that let the caller name its own origin would erase it.
     let written = putArtifact(this.db, {
       threadId: param(req, "id"), path: body.path, title: body.title,
-      content: body.content, note: body.note, origin: "uploaded", now: stamp(),
+      content: body.content, note: body.note, origin: "uploaded",
+      // A person may deliberately re-upload a path — that IS a new version.
+      mustCreate: false,
+      // A console upload happens outside any conversation round, so there is
+      // no turn for the version row to point at.
+      turnSeq: TURN_SEQ_NONE, now: stamp(),
     });
     if (!written.ok) { return badRequest(written.problem); }
     return created("{\"slot\":" + `${written.slot}`
       + ",\"path\":" + JSON.stringify(normalScope(body.path))
       + ",\"version\":" + `${written.version}`
       + ",\"previewToken\":" + JSON.stringify(written.previewToken) + "}");
+  }
+
+  // Which versions each round produced — the join a chat client renders its
+  // cards from, one query for the whole conversation. `?turn=N` narrows to one
+  // round. Console uploads never appear: no round made them.
+  //
+  // Declared before the slot routes on purpose. "/by-turn" is a literal where
+  // ":slot" is a parameter, and the router refuses at startup a table whose
+  // literal is written second — the parameter would shadow it.
+  @get("/by-turn")
+  byTurn(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let turn = queryParam(req, "turn", "");
+    let rows: TurnArtifact[] = [];
+    if (turn == "") {
+      rows = artifactsByTurn(this.db, param(req, "id"));
+    } else {
+      // A turn that is not a number reads as TURN_SEQ_NONE, which the read
+      // guards against and answers with nothing — the honest reply to a
+      // question about a round that does not exist.
+      rows = artifactsForTurn(this.db, param(req, "id"), parseInt(turn) ?? TURN_SEQ_NONE);
+    }
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"turnSeq\":" + `${rows[i].turnSeq}`
+        + ",\"slot\":" + `${rows[i].slot}`
+        + ",\"path\":" + JSON.stringify(rows[i].path)
+        + ",\"title\":" + JSON.stringify(rows[i].title)
+        + ",\"kind\":" + JSON.stringify(rows[i].kind)
+        + ",\"version\":" + `${rows[i].version}` + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
   }
 
   @get("/:slot")
@@ -1969,6 +2080,10 @@ function main(): void {
   });
   bound.set("acreate", (req: Request) => {
     try { return artifacts.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("abyTurn", (req: Request) => {
+    try { return artifacts.byTurn(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
   bound.set("afind", (req: Request) => {

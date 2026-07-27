@@ -14,6 +14,7 @@ import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { AgentRow, ModelRow, ModelConfigRow, PromptRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "./schema.ts";
 import { agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
 import { AgentRun, runAgent, runAgentAt } from "./run.ts";
+import { TURN_SEQ_NONE } from "./artifacts.ts";
 import { noTracer } from "../tracing/tracing.ts";
 import { Turn } from "./provider.ts";
 
@@ -142,7 +143,7 @@ test("a cycle is named, not descended into", () => {
   delegates("a2", "a1");
 
   let above: string[] = ["a1"];
-  let child = runAgentAt(database, "a2", "anything", testKey(), { depth: 1, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2() });
+  let child = runAgentAt(database, "a2", "anything", testKey(), { depth: 1, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), baseSeq: TURN_SEQ_NONE });
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
   expect(child.notes[0].indexOf("already in this chain") >= 0);
@@ -172,7 +173,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
   delegates("a1", "a2");
 
   let above: string[] = ["x1", "x2", "x3"];
-  let deep = runAgentAt(database, "a1", "anything", testKey(), { depth: 3, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2() });
+  let deep = runAgentAt(database, "a1", "anything", testKey(), { depth: 3, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), baseSeq: TURN_SEQ_NONE });
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
   // It still reached the provider — the run happened.

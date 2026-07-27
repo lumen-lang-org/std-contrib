@@ -20,7 +20,7 @@
 // enforce it.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { normalScope } from "./knowledge.ts";
 
@@ -33,11 +33,27 @@ export const ARTIFACT_MAX: int = 524288;
 export const ARTIFACT_MAX_SEGMENTS: int = 8;
 export const ARTIFACT_MAX_PATH: int = 200;
 
-// No turn number yet. The run loop does not hand a tool call the sequence
-// number of the round it is in, so v1 writes this and the column waits. It is
-// a column rather than something added later because backfilling a turn
-// pointer onto history nobody recorded is not possible — the rows have to be
-// wrong from the start or right from the start, and -1 says "wrong, knowingly".
+// The caps on a title and a note. A title rides the briefing into the system
+// prompt of every later turn, and a note rides listings and the run log — an
+// unbounded title was an unbounded write into the prompt, persistence for a
+// one-shot injection. Checked in putArtifact, so both doors and the console
+// pass one gate.
+export const ARTIFACT_TITLE_MAX: int = 120;
+export const ARTIFACT_NOTE_MAX: int = 400;
+
+// What one thread may accumulate: at most this many artifacts, and at most
+// this many bytes across every version of every one of them. Enforced at the
+// write, in putArtifact, so the fence door, the tool door and the console all
+// inherit them — a reply cannot grow a thread past what an operator budgeted
+// for it, no matter which door it found.
+export const THREAD_ARTIFACTS_MAX: int = 200;
+export const THREAD_BYTES_MAX: int = 104857600;
+
+// No turn number. What a write carries when no conversation round made it — a
+// console upload — and what every version row holds from before the run loop
+// started handing the number through. -1 rather than 0 because 0 is a real
+// round, and a row that says "no round, knowingly" beats one that quietly
+// claims the first turn.
 export const TURN_SEQ_NONE: int = -1;
 
 // --- rows -----------------------------------------------------------------------
@@ -237,6 +253,26 @@ function segmentCharsOk(seg: string): bool {
   return true;
 }
 
+// Whether a title or note is fit to store: within its cap, and one line of
+// plain text. Control characters are refused along with newlines because a
+// title reaches the system prompt and a note reaches the run log — a newline
+// in either is a fresh line the reader parses as structure, not as the
+// artifact's name.
+function labelProblem(what: string, text: string, cap: int): string {
+  if (text.length > cap) {
+    return "a " + what + " is at most " + `${cap}` + " characters; this one is " + `${text.length}`;
+  }
+  let i: int = 0;
+  while (i < text.length) {
+    let c = text.charCodeAt(i);
+    if (c < 32 || c == 127) {
+      return "a " + what + " is one line of plain text — no newlines or control characters";
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
 // The suffix, lowercased, or "" when there is none. Compared case-insensitively
 // because ".HTML" and ".html" are one kind, and a path that differs only in the
 // case of its extension should not become a second artifact.
@@ -334,6 +370,19 @@ export type ArtifactWrite = {
   // "uploaded" or "generated". There is deliberately no "retrieved": an
   // artifact is made here, and nothing pulls one out of the corpus.
   origin: string,
+  // Refuse rather than append when the path already exists. The fence door
+  // is create-only by design, and it decides "new" from a listing taken
+  // before this call — a concurrent write can create the path in between,
+  // and an append the caller never intended is exactly the shared-link
+  // overwrite the create-only rule exists to prevent. Checked HERE, inside
+  // the transaction, because a check outside one is a race with a rule
+  // drawn on top of it.
+  mustCreate: bool,
+  // The round that caused this write — the thread's turn seq at the round's
+  // base — or TURN_SEQ_NONE for a write no round made, like a console upload.
+  // Both doors of a round stamp the same number, which is what lets "what did
+  // this round produce" be a join on artifact_versions.turn_seq.
+  turnSeq: int,
   now: string,
 };
 
@@ -385,6 +434,12 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
   if (write.origin != "uploaded" && write.origin != "generated") {
     return refusal("origin must be uploaded or generated");
   }
+  // Both doors, one place: the tool and the fence funnel through here, so a
+  // title or note neither door checked still cannot reach the briefing.
+  let badTitle = labelProblem("title", write.title, ARTIFACT_TITLE_MAX);
+  if (badTitle != "") { return refusal(badTitle); }
+  let badNote = labelProblem("note", write.note, ARTIFACT_NOTE_MAX);
+  if (badNote != "") { return refusal(badNote); }
   let bytes = utf8Length(write.content);
   if (bytes > ARTIFACT_MAX) {
     return refusal("an artifact is at most " + `${ARTIFACT_MAX}` + " bytes; this one is " + `${bytes}`);
@@ -403,6 +458,35 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
   let slot = existing.slot;
   let token = existing.previewToken;
   let createdAt = existing.createdAt;
+
+  // The thread caps, inside the transaction with the counts they read. The
+  // refusal names which cap, because "could not save" tells a writer to
+  // retry and a full thread is not something a retry fixes.
+  if (write.mustCreate && existing.id != "") {
+    rollbackTransaction(db);
+    return refusal("update " + path + " needs write_artifact");
+  }
+  if (existing.id == "") {
+    let count = countWhere(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [write.threadId]);
+    if (count < 0) {
+      rollbackTransaction(db);
+      return refusal("could not count this thread's artifacts");
+    }
+    if (count >= THREAD_ARTIFACTS_MAX) {
+      rollbackTransaction(db);
+      return refusal("a thread holds at most " + `${THREAD_ARTIFACTS_MAX}` + " artifacts; delete one before creating another");
+    }
+  }
+  let held = threadBytes(db, write.threadId);
+  if (held < 0) {
+    rollbackTransaction(db);
+    return refusal("could not read how much this thread's artifacts hold");
+  }
+  if (held + bytes > THREAD_BYTES_MAX) {
+    rollbackTransaction(db);
+    return refusal("a thread's artifacts hold at most " + `${THREAD_BYTES_MAX}` + " bytes across all versions; this write would exceed that");
+  }
+
   if (existing.id == "") {
     // The next slot is however many the thread already has.
     //
@@ -445,7 +529,7 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
     body: write.content,
     bytes: bytes,
     origin: write.origin,
-    turnSeq: TURN_SEQ_NONE,
+    turnSeq: write.turnSeq,
     note: write.note,
     createdAt: write.now,
   };
@@ -531,6 +615,21 @@ function maxSlot(db: Db, threadId: string): int {
   return parseInt(top) ?? -1;
 }
 
+// Every byte the thread's artifacts hold, across every version — versions are
+// append-only, so old bodies stay on disk and must stay under the budget too.
+// -1 when the log cannot be read, 0 for a thread with none: SUM over no rows
+// is NULL, which reads as empty text.
+function threadBytes(db: Db, threadId: string): int {
+  let sql = "SELECT SUM(artifact_versions.bytes) FROM artifact_versions"
+    + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
+    + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
+  if (!db.query(sql, [threadId])) { return -1; }
+  if (db.rows() == 0) { return 0; }
+  let held = db.value(0, 0);
+  if (held == "") { return 0; }
+  return parseInt(held) ?? -1;
+}
+
 function nextVersion(db: Db, artifactId: string): int {
   let sql = "SELECT MAX(version) FROM artifact_versions WHERE artifact_id = " + placeholderAt(db, 1);
   if (!db.query(sql, [artifactId])) { return 0; }
@@ -555,9 +654,6 @@ export function getArtifact(db: Db, threadId: string, path: string): ArtifactRow
   return JSON.parse<ArtifactRow>(document);
 }
 
-// A thread's artifacts in slot order, which is creation order — the order a
-// tab strip should show and the only one that does not move under a reader
-// when something is renamed.
 // The thread's artifacts as a paragraph for the model.
 //
 // References, not bodies: the model is told what exists — path, title, how
@@ -567,28 +663,132 @@ export function getArtifact(db: Db, threadId: string, path: string): ArtifactRow
 // /index.html, and the model cannot know the file exists — so it invents a
 // new path and the reader gets two dashboards where they wanted version 2.
 // The listing costs a line per file; the bodies would cost the window.
+// How many artifacts the briefing lists. The listing is a line per file in
+// the system prompt of every later turn, and the cap is what keeps that from
+// growing without bound — by legitimate use or by anything that learned to
+// mint files.
+export const BRIEFING_LINES: int = 50;
+
 export function artifactBriefing(db: Db, threadId: string): string {
-  let rows = listArtifacts(db, threadId);
+  // Newest-touched first: the files the conversation is working on now are
+  // the ones a revision must land on, and the ones past the cap are the ones
+  // least likely to be meant. Slot breaks ties so two writes in one stamp
+  // still list in a stable order.
+  let keys: DbOrder[] = [desc("updated_at"), desc("slot")];
+  let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  if (listed == "" || listed == "[]") { return ""; }
+  let rows = JSON.parse<ArtifactRow[]>(listed);
   if (rows.length == 0) { return ""; }
+  let shown = rows.length < BRIEFING_LINES ? rows.length : BRIEFING_LINES;
   let out = "This conversation already has these artifacts:";
   let i: int = 0;
-  while (i < rows.length) {
+  while (i < shown) {
     let each = rows[i];
     let named = each.title == "" ? "" : " — " + each.title;
     out = out + "\n- " + each.path + " (" + each.kind + ", v" + `${each.currentVersion}` + ")" + named;
     i = i + 1;
   }
-  out = out + "\nRead one with read_artifact before changing it. To update a file, "
-    + "write_artifact the SAME path — that appends a version. A new path is a new file.";
+  if (rows.length > shown) {
+    out = out + "\n…and " + `${rows.length - shown}` + " more; list with read_artifact";
+  }
+  // Directly under the list, because it is about the list: the one mistake a
+  // model reliably makes here is a near-miss respelling of a path it can see.
+  out = out + "\nAny change to one of the files above must be written to its exact path, "
+    + "character for character including capitalization — a near-miss path creates a duplicate file, not a new version.";
+  // Door-agnostic on purpose: true whether a file arrives through
+  // write_artifact or through a fenced reply, because promising that "saving
+  // a path appends a version" is false at the fence door, which only creates.
+  out = out + "\nRead one with read_artifact before changing it. Updating an existing path appends a new version, "
+    + "and only the write_artifact tool can do that; a new path always creates a new file.";
   return out;
 }
 
+// A thread's artifacts in slot order, which is creation order — the order a
+// tab strip should show and the only one that does not move under a reader
+// when something is renamed.
 export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let none: ArtifactRow[] = [];
   let keys: DbOrder[] = [asc("slot")];
   let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<ArtifactRow[]>(listed);
+}
+
+// One round's mark on an artifact: which slot and version a turn produced,
+// and where it lives. What the by-turn route serves and what a chat card
+// resolves against — identity only, never a body.
+export type TurnArtifact = {
+  turnSeq: int,
+  slot: int,
+  path: string,
+  title: string,
+  kind: string,
+  version: int,
+};
+
+// One row of the join, read field by field from db.value rather than through
+// a mapping: the shape is a join's, and no repository owns it.
+function turnArtifactAt(db: Db, i: int): TurnArtifact {
+  let row: TurnArtifact = {
+    turnSeq: parseInt(db.value(i, 0)) ?? TURN_SEQ_NONE,
+    slot: parseInt(db.value(i, 1)) ?? -1,
+    path: db.value(i, 2),
+    title: db.value(i, 3),
+    kind: db.value(i, 4),
+    version: parseInt(db.value(i, 5)) ?? 0,
+  };
+  return row;
+}
+
+// The columns both turn-scoped reads select, spelled once so the field-by-field
+// reader above can never drift from the SELECT it reads.
+function turnArtifactSql(): string {
+  return "SELECT artifact_versions.turn_seq, artifacts.slot, artifacts.path,"
+    + " artifacts.title, artifacts.kind, artifact_versions.version"
+    + " FROM artifact_versions"
+    + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id";
+}
+
+// What one round produced, whichever door and whichever agent wrote it — a
+// delegated child's write_artifact carries the parent's seq and appears here.
+//
+// The `turn_seq >= 0` guard is belted on beside the equality check:
+// TURN_SEQ_NONE marks writes no round made, and a turn-scoped read that could
+// match it would credit console uploads to a conversation round.
+export function artifactsForTurn(db: Db, threadId: string, turnSeq: int): TurnArtifact[] {
+  let out: TurnArtifact[] = [];
+  if (turnSeq < 0) { return out; }
+  let sql = turnArtifactSql()
+    + " WHERE artifacts.thread_id = " + placeholderAt(db, 1)
+    + " AND artifact_versions.turn_seq = " + placeholderAt(db, 2)
+    + " AND artifact_versions.turn_seq >= 0"
+    + " ORDER BY artifacts.slot, artifact_versions.version";
+  if (!db.query(sql, [threadId, `${turnSeq}`])) { return out; }
+  let i: int = 0;
+  while (i < db.rows()) {
+    out.push(turnArtifactAt(db, i));
+    i = i + 1;
+  }
+  return out;
+}
+
+// Every turn-scoped version in the thread, in round order — the transcript's
+// join, answered in one query for the whole conversation rather than one per
+// message. Console uploads (TURN_SEQ_NONE) are deliberately absent: no round
+// made them, so no message should wear their card.
+export function artifactsByTurn(db: Db, threadId: string): TurnArtifact[] {
+  let out: TurnArtifact[] = [];
+  let sql = turnArtifactSql()
+    + " WHERE artifacts.thread_id = " + placeholderAt(db, 1)
+    + " AND artifact_versions.turn_seq >= 0"
+    + " ORDER BY artifact_versions.turn_seq, artifacts.slot, artifact_versions.version";
+  if (!db.query(sql, [threadId])) { return out; }
+  let i: int = 0;
+  while (i < db.rows()) {
+    out.push(turnArtifactAt(db, i));
+    i = i + 1;
+  }
+  return out;
 }
 
 // The artifact a preview token names.

@@ -20,6 +20,8 @@ import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, 
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
+import { TURN_SEQ_NONE } from "./artifacts.ts";
+import { extractFiles, neutraliseMarkers } from "./artifacts-fence.ts";
 import { Tracer, noTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonList, jsonText } from "./scan.ts";
 
@@ -88,6 +90,15 @@ export function threadPlan(db: Db): Migration[] {
       + "chunk_id " + db.textType + " NOT NULL)"),
     migration("25", "chunks by thread",
       "CREATE INDEX IF NOT EXISTS chunks_by_thread ON thread_chunks (thread_id, seq)"),
+    // One turn per seq, enforced. Two requests racing on one thread both read
+    // the same turn count and file their rounds from the same number; without
+    // this, the second `persist` upserted over the first round's rows and a
+    // conversation silently lost half of what was said. Same loud-loser
+    // pattern as 51–53: the loser's INSERT fails and the caller is told.
+    // Appended at "54" to continue the artifact plan's numbering — versions
+    // are global to the migrations table, not per plan.
+    migration("54", "one turn per seq",
+      "CREATE UNIQUE INDEX IF NOT EXISTS turns_one_per_seq ON thread_turns (thread_id, seq)"),
   ];
   return plan;
 }
@@ -218,7 +229,10 @@ function callsJson(calls: ToolCall[]): string {
   return out + "]";
 }
 
-// Append turns to a thread, continuing its numbering.
+// Append turns to a thread, continuing its numbering. Returns "" on success
+// and the database's sentence otherwise — an error a caller must check,
+// because a round that was not stored must not have files extracted against
+// its seq.
 export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int): string {
   let i: int = 0;
   while (i < turns.length) {
@@ -233,8 +247,17 @@ export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int):
       callId: turns[i].callId,
       toolName: turns[i].toolName,
     };
-    let written = persist(db, threadTurnsMapping(), JSON.stringify(row));
-    if (!written.ok) { return written.error; }
+    // An explicit INSERT, not `persist`: persist upserts, and an upsert here
+    // let two rounds racing on one thread silently merge — the loser's turns
+    // replaced the winner's row by row. With migration 54's unique
+    // (thread_id, seq), the loser now fails loudly and this returns why.
+    let wrote = executeWith(db,
+      "INSERT INTO thread_turns (id, thread_id, seq, role, text, calls, call_id, tool_name) VALUES ("
+      + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ", " + placeholderAt(db, 3) + ", "
+      + placeholderAt(db, 4) + ", " + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ", "
+      + placeholderAt(db, 7) + ", " + placeholderAt(db, 8) + ")",
+      [row.id, row.threadId, `${row.seq}`, row.role, row.text, row.calls, row.callId, row.toolName]);
+    if (!wrote.ok) { return wrote.error; }
     i = i + 1;
   }
   return "";
@@ -311,12 +334,35 @@ const CONTEXT_PREFIX = "Use only the following context.";
 
 // --- continuing a conversation ---------------------------------------------------
 
+// One clock for the rows extraction writes. The run loop and the API each
+// keep a private copy of this line for the same reason: a shared helper is
+// worth a deliberate home, not a side effect of a feature change.
+function stamp(): string { return `${Date.now()}`; }
+
+// What asking a thread produces: the run, and what the thread now remembers.
+//
+// `run.text` stays the RAW reply — fences, bodies and all — because the run
+// log is the audit trail and must hold what the model actually said. `text`
+// is the reply as the thread stores it: each saved fence replaced by its
+// nonce-minted reference marker, every marker-lookalike flattened. The wire
+// serves `text` with the nonce stripped, never `run.text`.
+export type ThreadReply = {
+  run: AgentRun,
+  text: string,
+  // The round's base turn seq — the number every artifact write of the round
+  // is stamped with — or TURN_SEQ_NONE when the thread named no agent and no
+  // round was stored.
+  baseSeq: int,
+  // Extraction's refusals and rewrites, in words, for the run log.
+  notes: string[],
+};
+
 // Ask a thread. Everything it already holds is replayed, this question is
 // added, and whatever the run produced is appended.
 //
 // Retrieval still happens for the new question: the passages already in the
 // thread were fetched for older ones, and "and in Rotterdam?" needs its own.
-export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): AgentRun {
+export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): ThreadReply {
   let agentId = threadAgent(db, threadId);
   if (agentId == "") {
     let noThread: Turn[] = [];
@@ -324,7 +370,10 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     // Runs against an agent that does not exist, which reports "no agent " and
     // is the truth: this thread names nothing runnable.
     let noChunks: string[] = [];
-    return runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks });
+    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, baseSeq: TURN_SEQ_NONE });
+    let noNotes: string[] = [];
+    let bare: ThreadReply = { run: refused, text: refused.text, baseSeq: TURN_SEQ_NONE, notes: noNotes };
+    return bare;
   }
 
   let held = threadTurns(db, threadId);
@@ -334,7 +383,11 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   let firstReplayed = held.length - replayed.length;
   let alreadyShown = chunksShownSince(db, threadId, firstReplayed);
   let path: string[] = [];
-  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown });
+  // The round's base is the thread's stored turn count, not the replayed
+  // one: trimming affects what the model is shown, never the numbering — and
+  // this is the seq every artifact write of the round is stamped with, the
+  // same number `appendTurns` below files the round's turns from.
+  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, baseSeq: held.length });
 
   // What this run added: everything in its context past what was replayed.
   // Stored under the thread's own numbering, which continues from what is
@@ -347,14 +400,64 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     let noCalls: ToolCall[] = [];
     added.push(assistantTurn(run.text, noCalls));
   }
-  appendTurns(db, threadId, added, held.length);
+
+  // Turns first, with the RAW text — extraction only runs against a round the
+  // table actually holds, because turn_seq names a stored round and a file the
+  // transcript cannot account for is worse than a fence left in prose.
+  let notes: string[] = [];
+  let kept = run.text;
+  let appended = appendTurns(db, threadId, added, held.length);
+  if (appended != "") {
+    notes.push("this round could not be stored (" + appended + "), so no files were extracted from the reply");
+    // Nothing was written this round, so no marker in this text can be
+    // genuine — flattening against a nonce nothing carries turns every
+    // lookalike into the honest sentence. Without this, the one reply that
+    // failed to store was also the one whose forged markers reached the wire
+    // as cards.
+    kept = neutraliseMarkers(run.text, crypto.randomUUID()).text;
+  } else if (run.text != "") {
+    let out = extractFiles(db, threadId, held.length, run.text, stamp());
+    kept = out.text;
+    let en: int = 0;
+    while (en < out.notes.length) { notes.push(out.notes[en]); en = en + 1; }
+    if (kept != run.text) {
+      // Re-persist only the final assistant row, now carrying references
+      // instead of bodies. `persist` is right here and wrong above: the row
+      // exists and updating it is the intent, so the upsert lands on the id
+      // the append just wrote rather than colliding on migration 54's index.
+      let seq = held.length + added.length - 1;
+      let noCalls: ToolCall[] = [];
+      let rewritten: ThreadTurnRow = {
+        id: threadId + "-" + `${seq}`,
+        threadId: threadId,
+        seq: seq,
+        role: "assistant",
+        text: kept,
+        calls: callsJson(noCalls),
+        callId: "",
+        toolName: "",
+      };
+      let moved = persist(db, threadTurnsMapping(), JSON.stringify(rewritten));
+      if (!moved.ok) {
+        // The thread keeps the raw reply, which still reads fine — it merely
+        // shows fences where references should be. Said in the notes rather
+        // than swallowed, because the extraction DID write the files.
+        notes.push("the reply could not be rewritten to references (" + moved.error + "); the raw fences remain in the transcript");
+      }
+    }
+  }
+
   // What this round showed, filed under its first turn's seq so exclusion
   // follows the trim boundary.
   let shown: string[] = [];
   let r: int = 0;
   while (r < run.retrieved.length) { shown.push(run.retrieved[r].id); r = r + 1; }
-  if (shown.length > 0) { recordChunks(db, threadId, held.length, shown); }
-  return run;
+  // Only for a stored round: chunks filed under a seq the table does not hold
+  // would be excluded from future retrieval by chunksShownSince while the
+  // replay never actually carried them.
+  if (appended == "" && shown.length > 0) { recordChunks(db, threadId, held.length, shown); }
+  let reply: ThreadReply = { run: run, text: kept, baseSeq: held.length, notes: notes };
+  return reply;
 }
 
 // The conversation a person reads: the questions and the answers, without the
@@ -364,9 +467,26 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
 // needs the working; a reader needs the conclusion.
 export function threadMessages(db: Db, threadId: string): Turn[] {
   let out: Turn[] = [];
-  let all = threadTurns(db, threadId);
+  let rows = threadMessageRows(db, threadId);
   let i: int = 0;
-  while (i < all.length) {
+  while (i < rows.length) {
+    out.push(turnOf(rows[i]));
+    i = i + 1;
+  }
+  return out;
+}
+
+// The same conversation as stored rows, seq kept. The wire needs the number:
+// a message's artifact cards come from the join on the round's turn_seq, and
+// Turn — the provider's shape — deliberately does not carry one.
+export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {
+  let out: ThreadTurnRow[] = [];
+  let keys: DbOrder[] = [asc("seq")];
+  let listed = listOrdered(db, threadTurnsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  if (listed == "" || listed == "[]") { return out; }
+  let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
+  let i: int = 0;
+  while (i < rows.length) {
     // A user turn carrying retrieved passages is context, not something the
     // person typed, and an assistant turn that is only tool calls said nothing.
     //
@@ -374,8 +494,8 @@ export function threadMessages(db: Db, threadId: string): Turn[] {
     // them. Matching on text is a seam — a marker on the turn would be better —
     // but Turn is the provider's shape and a field the wire does not carry has
     // to be justified by more than this.
-    if (all[i].role == "user" && !all[i].text.startsWith(CONTEXT_PREFIX)) { out.push(all[i]); }
-    else if (all[i].role == "assistant" && all[i].text != "" && all[i].calls.length == 0) { out.push(all[i]); }
+    if (rows[i].role == "user" && !rows[i].text.startsWith(CONTEXT_PREFIX)) { out.push(rows[i]); }
+    else if (rows[i].role == "assistant" && rows[i].text != "" && jsonList(rows[i].calls).length == 0) { out.push(rows[i]); }
     i = i + 1;
   }
   return out;

@@ -90,7 +90,16 @@ export type ThreadListing = {
   title: string;
 };
 
-export type TranscriptTurn = { role: string; text: string };
+// One artifact save, as a message refers to it. The server strips its own
+// reference nonce before the wire, so what arrives is only the resolved
+// address: which slot, which version, and the path the caption names. No
+// previewToken here by design — a capability does not ride every message.
+export type WireRef = { slot: number; version: number; path: string };
+
+// `refs` is the only thing a card may be built from. The text's "[saved …]"
+// captions are prose for the reader; mapping cards by text order was breakable
+// by one forged line, so the ids travel beside the text, not inside it.
+export type TranscriptTurn = { role: string; seq: number; text: string; refs: WireRef[] };
 
 export type ScopeNode = { path: string; documents: number; total: number };
 
@@ -156,6 +165,11 @@ export type SayReply = {
   runId: string;
   ok: boolean;
   text: string;
+  // The saves this turn made, already resolved to slot@version. The turn's
+  // stored sequence number rides along so a caller can ask the by-turn join
+  // about exactly this round; -1 when nothing was stored.
+  refs: WireRef[];
+  seq: number;
   toolCalls: number;
   inputTokens: number;
   outputTokens: number;
@@ -269,6 +283,20 @@ export const uploadFile = (threadId: string, name: string, content: string) =>
 
 export const listArtifacts = (threadId: string) =>
   call<ArtifactListing[]>(`/threads/${encodeURIComponent(threadId)}/artifacts`);
+
+// One row per version a model round produced — the join a chat renders its
+// cards from. Console uploads never appear: no round made them. Like a
+// transcript ref this carries no previewToken; a card that needs the token
+// buys it from the listing at click time.
+export type TurnArtifactRef = {
+  turnSeq: number; slot: number; path: string; title: string; kind: string; version: number;
+};
+
+// The whole conversation in one query rather than `?turn=N` per message: the
+// client resolves refs by slot@version, and that key is unique thread-wide,
+// so narrowing by turn would only multiply requests.
+export const artifactsByTurn = (threadId: string) =>
+  call<TurnArtifactRef[]>(`/threads/${encodeURIComponent(threadId)}/artifacts/by-turn`);
 
 // The server files this as origin "uploaded" whatever we say: this route is a
 // person with a console, and the model's writes arrive through its own tool.

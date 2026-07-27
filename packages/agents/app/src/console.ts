@@ -12,7 +12,10 @@ import "./artifact-panel.js";
 import "./settings.js";
 import "./knowledge.js";
 import "./canvas.js";
-import { AgentRow, ThreadListing, listAgents, listThreads } from "./api.js";
+import {
+  AgentRow, ArtifactListing, ThreadListing, TurnArtifactRef, WireRef,
+  artifactsByTurn, listAgents, listArtifacts, listThreads, previewUrl,
+} from "./api.js";
 import { ChatSession } from "./chat-session.js";
 
 @customElement("agent-console")
@@ -37,6 +40,20 @@ export class AgentConsole extends LitElement {
     .icon[aria-pressed="true"] { border-color: var(--accent); color: var(--fg);
                                  background: var(--bg-sunken); }
     main { flex: 1; min-height: 0; }
+    /* The cards live in this element's own DOM, below the chat — never inside
+       the component's messages. Its artifact mode re-extracts fences from the
+       displayed text and matches them to rows by position, which is exactly
+       the text-order mapping the refs exist to replace. */
+    .cards { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 18px 12px;
+             border-top: 1px solid var(--border); background: var(--bg); }
+    .card { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+            border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px;
+            background: var(--bg-card); color: var(--fg); cursor: pointer;
+            font: inherit; text-align: left; max-width: 260px; }
+    .card:hover { border-color: var(--accent); }
+    .card .card-name { font-size: 13px; font-weight: 600; max-width: 100%;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card .card-meta { font: 11.5px var(--mono); color: var(--muted); }
     nr-chatbot {
       height: 100%;
       /* The Claude reading: the user's turn is a warm block, the model's is
@@ -66,8 +83,16 @@ export class AgentConsole extends LitElement {
   private session = new ChatSession({
     agentId: () => this.agentId,
     onThreadOpened: (id) => { this.threadId = id; },
-    onTurnDone: () => { void this.refreshThreads(); },
+    onTurnDone: () => { void this.refreshThreads(); void this.refreshRefs(); },
   });
+  // What the conversation saved, from two sources that must agree before a
+  // card is drawn: the refs each message carries (slot@version, from the say
+  // reply or the transcript), and the by-turn join, which only answers for
+  // versions a round actually stored. A ref the join does not answer for is a
+  // claim, not a save, and is not rendered. Neither source is the reply text:
+  // mapping cards by text order was breakable by one forged line.
+  @state() private turnRefs: TurnArtifactRef[] = [];
+  @state() private saidRefs: WireRef[] = [];
   // Which rail is open, if either. One at a time and not two booleans: both
   // are 320px against a chat pane that is already the narrowest thing here,
   // and the files a conversation works from and the results it produced are
@@ -78,7 +103,10 @@ export class AgentConsole extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
+    this.session.on("state:changed", () => {
+      this.busy = this.session.isTyping();
+      this.saidRefs = this.session.getState().messages.flatMap((m) => m.refs);
+    });
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentRow[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled);
@@ -90,9 +118,10 @@ export class AgentConsole extends LitElement {
     const found = this.threads.find((t) => t.id === id);
     if (found) this.agentId = found.agentId;
     await this.session.open(id);
+    await this.refreshRefs();
   }
 
-  private fresh() { this.threadId = ""; this.session.fresh(); }
+  private fresh() { this.threadId = ""; this.turnRefs = []; this.session.fresh(); }
 
   // Clicking the rail that is already open closes it, which is what a pressed
   // toggle should do.
@@ -102,6 +131,43 @@ export class AgentConsole extends LitElement {
 
   private async refreshThreads() {
     this.threads = await listThreads().catch(() => this.threads);
+  }
+
+  private async refreshRefs() {
+    this.turnRefs = this.threadId === "" ? []
+      : await artifactsByTurn(this.threadId).catch(() => this.turnRefs);
+  }
+
+  // The cards to draw, in the order the conversation earned them. Each message
+  // ref resolves against the join by slot@version; one key, one card, however
+  // many captions mention it.
+  private cards(): { ref: WireRef; row: TurnArtifactRef }[] {
+    const byKey = new Map<string, TurnArtifactRef>();
+    for (const row of this.turnRefs) byKey.set(`${row.slot}@${row.version}`, row);
+    const seen = new Set<string>();
+    const out: { ref: WireRef; row: TurnArtifactRef }[] = [];
+    for (const ref of this.saidRefs) {
+      const key = `${ref.slot}@${ref.version}`;
+      const row = byKey.get(key);
+      if (row === undefined || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ref, row });
+    }
+    return out;
+  }
+
+  // A card opens the preview origin in a tab of its own — it does not open the
+  // artifact rail, which moves only when its header toggle is pressed. The
+  // previewToken is deliberately absent from say and transcript payloads, so
+  // the card buys it at click time from the listing, the one route that says
+  // it. noreferrer because that token is the whole authorisation and a page
+  // the artifact links to must not be handed it; noopener follows and also
+  // keeps the new document from reaching back through window.opener.
+  private async openCard(ref: WireRef) {
+    const listed = await listArtifacts(this.threadId).catch(() => [] as ArtifactListing[]);
+    const row = listed.find((a) => a.slot === ref.slot);
+    if (row === undefined) return;
+    window.open(previewUrl(row.previewToken, ref.version), "_blank", "noopener,noreferrer");
   }
 
   private async reloadAgents() {
@@ -123,6 +189,7 @@ export class AgentConsole extends LitElement {
   }
 
   render() {
+    const cards = this.cards();
     return html`
       <console-sidebar
         .threads=${this.threads}
@@ -163,7 +230,16 @@ export class AgentConsole extends LitElement {
             .isQueryRunning=${this.busy}
             placeholder="Ask ${this.agentName()}…"
           ></nr-chatbot>
-        </main>`}
+        </main>
+        ${cards.length === 0 ? "" : html`
+        <div class="cards">
+          ${cards.map((c) => html`
+            <button class="card" title=${c.row.path}
+              @click=${() => { void this.openCard(c.ref); }}>
+              <span class="card-name">${c.row.title === "" ? c.row.path : c.row.title}</span>
+              <span class="card-meta">${c.row.kind} · v${c.row.version}</span>
+            </button>`)}
+        </div>`}`}
       </div>
 
       ${this.rail === "workspace"

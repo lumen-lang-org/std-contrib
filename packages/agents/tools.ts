@@ -271,6 +271,21 @@ const SELF_CONTAINED: string = "An artifact may reach its siblings and nothing e
   + "request off this origin, so a CDN script, a Google font or a remote image is simply missing when a reader opens it. "
   + "Draw rather than link, and inline anything too small to be its own file.";
 
+// The fence convention, for the system prompt. A prompt line rather than a
+// tool description because the fence is not a tool call: a model deciding how
+// to answer needs the convention before it starts writing, not at the moment
+// it happens to consider write_artifact. Offered only where the tools are —
+// with a thread — since a fence saves into the same conversation they do.
+export const FILE_FENCE: string = "You can also create a file directly in your reply: open a code fence whose "
+  + "info line names a path, like ```html path=/index.html title=Landing page — the fenced body is saved as a new "
+  + "artifact and your reply keeps a one-line reference in its place. The first word after the backticks is the "
+  + "language, path= takes the path as one word, and title= runs to the end of the line. A fence can only CREATE "
+  + "a file that does not exist yet, and only of an inert kind: .html, .svg, .md, .json or .txt. Updating a path "
+  + "that already exists, and writing a script or stylesheet of any kind, must go through the write_artifact tool "
+  + "— a fence that tries either is refused, and the refusal is noted. A fence without path= is ordinary quoted "
+  + "code and is left alone. If you fence one new path twice in a reply, the last body is the one saved; if you "
+  + "both call write_artifact on a path and fence it, the tool call wins and the fence is skipped.";
+
 // The two tools, described for the model. A ToolSpec straight away rather than
 // a private tool type the caller re-wraps field by field: there is nothing here
 // a provider does not already understand.
@@ -280,6 +295,7 @@ export function artifactTools(): ToolSpec[] {
     "Save something the user is meant to look at — a page, a diagram, a document, a data file — as an artifact of this conversation. "
     + "Writing a path that already exists appends a new version instead of replacing the old one, and the reply names the slot and version number, "
     + "which is how you refer to what you just saved when you answer. "
+    + "A path-carrying code fence in your reply (```html path=/index.html) can create a new inert file the same way, but only this tool can update an existing path or write a script or stylesheet; when a reply names one path through both, this tool wins. "
     + SELF_CONTAINED,
     "{\"type\":\"object\",\"properties\":{"
     + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot and dash; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt or a source suffix.\"},"
@@ -316,6 +332,10 @@ export type ArtifactToolCall = {
   name: string,
   // The arguments as the model sent them: JSON text.
   args: string,
+  // The round this call belongs to: the thread's turn seq at the round's
+  // base. The fence door stamps the same number, so a version row answers
+  // "which round wrote you" identically whichever door was used.
+  turnSeq: int,
   now: string,
 };
 
@@ -343,10 +363,13 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       title: jsonText(call.args, "title"),
       content: content,
       note: jsonText(call.args, "note"),
+      // The tool is the door that MAY update, so no create-only here.
+      mustCreate: false,
       // Fixed here, never read out of the arguments: origin says who produced
       // a body, and a model asked to declare that can call its own output an
       // upload. This call site knows the answer.
       origin: "generated",
+      turnSeq: call.turnSeq,
       now: call.now,
     });
     if (!written.ok) {
