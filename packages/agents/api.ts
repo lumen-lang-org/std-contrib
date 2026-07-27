@@ -24,7 +24,7 @@ import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
-import { chatEndpoint, embeddingEndpoint } from "./provider.ts";
+import { chatEndpoint, embeddingEndpoint, complete, embedText, replyText } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
@@ -44,6 +44,7 @@ type KeyBody = { apiKey: string };
 type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
 type ScopeGrant = { scope: string };
+type ServerAuth = { authKind: string, authHeader: string, token: string };
 type ThreadStart = { agentId: string };
 type FileUpload = { name: string, content: string };
 type FilePromote = { scope: string, modelId: string };
@@ -183,40 +184,16 @@ class AgentApi {
     }
     let named = agentNameProblem(row.agentName);
     if (named != "") { return badRequest(named); }
+
+    // Exactly one default, enforced on the way in. This used to live in a
+    // route of its own, which meant the rule held through that door and not
+    // through this one — and an invariant with two doors and one guard is not
+    // an invariant.
+    if (row.isDefault) {
+      executeWith(this.db, "UPDATE agents SET is_default = " + this.db.placeholder, ["0"]);
+    }
     let written = persist(this.db, this.flat, req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, this.full, param(req, "id")));
-  }
-
-  // Moving an agent to a different model is an update to one column, which is
-  // the point of keeping the model name in a row.
-  @put("/:id/model")
-  setModel(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
-    }
-    let change: ModelChange = JSON.parse<ModelChange>(req.body);
-    if (!existsById(this.db, modelConfigsMapping(this.db), change.modelConfigId)) {
-      return badRequest("no model config " + change.modelConfigId);
-    }
-    executeWith(this.db, "UPDATE agents SET model_config_id = " + this.db.placeholder
-      + " WHERE id = " + placeholderAt(this.db, 2), [change.modelConfigId, param(req, "id")]);
-    return ok(findById(this.db, this.full, param(req, "id")));
-  }
-
-  // Rolling a prompt back is pointing at an earlier version, which is why a
-  // prompt row is never edited.
-  @put("/:id/prompt")
-  setPrompt(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
-    }
-    let change: PromptChange = JSON.parse<PromptChange>(req.body);
-    if (!existsById(this.db, promptsMapping(), change.promptId)) {
-      return badRequest("no prompt " + change.promptId);
-    }
-    executeWith(this.db, "UPDATE agents SET prompt_id = " + this.db.placeholder
-      + " WHERE id = " + placeholderAt(this.db, 2), [change.promptId, param(req, "id")]);
     return ok(findById(this.db, this.full, param(req, "id")));
   }
 
@@ -518,7 +495,9 @@ class TraceApi {
 @controller("/models")
 class ModelApi {
   db: Db;
-  constructor(db: Db) { this.db = db; }
+  // Testing a model calls it, which needs the key out of the encrypted store.
+  master: string;
+  constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @get("/")
   list(req: Request): Reply {
@@ -540,28 +519,75 @@ class ModelApi {
 
   // Enabled is the kill switch: flipping it refuses the next call to every
   // agent on this model, which is the point of it being a column.
-  @put("/:id/enabled")
-  setEnabled(req: Request): Reply {
+  // Call the model once and say what happened. A row can name a provider, a
+  // base URL and a key and still be wrong in a way only the provider knows —
+  // a retired model id, a gateway that speaks a different dialect, a key
+  // without access. Finding that out at the first conversation is finding it
+  // out in front of a user.
+  @post("/:id/test")
+  test(req: Request): Reply {
+    let document = findById(this.db, modelsMapping(), param(req, "id"));
+    if (document == "") { return notFound("model " + param(req, "id")); }
+    let stored: ModelRow = JSON.parse<ModelRow>(document);
+    let key = credentialFor(this.db, stored.provider, this.master);
+    if (key == "") { return badRequest("no credential stored for " + stored.provider); }
+
+    // Tested as if enabled. A test is what you run to decide whether to enable
+    // a row, so refusing to test a disabled one refuses the only question the
+    // button is asked.
+    let model: ModelRow = {
+      id: stored.id, label: stored.label, apiName: stored.apiName,
+      provider: stored.provider, kind: stored.kind, dimensions: stored.dimensions,
+      baseUrl: stored.baseUrl, enabled: true,
+    };
+
+    if (model.kind == "embedding") {
+      let vector = embedText(model, "a probe from the console", key);
+      if (!vector.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(vector.error) + "}"); }
+      // The width it returns is the width the corpus was built at. A model
+      // that answers a different number is not the model this row describes.
+      let agrees = vector.dimensions == model.dimensions;
+      return ok("{\"ok\":" + `${agrees}`
+        + ",\"dimensions\":" + `${vector.dimensions}`
+        + ",\"declared\":" + `${model.dimensions}`
+        + ",\"error\":" + JSON.stringify(agrees ? "" : "the model returned a different width than this row declares") + "}");
+    }
+
+    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" };
+    let said = complete(model, config, "Reply with the single word: ok", "ping", key);
+    if (!said.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(said.error) + "}"); }
+    // The provider's whole envelope is not an answer. replyText pulls the
+    // assistant's own words out of it, which is what a person is looking at.
+    let answer = replyText(model.provider, said.text);
+    return ok("{\"ok\":true,\"reply\":" + JSON.stringify(answer.slice(0, 120))
+      + ",\"inputTokens\":" + `${said.inputTokens}`
+      + ",\"outputTokens\":" + `${said.outputTokens}` + "}");
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
     if (!existsById(this.db, modelsMapping(), param(req, "id"))) {
       return notFound("model " + param(req, "id"));
     }
-    let flag = "0";
-    if (req.body.indexOf("true") >= 0) { flag = "1"; }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let row: ModelRow = JSON.parse<ModelRow>(req.body);
+    if (row.id != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    let wrong = modelProblem(row);
+    if (wrong != "") { return badRequest(wrong); }
 
-    // At most one embedding model is enabled at a time, enforced here rather
-    // than asked of a caller. Two enabled embedders is not a preference, it is
-    // a corpus split down the middle: a document embedded by one is invisible
-    // to every agent retrieving through the other, and nothing reports it —
-    // the query simply comes back with fewer passages than it should.
-    let row: ModelRow = JSON.parse<ModelRow>(findById(this.db, modelsMapping(), param(req, "id")));
-    if (flag == "1" && row.kind == "embedding") {
+    // At most one embedding model is enabled at a time. Enforced here rather
+    // than asked of a caller: two enabled embedders is not a preference, it is
+    // a corpus split in half — a document embedded by one is invisible to
+    // every agent retrieving through the other, and nothing reports it.
+    if (row.enabled && row.kind == "embedding") {
       executeWith(this.db, "UPDATE models SET enabled = " + this.db.placeholder
         + " WHERE kind = " + placeholderAt(this.db, 2)
         + " AND id <> " + placeholderAt(this.db, 3), ["0", "embedding", param(req, "id")]);
     }
-
-    executeWith(this.db, "UPDATE models SET enabled = " + this.db.placeholder
-      + " WHERE id = " + placeholderAt(this.db, 2), [flag, param(req, "id")]);
+    let written = persist(this.db, modelsMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, modelsMapping(), param(req, "id")));
   }
 
@@ -665,7 +691,9 @@ class PromptApi {
 @controller("/servers")
 class ServerApi {
   db: Db;
-  constructor(db: Db) { this.db = db; }
+  // Setting a server's auth writes its token to the encrypted store.
+  master: string;
+  constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @get("/")
   list(req: Request): Reply {
@@ -686,15 +714,58 @@ class ServerApi {
     return created(findById(this.db, mcpServersMapping(), jsonId(req.body)));
   }
 
-  @put("/:id/enabled")
-  setEnabled(req: Request): Reply {
+  // How a server authenticates us. The token never lands in this table: it
+  // goes through the same encrypted store as a provider key, under the
+  // server's own id, because a secret beside the thing it authenticates is
+  // decoration.
+  @put("/:id/auth")
+  setAuth(req: Request): Reply {
     if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
       return notFound("server " + param(req, "id"));
     }
-    let flag = "0";
-    if (req.body.indexOf("true") >= 0) { flag = "1"; }
-    executeWith(this.db, "UPDATE mcp_servers SET enabled = " + this.db.placeholder
-      + " WHERE id = " + placeholderAt(this.db, 2), [flag, param(req, "id")]);
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: ServerAuth = JSON.parse<ServerAuth>(req.body);
+    if (body.authKind != "none" && body.authKind != "bearer" && body.authKind != "header") {
+      return badRequest("auth is none, bearer or header, not \"" + body.authKind + "\"");
+    }
+    if (body.authKind == "header" && body.authHeader.trim() == "") {
+      return badRequest("a custom header needs a name");
+    }
+    if (body.authKind != "none" && body.token == "") {
+      return badRequest("that auth kind needs a token");
+    }
+    executeWith(this.db, "UPDATE mcp_servers SET auth_kind = " + this.db.placeholder
+      + ", auth_header = " + placeholderAt(this.db, 2)
+      + " WHERE id = " + placeholderAt(this.db, 3),
+      [body.authKind, body.authHeader, param(req, "id")]);
+    if (body.authKind == "none") {
+      return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+    }
+    let stored = storeCredential(this.db, { provider: "mcp:" + param(req, "id"),
+      apiKey: body.token, masterKey: this.master, now: stamp() });
+    if (stored != "") { return badRequest(stored); }
+    return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let row: McpServerRow = JSON.parse<McpServerRow>(req.body);
+    if (row.id != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    if (row.serverName.trim() == "") { return badRequest("a server needs a name"); }
+    // Only the transport the client actually speaks. Offering one it refuses
+    // is offering a server that mounts no tools and says why only at run time.
+    if (row.transport != "http") {
+      return badRequest("this speaks http; \"" + row.transport + "\" needs a subprocess it cannot spawn");
+    }
+    if (row.endpoint.trim() == "") { return badRequest("a server needs an endpoint"); }
+    let written = persist(this.db, mcpServersMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
   }
 
@@ -1219,8 +1290,8 @@ function migrated(db: Db): Db {
 
 function seed(db: Db): void {
   if (countWhere(db, agentsMapping(), "", []) > 0) { return; }
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, enabled: true };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, enabled: true };
+  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(opus));
   persist(db, modelsMapping(), JSON.stringify(haiku));
   let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}" };
@@ -1231,12 +1302,12 @@ function seed(db: Db): void {
   let p2: PromptRow = { id: "p2", promptName: "lead", version: 2, body: "You lead, briefly.", createdAt: "2026-07-25" };
   persist(db, promptsMapping(), JSON.stringify(p1));
   persist(db, promptsMapping(), JSON.stringify(p2));
-  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "stdio", endpoint: "mcp-fs", enabled: true };
-  let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", enabled: true };
+  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "stdio", endpoint: "mcp-fs", authKind: "none", authHeader: "", enabled: true };
+  let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", authKind: "none", authHeader: "", enabled: true };
   persist(db, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(db, mcpServersMapping(), JSON.stringify(ghSrv));
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
-  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p1", enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", isDefault: true, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p1", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
   persist(db, agentsMapping(), JSON.stringify(lead));
   persist(db, agentsMapping(), JSON.stringify(scout));
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a1','s1')");
@@ -1276,7 +1347,7 @@ function main(): void {
     try { return api.find(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
-  bound.set("update", (req: Request) => {
+    bound.set("update", (req: Request) => {
     try { return api.update(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
@@ -1284,15 +1355,7 @@ function main(): void {
     try { return api.create(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
-  bound.set("setModel", (req: Request) => {
-    try { return api.setModel(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("setPrompt", (req: Request) => {
-    try { return api.setPrompt(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("addServer", (req: Request) => {
+      bound.set("addServer", (req: Request) => {
     try { return api.addServer(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
@@ -1443,7 +1506,7 @@ function main(): void {
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
 
-  let models = new ModelApi(db);
+  let models = new ModelApi(db, master);
   bound.set("mlist", (req: Request) => {
     try { return models.list(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
@@ -1452,11 +1515,15 @@ function main(): void {
     try { return models.create(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
-  bound.set("msetEnabled", (req: Request) => {
-    try { return models.setEnabled(req); }
+  bound.set("mupdate", (req: Request) => {
+    try { return models.update(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
-  bound.set("mremove", (req: Request) => {
+  bound.set("mtest", (req: Request) => {
+    try { return models.test(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+    bound.set("mremove", (req: Request) => {
     try { return models.remove(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
@@ -1485,7 +1552,7 @@ function main(): void {
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
 
-  let servers = new ServerApi(db);
+  let servers = new ServerApi(db, master);
   bound.set("slist", (req: Request) => {
     try { return servers.list(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
@@ -1494,11 +1561,15 @@ function main(): void {
     try { return servers.create(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
-  bound.set("ssetEnabled", (req: Request) => {
-    try { return servers.setEnabled(req); }
+  bound.set("supdate", (req: Request) => {
+    try { return servers.update(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
-  bound.set("sremove", (req: Request) => {
+  bound.set("ssetAuth", (req: Request) => {
+    try { return servers.setAuth(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+    bound.set("sremove", (req: Request) => {
     try { return servers.remove(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });

@@ -14,6 +14,8 @@ let database: Db = sqlite();
 // What one read of an agent gives back.
 type PromptView = { id: string, promptName: string, version: int, body: string };
 type ConfigView = { id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string };
+// Exactly what agentsFull projects for a linked server — no more, or
+// JSON.parse refuses the row for a field the query never selected.
 type ServerView = { id: string, serverName: string, transport: string, endpoint: string, enabled: bool };
 type SubAgentView = { id: string, agentName: string, enabled: bool };
 type AgentView = {
@@ -23,6 +25,7 @@ type AgentView = {
   modelConfigId: string,
   promptId: string,
   enabled: bool,
+  isDefault: bool,
   updatedAt: string,
   prompt: PromptView,
   config: ConfigView,
@@ -53,8 +56,8 @@ function seeded(): void {
   wipe();
   migrate(database, schemaPlan(database));
 
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, enabled: true };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, enabled: true };
+  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
 
@@ -70,13 +73,13 @@ function seeded(): void {
   persist(database, promptsMapping(), JSON.stringify(p2));
   persist(database, promptsMapping(), JSON.stringify(p3));
 
-  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "stdio", endpoint: "mcp-fs", enabled: true };
-  let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", enabled: true };
+  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "stdio", endpoint: "mcp-fs", authKind: "none", authHeader: "", enabled: true };
+  let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", authKind: "none", authHeader: "", enabled: true };
   persist(database, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(database, mcpServersMapping(), JSON.stringify(ghSrv));
 
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
-  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p3", enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p3", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
   persist(database, agentsMapping(), JSON.stringify(lead));
   persist(database, agentsMapping(), JSON.stringify(scout));
 
@@ -90,10 +93,11 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Nine: five tables from mappings, two link tables, the credentials table,
-  // and the index. Asserting the number rather than "some" is what catches a
-  // migration silently dropped from the plan.
-  expect(r.applied == 9);
+  // Thirteen: five tables from mappings, two link tables, the credentials
+  // table, the index, and the four ALTERs that add columns those tables did
+  // not have when they were first created. Asserting the number rather than
+  // "some" is what catches a migration silently dropped from the plan.
+  expect(r.applied == 13);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -101,7 +105,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 9);
+  expect(migrate(database, schemaPlan(database)).applied == 13);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

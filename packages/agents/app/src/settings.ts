@@ -9,8 +9,8 @@ import {
   AgentRow, ModelConfigRow, ModelRow, PromptRow, ServerRow, TracingStatus,
   configureTracing, createModel, createPrompt, createServer, listAgents,
   listConfigs, listModels, listPrompts, listProviders, listServers,
-  setModelEnabled, setTracingSecret,
-  storeProviderKey, tracingStatus, updateAgent,
+  setTracingSecret, storeProviderKey, tracingStatus,
+  updateAgent, updateModel, updateServer, setServerAuth, testModel,
 } from "./api.js";
 
 const TABS = ["Agents", "Models", "Prompts", "MCP", "Providers", "Tracing"] as const;
@@ -58,6 +58,20 @@ export class ConsoleSettings extends LitElement {
   // Which kind the "add model" row is on, so the dimensions input appears only
   // for an embedding model, where it is required.
   @state() private newKind = "chat";
+  // What the last Test said, so the answer appears where the button is.
+  @state() private probed = "";
+
+  private async probe(id: string) {
+    this.probed = "testing…";
+    try {
+      const r = await testModel(id);
+      this.probed = r.ok
+        ? (r.reply !== undefined ? `answered: ${r.reply}` : `answered, ${r.dimensions} dimensions`)
+        : `failed: ${r.error ?? "no reason given"}`;
+    } catch (e) {
+      this.probed = `failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
 
   async connectedCallback() {
     super.connectedCallback();
@@ -166,18 +180,20 @@ export class ConsoleSettings extends LitElement {
   private modelsTab() {
     return html`
       <table>
-        <tr><th>Label</th><th>API name</th><th>Provider</th><th>Kind</th><th>Enabled</th></tr>
+        <tr><th>Label</th><th>API name</th><th>Provider</th><th>Kind</th><th>Enabled</th><th></th></tr>
         ${this.models.map((m) => html`<tr>
           <td>${m.label}</td><td>${m.apiName}</td><td>${m.provider}</td><td>${m.kind}</td>
           <td><input type=${m.kind === "embedding" ? "radio" : "checkbox"} name="embedder"
             ?checked=${m.enabled}
             @change=${(e: Event) => this.act(() =>
-              setModelEnabled(m.id, (e.target as HTMLInputElement).checked))} /></td>
+              updateModel({ ...m, enabled: (e.target as HTMLInputElement).checked }))} /></td>
+          <td><button class="ghost" @click=${() => this.probe(m.id)}>Test</button></td>
         </tr>`)}
       </table>
       <p class="note">One embedding model is active at a time, and turning one on turns
       the others off — documents embedded by different models cannot see each other, so a
       second active embedder splits the corpus with nothing to report it.</p>
+      ${this.probed === "" ? "" : html`<p class="note">${this.probed}</p>`}
       <div class="row" id="newModel">
         <input name="id" placeholder="id" style="width:70px" />
         <input name="label" placeholder="Label" />
@@ -191,6 +207,8 @@ export class ConsoleSettings extends LitElement {
         ${this.newKind === "embedding" ? html`
           <input name="dimensions" type="number" min="1" placeholder="dimensions"
             style="width:120px" title="How wide this model's vectors are — 1024 for mistral-embed" />` : ""}
+        <input name="baseUrl" placeholder="base url — blank for the provider's own"
+          style="flex:1" title="An OpenAI-compatible gateway: Ollama, vLLM, a company proxy" />
         <label><input name="enabled" type="checkbox" checked /> enabled</label>
         <button @click=${(e: Event) => {
           const f = (e.target as HTMLElement).parentElement!;
@@ -201,6 +219,7 @@ export class ConsoleSettings extends LitElement {
             // Not a constant: an embedding model that lies about its width
             // builds a vector column the provider's own answers do not fit.
             dimensions: parseInt(this.field(f, "dimensions") || "0", 10),
+            baseUrl: this.field(f, "baseUrl"),
             enabled: (f.querySelector("[name=enabled]") as HTMLInputElement).checked,
           }));
         }}>Add</button>
@@ -235,9 +254,28 @@ export class ConsoleSettings extends LitElement {
         <tr><th>Name</th><th>Endpoint</th><th>Transport</th><th>Enabled</th></tr>
         ${this.servers.map((s) => html`<tr>
           <td>${s.serverName}</td><td>${s.endpoint}</td><td>${s.transport}</td>
-          <td>${s.enabled ? "yes" : "no"}</td>
+          <td><input type="checkbox" ?checked=${s.enabled}
+            @change=${(e: Event) => this.act(() =>
+              updateServer({ ...s, enabled: (e.target as HTMLInputElement).checked }))} /></td>
         </tr>`)}
       </table>
+      <div class="row" id="newAuth">
+        <select name="authFor">
+          ${this.servers.map((s) => html`<option value=${s.id}>${s.serverName}</option>`)}
+        </select>
+        <select name="authKind">
+          <option value="none">no auth</option><option value="bearer">bearer</option>
+          <option value="header">custom header</option>
+        </select>
+        <input name="authHeader" placeholder="header name" style="width:130px" />
+        <input name="token" type="password" placeholder="token" style="flex:1" />
+        <button @click=${(e: Event) => {
+          const f = (e.target as HTMLElement).parentElement!;
+          this.act(() => setServerAuth(this.field(f, "authFor"), this.field(f, "authKind"),
+            this.field(f, "authHeader"), this.field(f, "token")));
+        }}>Set auth</button>
+      </div>
+      <p class="note">A token is stored encrypted under the server's id and never read back.</p>
       <div class="row" id="newServer">
         <input name="id" placeholder="id" style="width:70px" />
         <input name="serverName" placeholder="Name" />
@@ -248,7 +286,7 @@ export class ConsoleSettings extends LitElement {
           this.act(() => createServer({
             id: this.field(f, "id"), serverName: this.field(f, "serverName"),
             endpoint: this.field(f, "endpoint"), transport: this.field(f, "transport"),
-            enabled: true,
+            authKind: "none", authHeader: "", enabled: true,
           }));
         }}>Add</button>
       </div>

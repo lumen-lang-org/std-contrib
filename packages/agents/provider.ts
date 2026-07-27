@@ -62,6 +62,23 @@ export function embeddingEndpoint(provider: string): string {
   return "";
 }
 
+// The address a model row actually calls. A base URL on the row wins: an
+// OpenAI-compatible gateway is the same wire format at a different host, so
+// it is an override rather than a provider of its own.
+//
+// The path is appended, because a gateway publishes a root — "/v1" — and not
+// the whole endpoint. A row that already names the full path keeps it.
+export function endpointFor(model: ModelRow, path: string): string {
+  if (model.baseUrl == "") {
+    if (path == "embeddings") { return embeddingEndpoint(model.provider); }
+    return chatEndpoint(model.provider);
+  }
+  let root = model.baseUrl;
+  while (root.endsWith("/")) { root = root.slice(0, root.length - 1); }
+  if (root.endsWith("/" + path)) { return root; }
+  return root + "/" + path;
+}
+
 export type Embedding = {
   ok: bool,
   // The vector in pgvector's own literal form, "[0.1,-0.2,...]", so it can be
@@ -74,7 +91,7 @@ export type Embedding = {
 // One embedding. The model is named by its row like any other, so which model
 // embeds is a column and changing it does not touch this file.
 export function embedText(model: ModelRow, text: string, apiKey: string): Embedding {
-  let endpoint = embeddingEndpoint(model.provider);
+  let endpoint = endpointFor(model, "embeddings");
   if (endpoint == "") {
     let unknown: Embedding = { ok: false, vector: "", dimensions: 0, error: "no embedding endpoint for \"" + model.provider + "\"" };
     return unknown;
@@ -450,7 +467,7 @@ export function complete(model: ModelRow, config: ModelConfigRow, systemPrompt: 
 // One completion over a whole context, with the tools the model may call.
 // `complete` above is this with one turn and no tools.
 export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string): Completion {
-  let endpoint = chatEndpoint(model.provider);
+  let endpoint = endpointFor(model, "chat/completions");
   if (endpoint == "") {
     let unknown: Completion = { ok: false, text: "", status: 0, error: "no endpoint for provider \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
     return unknown;

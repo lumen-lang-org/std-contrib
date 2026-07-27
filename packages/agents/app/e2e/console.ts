@@ -62,3 +62,44 @@ export async function errorOf(res: { text(): Promise<string> }): Promise<string>
     return "";
   }
 }
+
+
+// The flat columns of an agent row, and nothing else.
+//
+// GET /agents answers the *full* view — prompt, config, servers and sub-agents
+// nested — and `JSON.parse<AgentRow>` refuses both unknown and missing fields.
+// Hand-listing the columns in each spec meant every new column broke several
+// tests at once; this is the one place that knows the shape.
+export type AgentFlat = {
+  id: string; agentName: string; description: string;
+  modelConfigId: string; promptId: string; enabled: boolean;
+  isDefault: boolean; updatedAt: string;
+};
+
+export function agentRow(a: Record<string, unknown>, over: Partial<AgentFlat> = {}): AgentFlat {
+  return {
+    id: a.id as string,
+    agentName: a.agentName as string,
+    description: a.description as string,
+    modelConfigId: a.modelConfigId as string,
+    promptId: a.promptId as string,
+    enabled: a.enabled as boolean,
+    isDefault: (a.isDefault as boolean) ?? false,
+    updatedAt: "now",
+    ...over,
+  };
+}
+
+// The same, for a model row.
+export type ModelFlat = {
+  id: string; label: string; apiName: string; provider: string;
+  kind: string; dimensions: number; baseUrl: string; enabled: boolean;
+};
+
+export function modelRow(over: Partial<ModelFlat> & { id: string }): ModelFlat {
+  return {
+    label: "Probe", apiName: "mistral-small-latest", provider: "mistral",
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: false,
+    ...over,
+  };
+}

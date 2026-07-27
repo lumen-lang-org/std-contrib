@@ -13,6 +13,7 @@
 // somebody deploys a new tool.
 
 import { Db } from "../plume/driver.ts";
+import { credentialFor } from "./credentials.ts";
 import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, agentsMapping, mcpServersMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
@@ -31,6 +32,10 @@ export type MountedTool = {
 export type Mounted = {
   tools: MountedTool[],
   servers: McpServerRow[],
+  // One token per server, read out of the encrypted store when the tools were
+  // mounted. Carried here so calling a tool does not need the master key —
+  // the decryption happened once, where the key already was.
+  tokens: string[],
   // What could not be mounted, in words. Not an error — an agent with one
   // unreachable server out of three still runs — but never silent, because a
   // tool the model was never told about is a failure that looks like a bad
@@ -120,10 +125,26 @@ export function delegateSchema(): string {
 // described without renaming it out from under the server that owns it. The
 // first server linked wins and the clash is recorded, which at least makes it
 // visible to whoever linked them.
-export function mountTools(db: Db, agentId: string): Mounted {
+export function mountTools(db: Db, agentId: string, master: string): Mounted {
   let tools: MountedTool[] = [];
   let problems: string[] = [];
+  let tokens: string[] = [];
   let servers = agentServers(db, agentId);
+
+  // One token per server, in step with `servers`, filled before any of the
+  // guards below can skip an entry. A list that only gains an item on the
+  // paths that reach the bottom drifts out of alignment with the one it is
+  // indexed beside, which is the whole reason a tool's `server` is an index.
+  let t: int = 0;
+  while (t < servers.length) {
+    let each = servers[t];
+    let held = "";
+    if (each.authKind != "" && each.authKind != "none") {
+      held = credentialFor(db, "mcp:" + each.id, master);
+    }
+    tokens.push(held);
+    t = t + 1;
+  }
 
   let s: int = 0;
   while (s < servers.length) {
@@ -139,7 +160,15 @@ export function mountTools(db: Db, agentId: string): Mounted {
       continue;
     }
 
-    let offered = listTools(server);
+    // A server told to authenticate with nothing stored for it will be
+    // refused by the server itself; saying so here beats an opaque 401.
+    let token = tokens[s];
+    if (server.authKind != "" && server.authKind != "none" && token == "") {
+      problems.push(server.serverName + " needs a token and none is stored for it");
+      s = s + 1;
+      continue;
+    }
+    let offered = listTools(server, token);
     if (offered.length == 0) {
       problems.push(server.serverName + " listed no tools");
       s = s + 1;
@@ -164,7 +193,7 @@ export function mountTools(db: Db, agentId: string): Mounted {
     s = s + 1;
   }
 
-  let out: Mounted = { tools: tools, servers: servers, problems: problems };
+  let out: Mounted = { tools: tools, servers: servers, tokens: tokens, problems: problems };
   return out;
 }
 
@@ -204,7 +233,8 @@ export function callMounted(mounted: Mounted, name: string, args: string): McpCa
     };
     return unknown;
   }
-  return callTool(mounted.servers[mounted.tools[at].server], name, args);
+  let which = mounted.tools[at].server;
+  return callTool(mounted.servers[which], name, args, mounted.tokens[which]);
 }
 
 // Which server answers a tool, for a caller recording what ran.

@@ -44,7 +44,6 @@ Current limitations:
 - no streaming HTTP response handling
 - no dynamic JSON value type
 - exported type aliases are not supported by module imports
-- module inlining means type aliases must avoid duplicate names
 - no async package API yet
 - no provider-native tool-call parser yet
 - no vector database or embedding storage abstraction yet

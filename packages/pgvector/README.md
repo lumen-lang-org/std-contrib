@@ -78,10 +78,14 @@ the database's own message rather than one this package invented.
 
 ### Why the names are prefixed
 
-Every module is inlined into one flat namespace, so two packages that both
-define `search` or `count` cannot be used together — and import aliasing does
-not help, since it renames references rather than definitions. The prefix is
-what lets this and the `ai` package appear in one program.
+The prefix names the store rather than dodging a clash. `pgVectorLiteral` and
+`pgParseVector` are pgvector's own wire format, and `pgSearch` says which
+store is being searched when a program has more than one.
+
+It began as a workaround — two modules exporting `search` used to be a
+compile error — and that reason is gone: the compiler now renames internally
+and importers resolve through the exporting module's table (spec 476). The
+names stay because they read well, not because they must.
 
 ## Skipping work you have already paid for
 

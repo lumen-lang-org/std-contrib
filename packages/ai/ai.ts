@@ -48,8 +48,6 @@ import { FakeToolCall, Model, AgentStep, AgentResult, runAgent as runAgentLoop, 
 // So every toolchat name is imported unaliased, exactly like the sibling-shared
 // vector/tool names above, and the public wrappers below take a different name.
 import { ChatTurn, buildOpenAIToolBody, buildMistralToolBody, runOpenAIToolChat, runMistralToolChat } from "./agent/toolchat.ts";
-// mcp.ts declares McpTool / McpResult unexported; importing any value
-// from it brings those types into scope.
 // mcp_stdio.ts and mcp_sse.ts import six of mcp.ts's helpers UNALIASED
 // (mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools,
 // parseMcpToolResult, mcpResponseId), so those six must be imported unaliased

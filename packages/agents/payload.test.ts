@@ -93,7 +93,7 @@ test("a create on a taken id is refused, and says what to use instead", () => {
   fresh();
   let row: AgentRow = {
     id: "support", agentName: "Support", description: "",
-    modelConfigId: "cfg", promptId: "p", enabled: true, updatedAt: "",
+    modelConfigId: "cfg", promptId: "p", isDefault: false, enabled: true, updatedAt: "",
   };
   persist(database, agentsMapping(), JSON.stringify(row));
 

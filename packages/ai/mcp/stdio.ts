@@ -6,8 +6,6 @@
 // captured-session tool run() both stay total. readLine blocks until a line or
 // EOF.
 //
-// importing the value builders from client.ts also pulls its McpTool/McpResult
-// types into scope, and makeTool pulls in Tool — the types need no export.
 
 import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId } from "./client.ts";
 import { makeTool } from "../agent/tools.ts";

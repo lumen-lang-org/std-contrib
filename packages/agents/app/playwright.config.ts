@@ -21,6 +21,10 @@ export default defineConfig({
     baseURL: process.env.CONSOLE_URL ?? "http://127.0.0.1:5173",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // A recording per test, so a reviewer can watch what was actually checked
+    // rather than read an assertion and take it on trust.
+    video: { mode: "on", size: { width: 1000, height: 640 } },
+    viewport: { width: 1000, height: 640 },
   },
   webServer: process.env.CONSOLE_URL
     ? undefined

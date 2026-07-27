@@ -66,8 +66,8 @@ hand, because they hold keys rather than an entity.
 GET    /agents            every agent, ordered, with ?enabled=true
 GET    /agents/:id        the whole agent in one query
 POST   /agents            create
-PUT    /agents/:id/model  point at a different model config
-PUT    /agents/:id/prompt point at a different prompt version
+PUT    /agents/:id        edit the whole row — name, description, model config,
+                          prompt, enabled, default
 POST   /agents/:id/servers  attach an MCP server
 DELETE /agents/:id
 ```
@@ -533,6 +533,25 @@ upload, where typing a new path *is* how a folder is created, since a scope
 exists by carrying documents — and a settings overlay reached from the account
 block: agents (an edit form per agent), models, prompt versions, MCP servers,
 provider keys and tracing.
+
+### One PUT per resource
+
+A row is edited by sending the row. There is no route per attribute: the rules
+that must hold — exactly one default agent, exactly one enabled embedding
+model — live in the row's own PUT, so they hold whichever way the row is
+written. A rule enforced at one door and not another is not enforced.
+
+```
+PUT  /agents/:id          the whole agent row
+PUT  /models/:id          the whole model row
+PUT  /servers/:id         the whole MCP server row
+```
+
+What is *not* an attribute keeps its own route: `POST /models/:id/test` calls
+the model and reports what happened; `PUT /servers/:id/auth` carries a token
+that never becomes a column, since it goes to the encrypted store; the link
+collections (`/servers`, `/sub-agents`, `/scopes`) add and remove
+relationships, which a row cannot express; and `/retrieval` is its own record.
 
 ### Indexing is a queue
 

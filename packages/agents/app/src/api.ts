@@ -9,6 +9,8 @@ export type AgentRow = {
   modelConfigId: string;
   promptId: string;
   enabled: boolean;
+  // The agent a new conversation opens against. Exactly one.
+  isDefault: boolean;
 };
 
 export type ModelRow = {
@@ -18,6 +20,9 @@ export type ModelRow = {
   provider: string;
   kind: string;
   dimensions: number;
+  // Empty means the provider's own address; anything else is an
+  // OpenAI-compatible host — a gateway, a proxy, a local server.
+  baseUrl: string;
   enabled: boolean;
 };
 
@@ -41,11 +46,31 @@ export type PromptRow = {
   createdAt: string;
 };
 
+export type AgentFull = AgentRow & {
+  // GET /agents answers the full view: the prompt and config resolved, and
+  // the links an agent has. Editing sends only the flat columns back.
+  prompt: PromptRow | null;
+  config: ModelConfigRow | null;
+  servers: ServerRow[];
+  subAgents: { id: string; agentName: string; enabled: boolean }[];
+};
+
+export type Retrieval = {
+  agentId: string;
+  embeddingModelId: string;
+  topK: number;
+  maxDistance: number;
+  enabled: boolean;
+};
+
 export type ServerRow = {
   id: string;
   serverName: string;
   transport: string;
   endpoint: string;
+  // "none", "bearer" or "header" — the token itself is never returned.
+  authKind: string;
+  authHeader: string;
   enabled: boolean;
 };
 
@@ -114,7 +139,64 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 // --- conversation ---------------------------------------------------------------------
 
-export const listAgents = () => call<AgentRow[]>("/agents");
+export const listAgents = () => call<AgentFull[]>("/agents");
+export const readAgent = (id: string) => call<AgentFull>(`/agents/${encodeURIComponent(id)}`);
+
+// --- what an agent is wired to --------------------------------------------------------
+
+export const linkServer = (agentId: string, serverId: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/servers`, {
+    method: "POST", body: JSON.stringify({ serverId }),
+  });
+export const unlinkServer = (agentId: string, serverId: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/servers/${encodeURIComponent(serverId)}`,
+    { method: "DELETE" });
+
+export const linkChild = (agentId: string, childId: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/sub-agents`, {
+    method: "POST", body: JSON.stringify({ childId }),
+  });
+export const unlinkChild = (agentId: string, childId: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/sub-agents/${encodeURIComponent(childId)}`,
+    { method: "DELETE" });
+
+export const agentScopes = (agentId: string) =>
+  call<string[]>(`/agents/${encodeURIComponent(agentId)}/scopes`);
+export const grantScope = (agentId: string, scope: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/scopes`, {
+    method: "POST", body: JSON.stringify({ scope }),
+  });
+export const revokeScope = (agentId: string, scope: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/scopes/${encodeURIComponent(scope)}`,
+    { method: "DELETE" });
+
+export const setRetrieval = (agentId: string, r: Omit<Retrieval, "agentId">) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/retrieval`, {
+    method: "PUT", body: JSON.stringify(r),
+  });
+
+export const deleteAgent = (id: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const deleteModel = (id: string) =>
+  call<unknown>(`/models/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const deleteServer = (id: string) =>
+  call<unknown>(`/servers/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const updateServer = (r: ServerRow) =>
+  call<ServerRow>(`/servers/${encodeURIComponent(r.id)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: r.id, serverName: r.serverName, transport: r.transport,
+      endpoint: r.endpoint, authKind: r.authKind, authHeader: r.authHeader,
+      enabled: r.enabled,
+    }),
+  });
+
+// The token never becomes a column: it goes to the encrypted store under the
+// server's id, which is why this is its own call and not a field of the row.
+export const setServerAuth = (id: string, authKind: string, authHeader: string, token: string) =>
+  call<unknown>(`/servers/${encodeURIComponent(id)}/auth`, {
+    method: "PUT", body: JSON.stringify({ authKind, authHeader, token }),
+  });
 export const listThreads = () => call<ThreadListing[]>("/threads?limit=50");
 export const openThread = (agentId: string) =>
   call<{ id: string }>("/threads", { method: "POST", body: JSON.stringify({ agentId }) });
@@ -144,10 +226,21 @@ export const uploadFile = (threadId: string, name: string, content: string) =>
 export const listModels = () => call<ModelRow[]>("/models");
 export const createModel = (row: ModelRow) =>
   call<ModelRow>("/models", { method: "POST", body: JSON.stringify(row) });
-export const setModelEnabled = (id: string, enabled: boolean) =>
-  call<unknown>(`/models/${encodeURIComponent(id)}/enabled`, {
-    method: "PUT", body: JSON.stringify({ enabled }),
+// A row is edited by sending the row. The rules that must hold — one enabled
+// embedding model, one default agent — live in the row's PUT, so they hold
+// however the row is written.
+export const updateModel = (m: ModelRow) =>
+  call<ModelRow>(`/models/${encodeURIComponent(m.id)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: m.id, label: m.label, apiName: m.apiName, provider: m.provider,
+      kind: m.kind, dimensions: m.dimensions, baseUrl: m.baseUrl, enabled: m.enabled,
+    }),
   });
+
+export const testModel = (id: string) =>
+  call<{ ok: boolean; error?: string; reply?: string; dimensions?: number; declared?: number }>(
+    `/models/${encodeURIComponent(id)}/test`, { method: "POST" });
 
 export const listConfigs = () => call<ModelConfigRow[]>("/model-configs");
 export const createConfig = (row: ModelConfigRow) =>
@@ -210,7 +303,7 @@ export const updateAgent = (a: AgentRow) =>
     body: JSON.stringify({
       id: a.id, agentName: a.agentName, description: a.description,
       modelConfigId: a.modelConfigId, promptId: a.promptId,
-      enabled: a.enabled, updatedAt: "now",
+      enabled: a.enabled, isDefault: a.isDefault, updatedAt: "now",
     }),
   });
 export const createAgent = (a: AgentRow) =>
