@@ -10,6 +10,7 @@ import "./sidebar.js";
 import "./workspace-panel.js";
 import "./settings.js";
 import "./knowledge.js";
+import "./canvas.js";
 import {
   AgentRow, ThreadListing, listAgents, listThreads, openThread, say, transcript,
 } from "./api.js";
@@ -61,7 +62,7 @@ export class AgentConsole extends LitElement {
   @state() private busy = false;
   @state() private panel = false;
   @state() private settings = false;
-  @state() private view: "chat" | "knowledge" = "chat";
+  @state() private view: "chat" | "knowledge" | "canvas" = "chat";
 
   async connectedCallback() {
     super.connectedCallback();
@@ -137,10 +138,12 @@ export class AgentConsole extends LitElement {
         @new-thread=${() => { this.view = "chat"; this.fresh(); }}
         @open-settings=${() => { this.settings = true; }}
         @open-knowledge=${() => { this.view = "knowledge"; }}
+        @open-canvas=${() => { this.view = "canvas"; }}
       ></console-sidebar>
 
       <div class="center">
-        ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>` : html`
+        ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
+          : this.view === "canvas" ? html`<agent-canvas></agent-canvas>` : html`
         <header>
           <span class="title">${this.threadTitle()}</span>
           <span class="chip"><span class="bolt">⚡</span>
