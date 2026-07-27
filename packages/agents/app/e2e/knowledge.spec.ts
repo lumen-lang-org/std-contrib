@@ -4,13 +4,50 @@
 // Skips itself on sqlite. Documents need pgvector, the API says so plainly,
 // and reporting that as a failure would be reporting correct behaviour.
 
-import { expect, test } from "@playwright/test";
+import { Page, expect, test } from "@playwright/test";
 import { errorOf, hasPostgres, knowledge, openKnowledge, shell } from "./console.js";
+
+// A corpus the tree tests can actually read.
+//
+// Every one of these tests used to skip itself on an empty database — which
+// reads as a pass and proves nothing. The suite is responsible for its own
+// preconditions, so it puts two documents at two depths and works from those.
+// The sources are fixed names and upload is an upsert, so running the suite
+// twice leaves the same two rows rather than a growing pile.
+const CORPUS = [
+  { source: "e2e_intro", scope: "/guides", body: "The guide that sits at the top level." },
+  { source: "e2e_deep", scope: "/guides/deep", body: "The guide one level further down." },
+];
+
+let seeded = false;
+
+async function seedCorpus(page: Page) {
+  const models = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; kind: string; provider: string; enabled: boolean }[];
+  const embedder = models.find((m) => m.kind === "embedding" && m.enabled);
+  if (!embedder) return;
+  // Upload refuses a provider it has no credential for, which is right: it
+  // will not queue work it cannot carry out. So the fixture walks the same
+  // path a person does and configures one first. The key is never used —
+  // nothing here reaches the provider, because the API only enqueues and the
+  // indexer is a separate process — but it has to be present.
+  await page.request.put(`/api/providers/${embedder.provider}/key`, {
+    data: { apiKey: "e2e-not-a-real-key" },
+  });
+  for (const doc of CORPUS) {
+    await page.request.post(`/api/documents?model=${embedder.id}`, { data: doc });
+  }
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(shell(page)).toBeVisible();
   test.skip(!(await hasPostgres(page)), "documents need PostgreSQL (pgvector)");
+  if (!seeded) {
+    await seedCorpus(page);
+    seeded = true;
+    await page.goto("/");
+  }
   await openKnowledge(page);
 });
 

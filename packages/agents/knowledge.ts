@@ -85,6 +85,13 @@ export function createDocuments(db: Db, model: ModelRow): string {
     return model.label + " does not say how wide its vectors are";
   }
   let dimensions = model.dimensions;
+  // `vector` is a type pgvector defines, and a database has it only once the
+  // extension is created. Creating the table without this fails on any fresh
+  // PostgreSQL with `type "vector" does not exist` — the first upload on a new
+  // install, every time. The extension belongs with the table that needs it,
+  // not in a setup step someone has to know to run.
+  let ext = execute(db, "CREATE EXTENSION IF NOT EXISTS vector");
+  if (!ext.ok) { return ext.error; }
   let made = execute(db, "CREATE TABLE IF NOT EXISTS documents ("
     + "id " + db.textType + " PRIMARY KEY, "
     + "source " + db.textType + " NOT NULL, "
@@ -442,7 +449,28 @@ export function listSources(db: Db, scope: string): SourceListing[] {
   return out;
 }
 
-export function scopeCounts(db: Db, prefix: string): ScopeNode[] {
+// How many waiting documents sit in exactly this scope. One entry per waiting
+// document, so a folder holding three queued files says three rather than
+// nothing — a folder that lists files while claiming to be empty is worse than
+// one that is simply absent.
+function pendingIn(pending: string[], scope: string): int {
+  let n: int = 0;
+  let i: int = 0;
+  while (i < pending.length) {
+    if (pending[i] == scope) { n = n + 1; }
+    i = i + 1;
+  }
+  return n;
+}
+
+// `pending` names the scopes that hold work which is queued or failed but has
+// no chunks yet. They belong in the tree for the same reason the file list
+// shows them: a folder that exists only because someone just uploaded to it is
+// how they get back to what they uploaded. Leaving it out means the document
+// is listed under a folder that cannot be clicked, and the upload looks lost.
+// The jobs table belongs to the indexing module, so the caller reads it and
+// passes the scopes in rather than this one reaching across.
+export function scopeCounts(db: Db, prefix: string, pending: string[]): ScopeNode[] {
   let out: ScopeNode[] = [];
   let sql = "SELECT scope, COUNT(*) FROM documents GROUP BY scope ORDER BY scope";
   if (!db.query(sql, [])) { return out; }
@@ -456,6 +484,26 @@ export function scopeCounts(db: Db, prefix: string): ScopeNode[] {
     i = i + 1;
   }
 
+  // A pending scope that already holds indexed chunks is one folder, not two,
+  // so only the unseen ones are added. What each folder holds is read back
+  // through `pendingIn` below rather than folded into `counts` here: arrays
+  // are immutable, and rebuilding one to add a number reads worse than asking
+  // the question at the point the number is used.
+  let n: int = 0;
+  while (n < pending.length) {
+    let seen = false;
+    let s: int = 0;
+    while (s < paths.length) {
+      if (paths[s] == pending[n]) { seen = true; }
+      s = s + 1;
+    }
+    if (!seen) {
+      paths.push(pending[n]);
+      counts.push(0);
+    }
+    n = n + 1;
+  }
+
   // Totals include descendants, so every folder is compared with every other
   // one. A corpus has tens of folders, not thousands.
   let p: int = 0;
@@ -464,10 +512,12 @@ export function scopeCounts(db: Db, prefix: string): ScopeNode[] {
       let total: int = 0;
       let q: int = 0;
       while (q < paths.length) {
-        if (scopeCovers(paths[p], paths[q])) { total = total + counts[q]; }
+        if (scopeCovers(paths[p], paths[q])) {
+          total = total + counts[q] + pendingIn(pending, paths[q]);
+        }
         q = q + 1;
       }
-      let node: ScopeNode = { path: paths[p], documents: counts[p], total: total };
+      let node: ScopeNode = { path: paths[p], documents: counts[p] + pendingIn(pending, paths[p]), total: total };
       out.push(node);
     }
     p = p + 1;
