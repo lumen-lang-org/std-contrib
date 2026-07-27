@@ -2,7 +2,7 @@
 // person expects them.
 
 import { expect, test } from "@playwright/test";
-import { knowledge, openKnowledge, openSettings, settings, shell, sidebar } from "./console.js";
+import { knowledge, openKnowledge, openSettings, openTab, settings, shell, sidebar } from "./console.js";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -13,7 +13,9 @@ test("the sidebar carries the brand, search, new conversation and the account bl
   const rail = sidebar(page);
   await expect(rail.locator(".brand")).toHaveText(/Agents/);
   await expect(rail.locator("input[placeholder='Search…']")).toBeVisible();
-  await expect(rail.locator(".tools button")).toBeVisible();
+  // Starting a conversation is a row in the rail now, not a button beside the
+  // search box — same action, named rather than drawn as a "+".
+  await expect(rail.locator('.item[data-nav="new"]')).toBeVisible();
   await expect(rail.locator(".me")).toContainText("Agents");
 });
 
@@ -21,13 +23,14 @@ test("settings opens from the account block, not from the header", async ({ page
   // The gear left the header deliberately; if it comes back, this fails.
   await expect(shell(page).locator("header .icon", { hasText: "⚙" })).toHaveCount(0);
   await openSettings(page);
-  await expect(settings(page).locator("aside div")).toHaveCount(6);
+  // The rail items, not every div in the rail — it carries its own heading.
+  await expect(settings(page).locator("aside .item")).toHaveCount(6);
 });
 
 test("every settings tab opens and renders something", async ({ page }) => {
   await openSettings(page);
   for (const name of ["Agents", "Models", "Prompts", "MCP", "Providers", "Tracing"]) {
-    await settings(page).locator("aside div", { hasText: new RegExp(`^${name}$`) }).click();
+    await openTab(page, name);
     // Each tab shows either a table of rows or a form — never an empty pane.
     await expect(settings(page).locator("main")).not.toBeEmpty();
   }
@@ -45,7 +48,9 @@ test("the knowledge page replaces the chat pane and comes back", async ({ page }
   await expect(knowledge(page)).toBeVisible();
   await expect(shell(page).locator("nr-chatbot")).toHaveCount(0);
 
-  await sidebar(page).locator(".tools button").click();
+  // Back to the chat by starting a conversation — the rail's new-conversation
+  // row, which replaced the "+" beside the old search box.
+  await sidebar(page).locator('.item[data-nav="new"]').click();
   await expect(shell(page).locator("nr-chatbot")).toBeVisible();
 });
 

@@ -15,11 +15,11 @@
 
 import { controller } from "../rest/controller.ts";
 import { Route, route } from "../rest/router.ts";
-import { Request, Reply, Handler, serve, ok, created, accepted, noContent, notFound, badRequest, param, queryParam } from "../rest/server.ts";
+import { Request, Reply, Handler, serve, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
+import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
@@ -28,9 +28,13 @@ import { chatEndpoint, embeddingEndpoint, complete, embedText, replyText } from 
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
-import { jsonText } from "./scan.ts";
+import { jsonList, jsonText } from "./scan.ts";
+import { toolListing } from "./mcp.ts";
 import { ThreadListing, listThreads, openThread, threadAgent, threadMessages, runInThread, threadPlan } from "./threads.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
+// `mimeOf` is deliberately not taken from here: workspace.ts already owns that
+// name in this file, and an artifact's type is on its row anyway.
+import { ArtifactRow, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact } from "./artifacts.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
@@ -47,6 +51,9 @@ type ScopeGrant = { scope: string };
 type ServerAuth = { authKind: string, authHeader: string, token: string };
 type ThreadStart = { agentId: string };
 type FileUpload = { name: string, content: string };
+// Every field is required, `note` included — JSON.parse refuses a body missing
+// one, so "no note" is spelled "note":"" rather than left out.
+type ArtifactPost = { path: string, title: string, content: string, note: string };
 type FilePromote = { scope: string, modelId: string };
 type FilePull = { name: string, documentId: string };
 type DocumentUpload = { source: string, scope: string, body: string };
@@ -701,6 +708,35 @@ class ServerApi {
     return ok(listOrdered(this.db, mcpServersMapping(), "", [], keys));
   }
 
+  // What this server offers, asked of the server itself.
+  //
+  // Not stored: an MCP server's tool list is its own to change, and a copy
+  // here would be a second source of truth that goes stale silently. The
+  // console draws what the server says right now, or says why it could not
+  // be asked — an unreachable server and one with no tools look the same on
+  // a graph and mean opposite things.
+  @get("/:id/tools")
+  tools(req: Request): Reply {
+    let document = findById(this.db, mcpServersMapping(), param(req, "id"));
+    if (document == "") { return notFound("no server " + param(req, "id")); }
+    let server: McpServerRow = JSON.parse<McpServerRow>(document);
+    let token = "";
+    if (server.authKind != "" && server.authKind != "none") {
+      token = credentialFor(this.db, "mcp:" + server.id, this.master);
+    }
+    let listed = toolListing(server, token);
+    let out = "{\"serverId\":" + JSON.stringify(server.id)
+      + ",\"problem\":" + JSON.stringify(listed.problem) + ",\"tools\":[";
+    let i: int = 0;
+    while (i < listed.tools.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"name\":" + JSON.stringify(listed.tools[i].name)
+        + ",\"description\":" + JSON.stringify(listed.tools[i].description) + "}";
+      i = i + 1;
+    }
+    return ok(out + "]}");
+  }
+
   @post("/")
   create(req: Request): Reply {
     let problem = createProblem(this.db, mcpServersMapping(), req.body);
@@ -991,6 +1027,459 @@ class WorkspaceApi {
     return ok("{\"name\":" + JSON.stringify(param(req, "name"))
       + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
       + ",\"chunks\":" + `${stored.chunks}` + "}");
+  }
+}
+
+// The artifact a slot names, or a row whose id is "". Callers test `id == ""`.
+//
+// A slot and not a path in the URL, because the slot is the number a tab keeps
+// while a title is edited and a path is a second thing to escape. There is no
+// index on (thread_id, slot) and no lookup for it in the storage module, so
+// this walks the list a tab strip already reads — a thread holds a handful of
+// artifacts, and a scan of a handful is not worth an index that would then
+// have to be kept honest against the slot-reuse bug the module documents.
+function artifactAtSlot(db: Db, threadId: string, slot: int): ArtifactRow {
+  let absent: ArtifactRow = {
+    id: "", threadId: "", slot: -1, path: "", title: "", kind: "", mime: "",
+    currentVersion: 0, previewToken: "", createdAt: "", updatedAt: "",
+  };
+  if (slot < 0) { return absent; }
+  let rows = listArtifacts(db, threadId);
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].slot == slot) { return rows[i]; }
+    i = i + 1;
+  }
+  return absent;
+}
+
+// A slot from the URL, or -1 when it is not a number. -1 matches nothing:
+// every stored slot counts up from 0.
+function slotParam(req: Request): int {
+  return parseInt(param(req, "slot")) ?? -1;
+}
+
+// An artifact's identity as JSON. The body is never in here — a listing that
+// carried half a megabyte per row is why the versions table stores `bytes`.
+function artifactJson(a: ArtifactRow): string {
+  return "{\"slot\":" + `${a.slot}`
+    + ",\"path\":" + JSON.stringify(a.path)
+    + ",\"title\":" + JSON.stringify(a.title)
+    + ",\"kind\":" + JSON.stringify(a.kind)
+    + ",\"mime\":" + JSON.stringify(a.mime)
+    + ",\"version\":" + `${a.currentVersion}`
+    + ",\"previewToken\":" + JSON.stringify(a.previewToken)
+    + ",\"createdAt\":" + JSON.stringify(a.createdAt)
+    + ",\"updatedAt\":" + JSON.stringify(a.updatedAt) + "}";
+}
+
+// What a conversation produced, over the API. This is the console's view:
+// metadata, bodies as JSON, and the token that builds a preview link. It never
+// serves an artifact as itself — that is the preview host's job, below, and
+// keeping the two apart is the whole of the containment.
+@controller("/threads/:id/artifacts")
+class ArtifactApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let rows = listArtifacts(this.db, param(req, "id"));
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + artifactJson(rows[i]);
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
+  // Save a body at a path. A path that already exists gets a new version, not
+  // a second artifact, and the reply carries the version number so a caller
+  // knows which of two concurrent saves it won.
+  @post("/")
+  create(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"path\":\"/report.html\",\"title\":\"Q3\",\"content\":\"...\",\"note\":\"\"}");
+    }
+    let body: ArtifactPost = JSON.parse<ArtifactPost>(req.body);
+    // "uploaded", always. This route is a person with a console; the model's
+    // writes come through the tool and say "generated". The distinction is the
+    // only thing in a version row that answers "who wrote this", so a route
+    // that let the caller name its own origin would erase it.
+    let written = putArtifact(this.db, {
+      threadId: param(req, "id"), path: body.path, title: body.title,
+      content: body.content, note: body.note, origin: "uploaded", now: stamp(),
+    });
+    if (!written.ok) { return badRequest(written.problem); }
+    return created("{\"slot\":" + `${written.slot}`
+      + ",\"path\":" + JSON.stringify(normalScope(body.path))
+      + ",\"version\":" + `${written.version}`
+      + ",\"previewToken\":" + JSON.stringify(written.previewToken) + "}");
+  }
+
+  @get("/:slot")
+  find(req: Request): Reply {
+    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+    return ok(artifactJson(artifact));
+  }
+
+  // One version, body included. JSON, on the console origin, whatever the
+  // artifact's own type is — a caller that wants it rendered follows the
+  // preview link.
+  @get("/:slot/versions/:n")
+  version(req: Request): Reply {
+    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+    let row = getVersion(this.db, artifact.id, parseInt(param(req, "n")) ?? 0);
+    if (row.id == "") { return notFound("version " + param(req, "n")); }
+    return ok("{\"slot\":" + `${artifact.slot}`
+      + ",\"path\":" + JSON.stringify(artifact.path)
+      + ",\"version\":" + `${row.version}`
+      + ",\"bytes\":" + `${row.bytes}`
+      + ",\"origin\":" + JSON.stringify(row.origin)
+      + ",\"turnSeq\":" + `${row.turnSeq}`
+      + ",\"note\":" + JSON.stringify(row.note)
+      + ",\"createdAt\":" + JSON.stringify(row.createdAt)
+      + ",\"content\":" + JSON.stringify(row.body) + "}");
+  }
+
+  // Mint a new preview token, so every link handed out so far stops resolving.
+  //
+  // The token survives saving on purpose — a link shared with a reader must
+  // not break because the author edited — which leaves this as the only way to
+  // take one back after it reaches somebody it was not meant for.
+  //
+  // `persist` is right here and wrong one table over: the identity row is a
+  // pointer where the last writer wins, so an upsert on the same id is the
+  // intent. The versions log is append-only and takes an explicit INSERT.
+  @post("/:slot/rotate")
+  rotate(req: Request): Reply {
+    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+
+    // Only the two columns this route owns, by UPDATE — not the whole row.
+    //
+    // `persist` is an upsert of every column, so writing the row back here
+    // wrote `current_version` back too, from a value read before the update.
+    // A run appending version 6 between that read and this write had its
+    // pointer rewound to 5: the v6 row stayed in the table with nothing
+    // pointing at it, preview and read_artifact both served v5 with no error,
+    // and the next write took 7 — so 6 was orphaned, invisible in the version
+    // strip, and the agent's own "saved as version 6" referred to something no
+    // reader could reach. `title` and `updatedAt` were clobbered the same way.
+    // Every token in the thread, not just this one.
+    //
+    // A token resolves any artifact in its thread by path, so revoking one
+    // artifact's link while its neighbours' links still reach it revokes
+    // nothing: share /preview/<B>/, decide /a.html is sensitive, rotate
+    // /a.html — and /preview/<B>/a.html still serves it. A control named
+    // "New link" that leaves the content reachable is worse than none, because
+    // it is believed.
+    //
+    // So rotation is thread-wide, which is the honest shape of a thread-wide
+    // capability: every link previously handed out for this conversation stops
+    // working together. Rotating one row alone is only correct if a token ever
+    // addresses one row again.
+    let now = stamp();
+    // `listWhere` answers one JSON array, so the rows are scanned out of it.
+    let mine = jsonList(listWhere(this.db, artifactsMapping(),
+      "thread_id = " + placeholderAt(this.db, 1), [param(req, "id")]));
+    let fresh = "";
+    let i: int = 0;
+    while (i < mine.length) {
+      let each: ArtifactRow = JSON.parse<ArtifactRow>(mine[i]);
+      let token = crypto.randomUUID();
+      if (each.id == artifact.id) { fresh = token; }
+      let turned = executeWith(this.db,
+        "UPDATE artifacts SET preview_token = " + placeholderAt(this.db, 1)
+        + ", updated_at = " + placeholderAt(this.db, 2)
+        + " WHERE id = " + placeholderAt(this.db, 3),
+        [token, now, each.id]);
+      if (!turned.ok) { return badRequest("the links could not be replaced; try again"); }
+      i = i + 1;
+    }
+    return ok("{\"slot\":" + `${artifact.slot}`
+      + ",\"previewToken\":" + JSON.stringify(fresh)
+      + ",\"replaced\":" + `${mine.length}` + "}");
+  }
+
+  // The artifact and every version it ever had. There is no undo.
+  @del("/:slot")
+  remove(req: Request): Reply {
+    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+    let problem = deleteArtifact(this.db, param(req, "id"), artifact.path);
+    if (problem != "") { return badRequest(problem); }
+    return noContent();
+  }
+}
+
+// Everything an artifact is allowed to do once a browser has it: run the
+// script that came in the same document, style itself, draw images it carries
+// inline — and reach nothing. No origin to fetch from, no form to post to, no
+// base to rewrite relative URLs against, and a sandbox without same-origin, so
+// the document cannot read a cookie or a storage entry belonging to the host
+// it was served from even when that host is the preview host.
+//
+// `script-src 'unsafe-inline'` reads alarming and is the point: an artifact is
+// one self-contained document, its script is part of the body an author wrote,
+// and `default-src 'none'` has already removed every way to load another one.
+//
+// This is the policy when there is no preview host, and it is also the policy
+// on every other host a preview is ever reachable from. Nothing below relaxes
+// it except on the one host an operator configured for exactly that.
+const PREVIEW_CSP_CLOSED: string = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
+
+// The configured preview host, trimmed and lowercased, or "" when there is
+// none. Compared as a whole string including the port — see `previewType`.
+function previewHost(): string {
+  let configured = process.env("AGENTS_PREVIEW_HOST") ?? "";
+  let text = configured.trim().toLowerCase();
+  // The variable may be given as a bare host or as a whole origin. Only the
+  // host part is ever compared against the request's own Host header, which
+  // never carries a scheme.
+  let mark = text.indexOf("://");
+  if (mark >= 0) { return text.substring(mark + 3, text.length); }
+  return text;
+}
+
+// Whether this request arrived on the preview host.
+//
+// One predicate, because the content type and the policy have to agree about
+// what "the preview host" means: a request answered text/html under the closed
+// policy could not load the stylesheet it names, and a request answered
+// text/plain under the relaxed one would have widened the policy for a document
+// nothing can run anyway. Two copies of this comparison would eventually
+// disagree about a trailing dot, a case, or a port.
+//
+// Fail-closed in every direction: no configuration, no Host, or any mismatch,
+// and the answer is false.
+function onPreviewHost(req: Request): bool {
+  let configured = previewHost();
+  if (configured == "") { return false; }
+  let asked = header(req, "host").trim().toLowerCase();
+  if (asked == "") { return false; }
+  return asked == configured;
+}
+
+// The preview host as a CSP source expression: a scheme and a host.
+//
+// A source list needs an origin, and AGENTS_PREVIEW_HOST holds no scheme —
+// it is compared against the Host header, which has none either. A bare
+// `example.com:9443` in a source list is legal but parses as host:port and
+// matches http and https alike, which is looser than anything here intends, so
+// a scheme is supplied: https, unless the host names the loopback, where a
+// developer is running plain http and demanding https would break the only
+// deployment that has no certificate.
+//
+// Deriving it rather than adding a second environment variable keeps the origin
+// that appears in the policy and the host that unlocked it from ever naming two
+// different places.
+function previewOrigin(): string {
+  let configured = (process.env("AGENTS_PREVIEW_HOST") ?? "").trim().toLowerCase();
+  if (configured == "") { return ""; }
+  // Said outright when the variable carries a scheme. Guessing it is what this
+  // used to do, and the guess is unrecoverable when wrong: the policy names an
+  // origin the browser never asked, so every stylesheet and script the page
+  // references is refused, and the only evidence is a console message inside a
+  // sandboxed frame nobody has open. An operator serving previews over plain
+  // http on a hostname that is not localhost had no way to say so.
+  if (configured.indexOf("://") >= 0) { return configured; }
+  let host = previewHost();
+  let name = host;
+  let colon = host.indexOf(":");
+  if (colon >= 0) { name = host.substring(0, colon); }
+  // Still a guess, but only for the shorthand form, and https is the guess
+  // that fails closed: a page served over http against an https policy loses
+  // its subresources, which is visible, rather than the reverse.
+  if (name == "localhost" || name == "127.0.0.1") { return "http://" + host; }
+  return "https://" + host;
+}
+
+// The policy for one request.
+//
+// Off the preview host, exactly the closed policy above — an artifact is one
+// self-contained document and cannot reach anything at all.
+//
+// On the preview host, an artifact is a small site: its siblings are served
+// from that same origin under the same token, so `img-src`, `style-src`,
+// `script-src` and `font-src` name that origin and a relative `css/main.css`
+// loads. What does not change is everything that governs where the document can
+// send data or be re-pointed: `connect-src 'none'`, `form-action 'none'`,
+// `base-uri 'none'`, and a sandbox without `allow-same-origin`. Reading
+// siblings is the capability the token already grants; talking to the network
+// is not, and widening one is not an argument for widening the other.
+//
+// The origin is written out because 'self' cannot work here. `sandbox
+// allow-scripts` without `allow-same-origin` gives the document an opaque
+// origin, and 'self' matches the document's own origin — which for an opaque
+// origin is nothing at all. A policy written with 'self' would look correct,
+// pass review, and block every subresource.
+function previewCsp(req: Request): string {
+  if (!onPreviewHost(req)) { return PREVIEW_CSP_CLOSED; }
+  let origin = previewOrigin();
+  return "default-src 'none'"
+    + "; script-src 'unsafe-inline' " + origin
+    + "; style-src 'unsafe-inline' " + origin
+    + "; img-src data: " + origin
+    + "; font-src data: " + origin
+    + "; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
+}
+
+// The content type a preview answers with.
+//
+// The stored mime is what the artifact *is*; sending it is only safe on an
+// origin that holds nothing worth stealing. text/html on the preview host is a
+// page alone in its own sandbox. The same bytes on the console origin are
+// script running next to the console's session. So the request's own Host
+// decides, and everything else gets text/plain and is read, not run.
+//
+// The comparison is against the WHOLE host, port included, and is exact.
+//
+// It used to strip the port, on the reasoning that moving the listener should
+// not silently change the content type. That was backwards: the port is part
+// of the origin, and given a deployment with one process, a second port is the
+// obvious way an operator makes a "separate preview host". With the port
+// stripped, a console on example.com and previews on example.com:9443 compare
+// equal — so a request to the *console* origin is answered text/html, which is
+// the one thing this function exists to prevent. Cookies are not partitioned
+// by port, so that is the worst case available.
+//
+// Everything about this is fail-closed. An unset variable, a Host the proxy
+// rewrote, a mismatch of any kind: text/plain. The failure mode of a
+// misconfiguration is an artifact you can read but not run, never the reverse.
+function previewType(req: Request, mime: string): string {
+  if (!onPreviewHost(req)) { return "text/plain; charset=utf-8"; }
+  return mime;
+}
+
+// A preview, with the headers that make it safe to look at.
+//
+// `nosniff` matters most on the text/plain path: without it a browser is free
+// to sniff a leading "<html" back into markup, which undoes the Host check
+// before any policy is consulted. `no-referrer` keeps the token — which is the
+// entire authorisation — out of the Referer header of anything the page links
+// to. No access-control-allow-origin is set, here or anywhere: a token in a
+// URL is a capability, and letting another origin read the response with
+// script would hand that capability to whatever page a reader had open.
+//
+// `artifact` is the row the body came from, which for a sibling is the sibling
+// and not the artifact the token names. Every preview answer goes through here
+// so a sibling cannot end up with a weaker policy or its neighbour's type — a
+// stylesheet answered text/html is a script the sandbox would then run.
+function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
+  let answer = reply(200, body, previewType(req, artifact.mime));
+  answer.headers.set("content-security-policy", previewCsp(req));
+  answer.headers.set("x-content-type-options", "nosniff");
+  answer.headers.set("referrer-policy", "no-referrer");
+  answer.headers.set("cache-control", cache);
+  return answer;
+}
+
+// Artifacts as themselves, addressed by token.
+//
+// There is no thread id on one of these requests and nothing to check it
+// against: the token is the whole of the authorisation, which is why it is a
+// UUID minted per artifact and why `rotate` above exists. Nothing here reports
+// which tokens are wrong — an unknown token and a deleted artifact answer
+// identically, and neither answer repeats the token back into a log.
+//
+// A token also opens the artifact's siblings, meaning every artifact in the
+// same thread, addressed by path under the token's own prefix. That is what
+// makes a document with a stylesheet work at all, and it is a real widening: a
+// link shared once grants read of every artifact in that conversation, not just
+// the one the link names. It is the price of relative URLs resolving the way an
+// author wrote them, and `rotate` is still the answer when a link gets out.
+@controller("/preview")
+class PreviewApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  // The artifact the token names.
+  //
+  // `?v=3` pins a version, and a version row is never rewritten — that is what
+  // append-only buys — so a pinned answer is cacheable forever. `private`
+  // because the URL contains a secret and a shared cache holding it would serve
+  // the artifact to whoever asks next.
+  //
+  // Absent, empty or unparseable `v` means the current version, never cached:
+  // that URL follows the artifact, so a stored copy would keep serving a body
+  // the author has already replaced. Unparseable falls to current rather than
+  // 404 because `v` is a hint about which body to send, not part of the
+  // addressing — a truncated link should still show the artifact.
+  //
+  // A number that parses but names no version is a 404, unlike an unparseable
+  // one: it is a specific claim about the artifact's history that is false.
+  //
+  // The version moved off the path to get here. `/preview/:token/v/:n` is four
+  // segments, and so is a sibling named `v/3.css`; resolving that needs a
+  // best-match router, and this one matches in order on purpose.
+  @get("/:token")
+  preview(req: Request): Reply {
+    let artifact = findByToken(this.db, param(req, "token"));
+    if (artifact.id == "") { return notFound("artifact"); }
+    let asked = parseInt(queryParam(req, "v", "")) ?? 0;
+    if (asked < 1) {
+      let current = getVersion(this.db, artifact.id, artifact.currentVersion);
+      if (current.id == "") { return notFound("artifact"); }
+      return previewReply(req, artifact, current.body, "no-store");
+    }
+    let row = getVersion(this.db, artifact.id, asked);
+    if (row.id == "") { return notFound("artifact"); }
+    return previewReply(req, artifact, row.body, "private, max-age=31536000, immutable");
+  }
+
+  // Another artifact in the same thread, by path.
+  //
+  // The token's own row carries the thread id, so the token is still the whole
+  // of the authorisation — nothing here reads a path from the client and trusts
+  // it beyond the thread that token already opened.
+  //
+  // The path arrives from the router with each segment percent-decoded and the
+  // separators intact, so it is a thread path missing only its leading slash.
+  // `getArtifact` normalises it with `normalScope` before the lookup — the same
+  // function that normalised it on the way in — so "/a/b.css" and "a/b.css"
+  // find the same row, and a lookup is a primary-key read with nothing to
+  // traverse. `..` needs no special case for the same reason: it is not a
+  // filesystem, and `pathProblem` refuses to store a segment spelled that way,
+  // so a path containing one matches nothing that exists.
+  //
+  // Siblings are always the current version. `?v` numbers the entry's own
+  // history, and every artifact has an independent counter, so carrying that
+  // number across would pin some unrelated revision of the stylesheet — which
+  // is worse than not pinning, because it looks deliberate. A pinned entry can
+  // therefore drift against its assets; the honest fix is a version scheme that
+  // spans a thread, which does not exist yet.
+  //
+  // A path with no artifact answers `notFound("artifact")` — the same reply as
+  // an unknown token, byte for byte. Anything that distinguished "token good,
+  // path absent" from "token bad" would turn one shared link into an oracle for
+  // which paths a conversation holds.
+  @get("/:token/*path")
+  sibling(req: Request): Reply {
+    let artifact = findByToken(this.db, param(req, "token"));
+    if (artifact.id == "") { return notFound("artifact"); }
+    let found = getArtifact(this.db, artifact.threadId, param(req, "path"));
+    if (found.id == "") { return notFound("artifact"); }
+    let row = getVersion(this.db, found.id, found.currentVersion);
+    if (row.id == "") { return notFound("artifact"); }
+    // `found`, not `artifact`: the type comes from the row whose body this is.
+    return previewReply(req, found, row.body, "no-store");
   }
 }
 
@@ -1294,6 +1783,9 @@ function migrated(db: Db): Db {
   let jobs = indexingPlan(db);
   let ij: int = 0;
   while (ij < jobs.length) { plan.push(jobs[ij]); ij = ij + 1; }
+  let results = artifactPlan(db);
+  let ar: int = 0;
+  while (ar < results.length) { plan.push(results[ar]); ar = ar + 1; }
   let ran = migrate(db, plan);
   if (!ran.ok) { console.error(ran.error); }
   return db;
@@ -1470,6 +1962,47 @@ function main(): void {
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
 
+  let artifacts = new ArtifactApi(db);
+  bound.set("alist", (req: Request) => {
+    try { return artifacts.list(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("acreate", (req: Request) => {
+    try { return artifacts.create(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("afind", (req: Request) => {
+    try { return artifacts.find(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("aversion", (req: Request) => {
+    try { return artifacts.version(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("arotate", (req: Request) => {
+    try { return artifacts.rotate(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("aremove", (req: Request) => {
+    try { return artifacts.remove(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+
+  // The preview handlers share the artifact prefix, so their names come out
+  // "apreview" and "asibling" — the class is separate because the paths are,
+  // not because the numbering is. Neither name collides with ArtifactApi's
+  // list/create/find/version/rotate/remove, which is the only thing the shared
+  // prefix requires.
+  let preview = new PreviewApi(db);
+  bound.set("apreview", (req: Request) => {
+    try { return preview.preview(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+  bound.set("asibling", (req: Request) => {
+    try { return preview.sibling(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
+
   let threads = new ThreadApi(db, master);
   bound.set("hlist", (req: Request) => {
     try { return threads.list(req); }
@@ -1579,6 +2112,10 @@ function main(): void {
     try { return servers.list(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
   });
+  bound.set("stools", (req: Request) => {
+    try { return servers.tools(req); }
+    catch (e) { return badRequest("the request could not be handled: " + e.message); }
+  });
   bound.set("screate", (req: Request) => {
     try { return servers.create(req); }
     catch (e) { return badRequest("the request could not be handled: " + e.message); }
@@ -1673,6 +2210,18 @@ function main(): void {
     let r = controllerServerApi[sv];
     table.push(route(r.method, r.pattern, "s" + r.handler));
     sv = sv + 1;
+  }
+  let ar: int = 0;
+  while (ar < controllerArtifactApi.length) {
+    let r = controllerArtifactApi[ar];
+    table.push(route(r.method, r.pattern, "a" + r.handler));
+    ar = ar + 1;
+  }
+  let pv: int = 0;
+  while (pv < controllerPreviewApi.length) {
+    let r = controllerPreviewApi[pv];
+    table.push(route(r.method, r.pattern, "a" + r.handler));
+    pv = pv + 1;
   }
 
   let i: int = 0;

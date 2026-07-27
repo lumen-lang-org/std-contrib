@@ -17,6 +17,21 @@
 //   m.params     // id -> a1
 //   m.query      // fields -> id
 //
+// A pattern segment is a literal, a `:name` standing for exactly one segment,
+// or — as the LAST segment only — a `*name` standing for the whole rest of the
+// path, one segment or more:
+//
+//   route("GET", "/files/:box/*path", "readFile")
+//   // GET /files/b1/css/main.css  ->  box = b1, path = "css/main.css"
+//
+// A `*name` anywhere but last is a programming error, since nothing after a
+// catch-all could ever be reached; `tableProblem` refuses such a table at
+// startup rather than letting the route quietly mean something else.
+//
+// A catch-all is also always the last resort. Any route that matches without
+// one beats it, whatever order the table is written in, so `/files/:box/v/:n`
+// still wins over `/files/:box/*path` and a literal still wins over both.
+//
 // The handler is named rather than held. A record cannot carry a function and
 // still be compared, printed or built at compile time by a decorator, and the
 // dispatch a name costs is one comparison per route.
@@ -145,13 +160,71 @@ function noMatch(pathMatched: bool): Match {
   return m;
 }
 
-// Whether one pattern's segments match one path's, filling in `:name` params.
-// Returns an empty map and false through `ok`, since a pattern segment that
-// disagrees ends the attempt.
+// The index of a pattern's trailing `*name`, or -1 when it has none.
+//
+// Only the last segment counts. A `*name` written anywhere else is a
+// programming error — everything after a catch-all is unreachable, so the
+// pattern does not mean what it looks like it means — and `tableProblem`
+// refuses such a table at startup. Until that check has run, the honest answer
+// is that this router does not match a wildcard there, and this says so by
+// looking at one position only.
+function wildcardAt(parts: string[]): int {
+  if (parts.length == 0) { return -1; }
+  let last = parts.length - 1;
+  if (!parts[last].startsWith("*")) { return -1; }
+  return last;
+}
+
+// The path from `from` on, as one string.
+//
+// Each segment is decoded on its own and only then joined, so the boundaries
+// are the ones `segments` already found and decoding cannot move them: the join
+// is structure, the decode is data, and the structure is settled first.
+//
+// What that does NOT buy is an unambiguous capture, and a caller has to know
+// it. `%2F` decodes to a slash like any other byte, so `/x/a%2Fb/c` and
+// `/x/a/b/c` both capture `a/b/c` — nothing downstream can tell an encoded
+// separator from a real one. Nor is `..` filtered here: `segments` drops empty
+// segments and nothing else, so a capture can contain `.` and `..` and arrives
+// exactly as sent. A handler that resolves a capture against a filesystem, a
+// key space or anything else hierarchical owns that check; the router's job is
+// to report what was asked for, not to decide what is allowed.
+function joinTail(pathParts: string[], from: int): string {
+  let out = "";
+  let i: int = from;
+  while (i < pathParts.length) {
+    if (i > from) { out = out + "/"; }
+    out = out + decodeComponent(pathParts[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+// Whether one pattern's segments match one path's, filling in `:name` params
+// and, for a pattern ending in `*name`, the whole remaining path under that
+// name. A pattern segment that disagrees ends the attempt, which can leave
+// `into` half filled — callers pass a map they are willing to throw away.
+//
+// This says only whether the pattern matches. Whether a match that used a
+// catch-all should *win* is `match`'s business, not this function's.
 function matchSegments(patternParts: string[], pathParts: string[], into: Map<string, string>): bool {
-  if (patternParts.length != pathParts.length) { return false; }
+  let at = wildcardAt(patternParts);
+
+  // How many pattern segments match one path segment each. For a catch-all
+  // that is everything before it; the rest of the path is the capture.
+  let fixed = patternParts.length;
+  if (at >= 0) {
+    fixed = at;
+    // `*name` stands for one or more segments, never zero. Requiring one keeps
+    // `/p/:t` and `/p/:t/*rest` disjoint — no path matches both — so neither
+    // can quietly hide the other and their order stops mattering.
+    if (pathParts.length <= fixed) { return false; }
+  } else {
+    if (patternParts.length != pathParts.length) { return false; }
+  }
+
   let i: int = 0;
-  while (i < patternParts.length) {
+  while (i < fixed) {
     let p = patternParts[i];
     if (p.startsWith(":")) {
       let key = p.substring(1, p.length);
@@ -162,6 +235,11 @@ function matchSegments(patternParts: string[], pathParts: string[], into: Map<st
     }
     i = i + 1;
   }
+  if (at >= 0) {
+    let key = patternParts[at].substring(1, patternParts[at].length);
+    if (key == "") { return false; }
+    into.set(key, joinTail(pathParts, fixed));
+  }
   return true;
 }
 
@@ -169,18 +247,39 @@ function matchSegments(patternParts: string[], pathParts: string[], into: Map<st
 // a table is written in the order its author meant, and a scoring rule is a
 // thing to debug at three in the morning.
 //
+// The one exception is the catch-all, and it is not a score either. A `*name`
+// match is held aside rather than returned: the sweep carries on, and any
+// fixed-arity route that matches later wins outright. So a catch-all is last
+// resort by construction, not by where an author put it — nobody can break
+// `/preview/:token/v/:n` by writing `/preview/:token/*path` above it, which is
+// a mistake that shows up as a 404 in production and nowhere else.
+//
+// Held aside, not returned early, because deciding it here costs one sweep. A
+// second sweep for catch-alls would re-split every pattern in the table on
+// every request that misses.
+//
+// Among catch-alls themselves the ordinary rule still holds: the first one
+// written wins, and `tableProblem` refuses a table where an earlier catch-all
+// makes a later one unreachable.
+//
 // `target` is the request target — the path, optionally with a query string.
 export function match(table: Route[], method: string, target: string): Match {
   let split = splitQuery(target);
   let pathParts = segments(split[0]);
   let wanted = method.toUpperCase();
   let sawPath = false;
+  // The best catch-all seen so far. `found` doubles as "there is one", which is
+  // exactly what it means, so there is no second flag to keep in step with it.
+  let viaWildcard = noMatch(false);
 
   let i: int = 0;
   while (i < table.length) {
     let candidate = table[i];
+    let patternParts = segments(candidate.pattern);
+    // A fresh map per candidate: `matchSegments` fills it as it goes and can
+    // still fail afterwards, so a rejected candidate leaves nothing behind.
     let params = new Map<string, string>();
-    if (matchSegments(segments(candidate.pattern), pathParts, params)) {
+    if (matchSegments(patternParts, pathParts, params)) {
       if (candidate.method == wanted) {
         let m: Match = {
           found: true,
@@ -189,17 +288,27 @@ export function match(table: Route[], method: string, target: string): Match {
           query: parseQuery(split[1]),
           pathMatched: true,
         };
-        return m;
+        if (wildcardAt(patternParts) < 0) { return m; }
+        if (!viaWildcard.found) { viaWildcard = m; }
+      } else {
+        // The path is claimed either way, so 405 is owed whether the route that
+        // claimed it was exact or a catch-all.
+        sawPath = true;
       }
-      sawPath = true;
     }
     i = i + 1;
   }
+  if (viaWildcard.found) { return viaWildcard; }
   return noMatch(sawPath);
 }
 
 // Which methods a path does accept, for the `Allow` header a 405 owes the
 // client.
+//
+// A catch-all counts here like any other route: if it would answer that path
+// under some method, that method really is allowed, and leaving it out would
+// print an `Allow` the server itself contradicts. Precedence does not come into
+// it — this is a set, not a choice.
 export function allowedMethods(table: Route[], target: string): string[] {
   let pathParts = segments(splitQuery(target)[0]);
   let out: string[] = [];
@@ -234,13 +343,28 @@ export function tableProblem(table: Route[]): string {
     let seen: string[] = [];
     let j: int = 0;
     while (j < parts.length) {
-      if (parts[j].startsWith(":")) {
+      let sigil = parts[j].substring(0, 1);
+      if (sigil == ":" || sigil == "*") {
         let key = parts[j].substring(1, parts[j].length);
-        if (key == "") { return "the pattern \"" + r.pattern + "\" has a : with no name after it"; }
+        if (key == "") {
+          return "the pattern \"" + r.pattern + "\" has a " + sigil + " with no name after it";
+        }
+        // One namespace for both sigils. A handler reads a parameter by name
+        // and cannot tell which sigil filled it, so `/a/:x/*x` is the same
+        // collision as `/a/:x/b/:x` and deserves the same refusal.
         if (seen.indexOf(key) >= 0) {
-          return "the pattern \"" + r.pattern + "\" names \":" + key + "\" twice";
+          return "the pattern \"" + r.pattern + "\" names \"" + sigil + key + "\" twice";
         }
         seen.push(key);
+      }
+      // A wildcard swallows the whole rest of the path, so a segment written
+      // after one can never be reached — and nothing downstream would ever
+      // notice: `matchSegments` only honours a trailing `*name`, so
+      // `/a/*rest/b` would silently behave as `/a/*rest` and the `/b` an author
+      // wrote would mean nothing. Refuse it here, by name, at startup.
+      if (sigil == "*" && j != parts.length - 1) {
+        return "the pattern \"" + r.pattern + "\" writes \"" + parts[j]
+          + "\" before its last segment: a wildcard takes the rest of the path, so nothing can follow it";
       }
       j = j + 1;
     }
@@ -265,14 +389,52 @@ export function tableProblem(table: Route[]): string {
 // `/agents/new` but not the other way round. That asymmetry is the whole
 // point: it is why the literal has to be written first, and why writing it
 // second is the mistake worth catching.
+//
+// A catch-all turns this into a question about two different path lengths, so
+// the length test moves out of the loop and the comparison runs only over the
+// segments that can still rule a shadow out. Bias the answer towards reporting:
+// a missed shadow ships a route that silently never runs, a spurious one is a
+// startup error fixed in ten seconds. The one place that bias is deliberately
+// not applied is a catch-all over a fixed route, where `match` guarantees the
+// fixed route wins.
 function shadows(a: string, b: string): bool {
   let pa = segments(a);
   let pb = segments(b);
-  if (pa.length != pb.length) { return false; }
+  let wa = wildcardAt(pa);
+  let wb = wildcardAt(pb);
+
+  if (wa < 0) {
+    // A fixed-arity pattern matches exactly one path length, and a catch-all
+    // matches every length past its prefix, so `a` can never cover all of `b`.
+    // It does steal the one length they share — but the question here is
+    // whether `b` is wholly unreachable, not whether the two overlap, and an
+    // overlap is a legal thing to write.
+    if (wb >= 0) { return false; }
+    if (pa.length != pb.length) { return false; }
+    return prefixCovers(pa, pb, pa.length);
+  }
+
+  // `a` is a catch-all. It cannot hide a fixed-arity `b` at all, whatever the
+  // two patterns look like, because `match` only falls back to a catch-all once
+  // nothing else has matched — `b` wins on its own paths regardless of table
+  // order. Refusing this at startup would be refusing a table that works.
+  if (wb < 0) { return false; }
+
+  // Two catch-alls, and now order does decide. `a` takes everything from `wa`
+  // on, so only the segments before the wildcard can rule the shadow out. A `b`
+  // whose own wildcard starts earlier matches shorter paths than `a` ever will,
+  // so it keeps a life of its own; otherwise `b` reaches past `a`'s prefix by
+  // construction and the prefix is the whole question.
+  if (wb < wa) { return false; }
+  return prefixCovers(pa, pb, wa);
+}
+
+// Whether `a`'s first `upto` segments cover `b`'s: a literal covers only the
+// same literal, a `:name` covers any single segment.
+function prefixCovers(pa: string[], pb: string[], upto: int): bool {
   let i: int = 0;
-  while (i < pa.length) {
+  while (i < upto) {
     if (!pa[i].startsWith(":")) {
-      // A literal in `a` only covers the same literal in `b`.
       if (pa[i] != pb[i]) { return false; }
     }
     i = i + 1;

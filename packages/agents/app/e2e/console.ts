@@ -38,11 +38,14 @@ export async function openSettings(page: Page) {
 }
 
 export async function openTab(page: Page, name: string) {
-  await settings(page).locator("aside div", { hasText: new RegExp(`^${name}$`) }).click();
+  // By name, not by text. An item is an icon beside a word, and the template
+  // puts newlines around both — so a `^Agents$` match against its text content
+  // never fires, however right it looks.
+  await settings(page).locator(`aside .item[data-tab="${name}"]`).click();
 }
 
 export async function openKnowledge(page: Page) {
-  await sidebar(page).locator(".thread", { hasText: "Knowledge" }).click();
+  await sidebar(page).locator('.item[data-nav="knowledge"]').click();
   await expect(knowledge(page)).toBeVisible();
 }
 
@@ -50,7 +53,7 @@ export async function openKnowledge(page: Page) {
 // sentence when it is not, and the knowledge specs skip on that rather than
 // reporting a failure for behaviour that is correct.
 export async function openCanvas(page: Page) {
-  await sidebar(page).locator(".thread", { hasText: "Agent graph" }).click();
+  await sidebar(page).locator('.item[data-nav="canvas"]').click();
   await expect(canvas(page)).toBeVisible();
 }
 
@@ -72,6 +75,23 @@ export async function errorOf(res: { text(): Promise<string> }): Promise<string>
   }
 }
 
+
+// The control inside a LumenUI field.
+//
+// `<nr-input id="c-name">` is a wrapper; the thing that holds a value and
+// answers fill() is the <input> in its shadow root. Playwright pierces open
+// shadow roots for CSS, so this reaches it — and naming it once means the
+// specs do not each have to know that a field is a component rather than an
+// element.
+export function field(root: Locator, id: string): Locator {
+  return root.locator(`#${id} input, #${id} textarea`).first();
+}
+
+// A LumenUI select shows its value as text rather than as an <option>, so it
+// is read, not asked for `inputValue`.
+export function selectValue(root: Locator, id: string): Locator {
+  return root.locator(`#${id}`);
+}
 
 // The flat columns of an agent row, and nothing else.
 //

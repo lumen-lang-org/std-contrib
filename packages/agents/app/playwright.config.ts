@@ -26,12 +26,31 @@ export default defineConfig({
     video: { mode: "on", size: { width: 1000, height: 640 } },
     viewport: { width: 1000, height: 640 },
   },
+  // The console, and a stand-in MCP server for it to ask about tools. The
+  // graph draws what a server says it offers, so with nothing answering, the
+  // tool nodes could only ever be tested as absent.
   webServer: process.env.CONSOLE_URL
-    ? undefined
-    : {
-        command: "npx vite dev --port 5173",
-        url: "http://127.0.0.1:5173",
-        reuseExistingServer: true,
-        timeout: 60_000,
-      },
+    ? [
+        {
+          command: "node e2e/mcp-double.mjs",
+          url: "http://127.0.0.1:8931/mcp",
+          ignoreHTTPSErrors: true,
+          reuseExistingServer: true,
+          timeout: 20_000,
+        },
+      ]
+    : [
+        {
+          command: "npx vite dev --port 5173",
+          url: "http://127.0.0.1:5173",
+          reuseExistingServer: true,
+          timeout: 60_000,
+        },
+        {
+          command: "node e2e/mcp-double.mjs",
+          url: "http://127.0.0.1:8931/mcp",
+          reuseExistingServer: true,
+          timeout: 20_000,
+        },
+      ],
 });

@@ -13,37 +13,115 @@ import {
   updateAgent, updateModel, updateServer, setServerAuth, testModel,
 } from "./api.js";
 
-const TABS = ["Agents", "Models", "Prompts", "MCP", "Providers", "Tracing"] as const;
-type Tab = typeof TABS[number];
+// Each tab, with the mark that stands for it in the rail. The icons are the
+// ones nr-icon carries — a name it does not have is drawn as the name itself.
+const TABS = [
+  { name: "Agents", icon: "message-square" },
+  { name: "Models", icon: "zap" },
+  { name: "Prompts", icon: "file-text" },
+  { name: "MCP", icon: "code" },
+  { name: "Providers", icon: "cloud" },
+  { name: "Tracing", icon: "layers" },
+] as const;
+type Tab = typeof TABS[number]["name"];
 
 @customElement("console-settings")
 export class ConsoleSettings extends LitElement {
   static styles = css`
-    :host { position: fixed; inset: 0; background: rgba(31,30,29,0.4);
-            display: flex; align-items: center; justify-content: center; z-index: 40; }
-    .modal { width: min(860px, 92vw); height: min(560px, 88vh); background: var(--bg);
-             border: 1px solid var(--border); border-radius: 14px; display: flex;
-             overflow: hidden; box-shadow: 0 18px 50px rgba(31,30,29,0.18); }
-    aside { width: 150px; border-right: 1px solid var(--border); padding-top: 12px;
-            background: var(--bg-rail); }
-    aside div { padding: 9px 16px; cursor: pointer; color: var(--muted); font-size: 14px;
-                border-radius: 8px; margin: 1px 8px; }
-    aside div.on { color: var(--fg); background: var(--bg-user); }
-    main { flex: 1; overflow-y: auto; padding: 18px 22px; font-size: 13.5px; }
-    table { width: 100%; border-collapse: collapse; }
-    td, th { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
-    th { color: var(--muted); font-weight: 600; }
+    /* The overlay inside is fixed and out of flow, which leaves this host with
+       no box at all — and an element with no box is not "visible" to anything
+       that asks, from a test to a screen reader. So the host stays a layer of
+       its own and the overlay fills it. */
+    :host { position: fixed; inset: 0; z-index: 40; }
+
+    /* The surface, its scrim, its header and its dismissal all belong to
+       nr-overlay. What is left here is the settings layout itself. */
+    nr-overlay {
+      --nuraly-color-overlay-surface: var(--bg);
+      --nuraly-color-overlay-border: var(--border);
+      --nuraly-color-overlay-text: var(--fg);
+      --nuraly-color-overlay-muted: var(--muted);
+      --nuraly-color-overlay-hover: var(--bg-sunken);
+    }
+
+    .body { flex: 1; display: flex; min-height: 0; width: 100%; }
+
+    /* Left rail. Each item is an icon and a word; the active one is a filled
+       pill rather than a coloured word, so the eye finds it by shape. */
+    aside { width: 216px; flex: none; border-right: 1px solid var(--border);
+            background: var(--bg-rail); padding: 12px 8px; overflow-y: auto; }
+    aside .label { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
+                   color: var(--muted); font-weight: 600; padding: 4px 10px 8px; }
+    aside .item { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+                  border-radius: 8px; cursor: pointer; color: var(--muted);
+                  font-size: 14px; margin-bottom: 1px; }
+    aside .item:hover { background: var(--bg-sunken); color: var(--fg); }
+    aside .item.on { background: var(--bg-sunken); color: var(--fg); font-weight: 500; }
+    aside .item .ic { width: 16px; display: grid; place-items: center; opacity: 0.8; }
+
+    main { flex: 1; overflow-y: auto; padding: 22px 26px 30px; min-width: 0; }
+
+    /* Page head: the title, and the one action that makes a new one. */
+    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .head h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; flex: 1; }
+    .head .ic { color: var(--muted); }
+
+    .primary { background: var(--accent); color: var(--accent-fg); border: 0;
+               border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 500;
+               cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .primary:hover { background: var(--accent-hover); }
+
+    /* Tabs carry their count, so the number is read without opening them. */
+    .tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border);
+            margin-bottom: 4px; }
+    .tabs .tab { padding: 8px 2px; cursor: pointer; color: var(--muted);
+                 border-bottom: 2px solid transparent; margin-bottom: -1px;
+                 display: flex; align-items: center; gap: 7px; font-size: 14px; }
+    .tabs .tab:hover { color: var(--fg); }
+    .tabs .tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+    .tabs .tab .n { color: var(--muted); font-size: 12.5px;
+                    font-variant-numeric: tabular-nums; }
+
+    /* A group of rows, headed by what it is and how many. */
+    .group { display: flex; align-items: center; padding: 16px 2px 6px; }
+    .group .label { flex: 1; font-size: 11px; letter-spacing: 0.09em;
+                    text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .group .n { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    td, th { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+    tbody tr:hover { background: var(--bg-rail); }
+    td.right { text-align: right; white-space: nowrap; }
+
+    /* An id is a value to copy, not prose: monospace, on a sunken chip. */
+    .slug { font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken);
+            border-radius: 6px; padding: 2px 8px; color: var(--fg); }
+    /* A tag is a label something was given, not a value it holds. */
+    .tag { font-size: 12.5px; background: var(--bg-sunken); border-radius: 999px;
+           padding: 2px 10px; color: var(--muted); font-style: italic; }
+    .dim { color: var(--muted); }
+
+    /* Row actions: ghosts until the row is under the pointer. */
+    .act { background: none; border: 0; color: var(--muted); cursor: pointer;
+           padding: 4px 6px; border-radius: 6px; font-size: 14px; }
+    .act:hover { background: var(--bg-sunken); color: var(--fg); }
+    .act.danger:hover { color: var(--danger); }
+
     input, select, textarea { background: var(--bg-card); border: 1px solid var(--border);
-             color: inherit; border-radius: 8px; padding: 5px 9px; font: inherit; }
+             color: inherit; border-radius: 8px; padding: 7px 10px; font: inherit; }
+    input:focus-visible, select:focus-visible, textarea:focus-visible,
+    .item:focus-visible, .tab:focus-visible, button:focus-visible {
+      outline: 2px solid var(--focus); outline-offset: 1px; }
     button { background: var(--accent); color: var(--accent-fg); border: 0;
-             border-radius: 8px; padding: 5px 13px; cursor: pointer; font: inherit; }
+             border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
     button:hover { background: var(--accent-hover); }
-    .row { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; align-items: center; }
-    .close { position: absolute; margin: 10px; right: max(calc(50vw - 430px), 4vw);
-             background: none; border: 0; color: var(--bg); font-size: 18px; cursor: pointer; }
+    .row { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; align-items: center; }
     .note { color: var(--muted); }
-    .err { color: #B3261E; }
+    .err { color: var(--danger); }
   `;
+
+
 
   @property() tab: Tab = "Agents";
   @state() private agents: AgentRow[] = [];
@@ -99,20 +177,56 @@ export class ConsoleSettings extends LitElement {
     return (form.querySelector(`[name=${name}]`) as HTMLInputElement | null)?.value ?? "";
   }
 
+  // How many rows each tab holds, so the rail and the tabs can say so without
+  // being opened. A tab with nothing behind it shows nothing rather than a
+  // zero, which reads as a count that failed to load.
+  private countOf(tab: Tab): number {
+    switch (tab) {
+      case "Agents": return this.agents.length;
+      case "Models": return this.models.length;
+      case "Prompts": return this.prompts.length;
+      case "MCP": return this.servers.length;
+      default: return 0;
+    }
+  }
+
   render() {
     return html`
-      <div class="modal" @click=${(e: Event) => e.stopPropagation()}>
-        <aside>
-          ${TABS.map((t) => html`
-            <div class=${t === this.tab ? "on" : ""} @click=${() => { this.tab = t; }}>${t}</div>`)}
-        </aside>
-        <main>
-          ${this.problem === "" ? "" : html`<p class="err">${this.problem}</p>`}
-          ${this.renderTab()}
-        </main>
-      </div>
-      <button class="close" @click=${() => this.dispatchEvent(new CustomEvent("close"))}>✕</button>
+      <nr-overlay
+        open
+        label="Settings"
+        allow-fullscreen
+        @nr-close=${() => this.dispatchEvent(new CustomEvent("close"))}
+      >
+        <div class="body">
+          <aside>
+            <div class="label">Settings</div>
+            ${TABS.map((t) => html`
+              <div class="item ${t.name === this.tab ? "on" : ""}" data-tab=${t.name}
+                @click=${() => { this.tab = t.name; }}>
+                <span class="ic"><nr-icon name=${t.icon} size="small"></nr-icon></span>
+                <span>${t.name}</span>
+              </div>`)}
+          </aside>
+          <main>
+            ${this.problem === "" ? "" : html`<p class="err">${this.problem}</p>`}
+            ${this.renderTab()}
+          </main>
+        </div>
+      </nr-overlay>
     `;
+  }
+
+  // The heading every tab shares: what it is, how many, and the one action
+  // that adds another.
+  private head(title: string, icon: string) {
+    const n = this.countOf(title as Tab);
+    return html`
+      <div class="head">
+        <span class="ic"><nr-icon name=${icon} size="small"></nr-icon></span>
+        <h2>${title}</h2>
+        ${n > 0 ? html`<span class="dim">${n}</span>` : ""}
+      </div>`;
   }
 
   private renderTab() {
@@ -128,17 +242,36 @@ export class ConsoleSettings extends LitElement {
 
   private agentsTab() {
     if (this.editing !== null) return this.agentForm(this.editing);
+    const entry = this.agents.find((a) => a.isDefault);
     return html`
+      ${this.head("Agents", "message-square")}
+
+      <div class="group">
+        <span class="label">General</span>
+        <span class="n">${this.agents.length}</span>
+      </div>
+
       <table>
-        <tr><th>Agent</th><th>Description</th><th>Model config</th><th>Prompt</th><th>Enabled</th><th></th></tr>
+        <tbody>
         ${this.agents.map((a) => html`<tr>
-          <td>${a.agentName}</td>
-          <td class="note">${a.description.slice(0, 40)}</td>
-          <td>${a.modelConfigId}</td>
-          <td>${this.prompts.find((p) => p.id === a.promptId)?.promptName ?? a.promptId}</td>
-          <td>${a.enabled ? "yes" : "no"}</td>
-          <td><button @click=${() => { this.editing = { ...a }; }}>Edit</button></td>
+          <td>
+            ${a.agentName}
+            ${a.id === entry?.id ? html`<span class="tag">entry</span>` : ""}
+          </td>
+          <!-- What the agent is for. Dropped in the first pass of this table
+               in favour of the id and the config, which is exactly backwards:
+               those two are addresses, and this is the only column that says
+               what the row does. -->
+          <td class="dim">${a.description.length > 52 ? a.description.slice(0, 52) + "…" : a.description}</td>
+          <td><span class="slug">${a.id}</span></td>
+          <td><span class="tag">${this.prompts.find((p) => p.id === a.promptId)?.promptName ?? a.promptId}</span></td>
+          <td class="dim">${a.enabled ? "" : "off"}</td>
+          <td class="right">
+            <button class="act" title="Edit ${a.agentName}"
+              @click=${() => { this.editing = { ...a }; }}>✎</button>
+          </td>
         </tr>`)}
+        </tbody>
       </table>
       <p class="note">Changes take effect on the next message — no restart.</p>
     `;

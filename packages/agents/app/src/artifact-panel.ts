@@ -1,0 +1,310 @@
+// The rail's other half: what the conversation produced. A workspace file is
+// state the agent rewrites while it works; an artifact is a result — addressed
+// by a path, with every version it ever had still readable.
+//
+// This file has one rule, and it is the reason the feature exists: a body here
+// was written by a model, and it never becomes part of this document. It is
+// loaded from the preview URL into a sandboxed iframe, which is a document of
+// its own with its own origin. `srcdoc`, a `data:` URI and unsafeHTML all
+// inherit *this* origin instead — the console's session, and through /api
+// every agent, every document and every key envelope reference in the
+// database. The three are not stylistic alternatives to the src attribute
+// below; they are the whole attack the preview host exists to contain.
+//
+// The panel is 320px because the rail is. Reading an artifact properly happens
+// in a tab of its own, which is what the expand button is for.
+
+import { LitElement, css, html } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import {
+  ArtifactListing, ArtifactVersion, deleteArtifact, listArtifacts, previewUrl,
+  readArtifactVersion, rotateArtifact,
+} from "./api.js";
+
+// The kinds a browser can be trusted to render, given the sandbox. Everything
+// else — markdown, json, source, plain text — is text, and text is read as
+// text: a <pre> says what the bytes are without asking a parser what they mean.
+function embeds(kind: string): boolean {
+  return kind === "html" || kind === "svg";
+}
+
+@customElement("artifact-panel")
+export class ArtifactPanel extends LitElement {
+  static styles = css`
+    :host { display: flex; flex-direction: column; height: 100%; width: 320px;
+            background: var(--bg-rail); border-left: 1px solid var(--border); }
+    h3 { margin: 0; padding: 16px 16px 8px; font-size: 12px; text-transform: uppercase;
+         letter-spacing: 0.06em; color: var(--muted); display: flex; align-items: center;
+         justify-content: space-between; gap: 8px; }
+    .list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+    .artifact { padding: 8px 10px; cursor: pointer; font-size: 13.5px; border-radius: 8px; }
+    .artifact:hover { background: var(--bg-user); }
+    .artifact .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .artifact .meta { color: var(--muted); font-size: 11.5px; }
+    .none { padding: 16px; color: var(--muted); font-size: 13px; }
+
+    .view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .head { display: flex; align-items: flex-start; gap: 8px; padding: 12px 12px 8px; }
+    .head .name { flex: 1; min-width: 0; font: 600 14px var(--display);
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .head .meta { color: var(--muted); font-size: 11.5px; font-weight: 400;
+                  font-family: var(--mono); }
+    /* The frame is a separate document. It gets a border and nothing else —
+       no styling of ours reaches inside it, and none of its reaches out. */
+    iframe { flex: 1; min-height: 0; width: auto; margin: 0 12px; border: 1px solid var(--border);
+             border-radius: 8px; background: #FFFFFF; }
+    pre { flex: 1; overflow: auto; margin: 0 12px; padding: 12px; font: 12.5px/1.55 var(--mono);
+          background: var(--bg-card); border: 1px solid var(--border);
+          border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+    .loading { flex: 1; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+
+    .versions { padding: 10px 12px 0; }
+    .versions .label { color: var(--muted); font-size: 11.5px; text-transform: uppercase;
+                       letter-spacing: 0.06em; margin-bottom: 6px; }
+    .versions .row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .v { border: 1px solid var(--border); background: var(--bg-card); color: var(--muted);
+         border-radius: 999px; padding: 2px 10px; font: 12px var(--mono); cursor: pointer; }
+    .v:hover { border-color: var(--accent); color: var(--fg); }
+    .v[aria-current="true"] { background: var(--accent); border-color: var(--accent);
+                              color: var(--accent-fg); }
+    .note { color: var(--muted); font-size: 12px; padding: 8px 12px 0; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px; }
+    nr-button { font-size: 12.5px; }
+    .problem { color: var(--danger); font-size: 12.5px; padding: 0 12px 12px; }
+    .said { color: var(--ok); font-size: 12.5px; padding: 0 12px 12px; }
+  `;
+
+  @property() threadId = "";
+
+  @state() private artifacts: ArtifactListing[] = [];
+  // The artifact being read, and the version of it on screen. Two pieces of
+  // state and not one: the frame is pinned to a version number, and the row
+  // carries the token that number is addressed through.
+  @state() private open: ArtifactListing | null = null;
+  @state() private shown: ArtifactVersion | null = null;
+  // Rotate and delete both destroy something that cannot be recovered — a link
+  // somebody is holding, a history nothing else has — so each takes two
+  // clicks. "" when neither is armed.
+  @state() private arming = "";
+  @state() private problem = "";
+  @state() private said = "";
+
+  async updated(changed: Map<string, unknown>) {
+    if (changed.has("threadId")) {
+      this.close();
+      await this.refresh();
+    }
+  }
+
+  async refresh() {
+    if (this.threadId === "") {
+      this.artifacts = [];
+      return;
+    }
+    const listed = await listArtifacts(this.threadId).catch(() => [] as ArtifactListing[]);
+    // The API answers in slot order, which is creation order. Newest first is
+    // what a rail wants — and by the clock rather than by slot, so an artifact
+    // saved again rises to the top the way a conversation does.
+    this.artifacts = [...listed].sort((a, b) =>
+      b.updatedAt.localeCompare(a.updatedAt) || b.slot - a.slot);
+  }
+
+  private close() {
+    this.open = null;
+    this.shown = null;
+    this.arming = "";
+    this.problem = "";
+    this.said = "";
+  }
+
+  private async show(artifact: ArtifactListing, version: number) {
+    this.open = artifact;
+    this.shown = null;
+    this.arming = "";
+    this.problem = "";
+    this.said = "";
+    try {
+      this.shown = await readArtifactVersion(this.threadId, artifact.slot, version);
+    } catch (e) {
+      this.problem = (e as Error).message;
+    }
+  }
+
+  // Copy the bytes, not the rendering. The panel holds the version's own
+  // content already — the frame is showing the same body through a different
+  // door, and there is no reading back through that door by design.
+  private async copy() {
+    if (this.shown === null) return;
+    try {
+      await navigator.clipboard.writeText(this.shown.content);
+      this.said = "Copied.";
+    } catch {
+      // Clipboard access is a secure-context permission, so this fails on a
+      // plain-http deployment and saying why is the only useful answer.
+      this.problem = "the browser would not give this page the clipboard";
+    }
+  }
+
+  private expand() {
+    if (this.open === null || this.shown === null) return;
+    // noreferrer for the same reason the server sends Referrer-Policy: the
+    // token in that URL is the whole authorisation, and a page the artifact
+    // links to must not be handed it. noopener follows from it and also keeps
+    // the new document from reaching back through window.opener.
+    window.open(previewUrl(this.open.previewToken, this.shown.version), "_blank",
+      "noopener,noreferrer");
+  }
+
+  private async rotate() {
+    if (this.open === null) return;
+    if (this.arming !== "rotate") {
+      this.arming = "rotate";
+      return;
+    }
+    const slot = this.open.slot;
+    try {
+      const turned = await rotateArtifact(this.threadId, slot);
+      // Rebuilt rather than assigned into, so Lit sees a new row and the frame
+      // reloads against the new token — the old one is a 404 from now on.
+      const swap = (a: ArtifactListing) =>
+        a.slot === slot ? { ...a, previewToken: turned.previewToken } : a;
+      this.artifacts = this.artifacts.map(swap);
+      this.open = swap(this.open);
+      this.said = "Every link shared before now is dead.";
+    } catch (e) {
+      this.problem = (e as Error).message;
+    }
+    this.arming = "";
+  }
+
+  private async destroy() {
+    if (this.open === null) return;
+    if (this.arming !== "delete") {
+      this.arming = "delete";
+      return;
+    }
+    try {
+      await deleteArtifact(this.threadId, this.open.slot);
+      this.close();
+      await this.refresh();
+    } catch (e) {
+      this.arming = "";
+      this.problem = (e as Error).message;
+    }
+  }
+
+  private label(a: ArtifactListing): string {
+    return a.title === "" ? a.path : a.title;
+  }
+
+  // The version numbers this artifact has, newest first.
+  //
+  // Counted, not fetched: there is no route that lists versions, and there
+  // does not need to be one — the log is append-only, numbered from 1, and
+  // never has a hole, so the pointer's number is the count.
+  private versions(a: ArtifactListing): number[] {
+    const all: number[] = [];
+    for (let n = a.version; n >= 1; n--) all.push(n);
+    return all;
+  }
+
+  private viewing() {
+    const a = this.open as ArtifactListing;
+    const v = this.shown;
+    return html`
+      <div class="view">
+        <div class="head">
+          <div class="name">
+            ${this.label(a)}
+            <div class="meta">${a.path}</div>
+          </div>
+          <nr-button id="a-close" size="small" title="Back to the list"
+            @click=${() => this.close()}>
+            <nr-icon name="x" size="small"></nr-icon>
+          </nr-button>
+        </div>
+
+        ${v === null ? html`<div class="loading">Loading…</div>`
+          : embeds(a.kind) ? html`
+            <!-- src, and only src. The body is a document of its own served
+                 from the preview URL; srcdoc or a data: URI would run it here,
+                 inside the console's origin. allow-scripts without
+                 allow-same-origin is the whole point of the pair: the page may
+                 run its own script and may read nothing that belongs to
+                 anybody. -->
+            <iframe
+              sandbox="allow-scripts"
+              referrerpolicy="no-referrer"
+              title=${this.label(a)}
+              src=${previewUrl(a.previewToken, v.version)}
+            ></iframe>`
+          : html`<pre>${v.content}</pre>`}
+
+        <div class="versions">
+          <div class="label">Versions</div>
+          <div class="row">
+            ${this.versions(a).map((n) => html`
+              <button class="v" aria-current=${String(v !== null && v.version === n)}
+                @click=${() => this.show(a, n)}>v${n}</button>`)}
+          </div>
+        </div>
+
+        ${v === null ? "" : html`
+          <div class="note">
+            ${v.bytes} bytes · ${v.origin}${v.note === "" ? "" : html` · ${v.note}`}
+          </div>`}
+
+        <!-- A labelled button takes its icon through iconLeft, which is the
+             component's own API and sizes the glyph to the button; an
+             icon-only one slots an nr-icon, because iconLeft with an empty
+             label leaves the space the label would have had. Names are looked
+             up in nr-icon's set, and one that is not in it is drawn as the
+             word. -->
+        <div class="actions">
+          <nr-button id="a-copy" size="small" iconLeft="copy"
+            ?disabled=${v === null} @click=${() => this.copy()}>Copy</nr-button>
+          <nr-button id="a-expand" size="small" iconLeft="external-link"
+            ?disabled=${v === null} @click=${() => this.expand()}>Open</nr-button>
+          <nr-button id="a-rotate" size="small" iconLeft="refresh-cw"
+            @click=${() => this.rotate()}>
+            ${this.arming === "rotate" ? "Break links?" : "New link"}
+          </nr-button>
+          <nr-button id="a-delete" size="small" type="danger" iconLeft="trash-2"
+            @click=${() => this.destroy()}>
+            ${this.arming === "delete" ? "Delete all versions?" : "Delete"}
+          </nr-button>
+        </div>
+
+        ${this.problem === "" ? "" : html`<div class="problem">${this.problem}</div>`}
+        ${this.said === "" ? "" : html`<div class="said">${this.said}</div>`}
+      </div>
+    `;
+  }
+
+  render() {
+    if (this.open !== null) return this.viewing();
+    return html`
+      <h3>
+        <span>Artifacts</span>
+        ${this.threadId === "" ? "" : html`
+          <nr-button id="a-refresh" size="small" title="Refresh"
+            @click=${() => this.refresh()}>
+            <nr-icon name="refresh-cw" size="small"></nr-icon>
+          </nr-button>`}
+      </h3>
+      <div class="list">
+        ${this.threadId === "" ? html`<div class="none">Open a conversation first.</div>` : ""}
+        ${this.threadId !== "" && this.artifacts.length === 0
+          ? html`<div class="none">Nothing produced in this conversation yet.</div>` : ""}
+        ${this.artifacts.map((a) => html`
+          <div class="artifact" @click=${() => this.show(a, a.version)}>
+            <div class="name">${this.label(a)}</div>
+            <div class="meta">
+              ${a.kind} · ${a.version} version${a.version === 1 ? "" : "s"}
+            </div>
+          </div>`)}
+      </div>
+    `;
+  }
+}
