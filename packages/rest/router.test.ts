@@ -145,6 +145,89 @@ test("the first matching route wins, in the order written", () => {
   expect(match(table, "GET", "/agents/a1").handler == "findAgent");
 });
 
+// --- the trailing wildcard ---------------------------------------------------
+
+function fileRoutes(): Route[] {
+  return routes([
+    route("GET", "/files/:box/v/:n", "readVersion"),
+    route("GET", "/files/:box", "readBox"),
+    route("GET", "/files/:box/*path", "readFile"),
+  ]);
+}
+
+test("a *name segment captures the whole rest of the path", () => {
+  let m = match(fileRoutes(), "GET", "/files/b1/css/main.css");
+  expect(m.found);
+  expect(m.handler == "readFile");
+  expect(m.params.get("box") == "b1");
+  expect(m.params.get("path") == "css/main.css");
+});
+
+test("a wildcard captures one segment as readily as many", () => {
+  let m = match(fileRoutes(), "GET", "/files/b1/index.html");
+  expect(m.found);
+  expect(m.handler == "readFile");
+  expect(m.params.get("path") == "index.html");
+});
+
+test("a wildcard needs at least one segment, so it never covers its own prefix", () => {
+  // `/files/:box` and `/files/:box/*path` are disjoint: this is what makes the
+  // two routes independent of the order they are written in.
+  let m = match(fileRoutes(), "GET", "/files/b1");
+  expect(m.found);
+  expect(m.handler == "readBox");
+});
+
+test("each captured segment is decoded on its own", () => {
+  let m = match(fileRoutes(), "GET", "/files/b1/a%20b/c.css");
+  expect(m.found);
+  expect(m.params.get("path") == "a b/c.css");
+});
+
+test("an exact route beats a wildcard, whichever is written first", () => {
+  // The point of the rule: the table above puts the wildcard last, this one
+  // puts it first, and both answer the same.
+  expect(match(fileRoutes(), "GET", "/files/b1/v/3").handler == "readVersion");
+  let reversed = routes([
+    route("GET", "/files/:box/*path", "readFile"),
+    route("GET", "/files/:box/v/:n", "readVersion"),
+  ]);
+  expect(match(reversed, "GET", "/files/b1/v/3").handler == "readVersion");
+  expect(match(reversed, "GET", "/files/b1/v/3").params.get("n") == "3");
+  // And a path the exact route does not claim still reaches the wildcard.
+  expect(match(reversed, "GET", "/files/b1/v/3/deep").handler == "readFile");
+});
+
+test("a literal beats a wildcard that comes before it", () => {
+  let table = routes([
+    route("GET", "/files/*path", "readFile"),
+    route("GET", "/files/index.html", "home"),
+  ]);
+  expect(match(table, "GET", "/files/index.html").handler == "home");
+  expect(match(table, "GET", "/files/other.html").handler == "readFile");
+});
+
+test("among wildcards the first one written still wins", () => {
+  let table = routes([
+    route("GET", "/files/public/*path", "readPublic"),
+    route("GET", "/files/:box/*path", "readFile"),
+  ]);
+  expect(tableProblem(table) == "");
+  expect(match(table, "GET", "/files/public/x.css").handler == "readPublic");
+  expect(match(table, "GET", "/files/b1/x.css").handler == "readFile");
+});
+
+test("a wildcard route claims the path for 405 as any route does", () => {
+  let m = match(fileRoutes(), "PATCH", "/files/b1/css/main.css");
+  expect(!m.found);
+  expect(m.pathMatched);
+  expect(allowedMethods(fileRoutes(), "/files/b1/css/main.css").indexOf("GET") >= 0);
+});
+
+test("a wildcard does not match a path that stops short of its prefix", () => {
+  expect(!match(fileRoutes(), "GET", "/files").found);
+});
+
 // --- checking the table ------------------------------------------------------
 
 test("a well-formed table reports no problem", () => {
@@ -189,6 +272,49 @@ test("two routes differing only in parameter name are the same route", () => {
     route("GET", "/agents/:key", "b"),
   ]);
   expect(tableProblem(twice).indexOf("can never match") >= 0);
+});
+
+test("a table mixing exact routes and a wildcard reports no problem", () => {
+  expect(tableProblem(fileRoutes()) == "");
+});
+
+test("a wildcard before its last segment is refused, since nothing can follow it", () => {
+  let problem = tableProblem(routes([route("GET", "/a/*rest/b", "h")]));
+  expect(problem.indexOf("nothing can follow it") >= 0);
+});
+
+test("a * with no name after it is refused", () => {
+  expect(tableProblem(routes([route("GET", "/a/*", "h")])).indexOf("no name after it") >= 0);
+});
+
+test("a wildcard and a parameter share one namespace, since a handler reads names", () => {
+  expect(tableProblem(routes([route("GET", "/a/:x/*x", "h")])).indexOf("twice") >= 0);
+});
+
+test("a wildcard written first does not make a later exact route dead", () => {
+  // It would under a first-match-wins rule; `match` prefers the exact route
+  // whatever the order, so refusing this table at startup would be wrong.
+  expect(tableProblem(routes([
+    route("GET", "/files/:box/*path", "readFile"),
+    route("GET", "/files/:box/v/:n", "readVersion"),
+  ])) == "");
+});
+
+test("a wildcard that covers a later wildcard is refused", () => {
+  let problem = tableProblem(routes([
+    route("GET", "/files/:box/*path", "readFile"),
+    route("GET", "/files/b1/*rest", "readBox1"),
+  ]));
+  expect(problem.indexOf("can never match") >= 0);
+});
+
+test("a wildcard reaching further back does not shadow one nested deeper", () => {
+  // `/files/:box/logs/*rest` matches paths `/files/*path` also matches, so it
+  // is the earlier, wider one that must come second.
+  expect(tableProblem(routes([
+    route("GET", "/files/:box/logs/*rest", "readLogs"),
+    route("GET", "/files/*path", "readFile"),
+  ])) == "");
 });
 
 test("the same path under different methods is not a conflict", () => {

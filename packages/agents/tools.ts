@@ -18,6 +18,10 @@ import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, agentsMapping, mcpServersMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
+import { jsonText } from "./scan.ts";
+import { normalScope } from "./knowledge.ts";
+import { FileToolResult } from "./workspace.ts";
+import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts";
 
 // One tool, and which server answers it.
 export type MountedTool = {
@@ -242,4 +246,154 @@ export function serverOf(mounted: Mounted, name: string): string {
   let at = mountedIndex(mounted.tools, name);
   if (at < 0) { return ""; }
   return mounted.servers[mounted.tools[at].server].serverName;
+}
+
+// --- artifacts -----------------------------------------------------------------
+//
+// What a conversation produces, as tools. Offered beside the workspace files
+// and answered ahead of MCP, for the same reason those are: these two names
+// belong to the thread, and a server that happens to offer a `write_artifact`
+// must not be the thing that answers one.
+//
+// Two tools and not five. A model that can save a body and read the current one
+// can do the work; listing, diffing and rolling a version back are things a
+// person does through the API, with the whole log in front of them.
+
+// The self-containment rule, in the description because it is the one thing
+// about an artifact a model cannot learn by trying. A body that pulls a script
+// off a CDN validates, stores and previews without a single error and merely
+// renders without the script — so nothing in the loop ever tells the model it
+// got this wrong, and it has to be told up front.
+const SELF_CONTAINED: string = "An artifact may reach its siblings and nothing else. "
+  + "Files you save in this same conversation are served next to each other, so a page at /index.html can link "
+  + "<link rel=\"stylesheet\" href=\"css/main.css\"> or <script src=\"js/app.js\"> and they will load — save each one with its own "
+  + "write_artifact call, at the path the page refers to. Nothing from another host will: the preview blocks every "
+  + "request off this origin, so a CDN script, a Google font or a remote image is simply missing when a reader opens it. "
+  + "Draw rather than link, and inline anything too small to be its own file.";
+
+// The two tools, described for the model. A ToolSpec straight away rather than
+// a private tool type the caller re-wraps field by field: there is nothing here
+// a provider does not already understand.
+export function artifactTools(): ToolSpec[] {
+  let out: ToolSpec[] = [];
+  out.push(toolSpec("write_artifact",
+    "Save something the user is meant to look at — a page, a diagram, a document, a data file — as an artifact of this conversation. "
+    + "Writing a path that already exists appends a new version instead of replacing the old one, and the reply names the slot and version number, "
+    + "which is how you refer to what you just saved when you answer. "
+    + SELF_CONTAINED,
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot and dash; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt or a source suffix.\"},"
+    + "\"title\":{\"type\":\"string\",\"description\":\"What to call it where artifacts are listed.\"},"
+    + "\"content\":{\"type\":\"string\",\"description\":\"The whole body. This is not a patch: what you send is the new version, entire.\"},"
+    + "\"note\":{\"type\":\"string\",\"description\":\"Why this version exists, in a few words. Empty is fine for a first draft.\"}},"
+    + "\"required\":[\"path\",\"title\",\"content\"]}"));
+  out.push(toolSpec("read_artifact",
+    "Read the current version of one of this conversation's artifacts, whole. "
+    + "Artifacts are self-contained — no remote scripts, styles or fonts — so what comes back is all of it, with nothing left to fetch.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"path\":{\"type\":\"string\",\"description\":\"The path the artifact was saved under.\"}},"
+    + "\"required\":[\"path\"]}"));
+  return out;
+}
+
+// One call to the artifact tools.
+//
+// A record, not four positional strings. `threadId`, `name`, `args` and `now`
+// are all strings with no shape between them: swapped, a run files the model's
+// arguments as a thread id, or stamps a version row with a tool name where the
+// date belongs. Nothing in the types and nothing in the storage would refuse
+// any of it — `putArtifact` would take "write_artifact" as a timestamp without
+// comment. This is the same fix `ArtifactWrite` and `FileWrite` already are,
+// applied to the call that reaches them.
+//
+// `args` stays whole and is unpacked here. The workspace's caller pre-extracts
+// two argument names before it knows which tool was called, which is why adding
+// an argument there means editing a schema in one file and an extraction in
+// another and hoping the two agree. Holding the JSON until the name is known
+// leaves one place that decides what write_artifact takes.
+export type ArtifactToolCall = {
+  threadId: string,
+  name: string,
+  // The arguments as the model sent them: JSON text.
+  args: string,
+  now: string,
+};
+
+// Dispatch one of the two. `handled` false means the name is not ours, which is
+// how the run loop knows to go on to delegation and then to MCP.
+//
+// The result is the workspace's `FileToolResult` rather than a second record
+// with the same three fields — the loop treats both dispatchers identically and
+// a parallel type would only be a thing to keep in step. The name is about
+// files rather than about the shape, and is worth widening the day workspace.ts
+// is open for another reason.
+export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult {
+  let not: FileToolResult = { handled: false, ok: false, text: "" };
+  // An artifact is addressed within a conversation, so a bare run has none.
+  // The loop does not offer these tools without a thread; this catches a model
+  // that invented the name from its own training rather than from the list.
+  if (call.threadId == "") { return not; }
+
+  if (call.name == "write_artifact") {
+    let path = normalScope(jsonText(call.args, "path"));
+    let content = jsonText(call.args, "content");
+    let written = putArtifact(db, {
+      threadId: call.threadId,
+      path: path,
+      title: jsonText(call.args, "title"),
+      content: content,
+      note: jsonText(call.args, "note"),
+      // Fixed here, never read out of the arguments: origin says who produced
+      // a body, and a model asked to declare that can call its own output an
+      // upload. This call site knows the answer.
+      origin: "generated",
+      now: call.now,
+    });
+    if (!written.ok) {
+      // The refusal in the storage's own words — every one of them names what
+      // was wrong with the path or the body, which is what the model needs to
+      // try again rather than give up.
+      let refused: FileToolResult = { handled: true, ok: false, text: written.problem };
+      return refused;
+    }
+    // Both numbers, because the sentence the model writes next has to point at
+    // what it just saved: "the artifact" is ambiguous the moment there are two,
+    // and "the latest version" stops being true on the next write.
+    let wrote: FileToolResult = {
+      handled: true, ok: true,
+      text: "Saved " + path + " as artifact " + `${written.slot}` + ", version " + `${written.version}`
+        + " (" + `${utf8Length(content)}` + " bytes). Refer to it as artifact " + `${written.slot}`
+        + ", version " + `${written.version}` + ".",
+    };
+    return wrote;
+  }
+
+  if (call.name == "read_artifact") {
+    let path = normalScope(jsonText(call.args, "path"));
+    let artifact = getArtifact(db, call.threadId, path);
+    if (artifact.id == "") {
+      let missing: FileToolResult = {
+        handled: true, ok: false,
+        text: "There is no artifact at " + path + " in this conversation.",
+      };
+      return missing;
+    }
+    let current = getVersion(db, artifact.id, artifact.currentVersion);
+    if (current.id == "") {
+      // The pointer names a version the log does not hold. Said out loud rather
+      // than answered with the empty body `getVersion` returns: an artifact
+      // that reads as blank is indistinguishable from one that was saved blank,
+      // and the model would confidently report it as empty.
+      let broken: FileToolResult = {
+        handled: true, ok: false,
+        text: "Artifact " + path + " points at version " + `${artifact.currentVersion}`
+          + ", which is not in its history.",
+      };
+      return broken;
+    }
+    let read: FileToolResult = { handled: true, ok: true, text: current.body };
+    return read;
+  }
+
+  return not;
 }

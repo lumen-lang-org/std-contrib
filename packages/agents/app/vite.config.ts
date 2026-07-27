@@ -32,10 +32,27 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // The preview host is a second name for this same server, and Vite refuses
+    // a Host it does not recognise. Previews are only ever served from a host
+    // the operator names, so the same name has to be allowed in here for dev.
+    allowedHosts: process.env.AGENTS_PREVIEW_HOST
+      ? [process.env.AGENTS_PREVIEW_HOST.split(":")[0]]
+      : [],
     proxy: {
+      // Previews are served by the API at its own root, not under /api: the
+      // URL a page's relative links resolve against has to be the artifact's
+      // own path, so it cannot carry a prefix belonging to the console.
+      "/preview": {
+        target: process.env.AGENTS_API ?? "http://127.0.0.1:8100",
+        changeOrigin: false,
+      },
       "/api": {
         target: process.env.AGENTS_API ?? "http://127.0.0.1:8100",
-        changeOrigin: true,
+        // Keep the browser's Host. `changeOrigin: true` rewrites it to the
+        // target, which is the same hole nginx had: the preview route decides
+        // its content type from that header, and a rewritten one is a decision
+        // made about a host nobody asked for.
+        changeOrigin: false,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
     },

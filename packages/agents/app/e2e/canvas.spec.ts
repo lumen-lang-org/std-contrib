@@ -6,7 +6,7 @@
 // only looked right would be worse than none.
 
 import { expect, test } from "@playwright/test";
-import { agentRow, canvas, errorOf, openCanvas, shell } from "./console.js";
+import { agentRow, canvas, errorOf, field, openCanvas, shell } from "./console.js";
 import type { Page } from "@playwright/test";
 
 // What a node is labelled. The entry agent says so on the node itself, so its
@@ -53,8 +53,8 @@ test("selecting a node opens it with its own values, not a blank form", async ({
 
   await expect(canvas(page).locator("aside h3")).toHaveText(first.agentName);
   await expect(canvas(page).locator("aside .sub")).toHaveText(first.id);
-  await expect(canvas(page).locator("#c-name")).toHaveValue(first.agentName);
-  await expect(canvas(page).locator("#c-desc")).toHaveValue(first.description);
+  await expect(field(canvas(page), "c-name")).toHaveValue(first.agentName);
+  await expect(field(canvas(page), "c-desc")).toHaveValue(first.description);
 });
 
 test("editing a field on the canvas is stored, and the graph says so", async ({ page }) => {
@@ -64,8 +64,8 @@ test("editing a field on the canvas is stored, and the graph says so", async ({ 
   const renamed = `${target.agentName}-canvas`;
 
   await node(page, target).click();
-  await canvas(page).locator("#c-name").fill(renamed);
-  await canvas(page).locator("aside button.primary").click();
+  await field(canvas(page), "c-name").fill(renamed);
+  await canvas(page).locator("aside nr-button[type=primary]").click();
   await expect(canvas(page).locator("aside .saved")).toHaveText("saved");
 
   // The database, not the drawing.
@@ -89,8 +89,8 @@ test("the canvas refuses what the API refuses, rather than drawing it anyway", a
   const target = agents[0];
 
   await node(page, target).click();
-  await canvas(page).locator("#c-name").fill("   ");
-  await canvas(page).locator("aside button.primary").click();
+  await field(canvas(page), "c-name").fill("   ");
+  await canvas(page).locator("aside nr-button[type=primary]").click();
 
   // The sentence the API answered, shown where the edit was made.
   await expect(canvas(page).locator("aside .problem")).toBeVisible();
@@ -175,8 +175,8 @@ test("selecting a server opens the server form, not the agent one", async ({ pag
   await canvas(page).getByText(s.serverName, { exact: true }).first().click();
 
   await expect(canvas(page).locator("aside .sub")).toContainText("MCP server");
-  await expect(canvas(page).locator("#s-endpoint")).toHaveValue(s.endpoint);
-  await expect(canvas(page).locator("#s-transport")).toHaveValue(s.transport);
+  await expect(field(canvas(page), "s-endpoint")).toHaveValue(s.endpoint);
+  await expect(canvas(page).locator("#s-transport")).toContainText(s.transport);
   // The agent form is not also on screen.
   await expect(canvas(page).locator("#c-name")).toHaveCount(0);
 });
@@ -189,8 +189,8 @@ test("editing a server on the canvas is stored", async ({ page }) => {
   const moved = "http://127.0.0.1:9999/mcp";
 
   await canvas(page).getByText(s.serverName, { exact: true }).first().click();
-  await canvas(page).locator("#s-endpoint").fill(moved);
-  await canvas(page).locator("aside button.primary").click();
+  await field(canvas(page), "s-endpoint").fill(moved);
+  await canvas(page).locator("aside nr-button[type=primary]").click();
   await expect(canvas(page).locator("aside .saved")).toHaveText("saved");
 
   const after = (await page.request.get("/api/servers").then((r) => r.json())) as
@@ -198,8 +198,8 @@ test("editing a server on the canvas is stored", async ({ page }) => {
   expect(after.find((x) => x.id === s.id)?.endpoint).toBe(moved);
 
   // Put it back.
-  await canvas(page).locator("#s-endpoint").fill(s.endpoint);
-  await canvas(page).locator("aside button.primary").click();
+  await field(canvas(page), "s-endpoint").fill(s.endpoint);
+  await canvas(page).locator("aside nr-button[type=primary]").click();
   await expect(canvas(page).locator("aside .saved")).toHaveText("saved");
 });
 
@@ -214,4 +214,104 @@ test("a transport the client cannot speak is refused on create as well as update
   });
   expect(res.status()).toBe(400);
   expect(await errorOf(res)).toContain("speaks http");
+});
+
+test("a server's tools are nodes of their own, read from the server", async ({ page }) => {
+  // Which server the double is behind. Asked of the API rather than assumed,
+  // so the test does not care which seeded row points at it.
+  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
+    { id: string; serverName: string }[];
+  const listings = await Promise.all(servers.map(async (s) => ({
+    server: s,
+    listing: (await page.request.get(`/api/servers/${s.id}/tools`).then((r) => r.json())) as
+      { problem: string; tools: { name: string }[] },
+  })));
+  const answering = listings.find((l) => l.listing.problem === "" && l.listing.tools.length > 0);
+  test.skip(!answering, "no MCP server is answering");
+
+  for (const t of answering!.listing.tools) {
+    await expect(canvas(page).getByText(t.name, { exact: true }).first()).toBeVisible();
+  }
+  const total = listings.reduce((n, l) => n + l.listing.tools.length, 0);
+  await expect(canvas(page).locator(".note")).toContainText(`${total} tools`);
+});
+
+test("a tool is shown, not offered as a form", async ({ page }) => {
+  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
+    { id: string }[];
+  const listings = await Promise.all(servers.map(async (s) =>
+    (await page.request.get(`/api/servers/${s.id}/tools`).then((r) => r.json())) as
+      { problem: string; tools: { name: string; description: string }[] }));
+  const tool = listings.flatMap((l) => l.tools)[0];
+  test.skip(!tool, "no tools to select");
+
+  await canvas(page).getByText(tool.name, { exact: true }).first().click();
+
+  await expect(canvas(page).locator("aside h3")).toHaveText(tool.name);
+  await expect(canvas(page).locator("aside .sub")).toContainText("offered by");
+  // Nothing editable: a tool is the server's to declare.
+  await expect(canvas(page).locator("aside nr-input")).toHaveCount(0);
+  await expect(canvas(page).locator("aside nr-button")).toHaveCount(0);
+});
+
+test("a server that cannot be reached says so rather than looking empty", async ({ page }) => {
+  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
+    { id: string; serverName: string }[];
+  const listings = await Promise.all(servers.map(async (s) => ({
+    server: s,
+    listing: (await page.request.get(`/api/servers/${s.id}/tools`).then((r) => r.json())) as
+      { problem: string },
+  })));
+  const broken = listings.find((l) => l.listing.problem !== "");
+  test.skip(!broken, "every server is answering");
+
+  await canvas(page).getByText(broken!.server.serverName, { exact: true }).first().click();
+  // The reason, where the server is being looked at — not an empty tool list
+  // that reads as "this server offers nothing".
+  await expect(canvas(page).locator("aside .problem")).toContainText("no tools drawn");
+});
+
+test("every icon the graph asks for is one nr-icon has", async ({ page }) => {
+  // A name the set does not carry is rendered as the name itself, which puts a
+  // word like "function" across the node's title. It looks like a layout bug
+  // and it is a typo, so it is worth catching by asking the component rather
+  // than by reading the picture.
+  const missing = await page.evaluate(() => {
+    const seen: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
+      for (const el of root.querySelectorAll("*")) {
+        if (el.tagName.toLowerCase() === "nr-icon") {
+          const name = el.getAttribute("name") ?? "";
+          // An icon that resolved draws an <svg>; one that did not shows text.
+          if (name !== "" && !el.shadowRoot?.querySelector("svg")) seen.push(name);
+        }
+        if (el.shadowRoot) walk(el.shadowRoot);
+      }
+    };
+    walk(document);
+    return seen;
+  });
+  expect(missing).toEqual([]);
+});
+
+test("double-clicking a node opens the inspector, not a second editor", async ({ page }) => {
+  // The canvas brings its own configuration panel. It edits the workflow
+  // object in memory and fires workflow-changed, which this console only reads
+  // for edge changes — so a name typed there is dropped on the next load with
+  // no error. One editor, and it is the one that can save.
+  const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
+    { id: string; agentName: string; isDefault: boolean }[];
+  const target = agents[0];
+
+  await node(page, target).dblclick();
+
+  // The canvas's own panel is not left open.
+  await expect(canvas(page).locator("workflow-canvas .config-panel")).toHaveCount(0);
+  await expect(canvas(page).getByText("Connect nodes to the agent's input ports"))
+    .toHaveCount(0);
+
+  // The inspector has it instead, showing the stored name rather than the
+  // node's label — which for the entry agent carries a "· entry" suffix.
+  await expect(canvas(page).locator("aside h3")).toHaveText(target.agentName);
+  await expect(field(canvas(page), "c-name")).toHaveValue(target.agentName);
 });

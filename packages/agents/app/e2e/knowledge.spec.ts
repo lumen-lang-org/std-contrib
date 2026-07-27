@@ -27,13 +27,21 @@ async function seedCorpus(page: Page) {
   const embedder = models.find((m) => m.kind === "embedding" && m.enabled);
   if (!embedder) return;
   // Upload refuses a provider it has no credential for, which is right: it
-  // will not queue work it cannot carry out. So the fixture walks the same
-  // path a person does and configures one first. The key is never used —
-  // nothing here reaches the provider, because the API only enqueues and the
-  // indexer is a separate process — but it has to be present.
-  await page.request.put(`/api/providers/${embedder.provider}/key`, {
-    data: { apiKey: "e2e-not-a-real-key" },
-  });
+  // will not queue work it cannot carry out. So the fixture configures one —
+  // but only when there is none already.
+  //
+  // A credential can never be read back, by design, so a test that overwrites
+  // one cannot put it back. This fixture used to write a placeholder key
+  // unconditionally, which meant running the suite against a database somebody
+  // actually uses replaced their real key with "not-a-real-key" and left no
+  // way to recover it. A test may not cost more than it proves.
+  const configured = (await page.request.get("/api/providers")
+    .then((r) => r.json())) as string[];
+  if (!configured.includes(embedder.provider)) {
+    await page.request.put(`/api/providers/${embedder.provider}/key`, {
+      data: { apiKey: "e2e-placeholder-key" },
+    });
+  }
   for (const doc of CORPUS) {
     await page.request.post(`/api/documents?model=${embedder.id}`, { data: doc });
   }

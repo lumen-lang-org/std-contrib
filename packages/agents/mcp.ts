@@ -95,16 +95,31 @@ export function initialize(server: McpServerRow, token: string): McpCall {
   return rpcWith(server.endpoint, authHeaders(server, token), 1, "initialize", "{}");
 }
 
-// What the server offers, in the order it listed them.
+// What the server offers, and — when the answer is nothing — why.
 //
+// A caller mounting tools for a run only needs the list, and an empty one is
+// an answer it can act on. A console drawing the server needs the difference
+// between "offers no tools" and "could not be asked": the two look identical
+// on screen and mean opposite things about whether anything is wrong.
+export type ToolListing = {
+  tools: McpTool[],
+  // Empty when the server answered. Otherwise a sentence a reader can act on.
+  problem: string,
+};
+
 // Read by scanning rather than with JSON.parse: a tool's input schema is an
 // arbitrary shape by design, and a strict parse would refuse the whole reply
 // over a key it had never been told about.
-export function listTools(server: McpServerRow, token: string): McpTool[] {
+export function toolListing(server: McpServerRow, token: string): ToolListing {
   let out: McpTool[] = [];
-  if (server.transport != "http" || !server.enabled) { return out; }
+  if (!server.enabled) { return { tools: out, problem: "this server is switched off" }; }
+  if (server.transport != "http") {
+    return { tools: out, problem: "this speaks http; \"" + server.transport + "\" needs a subprocess it cannot spawn" };
+  }
   let listed = rpcWith(server.endpoint, authHeaders(server, token), 2, "tools/list", "");
-  if (!listed.ok) { return out; }
+  if (!listed.ok) {
+    return { tools: out, problem: "could not reach " + server.endpoint + ": " + listed.error };
+  }
 
   let items = jsonList(jsonRaw(listed.text, "tools"));
   let i: int = 0;
@@ -127,7 +142,12 @@ export function listTools(server: McpServerRow, token: string): McpTool[] {
     }
     i = i + 1;
   }
-  return out;
+  return { tools: out, problem: "" };
+}
+
+// The list alone, for a caller that has nowhere to put the reason.
+export function listTools(server: McpServerRow, token: string): McpTool[] {
+  return toolListing(server, token).tools;
 }
 
 // Just the names, for a caller that only wants to know what is there.

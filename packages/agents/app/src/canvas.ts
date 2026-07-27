@@ -17,8 +17,8 @@ import { customElement, state } from "lit/decorators.js";
 // <workflow-canvas> is registered by the single LumenUI bundle in ui.ts.
 import "./ui.js";
 import {
-  AgentFull, ModelConfigRow, PromptRow, ServerRow,
-  listAgents, listConfigs, listPrompts, listServers,
+  AgentFull, ModelConfigRow, PromptRow, ServerRow, ServerTools,
+  listAgents, listConfigs, listPrompts, listServers, serverTools,
   updateAgent, updateServer, linkChild, unlinkChild, linkServer, unlinkServer,
 } from "./api.js";
 
@@ -45,11 +45,29 @@ type CanvasWorkflow = {
 // tables — an agent and a server could both be called "s1". A node id carries
 // its kind so they cannot collide, and every read of one goes back through
 // `partsOf` rather than slicing strings at the call site.
-type Kind = "agent" | "server";
+type Kind = "agent" | "server" | "tool";
 const nodeId = (kind: Kind, id: string) => `${kind}:${id}`;
 function partsOf(node: string): { kind: Kind; id: string } {
   const cut = node.indexOf(":");
   return { kind: node.slice(0, cut) as Kind, id: node.slice(cut + 1) };
+}
+
+// The value a LumenUI field is now carrying.
+//
+// Read off the element rather than out of the event detail: nr-input,
+// nr-select and nr-textarea each describe their payload differently, and the
+// element's own `value` is the one thing all three agree on. A detail shape
+// that changed under us would be a silent empty string here otherwise.
+function valueOf(e: Event): string {
+  return (e.target as unknown as { value?: string }).value ?? "";
+}
+
+// http is the only transport the API accepts. A row stored before that rule
+// was consistent still shows what it actually is rather than being silently
+// redrawn as http by a list with no entry to match it.
+function transportOptions(current: string): { value: string; label: string }[] {
+  const base = [{ value: "http", label: "http" }];
+  return current === "http" ? base : [...base, { value: current, label: current }];
 }
 
 // A relation as the API states it. `kind` is the child's: an agent delegates
@@ -85,36 +103,96 @@ function forgetLayout() {
 // dragged yet.
 // One grid for everything on the canvas, so nodes line up instead of landing
 // wherever the arithmetic put them. A cell is wider than a node and taller
-// than one with two lines of description, which is what keeps the gaps even
-// as names and endpoints change length.
-const CELL = { w: 320, h: 220 };
-const ORIGIN = { x: 100, y: 100 };
+// than one carrying two lines of description, which is what keeps the gaps
+// even as names and endpoints change length.
+// Tight enough that a three-column graph still fits beside the inspector on a
+// laptop: the canvas has no fit-to-view to call, so the layout has to land
+// inside the pane rather than trust the reader to pan for the last column.
+const CELL = { w: 240, h: 190 };
+const ORIGIN = { x: 50, y: 70 };
 const cell = (col: number, row: number): Position =>
   ({ x: ORIGIN.x + col * CELL.w, y: ORIGIN.y + row * CELL.h });
 
-function tidyPositions(agents: AgentFull[], servers: ServerRow[]): Record<string, Position> {
+// How far along the chain of delegation each agent sits: an agent nobody
+// delegates to is 0, and anything it delegates to is one further along.
+//
+// Computed by walking outward from the roots rather than by asking each agent
+// for its parents, so a cycle cannot send it round forever — an agent already
+// placed keeps the depth it was first reached at. A graph where every agent
+// has a parent has no root to start from, so the walk seeds itself with the
+// first agent and still terminates.
+function depths(agents: AgentFull[]): Map<string, number> {
   const children = new Set<string>();
   for (const a of agents) for (const c of a.subAgents) children.add(c.id);
-  const roots = agents.filter((a) => !children.has(a.id));
-  const rest = agents.filter((a) => children.has(a.id));
+  const by = new Map(agents.map((a) => [a.id, a]));
+  const depth = new Map<string, number>();
+
+  let frontier = agents.filter((a) => !children.has(a.id)).map((a) => a.id);
+  if (frontier.length === 0 && agents.length > 0) frontier = [agents[0].id];
+
+  let level = 0;
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      if (depth.has(id)) continue;
+      depth.set(id, level);
+      for (const c of by.get(id)?.subAgents ?? []) {
+        if (!depth.has(c.id)) next.push(c.id);
+      }
+    }
+    frontier = next;
+    level = level + 1;
+  }
+  // An agent no walk reached — one inside a cycle with no way in — still
+  // needs somewhere to be rather than stacking at the origin.
+  for (const a of agents) if (!depth.has(a.id)) depth.set(a.id, level);
+  return depth;
+}
+
+// Laid out the way a trace reads: left to right, one column per step of
+// delegation, with what an agent uses at the end of the line. Each column is
+// centred against the tallest, so a single agent feeding three sub-agents sits
+// level with the middle of them and its arrows stay flat instead of fanning.
+function tidyPositions(
+  agents: AgentFull[], servers: ServerRow[], tools: ServerTools[],
+): Record<string, Position> {
+  const depth = depths(agents);
+  const columns: AgentFull[][] = [];
+  for (const a of agents) {
+    const d = depth.get(a.id) ?? 0;
+    while (columns.length <= d) columns.push([]);
+    columns[d].push(a);
+  }
+
+  const serverColumn = columns.length;
+  const toolColumn = serverColumn + 1;
+
+  // Tools are laid out under the server that offers them rather than in one
+  // list, so which server a tool came from is read off the position instead
+  // of having to be looked up.
+  const rowsOfTools = tools.reduce((n, t) => n + t.tools.length, 0);
+  const tallest = Math.max(
+    ...columns.map((c) => c.length), servers.length, rowsOfTools, 1);
   const at: Record<string, Position> = {};
 
-  // Agents in two rows: what nothing delegates to on top, its sub-agents
-  // under it. Each row is centred on the wider of the two, so a single root
-  // above three sub-agents sits over the middle of them rather than off at
-  // the left edge with its arrows fanning sideways.
-  const span = Math.max(roots.length, rest.length, 1);
-  const place = (list: AgentFull[], row: number) => {
-    const offset = (span - list.length) / 2;
-    list.forEach((a, i) => { at[nodeId("agent", a.id)] = cell(offset + i, row); });
-  };
-  place(roots, 0);
-  place(rest, 1);
+  columns.forEach((column, col) => {
+    const offset = (tallest - column.length) / 2;
+    column.forEach((a, row) => { at[nodeId("agent", a.id)] = cell(col, offset + row); });
+  });
 
-  // Servers in their own column, one clear cell to the right of the widest
-  // agent row — a fixed x would have them sitting on top of the agents as
-  // soon as there were four of them.
-  servers.forEach((v, i) => { at[nodeId("server", v.id)] = cell(span + 0.5, i); });
+  // Each server sits level with the middle of its own tools, so the fan of
+  // arrows out of it is symmetric rather than hanging off the top.
+  const toolOffset = (tallest - Math.max(rowsOfTools, servers.length)) / 2;
+  let row = 0;
+  servers.forEach((v) => {
+    const mine = tools.find((t) => t.serverId === v.id)?.tools ?? [];
+    const span = Math.max(mine.length, 1);
+    at[nodeId("server", v.id)] = cell(serverColumn, toolOffset + row + (span - 1) / 2);
+    mine.forEach((t, i) => {
+      at[nodeId("tool", `${v.id}/${t.name}`)] = cell(toolColumn, toolOffset + row + i);
+    });
+    row = row + span;
+  });
   return at;
 }
 
@@ -124,24 +202,48 @@ const AGENT_PORTS: { inputs: Port[]; configs: Port[]; outputs: Port[] } = {
   outputs: [{ id: "out", type: "OUTPUT", label: "Delegates to / uses" }],
 };
 
-// A server is something an agent reaches, never something that reaches back,
-// so it has an input and no output. The canvas will not let an edge start
-// where there is no port to start from.
+// An agent reaches a server and a server never reaches back, so its input is
+// where agents arrive. Its output goes only to the tools it offers, which the
+// server states and nobody here edits.
 const SERVER_PORTS: { inputs: Port[]; configs: Port[]; outputs: Port[] } = {
   inputs: [{ id: "in", type: "INPUT", label: "Used by" }],
   configs: [],
-  outputs: [],
+  outputs: [{ id: "out", type: "OUTPUT", label: "Offers" }],
 };
 
 // The entry agent is the one a new conversation opens against, and it is the
 // single most useful thing to be able to find at a glance — so it is not a
 // shade of the others but its own colour and its own mark.
+// Icon names are looked up in nr-icon's own set, and a name that is not in it
+// is drawn as the name — the word "function" sat across the title of every
+// tool node until it was noticed. These are all names the set actually has;
+// `agent`, which reads like it ought to exist, is not one of them.
 const ENTRY = { color: "#C2410C", icon: "play" };
 const AGENT = { color: "#10b981", icon: "cpu" };
-const SUB = { color: "#0EA5E9", icon: "agent" };
+const SUB = { color: "#0EA5E9", icon: "git-fork" };
 const OFF = { color: "#9AA4B2", icon: "cpu" };
 const SERVER = { color: "#7C3AED", icon: "plug" };
 const SERVER_OFF = { color: "#9AA4B2", icon: "plug" };
+const TOOL = { color: "#0F766E", icon: "code" };
+
+// Three things on one canvas want three cards, not one card wearing three
+// colours. The node type is what the canvas renders from, so it is the type
+// that changes: an agent is an agent node and gets the AI badge and the ports
+// an agent has; a server is an HTTP endpoint, which over http is exactly what
+// it is; a tool is a function, which is what a tool call is.
+const CARD: Record<Kind, string> = {
+  agent: "AGENT",
+  server: "HTTP",
+  tool: "FUNCTION",
+};
+
+// A tool is a leaf: something a server offers, reached through that server.
+// It has an input and no output, and nothing links to it by hand.
+const TOOL_PORTS: { inputs: Port[]; configs: Port[]; outputs: Port[] } = {
+  inputs: [{ id: "in", type: "INPUT", label: "Offered by" }],
+  configs: [],
+  outputs: [],
+};
 
 @customElement("agent-canvas")
 export class AgentCanvas extends LitElement {
@@ -149,34 +251,35 @@ export class AgentCanvas extends LitElement {
     :host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     header { display: flex; align-items: center; gap: 10px; padding: 10px 18px;
              border-bottom: 1px solid var(--border); background: var(--bg); }
-    .title { font: 600 17px var(--serif); flex: 1; }
+    .title { font: 600 17px var(--display); flex: 1; }
     .note { color: var(--muted); font-size: 12.5px; }
     .body { flex: 1; display: flex; min-height: 0; }
     workflow-canvas { flex: 1; min-width: 0; }
     aside { width: 300px; flex: none; border-left: 1px solid var(--border);
             background: var(--bg-card); overflow-y: auto; padding: 16px; }
-    aside h3 { margin: 0 0 4px; font: 600 15px var(--serif); }
+    aside h3 { margin: 0 0 4px; font: 600 15px var(--display); }
     aside .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 14px; }
-    label { display: block; font-size: 12.5px; color: var(--muted); margin: 10px 0 4px; }
-    input, select, textarea { width: 100%; box-sizing: border-box; font: inherit;
-      background: var(--bg); color: inherit; border: 1px solid var(--border);
-      border-radius: 8px; padding: 6px 8px; }
-    textarea { min-height: 60px; resize: vertical; }
-    .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-    .row input[type=checkbox] { width: auto; }
-    .actions { display: flex; gap: 8px; margin-top: 16px; }
-    button { font: inherit; border-radius: 8px; padding: 6px 12px; cursor: pointer;
-             border: 1px solid var(--border); background: var(--bg); color: inherit; }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    button:disabled { opacity: 0.55; cursor: default; }
+    /* The fields are LumenUI components and bring their own look; what is
+       left here is only the spacing between them. */
+    nr-input, nr-select, nr-textarea { display: block; margin-top: 12px; }
+    /* nr-select sizes itself to its content, which leaves a form of full-width
+       inputs with two short pills in the middle of it. The host rule is the
+       component's default and an outer rule may say otherwise. */
+    nr-select { width: 100%; }
+    [slot=label] { font-size: 12.5px; color: var(--muted); }
+    .row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .actions { display: flex; gap: 8px; margin-top: 18px; }
     .problem { color: #B3261E; font-size: 12.5px; margin-top: 10px; }
     .saved { color: #157F4D; font-size: 12.5px; margin-top: 10px; }
+    .offers { color: #0F766E; font-size: 12.5px; margin-top: 10px; }
     .empty { color: var(--muted); font-size: 13px; }
-    header button { padding: 4px 11px; font-size: 13px; }
+    .claim { font-size: 13.5px; margin: 0 0 10px; }
+    header nr-button { font-size: 13px; }
   `;
 
   @state() private agents: AgentFull[] = [];
   @state() private servers: ServerRow[] = [];
+  @state() private tools: ServerTools[] = [];
   @state() private configs: ModelConfigRow[] = [];
   @state() private prompts: PromptRow[] = [];
   @state() private picked = "";
@@ -213,6 +316,12 @@ export class AgentCanvas extends LitElement {
     this.configs = configs;
     this.prompts = prompts;
     this.servers = servers;
+    // Asked of each server in parallel, and never fatal: a server that cannot
+    // be reached still belongs on the graph, saying why.
+    this.tools = await Promise.all(
+      servers.map((v) => serverTools(v.id).catch(() =>
+        ({ serverId: v.id, problem: "could not ask this server", tools: [] }))),
+    );
     this.links = [
       ...agents.flatMap((a) => a.subAgents.map((c) =>
         ({ parent: a.id, child: c.id, kind: "agent" as Kind }))),
@@ -223,7 +332,7 @@ export class AgentCanvas extends LitElement {
   }
 
   private workflow(): CanvasWorkflow {
-    const at = { ...tidyPositions(this.agents, this.servers), ...savedLayout() };
+    const at = { ...tidyPositions(this.agents, this.servers, this.tools), ...savedLayout() };
     const isSub = new Set(this.agents.flatMap((a) => a.subAgents.map((c) => c.id)));
     const look = (a: AgentFull) =>
       !a.enabled ? OFF : a.isDefault ? ENTRY : isSub.has(a.id) ? SUB : AGENT;
@@ -235,7 +344,7 @@ export class AgentCanvas extends LitElement {
         // The entry agent says so on the node. Colour alone asks the reader to
         // remember a legend; the word does not.
         name: a.isDefault ? `${a.agentName} · entry` : a.agentName,
-        type: "AGENT",
+        type: CARD.agent,
         position: at[nodeId("agent", a.id)] ?? { x: 120, y: 120 },
         // What the node shows without being opened: which model config and
         // prompt it runs on, and whether it is the one a new conversation
@@ -260,7 +369,7 @@ export class AgentCanvas extends LitElement {
       ...this.servers.map((v) => ({
         id: nodeId("server", v.id),
         name: v.serverName,
-        type: "TOOL",
+        type: CARD.server,
         position: at[nodeId("server", v.id)] ?? { x: 760, y: 120 },
         configuration: { serverId: v.id, transport: v.transport, endpoint: v.endpoint },
         ports: { ...SERVER_PORTS },
@@ -270,8 +379,21 @@ export class AgentCanvas extends LitElement {
           icon: SERVER.icon,
         },
         selected: nodeId("server", v.id) === this.picked,
-      }))],
-      edges: this.links.map((l) => ({
+      })),
+      // A tool per row the server listed. These are not stored anywhere — the
+      // server is asked each time the graph is drawn — so they appear and
+      // disappear with the server itself.
+      ...this.tools.flatMap((t) => t.tools.map((tool) => ({
+        id: nodeId("tool", `${t.serverId}/${tool.name}`),
+        name: tool.name,
+        type: CARD.tool,
+        position: at[nodeId("tool", `${t.serverId}/${tool.name}`)] ?? { x: 0, y: 0 },
+        configuration: { serverId: t.serverId, tool: tool.name },
+        ports: { ...TOOL_PORTS },
+        metadata: { description: tool.description, color: TOOL.color, icon: TOOL.icon },
+        selected: nodeId("tool", `${t.serverId}/${tool.name}`) === this.picked,
+      })))],
+      edges: [...this.links.map((l) => ({
         id: `${l.parent}->${l.kind}:${l.child}`,
         sourceNodeId: nodeId("agent", l.parent), sourcePortId: "out",
         targetNodeId: nodeId(l.kind, l.child), targetPortId: "in",
@@ -279,6 +401,15 @@ export class AgentCanvas extends LitElement {
         // the reader to infer from what it points at.
         label: l.kind === "agent" ? "delegates" : "uses",
       })),
+      // Server to tool. Not a stored relation and not editable: a server
+      // offers what it offers, and drawing it any other way would suggest the
+      // console could change it.
+      ...this.tools.flatMap((t) => t.tools.map((tool) => ({
+        id: `${t.serverId}=>${tool.name}`,
+        sourceNodeId: nodeId("server", t.serverId), sourcePortId: "out",
+        targetNodeId: nodeId("tool", `${t.serverId}/${tool.name}`), targetPortId: "in",
+        label: "offers",
+      })))],
     };
   }
 
@@ -290,6 +421,12 @@ export class AgentCanvas extends LitElement {
       return;
     }
     const { kind, id } = partsOf(node);
+    if (kind === "tool") {
+      this.picked = node;
+      this.draft = null;
+      this.serverDraft = null;
+      return;
+    }
     if (kind === "server") {
       const found = this.servers.find((v) => v.id === id) ?? null;
       this.picked = found ? node : "";
@@ -301,6 +438,22 @@ export class AgentCanvas extends LitElement {
     this.picked = found ? node : "";
     this.draft = found ? { ...found } : null;
     this.serverDraft = null;
+  }
+
+  // Double-clicking a node opens it in the inspector. The canvas's own
+  // configuration panel is turned off through `disable-node-config`, so this
+  // only has to say which node was asked for.
+  //
+  // Two editors for one row is the thing being avoided, and the panel is the
+  // one to lose: it edits the workflow object this component was handed, and
+  // the graph is rebuilt from the API on every load, so anything typed there
+  // goes quietly. It also describes an agent as owning a provider and an API
+  // key with LLM, Prompt, Memory and Tools to connect — the workflow
+  // builder's model, not this one, where an agent names a model config and a
+  // prompt by id. And its name field shows the node's label, which for the
+  // entry agent carries a "· entry" suffix that is not part of the name.
+  private configure(e: CustomEvent) {
+    this.pick(e.detail?.node?.id ?? e.detail?.nodeId ?? "");
   }
 
   // A node dragged to a new place. Remembered locally; nothing is sent.
@@ -317,14 +470,14 @@ export class AgentCanvas extends LitElement {
     const wf = e.detail?.workflow as CanvasWorkflow | undefined;
     if (!wf || this.busy) return;
 
-    // Only an agent has an output port, so a source is always an agent; the
-    // target decides which route the link belongs to.
+    // Only relations the console owns. A server-to-tool edge is the server
+    // stating what it offers — there is no route that could store a change to
+    // it, and treating one as a link would send a tool's id to linkServer.
     const now: Link[] = wf.edges
       .filter((x) => x.sourceNodeId !== x.targetNodeId)
-      .map((x) => {
-        const target = partsOf(x.targetNodeId);
-        return { parent: partsOf(x.sourceNodeId).id, child: target.id, kind: target.kind };
-      });
+      .map((x) => ({ source: partsOf(x.sourceNodeId), target: partsOf(x.targetNodeId) }))
+      .filter((x) => x.source.kind === "agent" && x.target.kind !== "tool")
+      .map((x) => ({ parent: x.source.id, child: x.target.id, kind: x.target.kind }));
     const key = (l: Link) => `${l.parent}->${l.kind}:${l.child}`;
     const had = new Set(this.links.map(key));
     const has = new Set(now.map(key));
@@ -424,57 +577,98 @@ export class AgentCanvas extends LitElement {
       <h3>${v.serverName}</h3>
       <div class="sub">MCP server · ${v.id}</div>
 
-      <label for="s-name">Name</label>
-      <input id="s-name" name="serverName" .value=${v.serverName}
-        @input=${(e: Event) => this.editServer("serverName", (e.target as HTMLInputElement).value)} />
+      <nr-input id="s-name" .value=${v.serverName} placeholder="What this server is called"
+        @nr-input=${(e: Event) => this.editServer("serverName", valueOf(e))}>
+        <span slot="label">Name</span>
+      </nr-input>
 
-      <label for="s-endpoint">Endpoint</label>
-      <input id="s-endpoint" name="endpoint" .value=${v.endpoint}
-        @input=${(e: Event) => this.editServer("endpoint", (e.target as HTMLInputElement).value)} />
+      <nr-input id="s-endpoint" .value=${v.endpoint} placeholder="https://…"
+        @nr-input=${(e: Event) => this.editServer("endpoint", valueOf(e))}>
+        <span slot="label">Endpoint</span>
+      </nr-input>
 
-      <label for="s-transport">Transport</label>
-      <select id="s-transport" name="transport" .value=${v.transport}
-        @change=${(e: Event) => this.editServer("transport", (e.target as HTMLSelectElement).value)}>
-        <option value="http" ?selected=${v.transport === "http"}>http</option>
-        ${v.transport !== "http" ? html`
-          <!-- A row stored before the rule was consistent. Shown as it is,
-               rather than silently redrawn as http by a select with no option
-               to match it. -->
-          <option value=${v.transport} selected>${v.transport}</option>` : ""}
-      </select>
+      <nr-select id="s-transport" .value=${v.transport}
+        .options=${transportOptions(v.transport)}
+        @nr-change=${(e: Event) => this.editServer("transport", valueOf(e))}>
+        <span slot="label">Transport</span>
+      </nr-select>
 
-      <label for="s-authkind">Authentication</label>
-      <select id="s-authkind" name="authKind" .value=${v.authKind}
-        @change=${(e: Event) => this.editServer("authKind", (e.target as HTMLSelectElement).value)}>
-        <option value="none" ?selected=${v.authKind === "none"}>none</option>
-        <option value="bearer" ?selected=${v.authKind === "bearer"}>bearer</option>
-        <option value="header" ?selected=${v.authKind === "header"}>custom header</option>
-      </select>
+      <nr-select id="s-authkind" .value=${v.authKind}
+        .options=${[
+          { value: "none", label: "none" },
+          { value: "bearer", label: "bearer" },
+          { value: "header", label: "custom header" },
+        ]}
+        @nr-change=${(e: Event) => this.editServer("authKind", valueOf(e))}>
+        <span slot="label">Authentication</span>
+      </nr-select>
 
       ${v.authKind === "header" ? html`
-        <label for="s-authheader">Header name</label>
-        <input id="s-authheader" name="authHeader" .value=${v.authHeader}
-          @input=${(e: Event) => this.editServer("authHeader", (e.target as HTMLInputElement).value)} />` : ""}
+        <nr-input id="s-authheader" .value=${v.authHeader} placeholder="X-Api-Key"
+          @nr-input=${(e: Event) => this.editServer("authHeader", valueOf(e))}>
+          <span slot="label">Header name</span>
+        </nr-input>` : ""}
 
       <div class="row">
-        <input id="s-enabled" name="enabled" type="checkbox" .checked=${v.enabled}
-          @change=${(e: Event) => this.editServer("enabled", (e.target as HTMLInputElement).checked)} />
-        <label for="s-enabled" style="margin:0">Enabled</label>
+        <nr-checkbox id="s-enabled" ?checked=${v.enabled}
+          @nr-change=${(e: CustomEvent) => this.editServer("enabled", e.detail.checked)}>Enabled</nr-checkbox>
       </div>
+
+      ${this.toolNote(v)}
 
       <p class="empty">The token itself is set in Settings and never read back,
       so it is not shown here and saving cannot clear it.</p>
 
       <div class="actions">
-        <button class="primary" ?disabled=${this.busy} @click=${() => this.saveServer()}>Save</button>
-        <button ?disabled=${this.busy} @click=${() => this.pick(nodeId("server", v.id))}>Revert</button>
+        <nr-button id="s-save" type="primary" ?disabled=${this.busy}
+          @click=${() => this.saveServer()}>Save</nr-button>
+        <nr-button id="s-revert" ?disabled=${this.busy}
+          @click=${() => this.pick(nodeId("server", v.id))}>Revert</nr-button>
       </div>
       ${this.problem !== "" ? html`<div class="problem" role="alert">${this.problem}</div>` : ""}
       ${this.saved !== "" ? html`<div class="saved">${this.saved}</div>` : ""}
     `;
   }
 
+  // A tool is not ours to edit: the server declares it. Shown, not offered as
+  // a form, because a form that cannot save anything is a lie about what the
+  // console can do.
+  private toolView(node: string) {
+    const { id } = partsOf(node);
+    const cut = id.indexOf("/");
+    const serverId = id.slice(0, cut);
+    const name = id.slice(cut + 1);
+    const server = this.servers.find((v) => v.id === serverId);
+    const tool = this.tools.find((t) => t.serverId === serverId)?.tools
+      .find((x) => x.name === name);
+    return html`
+      <h3>${name}</h3>
+      <div class="sub">tool · offered by ${server?.serverName ?? serverId}</div>
+      <p class="claim">${tool?.description !== "" ? tool?.description : "This tool gives no description."}</p>
+      <p class="empty">What a server offers is the server's to say. It is read
+      each time the graph is drawn and never stored here, so it cannot be
+      edited from the console.</p>
+    `;
+  }
+
+  // What this server answered when it was asked for its tools. A count when it
+  // answered, the reason when it did not — the two must not look the same.
+  private toolNote(v: ServerRow) {
+    const listed = this.tools.find((t) => t.serverId === v.id);
+    if (!listed) return "";
+    if (listed.problem !== "") {
+      return html`<div class="problem">no tools drawn: ${listed.problem}</div>`;
+    }
+    // Its own class, not `.saved`: that one means "your edit was stored", and
+    // sharing it put two different meanings under one name — which a test
+    // caught as two elements where it expected one.
+    return html`<div class="offers">${listed.tools.length} tools offered</div>`;
+  }
+
   private inspector() {
+    if (this.picked !== "" && partsOf(this.picked).kind === "tool") {
+      return this.toolView(this.picked);
+    }
     if (this.serverDraft) return this.serverForm(this.serverDraft);
     const d = this.draft;
     if (!d) {
@@ -487,42 +681,43 @@ export class AgentCanvas extends LitElement {
       <h3>${d.agentName}</h3>
       <div class="sub">${d.id}</div>
 
-      <label for="c-name">Name</label>
-      <input id="c-name" name="agentName" .value=${d.agentName}
-        @input=${(e: Event) => this.edit("agentName", (e.target as HTMLInputElement).value)} />
+      <nr-input id="c-name" .value=${d.agentName} placeholder="What this agent is called"
+        @nr-input=${(e: Event) => this.edit("agentName", valueOf(e))}>
+        <span slot="label">Name</span>
+      </nr-input>
 
-      <label for="c-desc">Description</label>
-      <textarea id="c-desc" name="description" .value=${d.description}
-        @input=${(e: Event) => this.edit("description", (e.target as HTMLTextAreaElement).value)}></textarea>
+      <nr-textarea id="c-desc" .value=${d.description} rows="3"
+        placeholder="What it is for"
+        @nr-input=${(e: Event) => this.edit("description", valueOf(e))}>
+        <span slot="label">Description</span>
+      </nr-textarea>
 
-      <label for="c-config">Model config</label>
-      <select id="c-config" name="modelConfigId" .value=${d.modelConfigId}
-        @change=${(e: Event) => this.edit("modelConfigId", (e.target as HTMLSelectElement).value)}>
-        ${this.configs.map((c) => html`
-          <option value=${c.id} ?selected=${c.id === d.modelConfigId}>${c.id} · ${c.modelId}</option>`)}
-      </select>
+      <nr-select id="c-config" .value=${d.modelConfigId}
+        .options=${this.configs.map((c) => ({ value: c.id, label: `${c.id} · ${c.modelId}` }))}
+        @nr-change=${(e: Event) => this.edit("modelConfigId", valueOf(e))}>
+        <span slot="label">Model config</span>
+      </nr-select>
 
-      <label for="c-prompt">Prompt</label>
-      <select id="c-prompt" name="promptId" .value=${d.promptId}
-        @change=${(e: Event) => this.edit("promptId", (e.target as HTMLSelectElement).value)}>
-        ${this.prompts.map((p) => html`
-          <option value=${p.id} ?selected=${p.id === d.promptId}>${p.promptName} v${p.version}</option>`)}
-      </select>
+      <nr-select id="c-prompt" .value=${d.promptId}
+        .options=${this.prompts.map((x) => ({ value: x.id, label: `${x.promptName} v${x.version}` }))}
+        @nr-change=${(e: Event) => this.edit("promptId", valueOf(e))}>
+        <span slot="label">Prompt</span>
+      </nr-select>
 
       <div class="row">
-        <input id="c-enabled" name="enabled" type="checkbox" .checked=${d.enabled}
-          @change=${(e: Event) => this.edit("enabled", (e.target as HTMLInputElement).checked)} />
-        <label for="c-enabled" style="margin:0">Enabled</label>
+        <nr-checkbox id="c-enabled" ?checked=${d.enabled}
+          @nr-change=${(e: CustomEvent) => this.edit("enabled", e.detail.checked)}>Enabled</nr-checkbox>
       </div>
       <div class="row">
-        <input id="c-default" name="isDefault" type="checkbox" .checked=${d.isDefault}
-          @change=${(e: Event) => this.edit("isDefault", (e.target as HTMLInputElement).checked)} />
-        <label for="c-default" style="margin:0">Default agent</label>
+        <nr-checkbox id="c-default" ?checked=${d.isDefault}
+          @nr-change=${(e: CustomEvent) => this.edit("isDefault", e.detail.checked)}>Entry agent</nr-checkbox>
       </div>
 
       <div class="actions">
-        <button class="primary" ?disabled=${this.busy} @click=${() => this.save()}>Save</button>
-        <button ?disabled=${this.busy} @click=${() => this.pick(nodeId("agent", d.id))}>Revert</button>
+        <nr-button id="c-save" type="primary" ?disabled=${this.busy}
+          @click=${() => this.save()}>Save</nr-button>
+        <nr-button id="c-revert" ?disabled=${this.busy}
+          @click=${() => this.pick(nodeId("agent", d.id))}>Revert</nr-button>
       </div>
       ${this.problem !== "" ? html`<div class="problem" role="alert">${this.problem}</div>` : ""}
       ${this.saved !== "" ? html`<div class="saved">${this.saved}</div>` : ""}
@@ -535,8 +730,9 @@ export class AgentCanvas extends LitElement {
         <span class="title">Agents</span>
         <span class="note">${this.agents.length} agents · ${this.servers.length} servers ·
           ${this.links.filter((l) => l.kind === "agent").length} delegations ·
-          ${this.links.filter((l) => l.kind === "server").length} tool links</span>
-        <button @click=${() => this.tidy()} title="Put every node back on the grid">Tidy</button>
+          ${this.links.filter((l) => l.kind === "server").length} tool links ·
+          ${this.tools.reduce((n, t) => n + t.tools.length, 0)} tools</span>
+        <nr-button id="tidy" size="small" @click=${() => this.tidy()}>Tidy</nr-button>
       </header>
       <div class="body">
         <workflow-canvas
@@ -544,10 +740,10 @@ export class AgentCanvas extends LitElement {
           ?showMinimap=${true}
           ?showToolbar=${true}
           ?showPalette=${false}
+          .disableNodeConfig=${true}
           @node-selected=${(e: CustomEvent) =>
             this.pick(e.detail?.nodeId ?? e.detail?.node?.id ?? "")}
-          @node-configured=${(e: CustomEvent) =>
-            this.pick(e.detail?.node?.id ?? e.detail?.nodeId ?? "")}
+          @node-configured=${(e: CustomEvent) => this.configure(e)}
           @node-moved=${(e: CustomEvent) => this.moved(e)}
           @workflow-changed=${(e: CustomEvent) => this.changed(e)}
         ></workflow-canvas>

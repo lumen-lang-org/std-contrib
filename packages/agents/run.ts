@@ -24,8 +24,9 @@ import { Db } from "../plume/driver.ts";
 import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
-import { Completion, ToolSpec, ToolCall, Turn, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema } from "./tools.ts";
+import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool } from "./tools.ts";
+import { artifactBriefing } from "./artifacts.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -52,6 +53,21 @@ const MAX_TOOL_STEPS: int = 8;
 // enter an agent already on its path, which stops A→B→A immediately rather
 // than three levels later.
 const MAX_DEPTH: int = 3;
+
+// One clock for every row a run writes.
+//
+// The tool dispatch below passed the literal string "now" for a workspace
+// write, so every file the model wrote carried four letters in `updated_at`.
+// Nothing failed: the column is text, the row stored, the listing rendered —
+// and every sort by recency put the model's own files in an order that meant
+// nothing, because "now" compares against a millisecond count as a word. The
+// API had already grown its own `stamp()` after six routes did the same thing;
+// this is the last call site, and the one a person never touches.
+//
+// Private to each file for now. A run and an API request writing timestamps
+// through two copies of one line is a shared helper waiting to be written, but
+// not one to introduce from inside a bug fix.
+function stamp(): string { return `${Date.now()}`; }
 
 // model_configs declares a hasOne("model") relation, so its document carries
 // the model nested. Named here because a record type must declare every key
@@ -246,6 +262,15 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       specs.push(toolSpec(ws[w].name, ws[w].description, ws[w].schema));
       w = w + 1;
     }
+    // The conversation's artifacts, on the same condition and for the same
+    // reason: they are addressed within a thread, and a bare run has none to
+    // write to. Already ToolSpecs, so nothing to re-wrap.
+    let arts = artifactTools();
+    let a: int = 0;
+    while (a < arts.length) {
+      specs.push(arts[a]);
+      a = a + 1;
+    }
   }
 
   // Mounting's problems, plus delegation's, in one list. Copied rather than
@@ -368,6 +393,17 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let calledTools: string[] = [];
   let calledAgents: string[] = [];
   let answer = "";
+  // The prompt the model actually sees: the agent's own, plus what this
+  // conversation has already produced. The briefing is references only — the
+  // model asks for a body with read_artifact when it wants one — and it is
+  // what lets a revision land on the existing path instead of forking a new
+  // file: the model can only choose a file it has been shown exists.
+  let system = prompt.body;
+  if (threadId != "") {
+    let briefing = artifactBriefing(db, threadId);
+    if (briefing != "") { system = system + "\n\n" + briefing; }
+  }
+
   let last: Completion = { ok: false, text: "", status: 0, error: "", inputTokens: 0, outputTokens: 0, counted: false };
   // Summed across rounds and across children: what the whole run cost, which
   // is the only figure a budget can act on.
@@ -378,7 +414,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   while (rounds < MAX_TOOL_STEPS) {
     let modelSpan = startSpan(model.apiName, TRACE_GENERATION, agentSpan.id);
-    last = completeTurns(model, configRow, prompt.body, context, specs, key);
+    last = completeTurns(model, configRow, system, context, specs, key);
     rounds = rounds + 1;
     if (!last.ok) {
       // Token counts are not read back: a failed call has none, and inventing
@@ -439,12 +475,29 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // The workspace first: its three names are fixed and a thread that has
       // one wants them answered here, not sent to an MCP server that happens
       // to share a name.
+      //
+      // One timestamp for the whole call, taken once so a file write and an
+      // artifact write made in the same call carry the same instant rather
+      // than two readings a query apart.
+      let now = stamp();
       let fileAnswer = callWorkspaceTool(db, threadId, calls[i].name,
-        jsonText(calls[i].args, "name"), jsonText(calls[i].args, "content"), "now");
+        jsonText(calls[i].args, "name"), jsonText(calls[i].args, "content"), now);
+      // Artifacts beside the workspace and ahead of MCP, for the same reason.
+      // Both dispatchers are asked about every call and each answers only its
+      // own fixed names, so asking both costs two string comparisons and
+      // cannot write twice: no name belongs to both.
+      let artifactAnswer = callArtifactTool(db, {
+        threadId: threadId, name: calls[i].name, args: calls[i].args, now: now,
+      });
       if (fileAnswer.handled) {
         resultOk = fileAnswer.ok;
         resultText = fileAnswer.text;
         from = "workspace";
+        calledTools.push(calls[i].name);
+      } else if (artifactAnswer.handled) {
+        resultOk = artifactAnswer.ok;
+        resultText = artifactAnswer.text;
+        from = "artifacts";
         calledTools.push(calls[i].name);
       } else if (child.id != "") {
         let question = jsonText(calls[i].args, "question");

@@ -108,6 +108,50 @@ export type IndexJob = {
 
 export type WorkspaceFile = { name: string; mime: string; origin: string };
 
+// What a conversation produced. A workspace file is state the agent rewrites
+// as it works; an artifact is a result, addressed by a path, with every
+// version it ever had still readable.
+//
+// Addressed by `slot`, not by path: the slot is the number a tab keeps while a
+// title is edited, and a path is a second thing to escape into a URL.
+export type ArtifactListing = {
+  slot: number;
+  path: string;
+  title: string;
+  // One of html, svg, markdown, json, code, text — derived from the extension
+  // by the server, never sent by a caller.
+  kind: string;
+  mime: string;
+  // The newest version number. Versions are append-only and numbered from 1,
+  // so this is also how many there are — there is no route that lists them.
+  version: number;
+  // The unguessable half of a preview URL. Survives saving, so a link handed
+  // to a reader keeps working; `rotateArtifact` is the only way to retire one.
+  previewToken: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// One version, body included. JSON on this origin whatever the artifact's own
+// type is — rendering it as itself is the preview host's job.
+export type ArtifactVersion = {
+  slot: number;
+  path: string;
+  version: number;
+  bytes: number;
+  // "uploaded" (a person, through this console) or "generated" (the model's
+  // tool). The only thing in a version row that answers "who wrote this".
+  origin: string;
+  turnSeq: number;
+  note: string;
+  createdAt: string;
+  content: string;
+};
+
+export type ArtifactWritten = {
+  slot: number; path: string; version: number; previewToken: string;
+};
+
 export type SayReply = {
   runId: string;
   ok: boolean;
@@ -221,6 +265,87 @@ export const uploadFile = (threadId: string, name: string, content: string) =>
     body: JSON.stringify({ name, content }),
   });
 
+// --- artifacts ------------------------------------------------------------------------
+
+export const listArtifacts = (threadId: string) =>
+  call<ArtifactListing[]>(`/threads/${encodeURIComponent(threadId)}/artifacts`);
+
+// The server files this as origin "uploaded" whatever we say: this route is a
+// person with a console, and the model's writes arrive through its own tool.
+// Writing a path that already exists appends a version, it does not make a
+// second artifact — which is why the reply carries the number, so a caller
+// knows which of two concurrent saves it won.
+export const createArtifact = (
+  threadId: string,
+  a: { path: string; title: string; content: string; note: string },
+) =>
+  call<ArtifactWritten>(`/threads/${encodeURIComponent(threadId)}/artifacts`, {
+    method: "POST",
+    body: JSON.stringify({ path: a.path, title: a.title, content: a.content, note: a.note }),
+  });
+
+// A specific number, never "the latest". The listing already says which number
+// that is, and asking for it by name would let the body a panel renders and
+// the version it labels come from two different writes.
+export const readArtifactVersion = (threadId: string, slot: number, version: number) =>
+  call<ArtifactVersion>(
+    `/threads/${encodeURIComponent(threadId)}/artifacts/${slot}/versions/${version}`);
+
+// Mint a new preview token, so every link shared so far stops resolving. The
+// token deliberately survives saving, which leaves this as the only way to
+// take one back after it reaches somebody it was not meant for.
+export const rotateArtifact = (threadId: string, slot: number) =>
+  call<{ slot: number; previewToken: string }>(
+    `/threads/${encodeURIComponent(threadId)}/artifacts/${slot}/rotate`, { method: "POST" });
+
+// The artifact and every version it ever had. There is no undo.
+export const deleteArtifact = (threadId: string, slot: number) =>
+  call<unknown>(`/threads/${encodeURIComponent(threadId)}/artifacts/${slot}`,
+    { method: "DELETE" });
+
+// Where a preview is served from.
+//
+// Same origin by default, which means through the /api proxy — and on this
+// origin the server's Host check does not match AGENTS_PREVIEW_HOST, so the
+// body comes back text/plain and inert. That is the safe default and not an
+// oversight: a deployment that has not been told where artifacts are isolated
+// does not have anywhere to isolate them.
+//
+// A deployment that has one says so in index.html, and the same links start
+// rendering as themselves — on a host that holds no session worth stealing.
+// It is a meta tag rather than a build-time constant because the answer
+// belongs to the deployment, and the built bundle is the same everywhere.
+function previewOrigin(): string {
+  const tag = document.querySelector('meta[name="agents-preview-origin"]');
+  return (tag?.getAttribute("content") ?? "").replace(/\/+$/, "");
+}
+
+// A link to one version of an artifact.
+//
+// Always pinned to a version, never the bare token: the bare one follows the
+// artifact, so a panel showing "version 2" beside a frame that had silently
+// moved to 3 would be telling the reader something untrue. Pinned bodies are
+// also immutable, which is what lets the browser cache them.
+//
+// The version rides in the query string rather than in the path because the
+// path under the token now belongs to the artifact's siblings — the other
+// artifacts of the same thread, addressed by their own path. `/preview/:token/
+// v/3` could not be told apart from a sibling whose path happens to start
+// `/v/`, and resolving that ambiguity needs a best-match router this one
+// deliberately is not.
+//
+// The trailing slash is load-bearing for the same reason, and is why this
+// builder emits it rather than leaving it to whoever writes a link. A document
+// served at `/preview/TOKEN` resolves its own `css/main.css` against
+// `/preview/` — a token named "css", i.e. nobody's artifact. Served at
+// `/preview/TOKEN/` the same href resolves to `/preview/TOKEN/css/main.css`,
+// which is the sibling route and the artifact the author meant.
+export function previewUrl(previewToken: string, version: number): string {
+  const origin = previewOrigin();
+  const root = origin === "" ? BASE : origin;
+  return `${root}/preview/${encodeURIComponent(previewToken)}/?v=${version}`;
+}
+
 // --- configuration --------------------------------------------------------------------
 
 export const listModels = () => call<ModelRow[]>("/models");
@@ -256,6 +381,17 @@ export const createPrompt = (promptName: string, body: string) =>
   });
 
 export const listServers = () => call<ServerRow[]>("/servers");
+
+// What a server offers, asked of the server itself — so it can fail, and the
+// reason matters. A server that is unreachable and one that genuinely has no
+// tools look identical on a graph and mean opposite things.
+export type ServerTools = {
+  serverId: string;
+  problem: string;
+  tools: { name: string; description: string }[];
+};
+export const serverTools = (id: string) =>
+  call<ServerTools>(`/servers/${encodeURIComponent(id)}/tools`);
 export const createServer = (row: ServerRow) =>
   call<ServerRow>("/servers", { method: "POST", body: JSON.stringify(row) });
 

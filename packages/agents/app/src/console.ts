@@ -8,16 +8,12 @@ import { customElement, state } from "lit/decorators.js";
 import "./ui.js";
 import "./sidebar.js";
 import "./workspace-panel.js";
+import "./artifact-panel.js";
 import "./settings.js";
 import "./knowledge.js";
 import "./canvas.js";
-import {
-  AgentRow, ThreadListing, listAgents, listThreads, openThread, say, transcript,
-} from "./api.js";
-
-type UiMessage = {
-  id: string; sender: "user" | "bot"; text: string; timestamp: string; error?: boolean;
-};
+import { AgentRow, ThreadListing, listAgents, listThreads } from "./api.js";
+import { ChatSession } from "./chat-session.js";
 
 @customElement("agent-console")
 export class AgentConsole extends LitElement {
@@ -27,7 +23,7 @@ export class AgentConsole extends LitElement {
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     header { display: flex; align-items: center; gap: 10px; padding: 10px 18px;
              border-bottom: 1px solid var(--border); background: var(--bg); }
-    .title { font: 600 17px var(--serif); overflow: hidden; text-overflow: ellipsis;
+    .title { font: 600 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; flex: 1; }
     .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px;
             border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px;
@@ -38,6 +34,8 @@ export class AgentConsole extends LitElement {
     .icon { background: none; border: 1px solid var(--border); color: var(--muted);
             border-radius: 8px; padding: 4px 10px; cursor: pointer; font: inherit; }
     .icon:hover { border-color: var(--accent); color: var(--fg); }
+    .icon[aria-pressed="true"] { border-color: var(--accent); color: var(--fg);
+                                 background: var(--bg-sunken); }
     main { flex: 1; min-height: 0; }
     nr-chatbot {
       height: 100%;
@@ -58,36 +56,53 @@ export class AgentConsole extends LitElement {
   @state() private agentId = "";
   @state() private threads: ThreadListing[] = [];
   @state() private threadId = "";
-  @state() private messages: UiMessage[] = [];
+  // The transcript lives in the session, which is what nr-chatbot reads. Only
+  // the typing flag is mirrored here, because the header and the composer's
+  // placeholder are drawn on this side.
   @state() private busy = false;
-  @state() private panel = false;
+
+  // One session for the pane. It is the controller nr-chatbot was missing:
+  // without one, Enter did nothing at all.
+  private session = new ChatSession({
+    agentId: () => this.agentId,
+    onThreadOpened: (id) => { this.threadId = id; },
+    onTurnDone: () => { void this.refreshThreads(); },
+  });
+  // Which rail is open, if either. One at a time and not two booleans: both
+  // are 320px against a chat pane that is already the narrowest thing here,
+  // and the files a conversation works from and the results it produced are
+  // read one after the other, not side by side.
+  @state() private rail: "" | "workspace" | "artifacts" = "";
   @state() private settings = false;
   @state() private view: "chat" | "knowledge" | "canvas" = "chat";
 
   async connectedCallback() {
     super.connectedCallback();
+    this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentRow[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled);
     if (this.agents.length > 0) this.agentId = this.agents[0].id;
   }
 
-  private push(m: Omit<UiMessage, "timestamp">) {
-    this.messages = [...this.messages, { ...m, timestamp: new Date().toISOString() }];
-  }
-
   private async open(id: string) {
     this.threadId = id;
     const found = this.threads.find((t) => t.id === id);
     if (found) this.agentId = found.agentId;
-    const turns = await transcript(id);
-    this.messages = turns.map((t, i) => ({
-      id: `t${i}`, sender: t.role === "user" ? "user" : "bot",
-      text: t.text, timestamp: new Date().toISOString(),
-    }));
+    await this.session.open(id);
   }
 
-  private fresh() { this.threadId = ""; this.messages = []; }
+  private fresh() { this.threadId = ""; this.session.fresh(); }
+
+  // Clicking the rail that is already open closes it, which is what a pressed
+  // toggle should do.
+  private show(which: "workspace" | "artifacts") {
+    this.rail = this.rail === which ? "" : which;
+  }
+
+  private async refreshThreads() {
+    this.threads = await listThreads().catch(() => this.threads);
+  }
 
   private async reloadAgents() {
     const listed = await listAgents().catch(() => this.agents);
@@ -96,28 +111,6 @@ export class AgentConsole extends LitElement {
     if (!this.agents.some((a) => a.id === this.agentId)) {
       this.agentId = this.agents.length > 0 ? this.agents[0].id : "";
     }
-  }
-
-  private async send(text: string) {
-    if (this.busy || text.trim() === "") return;
-    this.busy = true;
-    try {
-      // Opened lazily on the first message — an empty conversation nobody
-      // typed into is not worth a row.
-      if (this.threadId === "") this.threadId = (await openThread(this.agentId)).id;
-      this.push({ id: `u${this.messages.length}`, sender: "user", text });
-      const reply = await say(this.threadId, text);
-      this.push({
-        id: reply.runId, sender: "bot",
-        text: reply.ok ? reply.text : reply.error, error: !reply.ok,
-      });
-      this.threads = await listThreads();
-    } catch (e) {
-      this.push({
-        id: `e${this.messages.length}`, sender: "bot",
-        text: e instanceof Error ? e.message : String(e), error: true,
-      });
-    } finally { this.busy = false; }
   }
 
   private threadTitle(): string {
@@ -153,21 +146,30 @@ export class AgentConsole extends LitElement {
                   <option value=${a.id} ?selected=${a.id === this.agentId}>${a.agentName}</option>`)}
               </select>` : this.agentName()}
           </span>
-          <button class="icon" title="Workspace" @click=${() => { this.panel = !this.panel; }}>🗂</button>
+          <button class="icon" title="Workspace" aria-pressed=${this.rail === "workspace"}
+            @click=${() => this.show("workspace")}>🗂</button>
+          <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
+            @click=${() => this.show("artifacts")}>📄</button>
         </header>
         <main>
+          <!-- The session is the controller. Messages are not passed in: the
+               component reads them from the controller's state, and a second
+               binding would fight it. The message-sent event is not listened
+               for either - it is announced after a send, not a request to
+               perform one. -->
           <nr-chatbot
-            .messages=${this.messages}
+            .controller=${this.session}
             .isBotTyping=${this.busy}
             .isQueryRunning=${this.busy}
             placeholder="Ask ${this.agentName()}…"
-            @nr-chatbot-message-sent=${(e: CustomEvent) =>
-              this.send(e.detail?.metadata?.text ?? e.detail?.text ?? "")}
           ></nr-chatbot>
         </main>`}
       </div>
 
-      ${this.panel ? html`<workspace-panel .threadId=${this.threadId}></workspace-panel>` : ""}
+      ${this.rail === "workspace"
+        ? html`<workspace-panel .threadId=${this.threadId}></workspace-panel>` : ""}
+      ${this.rail === "artifacts"
+        ? html`<artifact-panel .threadId=${this.threadId}></artifact-panel>` : ""}
       ${this.settings ? html`<console-settings @close=${() => {
         this.settings = false;
         // The settings tab says a change takes effect on the next message with

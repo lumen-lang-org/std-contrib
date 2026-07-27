@@ -20,3 +20,9 @@
 import "@nuraly/lumenui/canvas/bundle";
 import "@nuraly/lumenui/dropdown/bundle";
 import "@nuraly/lumenui/modal/bundle";
+// Neither of these is in the canvas bundle, and neither collides with it.
+import "@nuraly/lumenui/checkbox/bundle";
+import "@nuraly/lumenui/textarea/bundle";
+// A surface to work on, as opposed to nr-modal's question to answer. Settings
+// is the former: it is a place you go, not a thing you confirm.
+import "@nuraly/lumenui/overlay/bundle";

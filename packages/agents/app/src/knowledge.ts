@@ -100,7 +100,7 @@ export class KnowledgePage extends LitElement {
     .row { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; align-items: center; }
     .note { color: var(--muted); }
     .err { color: #B3261E; }
-    .title { font: 600 17px var(--serif); margin: 0 0 12px; }
+    .title { font: 600 17px var(--display); margin: 0 0 12px; }
     .status { font-size: 12px; border-radius: 999px; padding: 2px 9px;
               border: 1px solid var(--border); color: var(--muted); }
     .status.indexed { color: #2F6F4E; border-color: #BFD8C9; }

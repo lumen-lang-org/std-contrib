@@ -20,13 +20,15 @@ test("the agents tab lists every agent with its model config and prompt", async 
   await openTab(page, "Agents");
   const rows = settings(page).locator("tr");
   const listed = (await page.request.get("/api/agents").then((r) => r.json())) as unknown[];
-  await expect(rows).toHaveCount(listed.length + 1); // + the header
-  await expect(rows.nth(1).locator("button")).toHaveText("Edit");
+  await expect(rows).toHaveCount(listed.length);
+  // Each row offers the one action that opens it. It is an icon now, so it is
+  // named by what it does rather than by the glyph it draws.
+  await expect(rows.first().locator("button.act")).toHaveAttribute("title", /^Edit /);
 });
 
 test("the edit form offers every editable field", async ({ page }) => {
   await openTab(page, "Agents");
-  await settings(page).locator("tr").nth(1).locator("button").click();
+  await settings(page).locator("tr").first().locator("button.act").click();
 
   const form = settings(page).locator(".row");
   await expect(form.filter({ hasText: "Name" }).locator("input")).toBeVisible();
@@ -38,24 +40,24 @@ test("the edit form offers every editable field", async ({ page }) => {
 
 test("cancel leaves the agent as it was", async ({ page }) => {
   await openTab(page, "Agents");
-  const before = await settings(page).locator("tr").nth(1).textContent();
+  const before = await settings(page).locator("tr").first().textContent();
 
-  await settings(page).locator("tr").nth(1).locator("button").click();
+  await settings(page).locator("tr").first().locator("button.act").click();
   await settings(page).locator(".row input").nth(1).fill("typed then abandoned");
   await settings(page).locator("button", { hasText: "Cancel" }).click();
 
-  await expect(settings(page).locator("tr").nth(1)).toHaveText(before ?? "");
+  await expect(settings(page).locator("tr").first()).toHaveText(before ?? "");
 });
 
 test("editing an agent saves and the row shows it", async ({ page }) => {
   await openTab(page, "Agents");
   const mark = `edited at ${Date.now()}`;
 
-  await settings(page).locator("tr").nth(1).locator("button").click();
+  await settings(page).locator("tr").first().locator("button.act").click();
   await settings(page).locator(".row input").nth(1).fill(mark);
   await settings(page).locator("button", { hasText: "Save" }).click();
 
-  await expect(settings(page).locator("tr").nth(1)).toContainText(mark);
+  await expect(settings(page).locator("tr").first()).toContainText(mark);
   // And it is in the database, not only on the screen.
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as { description: string }[];
   expect(agents.some((a) => a.description === mark)).toBe(true);

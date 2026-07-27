@@ -60,13 +60,38 @@ let table = routes([
 ]);
 ```
 
+## Catching the rest of a path
+
+A pattern's **last** segment may be `*name`, which stands for the whole rest of
+the path — one segment or more, joined with `/`, each segment decoded on its
+own.
+
+```ts
+let table = routes([
+  route("GET", "/files/:box/*path", "readFile"),
+]);
+// GET /files/b1/css/main.css  ->  box = b1, path = "css/main.css"
+```
+
+A catch-all is always the last resort: any route that matches without one wins,
+whatever order the table is written in. So `/files/:box/v/:n` still answers
+`/files/b1/v/3` even if the catch-all is written above it, and you never have to
+reason about placement to keep an exact route alive.
+
+The capture is reported, not vetted. `..` and an encoded `%2F` arrive as sent
+and read as ordinary path text, so a handler that resolves one against a
+filesystem or key space owns that check itself.
+
 ## What it refuses, at startup
 
 - **A shadowed route.** `/agents/:id` written before `/agents/new` makes the
   second unreachable — a `:param` matches any literal. Named at startup rather
   than found as a 404 later.
-- **A pattern that does not start with `/`**, one naming a parameter twice, or
-  a `:` with no name.
+- **A `*name` that is not the last segment.** Nothing after a catch-all could
+  ever be reached, so the pattern does not mean what it looks like.
+- **A pattern that does not start with `/`**, one naming a parameter twice —
+  `:` and `*` share one namespace, since a handler reads a parameter by name —
+  or a `:` or `*` with no name.
 - **An empty table**, and a route naming no handler.
 
 ## What it answers
