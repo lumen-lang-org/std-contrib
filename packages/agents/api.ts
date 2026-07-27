@@ -706,8 +706,11 @@ class ServerApi {
     let problem = createProblem(this.db, mcpServersMapping(), req.body);
     if (problem != "") { return badRequest(problem); }
     let body: McpServerRow = JSON.parse<McpServerRow>(req.body);
-    if (body.transport != "http" && body.transport != "stdio") {
-      return badRequest("transport must be \"http\" or \"stdio\", not \"" + body.transport + "\"");
+    // The same rule the update path applies. Accepting "stdio" here and
+    // refusing it there let a server be created that could never afterwards be
+    // saved — including the one the seed shipped.
+    if (body.transport != "http") {
+      return badRequest("this speaks http; \"" + body.transport + "\" needs a subprocess it cannot spawn");
     }
     let written = persist(this.db, mcpServersMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
@@ -1321,7 +1324,7 @@ function seed(db: Db): void {
   let p2: PromptRow = { id: "p2", promptName: "lead", version: 2, body: "You lead, briefly.", createdAt: "2026-07-25" };
   persist(db, promptsMapping(), JSON.stringify(p1));
   persist(db, promptsMapping(), JSON.stringify(p2));
-  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "stdio", endpoint: "mcp-fs", authKind: "none", authHeader: "", enabled: true };
+  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "http", endpoint: "http://127.0.0.1:8931/mcp", authKind: "none", authHeader: "", enabled: true };
   let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", authKind: "none", authHeader: "", enabled: true };
   persist(db, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(db, mcpServersMapping(), JSON.stringify(ghSrv));

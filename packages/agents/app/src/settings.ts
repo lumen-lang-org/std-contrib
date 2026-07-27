@@ -280,7 +280,8 @@ export class ConsoleSettings extends LitElement {
         <input name="id" placeholder="id" style="width:70px" />
         <input name="serverName" placeholder="Name" />
         <input name="endpoint" placeholder="http://…" style="flex:1" />
-        <select name="transport"><option>http</option><option>sse</option></select>
+        <!-- Only what the API accepts. It offered "sse", which every create refused. -->
+        <select name="transport"><option>http</option></select>
         <button @click=${(e: Event) => {
           const f = (e.target as HTMLElement).parentElement!;
           this.act(() => createServer({
