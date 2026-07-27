@@ -52,5 +52,13 @@ export default defineConfig({
           reuseExistingServer: true,
           timeout: 20_000,
         },
+        // A canned chat model, so extraction is tested against a real model
+        // round-trip instead of only unit-tested behind the API.
+        {
+          command: "node e2e/model-double.mjs",
+          url: "http://127.0.0.1:8932",
+          reuseExistingServer: true,
+          timeout: 20_000,
+        },
       ],
 });
