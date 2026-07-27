@@ -92,7 +92,6 @@ export class AgentConsole extends LitElement {
   // claim, not a save, and is not rendered. Neither source is the reply text:
   // mapping cards by text order was breakable by one forged line.
   @state() private turnRefs: TurnArtifactRef[] = [];
-  @state() private saidRefs: WireRef[] = [];
   // Which rail is open, if either. One at a time and not two booleans: both
   // are 320px against a chat pane that is already the narrowest thing here,
   // and the files a conversation works from and the results it produced are
@@ -103,10 +102,7 @@ export class AgentConsole extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    this.session.on("state:changed", () => {
-      this.busy = this.session.isTyping();
-      this.saidRefs = this.session.getState().messages.flatMap((m) => m.refs);
-    });
+    this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentRow[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled);
@@ -141,19 +137,22 @@ export class AgentConsole extends LitElement {
   // The cards to draw, in the order the conversation earned them. Each message
   // ref resolves against the join by slot@version; one key, one card, however
   // many captions mention it.
-  private cards(): { ref: WireRef; row: TurnArtifactRef }[] {
-    const byKey = new Map<string, TurnArtifactRef>();
-    for (const row of this.turnRefs) byKey.set(`${row.slot}@${row.version}`, row);
-    const seen = new Set<string>();
-    const out: { ref: WireRef; row: TurnArtifactRef }[] = [];
-    for (const ref of this.saidRefs) {
-      const key = `${ref.slot}@${ref.version}`;
-      const row = byKey.get(key);
-      if (row === undefined || seen.has(key)) continue;
-      seen.add(key);
-      out.push({ ref, row });
+  // The by-turn join is the whole source of cards. It is server-derived from
+  // artifact_versions.turn_seq, so nothing a user pastes and nothing a model
+  // claims can mint an entry — and it sees BOTH doors, which the message refs
+  // do not: a save made through write_artifact leaves no marker in the prose,
+  // and requiring one meant the primary door's files never carded. That is
+  // exactly how the live-Mistral run failed: the model did the right thing,
+  // used the tool, and the console showed nothing.
+  //
+  // One card per artifact, at its newest referenced version.
+  private cards(): TurnArtifactRef[] {
+    const newest = new Map<number, TurnArtifactRef>();
+    for (const row of this.turnRefs) {
+      const seen = newest.get(row.slot);
+      if (seen === undefined || row.version > seen.version) newest.set(row.slot, row);
     }
-    return out;
+    return [...newest.values()].sort((a, b) => a.slot - b.slot);
   }
 
   // A card opens the preview origin in a tab of its own — it does not open the
@@ -163,11 +162,11 @@ export class AgentConsole extends LitElement {
   // it. noreferrer because that token is the whole authorisation and a page
   // the artifact links to must not be handed it; noopener follows and also
   // keeps the new document from reaching back through window.opener.
-  private async openCard(ref: WireRef) {
+  private async openCard(card: TurnArtifactRef) {
     const listed = await listArtifacts(this.threadId).catch(() => [] as ArtifactListing[]);
-    const row = listed.find((a) => a.slot === ref.slot);
+    const row = listed.find((a) => a.slot === card.slot);
     if (row === undefined) return;
-    window.open(previewUrl(row.previewToken, ref.version), "_blank", "noopener,noreferrer");
+    window.open(previewUrl(row.previewToken, card.version), "_blank", "noopener,noreferrer");
   }
 
   private async reloadAgents() {
@@ -234,10 +233,10 @@ export class AgentConsole extends LitElement {
         ${cards.length === 0 ? "" : html`
         <div class="cards">
           ${cards.map((c) => html`
-            <button class="card" title=${c.row.path}
-              @click=${() => { void this.openCard(c.ref); }}>
-              <span class="card-name">${c.row.title === "" ? c.row.path : c.row.title}</span>
-              <span class="card-meta">${c.row.kind} · v${c.row.version}</span>
+            <button class="card" title=${c.path}
+              @click=${() => { void this.openCard(c); }}>
+              <span class="card-name">${c.title === "" ? c.path : c.title}</span>
+              <span class="card-meta">${c.kind} · v${c.version}</span>
             </button>`)}
         </div>`}`}
       </div>
