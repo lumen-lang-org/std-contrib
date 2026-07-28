@@ -7,8 +7,8 @@
 // EOF.
 //
 
-import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId } from "./client.ts";
-import { makeTool } from "../agent/tools.ts";
+import { mcpInitializeRequest, mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpIdMatches, mcpBuildArguments } from "./client.ts";
+import { makeTool, mergeToolsKeepingLocal } from "../agent/tools.ts";
 
 // a live stdio session: the child stays alive across calls so one spawned server
 // answers many requests. `nextId` is a single-entry Map used as a mutable
@@ -34,12 +34,18 @@ function stdioNextId(session: McpStdioSession): int {
 // request's answer. readLine keeps the trailing newline and returns "" only at
 // EOF, so a blank line ("\n") is skipped while "" ends the scan. the skip budget
 // guards against a server that never sends the id.
+//
+// The id is matched as text. A decimal scan of the raw line stops at an opening
+// quote and reads `"id":"7"` as 0, so a server using string ids — legal
+// JSON-RPC 2.0, and several MCP servers do it — had every one of its replies
+// discarded: tools/list came back empty, and the initialize drain in
+// mcpStdioSpawn read to EOF or blocked on a line that never came.
 function stdioReadReply(session: McpStdioSession, expectedId: int): string {
   let skips: int = 0;
   while (skips < 100000) {
     let line = session.child.readLine();
     if (line == "") { return ""; }
-    if (line.trim() != "" && mcpResponseId(line) == expectedId) { return line; }
+    if (line.trim() != "" && mcpIdMatches(line, expectedId)) { return line; }
     skips = skips + 1;
   }
   return "";
@@ -77,7 +83,9 @@ export function mcpStdioListTools(session: McpStdioSession): McpTool[] {
 }
 
 // `argumentsJson` is embedded verbatim under "arguments". an error reply comes
-// back ok:false with its message; parseMcpToolResult never throws.
+// back ok:false with its message; parseMcpToolResult never throws. an empty
+// reply means EOF — the child exited or closed its stdout — which is a failure,
+// not a tool that answered with nothing.
 export function mcpStdioCall(session: McpStdioSession, name: string, argumentsJson: string): McpResult {
   let id = stdioNextId(session);
   let reply = stdioExchange(session, mcpCallToolRequest(id, name, argumentsJson), id);
@@ -89,15 +97,16 @@ export function mcpStdioClose(session: McpStdioSession): void {
   session.child.close();
 }
 
-// run drives the captured session, wrapping its single string input as
-// {"input": <input>} — this package's one-string-arg convention. it never
-// throws: neither writeLine/readLine nor parseMcpToolResult throws, so trouble
-// comes back as text.
+// run drives the captured session, turning its single string input into the
+// arguments object the server's own inputSchema describes. it never throws:
+// neither writeLine/readLine nor parseMcpToolResult throws, so trouble comes
+// back as text.
 export function mcpStdioToolToLumen(session: McpStdioSession, entry: McpTool): Tool {
   let toolName = entry.name;
+  let toolSchema = entry.schema;
   return makeTool(entry.name, entry.description, entry.schema, (input: string) => {
-    let args = "{\"input\":" + JSON.stringify(input) + "}";
     let id = stdioNextId(session);
+    let args = mcpBuildArguments(toolSchema, input);
     let reply = stdioExchange(session, mcpCallToolRequest(id, toolName, args), id);
     let result = parseMcpToolResult(reply);
     if (result.ok) { return result.content; }
@@ -114,6 +123,12 @@ export function mcpStdioToolsToRegistry(session: McpStdioSession, tools: McpTool
     i = i + 1;
   }
   return out;
+}
+
+// merge a server's tools into a local registry without letting one displace a
+// local tool of the same name; see mcpRegisterTools.
+export function mcpStdioRegisterTools(local: Tool[], session: McpStdioSession, tools: McpTool[]): Tool[] {
+  return mergeToolsKeepingLocal(local, mcpStdioToolsToRegistry(session, tools));
 }
 
 // --- inline mock MCP servers, used by stdio.test.ts --------------------------
@@ -166,6 +181,68 @@ function mockNoisyServerScript(): string {
     + "    else:\n"
     + "        print('{\"jsonrpc\":\"2.0\",\"id\":' + str(rid) + ',\"result\":{}}')\n"
     + "    print(\"\")\n"
+    + "    sys.stdout.flush()\n";
+}
+
+// A server that behaves the way a real one does: it validates `arguments`
+// against the inputSchema it advertised and answers -32602 to anything else.
+// @modelcontextprotocol/server-everything, the server the README recommends,
+// rejects every call this way. `idQuote` is "'" for a server that answers with
+// a string id (legal JSON-RPC 2.0, and several MCP servers do it) and "" for
+// the integer form.
+function mockStrictServerScript(stringIds: bool): string {
+  let idExpr = "rid";
+  if (stringIds) { idExpr = "str(rid)"; }
+  return "import sys, json\n"
+    + "tools = [\n"
+    + "  {'name': 'echo', 'description': 'Echo a message.', 'inputSchema': {'type': 'object', 'properties': {'message': {'type': 'string'}}, 'required': ['message']}},\n"
+    + "  {'name': 'add', 'description': 'Add two numbers.', 'inputSchema': {'type': 'object', 'properties': {'a': {'type': 'number'}, 'b': {'type': 'number'}}, 'required': ['a', 'b']}},\n"
+    + "]\n"
+    + "schemas = dict((t['name'], t['inputSchema']) for t in tools)\n"
+    + "def bad(rid, why):\n"
+    + "    return {'jsonrpc': '2.0', 'id': " + idExpr + ", 'error': {'code': -32602, 'message': why}}\n"
+    + "def okText(rid, text):\n"
+    + "    return {'jsonrpc': '2.0', 'id': " + idExpr + ", 'result': {'content': [{'type': 'text', 'text': text}]}}\n"
+    + "for line in sys.stdin:\n"
+    + "    if line.strip() == '':\n"
+    + "        continue\n"
+    + "    try:\n"
+    + "        req = json.loads(line)\n"
+    + "    except Exception:\n"
+    + "        continue\n"
+    + "    rid = req.get('id', 0)\n"
+    + "    method = req.get('method', '')\n"
+    + "    if method == 'tools/list':\n"
+    + "        out = {'jsonrpc': '2.0', 'id': " + idExpr + ", 'result': {'tools': tools}}\n"
+    + "    elif method == 'tools/call':\n"
+    + "        params = req.get('params', {})\n"
+    + "        name = params.get('name', '')\n"
+    + "        args = params.get('arguments', {})\n"
+    + "        schema = schemas.get(name)\n"
+    + "        if schema is None:\n"
+    + "            out = bad(rid, 'Unknown tool: ' + str(name))\n"
+    + "        else:\n"
+    + "            props = schema['properties']\n"
+    + "            unknown = [k for k in args if k not in props]\n"
+    + "            missing = [k for k in schema['required'] if k not in args]\n"
+    + "            mistyped = []\n"
+    + "            for k in args:\n"
+    + "                if k not in props:\n"
+    + "                    continue\n"
+    + "                want = props[k].get('type')\n"
+    + "                if want == 'number' and not isinstance(args[k], (int, float)):\n"
+    + "                    mistyped.append(k)\n"
+    + "                if want == 'string' and not isinstance(args[k], str):\n"
+    + "                    mistyped.append(k)\n"
+    + "            if unknown or missing or mistyped:\n"
+    + "                out = bad(rid, 'Invalid arguments for ' + str(name) + ': unknown ' + str(unknown) + ' missing ' + str(missing) + ' mistyped ' + str(mistyped))\n"
+    + "            elif name == 'echo':\n"
+    + "                out = okText(rid, args['message'])\n"
+    + "            else:\n"
+    + "                out = okText(rid, str(args['a'] + args['b']))\n"
+    + "    else:\n"
+    + "        out = {'jsonrpc': '2.0', 'id': " + idExpr + ", 'result': {}}\n"
+    + "    print(json.dumps(out))\n"
     + "    sys.stdout.flush()\n";
 }
 

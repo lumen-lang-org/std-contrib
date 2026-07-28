@@ -170,12 +170,35 @@ function agStepOutput(result: ToolResult): string {
   return "error: " + result.error;
 }
 
+// the tag on the one line of an assistant message that lists its tool calls.
+export const AG_CALLS_MARKER = "[tool_calls]";
+
+// where that line starts, or -1 when this message has none.
+//
+// the marker counts only on the LAST line, which is where agCallSummary always
+// puts it: names and arguments are flattened first, so the list is always
+// exactly one line and always the final one. a marker anywhere else is the
+// model's own prose quoting the format. reading the first occurrence instead
+// let that prose forge calls — never dispatched, but presented back to the
+// model as things it had already done, and counted by the next request as
+// declared calls with no results answering them.
+function agCallsMarkerAt(content: string): int {
+  let start: int = 0;
+  let i: int = content.length - 1;
+  while (i >= 0) {
+    if (content.charAt(i) == "\n") { start = i + 1; break; }
+    i = i - 1;
+  }
+  if (!content.slice(start, content.length).startsWith(AG_CALLS_MARKER)) { return -1; }
+  return start;
+}
+
 // the assistant turn that asked for the tools must precede their results, or a
 // provider rejects the request. the content is provider-neutral text that an
 // adapter re-serializes into the provider's own `tool_calls` shape; it also
 // gives one assistant message per model turn, which is what `fakeModel` counts.
-function agCallSummary(text: string, calls: ToolCall[]): string {
-  let line = "[tool_calls]";
+export function agCallSummary(text: string, calls: ToolCall[]): string {
+  let line = AG_CALLS_MARKER;
   let i: int = 0;
   while (i < calls.length) {
     if (i > 0) { line = line + ","; }
@@ -406,14 +429,13 @@ export function agentHistoryToTurns(messages: Message[]): ChatTurn[] {
   let i: int = 0;
   while (i < messages.length) {
     let msg = messages[i];
-    let marker = "[tool_calls]";
-    let at = msg.content.indexOf(marker);
+    let at = agCallsMarkerAt(msg.content);
     if (msg.role == "assistant" && at >= 0) {
       let prose = msg.content.slice(0, at);
       if (prose.length > 0 && prose.charAt(prose.length - 1) == "\n") {
         prose = prose.slice(0, prose.length - 1);
       }
-      let seg = msg.content.slice(at + marker.length, msg.content.length);
+      let seg = msg.content.slice(at + AG_CALLS_MARKER.length, msg.content.length);
       let calls = agParseSummaryCalls(seg, idBase);
       out.push(assistantToolCallsTurn(prose, calls));
       let ids: string[] = [];
@@ -501,12 +523,13 @@ export function agentFakeToolCall(name: string, input: string): string {
 // there is no mutable state to hold a turn counter in, so the turn index is read
 // off the conversation by counting `[tool_calls]` summaries — the tag the loop
 // puts on every tool-call turn it emits. a resumed history's plain assistant
-// answers carry no such tag and so are not miscounted.
+// answers carry no such tag and so are not miscounted, and neither does prose
+// that merely quotes the marker: the same last-line rule the parser uses.
 export function fakeModel(responses: string[]): Model {
   return (messages: Message[]) => {
     let turn: int = 0;
     for (const msg of messages) {
-      if (msg.role == "assistant" && msg.content.indexOf("[tool_calls]") >= 0) { turn = turn + 1; }
+      if (msg.role == "assistant" && agCallsMarkerAt(msg.content) >= 0) { turn = turn + 1; }
     }
     if (turn >= responses.length) { return agentFakeAnswer("done"); }
     return responses[turn];

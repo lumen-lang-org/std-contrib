@@ -14,17 +14,35 @@
 // checkpointer restores state, the code rebuilds the machinery.
 
 import { runToolWithPolicy, toolResultMessage } from "./tools.ts";
-import { parseToolCalls, toolCallInput } from "./toolcall.ts";
+import { parseToolCalls, toolCallInput, makeToolCall, toolCallArgument } from "./toolcall.ts";
 import { assistantMessage, Message } from "../core/messages.ts";
-import { makeAgentStep } from "./agent.ts";
+import { agCallSummary } from "./agent.ts";
 import { serializeHistory, parseHistory } from "../memory/memory.ts";
 
+// A token minted once per process. Tool output is the least trusted string in
+// the system — an MCP tool relaying a remote server, a fetch_url, a read_file —
+// and a fixed marker is something any document can begin with. A forged one
+// made the parent checkpoint for a tool that had ALREADY run, and approving it
+// ran the tool again, which paused again: a loop repeating the side effect
+// every cycle. A child pausing is in-process with its parent and reads this
+// constant, so it can name the channel; a remote document cannot guess it.
+const APPROVAL_TOKEN = crypto.randomUUID();
+
 // A tool output beginning with this is a pause request bubbling up from a
-// child agent: the parent stops instead of treating it as a result.
-export const APPROVAL_SENTINEL = "[[approval-required]]";
+// child agent: the parent stops instead of treating it as a result. The value
+// is not stable across runs, and nothing should persist or hard-code it.
+export const APPROVAL_SENTINEL = "[[approval-required:" + APPROVAL_TOKEN + "]]";
+
+// The version this build writes and the only one it reads. It is bumped when
+// CheckpointFile gains or loses a field, because JSON.parse<T> rejects a
+// document with missing fields: without the bump an older checkpoint would
+// come back as an unexplained parse failure rather than as the version
+// mismatch it is. Version 2 added `queueTools`/`queueInputs`.
+export const APPROVAL_CHECKPOINT_VERSION = 2;
 
 // Why a run stopped, beyond the loop's own reasons: "approval" means a
-// sensitive call is waiting for a human.
+// sensitive call is waiting for a human, and "error" means the resume was
+// handed something it could not read — `answer` holds the sentence saying so.
 export type ApprovalRun = {
   answer: string,
   stopReason: string,
@@ -54,7 +72,46 @@ type CheckpointFile = {
   pendingInput: string,
   pendingKind: string,
   maxSteps: int,
+  // The rest of the paused turn: the calls the assistant declared after the
+  // one awaiting a verdict, in order, still to dispatch.
+  queueTools: string[],
+  queueInputs: string[],
 };
+
+// The tool calls dispatched so far, which a resume carries forward. One record
+// rather than four parallel parameters threaded through every signature.
+type RunSteps = {
+  tools: string[],
+  inputs: string[],
+  outputs: string[],
+  oks: bool[],
+};
+
+// Calls an assistant turn declared that have not been dispatched yet. A pause
+// happens in the MIDDLE of a turn: the loop stopped at call k, and calls
+// k+1..n are part of what the assistant already told the model it would do.
+// Dropping them left the conversation claiming results that never arrived, and
+// nothing said so.
+export type PendingCalls = {
+  names: string[],
+  inputs: string[],
+};
+
+function noSteps(): RunSteps {
+  let tools: string[] = [];
+  let inputs: string[] = [];
+  let outputs: string[] = [];
+  let oks: bool[] = [];
+  let s: RunSteps = { tools: tools, inputs: inputs, outputs: outputs, oks: oks };
+  return s;
+}
+
+function noPendingCalls(): PendingCalls {
+  let names: string[] = [];
+  let inputs: string[] = [];
+  let q: PendingCalls = { names: names, inputs: inputs };
+  return q;
+}
 
 function approvalResult(answer: string, stopReason: string, stepCount: int): ApprovalRun {
   let r: ApprovalRun = {
@@ -86,66 +143,96 @@ function isSensitive(name: string, sensitive: string[]): bool {
   return false;
 }
 
-// The loop, resumable. `convo` and the step arrays carry whatever a checkpoint
+// One checkpoint, built the same way from every place that pauses.
+function apCheckpoint(messages: Message[], steps: RunSteps, turn: int, name: string, input: string, kind: string, maxSteps: int, rest: PendingCalls): CheckpointFile {
+  let cp: CheckpointFile = {
+    version: APPROVAL_CHECKPOINT_VERSION,
+    history: serializeHistory(messages),
+    stepTools: steps.tools, stepInputs: steps.inputs,
+    stepOutputs: steps.outputs, stepOks: steps.oks,
+    turns: turn,
+    pendingTool: name, pendingInput: input, pendingKind: kind,
+    maxSteps: maxSteps,
+    queueTools: rest.names, queueInputs: rest.inputs,
+  };
+  return cp;
+}
+
+// A child pausing shows up as its tool result carrying the sentinel. The
+// sentinel is a per-process token, so this is a channel a child in this process
+// can name and a fetched document cannot.
+function apChildPaused(result: ToolResult): bool {
+  return result.ok && result.output.startsWith(APPROVAL_SENTINEL);
+}
+
+// The loop, resumable. `convo`, `steps` and `queue` carry whatever a checkpoint
 // restored; a fresh run passes them empty.
-function approvalLoop(model: Model, tools: Tool[], sensitive: string[], convo: Message[], stepTools: string[], stepInputs: string[], stepOutputs: string[], stepOks: bool[], turns: int, maxSteps: int): ApprovalRun {
+//
+// One iteration either takes a turn from the model or dispatches one call the
+// model already asked for. Both are bounded by `maxSteps` — turns by `turn`,
+// dispatches by the step count — so the loop terminates.
+function approvalLoop(model: Model, tools: Tool[], sensitive: string[], convo: Message[], steps: RunSteps, turns: int, maxSteps: int, queue: PendingCalls): ApprovalRun {
   let messages = convo.slice(0, convo.length);
   let answer = "";
   let turn = turns;
-  while (turn < maxSteps) {
-    let raw = model(messages);
-    turn = turn + 1;
-    let calls = parseToolCalls(raw);
-    if (calls.length == 0) {
+  let names = queue.names;
+  let inputs = queue.inputs;
+  let stepTools = steps.tools;
+  let stepInputs = steps.inputs;
+  let stepOutputs = steps.outputs;
+  let stepOks = steps.oks;
+  while (true) {
+    if (names.length == 0) {
+      if (turn >= maxSteps) { return approvalResult(answer, "max_steps", stepTools.length); }
+      let raw = model(messages);
+      turn = turn + 1;
+      let calls = parseToolCalls(raw);
       let text = agApprovalText(raw);
-      return approvalResult(text, "final", stepTools.length);
-    }
-    let text = agApprovalText(raw);
-    if (text != "") { answer = text; }
-    messages = [...messages, assistantMessage(agApprovalSummary(text, calls))];
-    let i: int = 0;
-    while (i < calls.length) {
-      if (stepTools.length >= maxSteps) { return approvalResult(answer, "max_steps", stepTools.length); }
-      let name = calls[i].name;
-      let input = toolCallInput(calls[i]);
-      // The gate: a sensitive call checkpoints BEFORE executing, so nothing
-      // has happened yet when the human looks at it.
-      if (isSensitive(name, sensitive)) {
-        let cp: CheckpointFile = {
-          version: 1,
-          history: serializeHistory(messages),
-          stepTools: stepTools, stepInputs: stepInputs, stepOutputs: stepOutputs, stepOks: stepOks,
-          turns: turn,
-          pendingTool: name, pendingInput: input, pendingKind: "direct",
-          maxSteps: maxSteps,
-        };
-        return pausedResult(cp);
+      if (calls.length == 0) {
+        return approvalResult(text, "final", stepTools.length);
       }
-      let none: string[] = [];
-      let result = runToolWithPolicy(tools, { allow: none, deny: none }, name, input);
-      // A child pausing shows up as its tool result carrying the sentinel:
-      // checkpoint the parent with the same call pending, so a resume can
-      // re-dispatch into the child.
-      if (result.ok && result.output.startsWith(APPROVAL_SENTINEL)) {
-        let cp: CheckpointFile = {
-          version: 1,
-          history: serializeHistory(messages),
-          stepTools: stepTools, stepInputs: stepInputs, stepOutputs: stepOutputs, stepOks: stepOks,
-          turns: turn,
-          pendingTool: name, pendingInput: input, pendingKind: "child",
-          maxSteps: maxSteps,
-        };
-        return pausedResult(cp);
+      if (text != "") { answer = text; }
+      // The same summary the plain loop writes, so the text this loop puts in
+      // history is the text agentHistoryToTurns reads back into native tool
+      // calls. Two formats meant a live second turn sent `"tool_calls":[]`
+      // beside a tool message answering nothing, and a provider rejected both.
+      messages = [...messages, assistantMessage(agCallSummary(text, calls))];
+      let freshNames: string[] = [];
+      let freshInputs: string[] = [];
+      let k: int = 0;
+      while (k < calls.length) {
+        freshNames = [...freshNames, calls[k].name];
+        freshInputs = [...freshInputs, toolCallInput(calls[k])];
+        k = k + 1;
       }
-      let out = result.output;
-      if (!result.ok) { out = "error: " + result.error; }
-      stepTools = [...stepTools, result.name];
-      stepInputs = [...stepInputs, result.input];
-      stepOutputs = [...stepOutputs, out];
-      stepOks = [...stepOks, result.ok];
-      messages = [...messages, toolResultMessage(result)];
-      i = i + 1;
+      names = freshNames;
+      inputs = freshInputs;
     }
+    if (stepTools.length >= maxSteps) { return approvalResult(answer, "max_steps", stepTools.length); }
+    let name = names[0];
+    let input = inputs[0];
+    let rest: PendingCalls = { names: names.slice(1, names.length), inputs: inputs.slice(1, inputs.length) };
+    let held: RunSteps = { tools: stepTools, inputs: stepInputs, outputs: stepOutputs, oks: stepOks };
+    // The gate: a sensitive call checkpoints BEFORE executing, so nothing has
+    // happened yet when the human looks at it. The rest of the turn rides along
+    // in the checkpoint and runs on resume.
+    if (isSensitive(name, sensitive)) {
+      return pausedResult(apCheckpoint(messages, held, turn, name, input, "direct", maxSteps, rest));
+    }
+    let none: string[] = [];
+    let result = runToolWithPolicy(tools, { allow: none, deny: none }, name, input);
+    if (apChildPaused(result)) {
+      return pausedResult(apCheckpoint(messages, held, turn, name, input, "child", maxSteps, rest));
+    }
+    let out = result.output;
+    if (!result.ok) { out = "error: " + result.error; }
+    stepTools = [...stepTools, result.name];
+    stepInputs = [...stepInputs, result.input];
+    stepOutputs = [...stepOutputs, out];
+    stepOks = [...stepOks, result.ok];
+    messages = [...messages, toolResultMessage(result)];
+    names = rest.names;
+    inputs = rest.inputs;
   }
   return approvalResult(answer, "max_steps", stepTools.length);
 }
@@ -153,11 +240,7 @@ function approvalLoop(model: Model, tools: Tool[], sensitive: string[], convo: M
 // Run with a pause gate. `sensitive` names the tools that need a human; the
 // run stops before the first such call with a checkpoint in the result.
 export function runAgentWithApproval(model: Model, tools: Tool[], sensitive: string[], history: Message[], maxSteps: int): ApprovalRun {
-  let noTools: string[] = [];
-  let noInputs: string[] = [];
-  let noOutputs: string[] = [];
-  let noOks: bool[] = [];
-  return approvalLoop(model, tools, sensitive, history, noTools, noInputs, noOutputs, noOks, 0, maxSteps);
+  return approvalLoop(model, tools, sensitive, history, noSteps(), 0, maxSteps, noPendingCalls());
 }
 
 // Resume a paused run with a verdict.
@@ -166,12 +249,20 @@ export function runAgentWithApproval(model: Model, tools: Tool[], sensitive: str
 // Denied: the model gets a tool message saying a human refused, and plans
 // around it — the tool itself never executes.
 export function resumeAgent(model: Model, tools: Tool[], sensitive: string[], checkpointJson: string, approved: bool): ApprovalRun {
+  // loadCheckpoint returns "" for a missing file, and JSON.parse<T> rejects a
+  // document missing a field the record gained — so the obvious composition
+  // took the process down. Both now come back as a sentence a caller can show.
+  let problem = checkpointProblem(checkpointJson);
+  if (problem != "") { return approvalResult(problem, "error", 0); }
+
   let cp: CheckpointFile = JSON.parse<CheckpointFile>(checkpointJson);
   let messages = parseHistory(cp.history);
-  let stepTools = cp.stepTools;
-  let stepInputs = cp.stepInputs;
-  let stepOutputs = cp.stepOutputs;
-  let stepOks = cp.stepOks;
+  let steps: RunSteps = {
+    tools: cp.stepTools, inputs: cp.stepInputs, outputs: cp.stepOutputs, oks: cp.stepOks,
+  };
+  // The rest of the paused turn, whichever way the verdict goes: the other
+  // calls were not the ones a human was asked about.
+  let queue: PendingCalls = { names: cp.queueTools, inputs: cp.queueInputs };
 
   if (!approved) {
     let refusal: Message = {
@@ -179,11 +270,13 @@ export function resumeAgent(model: Model, tools: Tool[], sensitive: string[], ch
       content: "[tool " + cp.pendingTool + "] a human reviewed this call and denied it — do not retry it; explain or find another way",
     };
     messages = [...messages, refusal];
-    stepTools = [...stepTools, cp.pendingTool];
-    stepInputs = [...stepInputs, cp.pendingInput];
-    stepOutputs = [...stepOutputs, "denied by human"];
-    stepOks = [...stepOks, false];
-    return approvalLoop(model, tools, sensitive, messages, stepTools, stepInputs, stepOutputs, stepOks, cp.turns, cp.maxSteps);
+    let denied: RunSteps = {
+      tools: [...steps.tools, cp.pendingTool],
+      inputs: [...steps.inputs, cp.pendingInput],
+      outputs: [...steps.outputs, "denied by human"],
+      oks: [...steps.oks, false],
+    };
+    return approvalLoop(model, tools, sensitive, messages, denied, cp.turns, cp.maxSteps, queue);
   }
 
   // Approved: dispatch the held call. For a child pause the dispatch re-enters
@@ -191,26 +284,21 @@ export function resumeAgent(model: Model, tools: Tool[], sensitive: string[], ch
   // on disk and resumes the child rather than starting over.
   let none: string[] = [];
   let result = runToolWithPolicy(tools, { allow: none, deny: none }, cp.pendingTool, cp.pendingInput);
-  if (result.ok && result.output.startsWith(APPROVAL_SENTINEL)) {
-    // The child paused again — a second sensitive call deeper in its run.
-    let again: CheckpointFile = {
-      version: 1,
-      history: cp.history,
-      stepTools: stepTools, stepInputs: stepInputs, stepOutputs: stepOutputs, stepOks: stepOks,
-      turns: cp.turns,
-      pendingTool: cp.pendingTool, pendingInput: cp.pendingInput, pendingKind: "child",
-      maxSteps: cp.maxSteps,
-    };
-    return pausedResult(again);
+  if (apChildPaused(result)) {
+    // The child paused again — a second sensitive call deeper in its run. The
+    // rest of the parent's turn is still waiting behind it.
+    return pausedResult(apCheckpoint(messages, steps, cp.turns, cp.pendingTool, cp.pendingInput, "child", cp.maxSteps, queue));
   }
   let out = result.output;
   if (!result.ok) { out = "error: " + result.error; }
-  stepTools = [...stepTools, result.name];
-  stepInputs = [...stepInputs, result.input];
-  stepOutputs = [...stepOutputs, out];
-  stepOks = [...stepOks, result.ok];
+  let done: RunSteps = {
+    tools: [...steps.tools, result.name],
+    inputs: [...steps.inputs, result.input],
+    outputs: [...steps.outputs, out],
+    oks: [...steps.oks, result.ok],
+  };
   messages = [...messages, toolResultMessage(result)];
-  return approvalLoop(model, tools, sensitive, messages, stepTools, stepInputs, stepOutputs, stepOks, cp.turns, cp.maxSteps);
+  return approvalLoop(model, tools, sensitive, messages, done, cp.turns, cp.maxSteps, queue);
 }
 
 // --- checkpoint files -----------------------------------------------------------
@@ -224,6 +312,50 @@ export function saveCheckpoint(path: string, run: ApprovalRun): bool {
 export function loadCheckpoint(path: string): string {
   if (!fs.existsSync(path)) { return ""; }
   return fs.readFileSync(path);
+}
+
+// --- reading a checkpoint before trusting it -------------------------------------
+
+// A structural field read that never throws, so the version can be inspected
+// before the typed parse that a version mismatch would fail. Same idiom as
+// agent.ts's agJsonField.
+function apCheckpointField(json: string, key: string): string {
+  return toolCallArgument(makeToolCall("", "", json), key);
+}
+
+// Why this text would not resume. "" means it will.
+export function checkpointProblem(checkpointJson: string): string {
+  if (checkpointJson == "") {
+    return "there is no checkpoint to resume from: nothing was saved at that path, or the run never paused";
+  }
+  let version = apCheckpointField(checkpointJson, "version");
+  if (version == "") {
+    return "this is not an approval checkpoint: it carries no version";
+  }
+  if (version != `${APPROVAL_CHECKPOINT_VERSION}`) {
+    return "this checkpoint is version " + version + ", and this build reads version "
+      + `${APPROVAL_CHECKPOINT_VERSION}`;
+  }
+  try {
+    let cp: CheckpointFile = JSON.parse<CheckpointFile>(checkpointJson);
+    if (cp.pendingTool == "") {
+      return "this checkpoint names no tool awaiting a decision";
+    }
+  } catch (err) {
+    return "this checkpoint says version " + version
+      + " but does not carry the fields that version holds";
+  }
+  return "";
+}
+
+// The conversation a checkpoint paused in the middle of, for a caller showing a
+// human what the agent was doing. A checkpoint that will not resume has no
+// conversation to show, so it reads as empty rather than throwing.
+export function checkpointHistory(checkpointJson: string): Message[] {
+  let empty: Message[] = [];
+  if (checkpointProblem(checkpointJson) != "") { return empty; }
+  let cp: CheckpointFile = JSON.parse<CheckpointFile>(checkpointJson);
+  return parseHistory(cp.history);
 }
 
 // --- text helpers ------------------------------------------------------------------
@@ -250,17 +382,4 @@ function agApprovalText(raw: string): string {
     i = i + 1;
   }
   return out;
-}
-
-function agApprovalSummary(text: string, calls: ToolCall[]): string {
-  let names = "";
-  let i: int = 0;
-  while (i < calls.length) {
-    if (i > 0) { names = names + ", "; }
-    names = names + calls[i].name;
-    i = i + 1;
-  }
-  let head = text;
-  if (head != "") { head = head + "\n"; }
-  return head + "[tool_calls] " + names;
 }

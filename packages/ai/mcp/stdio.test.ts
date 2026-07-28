@@ -1,6 +1,7 @@
 // Tests for stdio.
 
-import { mcpStdioCall, mcpStdioClose, mcpStdioListTools, mcpStdioSpawn, mcpStdioToolsToRegistry } from "./stdio.ts";
+import { mcpStdioCall, mcpStdioClose, mcpStdioListTools, mcpStdioRegisterTools, mcpStdioSpawn, mcpStdioToolsToRegistry } from "./stdio.ts";
+import { makeTool, registerTool, runToolWithPolicy, toolRegistry } from "../agent/tools.ts";
 
 function spawnBannerSession(): McpStdioSession {
   let args: string[] = ["-c", mockBannerServerScript()];
@@ -16,6 +17,78 @@ function spawnNoisySession(): McpStdioSession {
   let args: string[] = ["-c", mockNoisyServerScript()];
   return mcpStdioSpawn("python3", args);
 }
+
+function spawnStrictSession(): McpStdioSession {
+  let args: string[] = ["-c", mockStrictServerScript(false)];
+  return mcpStdioSpawn("python3", args);
+}
+
+function spawnStringIdSession(): McpStdioSession {
+  let args: string[] = ["-c", mockStrictServerScript(true)];
+  return mcpStdioSpawn("python3", args);
+}
+
+// A server that validates `arguments` against the inputSchema it advertised —
+// which is what every real MCP server does — answers -32602 to {"input": ...}.
+test("a tool call sends the arguments the server's own schema declares", () => {
+  let session = spawnStrictSession();
+  let tools = mcpStdioListTools(session);
+  expect(tools.length == 2);
+  expect(tools[0].name == "echo");
+  let registry = mcpStdioToolsToRegistry(session, tools);
+  expect(registry.length == 2);
+  expect(registry[0].run("hello there") == "hello there");
+  expect(registry[1].run("2, 3") == "5");
+  // a model that emits the whole arguments object is passed through.
+  expect(registry[1].run("{\"a\": 10, \"b\": 32}") == "42");
+  mcpStdioClose(session);
+});
+
+// A refusal has to reach the model as a sentence. It used to arrive as
+// "error: " with nothing after it, or as an empty successful result.
+test("a refused call reports why, not an empty success", () => {
+  let session = spawnStrictSession();
+  let refused = mcpStdioCall(session, "echo", "{\"input\":\"hello\"}");
+  expect(!refused.ok);
+  expect(refused.error != "");
+  expect(refused.error.indexOf("Invalid arguments") >= 0);
+  let unknown = mcpStdioCall(session, "no_such_tool", "{}");
+  expect(!unknown.ok);
+  expect(unknown.error.indexOf("Unknown tool") >= 0);
+  mcpStdioClose(session);
+});
+
+// JSON-RPC 2.0 permits a string id. Matching ids by a decimal scan of the raw
+// line reads `"id":"1"` as 0, so every reply is discarded: the initialize
+// drain in mcpStdioSpawn reads until EOF or blocks on a line that never comes,
+// and tools/list comes back empty.
+test("a server that answers with string ids is spoken to, not ignored", () => {
+  let session = spawnStringIdSession();
+  let tools = mcpStdioListTools(session);
+  expect(tools.length == 2);
+  expect(tools[0].name == "echo");
+  expect(tools[1].name == "add");
+  let res = mcpStdioCall(session, "echo", "{\"message\":\"still here\"}");
+  expect(res.ok);
+  expect(res.content == "still here");
+  let registry = mcpStdioToolsToRegistry(session, tools);
+  expect(registry[0].run("round trip") == "round trip");
+  mcpStdioClose(session);
+});
+
+test("a stdio server cannot displace a local tool of the same name", () => {
+  let session = spawnStrictSession();
+  let local = registerTool(toolRegistry(),
+    makeTool("echo", "The local echo.", "any text", (input: string) => { return "LOCAL:" + input; }));
+  let merged = mcpStdioRegisterTools(local, session, mcpStdioListTools(session));
+  expect(merged.length == 2);
+  let allow: string[] = ["echo"];
+  let deny: string[] = [];
+  let ran = runToolWithPolicy(merged, { allow: allow, deny: deny }, "echo", "hi");
+  expect(ran.ok);
+  expect(ran.output == "LOCAL:hi");
+  mcpStdioClose(session);
+});
 
 test("tools/list over stdio parses into the mock's tools", () => {
   let session = spawnMockSession();
