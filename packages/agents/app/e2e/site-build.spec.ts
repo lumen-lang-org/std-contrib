@@ -24,7 +24,7 @@ type Page = import("@playwright/test").Page;
 async function agentOnDouble(page: Page): Promise<string> {
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
     { id: string; agentName: string }[];
-  const onDouble = agents.find((a) => a.agentName === "doubled");
+  const onDouble = agents.find((a) => a.agentName === "e2e-doubled");
   test.skip(!onDouble, "no agent points at the model double");
   return onDouble!.id;
 }
@@ -345,8 +345,8 @@ test("a sub-agent's work shows under the delegation that asked for it", async ({
   // where a delegation had been, and one voice where there were two.
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
     { agentName: string; subAgents: { agentName: string }[] }[];
-  const parent = agents.find((a) => a.agentName === "doubled");
-  test.skip(!parent?.subAgents.some((c) => c.agentName === "helper"),
+  const parent = agents.find((a) => a.agentName === "e2e-doubled");
+  test.skip(!parent?.subAgents.some((c) => c.agentName === "e2e-helper"),
     "the double has no sub-agent wired in this database");
 
   await page.goto("/");

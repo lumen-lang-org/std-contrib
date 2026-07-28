@@ -20,7 +20,7 @@ const PREVIEW_HOST = "http://artifacts.51.91.124.105.nip.io:5173";
 async function agentOnDouble(page: Page): Promise<void> {
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
     { id: string; agentName: string }[];
-  test.skip(!agents.some((a) => a.agentName === "doubled"), "no agent points at the model double");
+  test.skip(!agents.some((a) => a.agentName === "e2e-doubled"), "no agent points at the model double");
 }
 
 async function ask(page: Page, text: string) {

@@ -88,7 +88,7 @@ function clearLog(): void {
 }
 
 function ensure(threadId: string, name: string, image: string, now: string): EnvEnsured {
-  let e: EnvEnsure = { threadId: threadId, name: name, image: image, now: now };
+  let e: EnvEnsure = { threadId: threadId, name: name, image: image, network: false, now: now };
   return envEnsure(database, e);
 }
 
@@ -110,10 +110,14 @@ test("first use creates the container and the row, named main by default", () =>
   expect(made.container == "agents-env-t1-main");
   expect(made.problem == "");
 
-  // The container was asked for with no network and a process to keep alive.
+  // The container was asked for offline — network is a creation-time choice,
+  // false in this fixture — with a process to keep alive, and then given its
+  // persistent, run-user-owned home.
   let asked = argvLines();
-  expect(asked.length == 1);
+  expect(asked.length == 2);
   expect(asked[0] == "run -d --name agents-env-t1-main --network none python:3.12-slim sleep infinity");
+  expect(asked[1].indexOf("exec agents-env-t1-main sh -c") == 0);
+  expect(asked[1].indexOf("/workspace") > 0);
 
   let rows = envList(database, "t1");
   expect(rows.length == 1);
@@ -261,9 +265,10 @@ test("a pruned container is recreated from the row's image, reported as created"
   // Start was tried first, failed, and the recreate used the image the row
   // remembers — the caller passed none.
   let asked = argvLines();
-  expect(asked.length == 2);
+  expect(asked.length == 3);
   expect(asked[0] == "start agents-env-t1-main");
   expect(asked[1] == "run -d --name agents-env-t1-main --network none python:3.12-slim sleep infinity");
+  expect(asked[2].indexOf("exec agents-env-t1-main sh -c") == 0);
 
   expect(envList(database, "t1")[0].status == "running");
 });

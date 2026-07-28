@@ -41,7 +41,7 @@ async function agentOnDouble(request: import("@playwright/test").APIRequestConte
   const prompts = (await request.get("/api/prompts").then((r) => r.json())) as { id: string }[];
   await request.post("/api/agents", {
     data: {
-      id: "a-double", agentName: "doubled", description: "answers from the double",
+      id: "a-double", agentName: "e2e-doubled", description: "e2e fixture: answers from the scripted model double; not for people",
       modelConfigId: "c-double", promptId: prompts[0].id,
       enabled: true, isDefault: false, updatedAt: "now",
     },

@@ -25,7 +25,7 @@ async function agentWithSlowTool(page: import("@playwright/test").Page): Promise
 
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
     { id: string; agentName: string; servers: { id: string }[] }[];
-  const onDouble = agents.find((a) => a.agentName === "doubled");
+  const onDouble = agents.find((a) => a.agentName === "e2e-doubled");
   test.skip(!onDouble, "no agent points at the model double");
 
   if (!onDouble!.servers.some((s) => s.id === mcp!.id)) {
