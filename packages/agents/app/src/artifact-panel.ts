@@ -11,8 +11,11 @@
 // database. The three are not stylistic alternatives to the src attribute
 // below; they are the whole attack the preview host exists to contain.
 //
-// The panel is 320px because the rail is. Reading an artifact properly happens
-// in a tab of its own, which is what the expand button is for.
+// The panel opens at 320px because the rail does, and is resizable from its
+// left edge — a page preview at 320px is a keyhole. The width a person drags
+// it to is kept in localStorage, so it is a preference, not a per-visit fight.
+// Reading an artifact properly still happens in a tab of its own, which is
+// what the expand button is for.
 
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
@@ -32,7 +35,17 @@ function embeds(kind: string): boolean {
 export class ArtifactPanel extends LitElement {
   static styles = css`
     :host { display: flex; flex-direction: column; height: 100%; width: 320px;
-            background: var(--bg-rail); border-left: 1px solid var(--border); }
+            background: var(--bg-rail); border-left: 1px solid var(--border);
+            position: relative; }
+    /* The left edge is the handle. Wider than the border it sits on, because a
+       1px target is not a target; the visible affordance is the cursor. */
+    .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px;
+            cursor: col-resize; z-index: 2; }
+    .grip:hover, .grip.active { background: var(--accent); opacity: 0.35; }
+    /* While a drag is live the iframe must not swallow the pointer — it is a
+       separate document, and a pointermove that crosses into it never comes
+       back to this one. */
+    :host(.resizing) iframe { pointer-events: none; }
     h3 { margin: 0; padding: 16px 16px 8px; font-size: 12px; text-transform: uppercase;
          letter-spacing: 0.06em; color: var(--muted); display: flex; align-items: center;
          justify-content: space-between; gap: 8px; }
@@ -76,6 +89,67 @@ export class ArtifactPanel extends LitElement {
   `;
 
   @property() threadId = "";
+
+  // --- width -----------------------------------------------------------------
+  // Dragged from the left edge, clamped so it can neither vanish nor eat the
+  // conversation, and remembered across visits.
+  private static readonly WIDTH_KEY = "artifact-panel-width";
+  private static readonly WIDTH_MIN = 260;
+  @state() private panelWidth = ArtifactPanel.readWidth();
+
+  private static readonly widthMax = () => Math.max(ArtifactPanel.WIDTH_MIN, Math.floor(window.innerWidth * 0.7));
+
+  private static clampWidth(w: number): number {
+    return Math.min(Math.max(w, ArtifactPanel.WIDTH_MIN), ArtifactPanel.widthMax());
+  }
+
+  private static readWidth(): number {
+    const kept = Number(localStorage.getItem(ArtifactPanel.WIDTH_KEY) ?? "320");
+    return ArtifactPanel.clampWidth(Number.isFinite(kept) ? kept : 320);
+  }
+
+  @state() private resizing = false;
+  private dragFromX = 0;
+  private dragFromW = 0;
+
+  private beginResize(e: PointerEvent) {
+    this.dragFromX = e.clientX;
+    this.dragFromW = this.panelWidth;
+    this.resizing = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  private moveResize(e: PointerEvent) {
+    if (!this.resizing) return;
+    // The handle is the left edge: moving the pointer left grows the panel.
+    this.panelWidth = ArtifactPanel.clampWidth(this.dragFromW + (this.dragFromX - e.clientX));
+  }
+
+  private endResize() {
+    if (!this.resizing) return;
+    this.resizing = false;
+    localStorage.setItem(ArtifactPanel.WIDTH_KEY, `${this.panelWidth}`);
+  }
+
+  // A double-click on the handle goes back to the rail's own width.
+  private resetWidth() {
+    this.panelWidth = 320;
+    localStorage.setItem(ArtifactPanel.WIDTH_KEY, "320");
+  }
+
+  protected willUpdate() {
+    this.style.width = `${this.panelWidth}px`;
+    this.classList.toggle("resizing", this.resizing);
+  }
+
+  private grip() {
+    return html`<div class=${this.resizing ? "grip active" : "grip"}
+      @pointerdown=${(e: PointerEvent) => this.beginResize(e)}
+      @pointermove=${(e: PointerEvent) => this.moveResize(e)}
+      @pointerup=${() => this.endResize()}
+      @pointercancel=${() => this.endResize()}
+      @dblclick=${() => this.resetWidth()}></div>`;
+  }
 
   @state() private artifacts: ArtifactListing[] = [];
   // The artifact being read, and the version of it on screen. Two pieces of
@@ -213,6 +287,7 @@ export class ArtifactPanel extends LitElement {
     const a = this.open as ArtifactListing;
     const v = this.shown;
     return html`
+      ${this.grip()}
       <div class="view">
         <div class="head">
           <div class="name">
@@ -285,6 +360,7 @@ export class ArtifactPanel extends LitElement {
   render() {
     if (this.open !== null) return this.viewing();
     return html`
+      ${this.grip()}
       <h3>
         <span>Artifacts</span>
         ${this.threadId === "" ? "" : html`

@@ -118,12 +118,14 @@ test("the file list shows subfolders above the documents, and navigates", async 
   const folders = knowledge(page).locator("tr.folder");
   await expect(folders.first()).toBeVisible();
 
-  // Clicking one moves into it, and the parent row comes back out.
-  const child = folders.filter({ hasText: "📁" }).first();
-  const childName = (await child.locator("td").first().textContent())?.replace("📁", "").trim();
+  // Clicking one moves into it, and the parent row comes back out. The rows
+  // are told apart by their icons — a folder glyph on a child, arrow-up on the
+  // way back — because every mark in this UI is an nr-icon, never an emoji.
+  const child = folders.filter({ has: page.locator('nr-icon[name="folder"]') }).first();
+  const childName = (await child.locator("td").first().textContent())?.trim();
   await child.click();
   await expect(knowledge(page).locator(".title")).toContainText(childName ?? "");
-  await knowledge(page).locator("tr.folder", { hasText: "↩" }).click();
+  await knowledge(page).locator("tr.folder", { has: page.locator('nr-icon[name="arrow-up"]') }).click();
   await expect(knowledge(page).locator(".title")).toContainText(parentPath!);
 });
 

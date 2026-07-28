@@ -123,7 +123,11 @@ export class AgentConsole extends LitElement {
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentRow[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled);
-    if (this.agents.length > 0) this.agentId = this.agents[0].id;
+    // The flagged default, not the first name in the list — sorted by name,
+    // "the first" was whichever agent happened to sort earliest, which for a
+    // while was the e2e model double.
+    const preferred = this.agents.find((a) => a.isDefault) ?? this.agents[0];
+    if (preferred) this.agentId = preferred.id;
   }
 
   private async open(id: string) {
@@ -189,9 +193,11 @@ export class AgentConsole extends LitElement {
   private async reloadAgents() {
     const listed = await listAgents().catch(() => this.agents);
     this.agents = listed.filter((a) => a.enabled);
-    // An agent disabled while it was selected must not stay selected.
+    // An agent disabled while it was selected must not stay selected. The
+    // replacement is the flagged default, same as first load.
     if (!this.agents.some((a) => a.id === this.agentId)) {
-      this.agentId = this.agents.length > 0 ? this.agents[0].id : "";
+      const preferred = this.agents.find((a) => a.isDefault) ?? this.agents[0];
+      this.agentId = preferred ? preferred.id : "";
     }
   }
 

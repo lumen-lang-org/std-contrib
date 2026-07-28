@@ -11,7 +11,8 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
-import { LiveStep, StepStart, ARGS_PREVIEW, rotations, stepPlan, stepId, argsPreview, beginStep, endStep, stepsOfRound, stepsOfThread, roundRunning, stepMillis, forgetRound, forgetSteps } from "./steps.ts";
+import { LiveStep, StepStart, ARGS_PREVIEW, EDIT_KEEP, rotations, stepPlan, stepId, argsPreview, stepArgs, beginStep, endStep, stepsOfRound, stepsOfThread, roundRunning, stepMillis, forgetRound, forgetSteps } from "./steps.ts";
+import { jsonRaw, jsonText } from "./scan.ts";
 
 let database: Db = sqlite();
 
@@ -258,4 +259,30 @@ test("a sub-agent's first call does not overwrite the delegation that caused it"
   expect(live[0].depth == 0);
   expect(live[1].name == "read_file");
   expect(live[1].depth == 1);
+});
+
+test("an edit step keeps what the card shows: path, counts from the whole text, a bounded old and new", () => {
+  // Counts come from the FULL strings, the kept text is cut — a count made
+  // after cutting would report the preview, not the edit.
+  let big = "";
+  let i: int = 0;
+  while (i < 200) { big = big + "line " + `${i}` + "\n"; i = i + 1; }
+  let args = "{\"path\":\"/index.html\",\"old\":" + JSON.stringify(big)
+    + ",\"new\":\"<h1>x</h1>\",\"note\":\"\"}";
+  let made = stepArgs("edit_artifact", args);
+  expect(jsonText(made, "path") == "/index.html");
+  expect(jsonRaw(made, "removed") == "201");
+  expect(jsonRaw(made, "added") == "1");
+  expect(jsonRaw(made, "cut") == "true");
+  expect(jsonText(made, "old").length <= EDIT_KEEP);
+  expect(jsonText(made, "new") == "<h1>x</h1>");
+
+  // Every other tool keeps the cut prefix it always had.
+  let other = stepArgs("write_artifact", args);
+  expect(other.startsWith("{\"path\":\"/index.html\""));
+  expect(other.endsWith("..."));
+
+  // An edit whose arguments are malformed falls back to the prefix rather
+  // than inventing fields.
+  expect(stepArgs("edit_artifact", "{\"path\":\"/a\"}").startsWith("{\"path\""));
 });

@@ -19,6 +19,7 @@
 //   cd packages/agents && lumen test steps.test.ts
 
 import { Db } from "../plume/driver.ts";
+import { jsonFind, jsonText } from "./scan.ts";
 import { DbField, DbRepository, DbOrder, asc, desc, field, repository, persist, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
@@ -191,6 +192,17 @@ export function thoughtsOfRound(db: Db, threadId: string, seq: int): Thought[] {
   return JSON.parse<Thought[]>(listOrdered(db, thoughtsMapping(), where, args, keys));
 }
 
+// Every round's reasoning at once, for a console that has just reloaded. The
+// pairing with stepsOfThread is deliberate: a reload that got the calls back
+// but not the thinking would redraw half a card, and the half it dropped is
+// the half a round with no tool call is made entirely of.
+export function thoughtsOfThread(db: Db, threadId: string): Thought[] {
+  let keys: DbOrder[] = [asc("seq"), asc("created_at"), asc("depth"), asc("rotation")];
+  let args: string[] = [threadId];
+  return JSON.parse<Thought[]>(
+    listOrdered(db, thoughtsMapping(), "thread_id = " + placeholderAt(db, 1), args, keys));
+}
+
 export function forgetThoughts(db: Db, threadId: string, seq: int): void {
   let args: string[] = [threadId, `${seq}`];
   deleteWhere(db, thoughtsMapping(),
@@ -221,6 +233,52 @@ function continuationByte(b: int): bool {
   return b >= 128 && b < 192;
 }
 
+// How much of `old` and `new` an edit step keeps for the card's detail view.
+// Enough to read a change, small enough that a poll every few hundred
+// milliseconds is not shipping documents around.
+export const EDIT_KEEP: int = 1500;
+
+function editCut(text: string): string {
+  if (text.length <= EDIT_KEEP) { return text; }
+  let cut = EDIT_KEEP;
+  while (cut > 0 && continuationByte(text.charCodeAt(cut))) { cut = cut - 1; }
+  return text.slice(0, cut);
+}
+
+function lineCount(text: string): int {
+  if (text == "") { return 0; }
+  let n: int = 1;
+  let i: int = 0;
+  while (i < text.length) {
+    if (text.charAt(i) == "\n") { n = n + 1; }
+    i = i + 1;
+  }
+  return n;
+}
+
+// What a step row stores as its `args`, by tool.
+//
+// Most tools store a cut prefix of their raw arguments — a label for a row,
+// not the arguments back. An edit is different: the card shows "Edited <path>
+// +a -r" and opens into the old and new text, so the row keeps those as
+// fields, with the line counts computed from the WHOLE strings before any
+// cut — a count made after cutting would report the preview, not the edit.
+export function stepArgs(name: string, args: string): string {
+  if (name != "edit_artifact") { return argsPreview(args); }
+  if (jsonFind(args, "old") < 0 || jsonFind(args, "new") < 0) { return argsPreview(args); }
+  let oldText = jsonText(args, "old");
+  let newText = jsonText(args, "new");
+  let keptOld = editCut(oldText);
+  let keptNew = editCut(newText);
+  return "{\"path\":" + JSON.stringify(jsonText(args, "path"))
+    + ",\"removed\":" + `${lineCount(oldText)}`
+    + ",\"added\":" + `${lineCount(newText)}`
+    + ",\"old\":" + JSON.stringify(keptOld)
+    + ",\"new\":" + JSON.stringify(keptNew)
+    + ",\"cut\":" + (keptOld.length < oldText.length || keptNew.length < newText.length ? "true" : "false")
+    + "}";
+}
+
 // What the caller knows when a call is dispatched. A record rather than six
 // positional arguments, because four of them are strings and a transposition
 // between `name` and `target` would be invisible.
@@ -246,7 +304,7 @@ export function beginStep(db: Db, s: StepStart): string {
   let id = stepId(s.threadId, s.seq, s.depth, s.idx);
   let row: LiveStep = {
     id: id, threadId: s.threadId, seq: s.seq, depth: s.depth, rotation: s.rotation, idx: s.idx,
-    kind: s.kind, name: s.name, target: s.target, args: argsPreview(s.args),
+    kind: s.kind, name: s.name, target: s.target, args: stepArgs(s.name, s.args),
     startedAt: s.now, endedAt: "", millis: -1, ok: false,
   };
   persist(db, stepsMapping(), JSON.stringify(row));
@@ -259,7 +317,7 @@ export function endStep(db: Db, s: StepStart, ok: bool, endedAt: string, millis:
   let row: LiveStep = {
     id: stepId(s.threadId, s.seq, s.depth, s.idx), threadId: s.threadId, seq: s.seq,
     depth: s.depth, rotation: s.rotation, idx: s.idx,
-    kind: s.kind, name: s.name, target: s.target, args: argsPreview(s.args),
+    kind: s.kind, name: s.name, target: s.target, args: stepArgs(s.name, s.args),
     startedAt: s.now, endedAt: endedAt, millis: millis, ok: ok,
   };
   persist(db, stepsMapping(), JSON.stringify(row));

@@ -165,3 +165,10 @@ export function modelRow(over: Partial<ModelFlat> & { id: string }): ModelFlat {
     ...over,
   };
 }
+
+// Put a fresh conversation on the named agent. New conversations open against
+// the flagged default — the real model — so a spec that drives the double has
+// to say so, the same way a person picks an agent from the header.
+export async function pickAgent(page: Page, agentId: string) {
+  await shell(page).locator("header select").selectOption(agentId);
+}

@@ -12,7 +12,7 @@
 // double sits for 1500ms on purpose.
 
 import { expect, test } from "@playwright/test";
-import { shell } from "./console.js";
+import { pickAgent, shell } from "./console.js";
 
 // The agent the model double answers for, wired to the MCP double so a tool
 // call has somewhere to go. Arranged through the API — the rule is that a test
@@ -87,6 +87,7 @@ test("the console draws the card while the call runs and settles it when it stop
   // card is what a person actually sees.
   await page.goto("/");
   await agentWithSlowTool(page);
+  await pickAgent(page, "a-double");
 
   const composer = shell(page).locator("nr-chatbot [contenteditable]");
   await composer.click();

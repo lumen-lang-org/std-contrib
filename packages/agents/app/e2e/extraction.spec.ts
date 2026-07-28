@@ -236,13 +236,22 @@ async function moveDouble(request: import("@playwright/test").APIRequestContext,
 }
 
 test.describe("a round that goes wrong leaves the conversation usable", () => {
-  test("a tool call the model did not finish writing is dropped, not stored", async ({ page, request }) => {
+  test("a reply the model did not finish writing is refused whole, not half-kept", async ({ page, request }) => {
     // A model asked for a file larger than its maxTokens stops mid-argument.
     // Stored as-is, that turn announces a call whose JSON cannot be parsed
     // back — the replay reads one call, meets the break, and stops, so the
     // next message goes to the provider with one announced call and two
     // results. Mistral answers "Unexpected tool call id … in tool results"
     // and EVERY later message in that conversation fails. This is that bug.
+    //
+    // The rule that fixes it is stricter than it first looks, and this test
+    // used to assert the softer version: a reply that stopped on "length" is
+    // not an answer *at all*, so the round is refused before a single call is
+    // dispatched. The whole call in the same reply does not land either —
+    // which is the point. A model that ran out of room in the middle of
+    // asking for two files never said which of them it had finished with, and
+    // half a plan carried out is worse than none: the conversation would go on
+    // believing a file exists that the model never got to describe.
     const threadOf = watchThread(page);
     await ask(page, "truncate a tool call please");
     await expect(chat(page)).not.toBeEmpty({ timeout: 20_000 }).catch(() => {});
@@ -251,11 +260,14 @@ test.describe("a round that goes wrong leaves the conversation usable", () => {
     const t = threadOf();
     expect(t).not.toBe("");
 
-    // The whole call was written, so it lands. The half-written one does not.
+    // Neither file: not the half-written one, and not the whole one beside it.
     const listed = (await request.get(`/api/threads/${t}/artifacts`).then((r) => r.json())) as
       { path: string }[];
-    expect(listed.map((a) => a.path)).toContain("/small.html");
     expect(listed.map((a) => a.path)).not.toContain("/big.css");
+    expect(listed.map((a) => a.path)).not.toContain("/small.html");
+
+    // And the refusal says what to do about it rather than failing silently.
+    await expect(chat(page)).toContainText("ran out of room", { timeout: 20_000 });
 
     // And the conversation still works: a second message is answered rather
     // than refused by the provider for a malformed history.

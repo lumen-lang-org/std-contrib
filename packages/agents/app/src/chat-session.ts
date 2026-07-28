@@ -21,7 +21,7 @@
 // shape rather than a gap. When this console grows file upload or a stop
 // button, they get added here deliberately.
 
-import { LiveStep, Thought, WireRef, openThread, say, threadSteps, transcript } from "./api.js";
+import { LiveStep, RoundSteps, Thought, WireRef, openThread, say, threadSteps, transcript } from "./api.js";
 
 export type ChatMessage = {
   id: string;
@@ -84,6 +84,24 @@ const MS = "opacity:.55;font-variant-numeric:tabular-nums";
 
 const THINK = "padding:6px 12px;border-top:1px solid rgba(0,0,0,.06)";
 const THINK_TEXT = "margin:.4rem 0 .2rem;white-space:pre-wrap;opacity:.7;font-size:12.5px";
+const DIFF = "margin:.35rem 0;padding:8px 10px;border-radius:6px;white-space:pre-wrap;word-break:break-word;"
+  + "font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:16rem;overflow:auto";
+
+// The fields an edit step stores, or null when the row is not that shape —
+// an old round's row, or a fallback prefix — in which case the raw preview is
+// shown as it always was.
+function editFields(args: string): { path: string; added: number; removed: number; old: string; new: string; cut: boolean } | null {
+  try {
+    const p = JSON.parse(args) as Record<string, unknown>;
+    if (typeof p.path !== "string" || typeof p.old !== "string" || typeof p.new !== "string") return null;
+    return {
+      path: p.path, old: p.old, new: p.new,
+      added: typeof p.added === "number" ? p.added : 0,
+      removed: typeof p.removed === "number" ? p.removed : 0,
+      cut: p.cut === true,
+    };
+  } catch { return null; }
+}
 
 export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
   if (steps.length === 0 && thoughts.length === 0) return "";
@@ -129,11 +147,28 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
     }
     for (const s of calls) {
       const mark = s.running ? "&#8230;" : (s.ok ? "&#10003;" : "&#10007;");
-      const detail = s.kind === "agent" ? s.target : s.args;
       const took = s.running ? "" : `${s.millis}ms`;
       // Indented by depth, so a sub-agent's calls read as belonging to the
       // delegation above them rather than as more of the parent's own work.
       const indent = s.depth > 0 ? `padding-left:${12 + s.depth * 18}px;` : "";
+      // An edit gets a sentence, not its raw arguments: "Edited <path> +a -r",
+      // opening into the old and new text. The row stores those as fields.
+      const edit = s.name === "edit_artifact" ? editFields(s.args) : null;
+      if (edit) {
+        body += `<details class="tool-call edit" style="${indent}">`
+          + `<summary style="${ROW};cursor:pointer;list-style:none"><span>${mark}</span>`
+          + `<span class="tool-name" style="${NAME}">Edited ${escapeHtml(edit.path)}</span>`
+          + `<span style="flex:1"><span style="color:#2f8a4c">+${edit.added}</span>`
+          + ` <span style="color:#b3382e">-${edit.removed}</span></span>`
+          + `<span class="tool-ms" style="${MS}">${took}</span></summary>`
+          + `<div style="padding:0 12px 8px">`
+          + `<pre style="${DIFF};background:rgba(179,56,46,.08)">${escapeHtml(edit.old)}</pre>`
+          + `<pre style="${DIFF};background:rgba(47,138,76,.08)">${escapeHtml(edit.new)}</pre>`
+          + (edit.cut ? `<div style="opacity:.55;font-size:11.5px">cut — the whole text is in the artifact's history</div>` : "")
+          + `</div></details>`;
+        continue;
+      }
+      const detail = s.kind === "agent" ? s.target : s.args;
       body += `<div class="tool-call" style="${ROW};${indent}"><span>${mark}</span>`
         + `<span class="tool-name" style="${NAME}">${escapeHtml(s.name)}</span>`
         + `<span style="${ARGS}">${escapeHtml(detail)}</span>`
@@ -354,14 +389,48 @@ export class ChatSession {
   /** Open an existing conversation and show its turns. */
   async open(threadId: string): Promise<void> {
     this.threadId = threadId;
-    const turns = await transcript(threadId);
-    this.setMessages(turns.map((t, i) => ({
-      id: `t${i}`,
-      sender: t.role === "user" ? "user" : "bot" as const,
-      text: escapeHtml(t.text),
-      refs: t.refs,
-      timestamp: new Date().toISOString(),
-    })));
+    // The turns and every round's calls and reasoning, together. A card is not
+    // a live-only ornament: it is what the answer above it was made of, and a
+    // reload that dropped it left the conversation claiming work it no longer
+    // showed. Asked in parallel — the transcript does not depend on the steps.
+    const [turns, past] = await Promise.all([
+      transcript(threadId),
+      threadSteps(threadId, "all").catch(() => ({ steps: [], thoughts: [] } as Pick<RoundSteps, "steps" | "thoughts">)),
+    ]);
+
+    // A round's rows carry the seq of the turn that *opened* it — the question —
+    // while the answer is stored further along, past the tool turns the reader
+    // never sees. So the two are not joined on equal seqs: a round belongs to
+    // the first answer that comes after it, which is true whatever sits in
+    // between and stays true when a round leaves no visible answer at all —
+    // its card lands on the next one rather than vanishing.
+    const rounds = new Map<number, { steps: LiveStep[]; thoughts: Thought[] }>();
+    const round = (seq: number) => {
+      const had = rounds.get(seq) ?? { steps: [], thoughts: [] };
+      rounds.set(seq, had);
+      return had;
+    };
+    for (const s of past.steps) round(s.seq).steps.push(s);
+    for (const t of past.thoughts) round(t.seq).thoughts.push(t);
+    const pending = [...rounds.keys()].sort((a, b) => a - b);
+
+    this.setMessages(turns.map((t, i) => {
+      let card = "";
+      if (t.role !== "user") {
+        const mine: number[] = [];
+        while (pending.length > 0 && pending[0] < t.seq) mine.push(pending.shift()!);
+        const steps = mine.flatMap((s) => rounds.get(s)!.steps);
+        const thoughts = mine.flatMap((s) => rounds.get(s)!.thoughts);
+        card = stepsCard(steps, thoughts);
+      }
+      return {
+        id: `t${i}`,
+        sender: t.role === "user" ? "user" : "bot" as const,
+        text: card + escapeHtml(t.text),
+        refs: t.refs,
+        timestamp: new Date().toISOString(),
+      };
+    }));
   }
 
   /** Start a fresh conversation. Nothing is stored until something is said. */

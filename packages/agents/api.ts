@@ -34,7 +34,8 @@ import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mi
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
 import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
-import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, LiveStep, Thought } from "./steps.ts";
+import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
+import { envPlan } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
@@ -924,18 +925,23 @@ class ThreadApi {
     let asked = queryParam(req, "seq", "");
     let round = latestRound(this.db, param(req, "id"));
     let live: LiveStep[] = [];
+    let thoughts: Thought[] = [];
     if (asked == "all") {
       // The whole transcript's worth, so a reloaded conversation draws a card
       // above every message that called something, not only the last one.
+      // The reasoning comes with it: `round` is NONE here, so asking for one
+      // round's thoughts would answer none, and a reload would come back with
+      // the calls and none of the thinking.
       round = TURN_SEQ_NONE;
       live = stepsOfThread(this.db, param(req, "id"));
+      thoughts = thoughtsOfThread(this.db, param(req, "id"));
     } else {
       if (asked != "") { round = parseInt(asked, 10) ?? -1; }
-      if (round >= 0) { live = stepsOfRound(this.db, param(req, "id"), round); }
+      if (round >= 0) {
+        live = stepsOfRound(this.db, param(req, "id"), round);
+        thoughts = thoughtsOfRound(this.db, param(req, "id"), round);
+      }
     }
-
-    let thoughts: Thought[] = [];
-    if (round >= 0) { thoughts = thoughtsOfRound(this.db, param(req, "id"), round); }
     return ok("{\"seq\":" + `${round}`
       + ",\"running\":" + boolJson(roundRunning(live))
       + ",\"thoughts\":" + thoughtsJson(thoughts)
@@ -1514,7 +1520,11 @@ function previewCsp(req: Request): string {
     + "; style-src 'unsafe-inline' " + origin
     + "; img-src data: " + origin
     + "; font-src data: " + origin
-    + "; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
+    // connect-src used to be 'none'. The live reload below polls a version
+    // stamp on this same origin, and that is the one connection a preview may
+    // make: the preview origin itself, nothing else.
+    + "; connect-src " + origin
+    + "; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
 }
 
 // The content type a preview answers with.
@@ -1558,6 +1568,46 @@ function previewType(req: Request, mime: string): string {
 // and not the artifact the token names. Every preview answer goes through here
 // so a sibling cannot end up with a weaker policy or its neighbour's type — a
 // stylesheet answered text/html is a script the sandbox would then run.
+// The chrome a live page carries: a poller that reloads when ANY artifact of
+// the conversation gains a version, and a click handler that keeps the base
+// route — an author writes <a href="/menu.html"> and the browser would leave
+// /preview/<token>/ for the host's own root, where nothing lives.
+//
+// Injected only into a CURRENT html body on the preview host. A pinned ?v= is
+// history and history does not reload; a sibling stylesheet is not a document;
+// off the preview host everything is text/plain and runs nothing anyway.
+function previewChrome(token: string, stamp: string): string {
+  return "\n<script>(function(){"
+    + "var base='/preview/'+" + JSON.stringify(token) + ";"
+    + "var was=" + JSON.stringify(stamp) + ";"
+    + "setInterval(function(){fetch(base+'/__version',{cache:'no-store'})"
+    + ".then(function(r){return r.text()})"
+    + ".then(function(v){if(v!==was){location.reload()}})"
+    + ".catch(function(){})},2000);"
+    + "document.addEventListener('click',function(e){"
+    + "var a=e.target&&e.target.closest?e.target.closest('a'):null;"
+    + "if(!a){return}var h=a.getAttribute('href');"
+    + "if(h&&h.charAt(0)==='/'&&h.indexOf('/preview/')!==0){e.preventDefault();location.href=base+h}"
+    + "},true);"
+    + "})()</script>";
+}
+
+// One value that moves when anything in the thread's artifact log moves. The
+// log is append-only and rows are never rewritten, so the row count IS the
+// stamp: any write anywhere in the conversation changes it.
+function previewStamp(db: Db, threadId: string): string {
+  let sql = "SELECT COUNT(*) FROM artifact_versions"
+    + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
+    + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
+  if (!db.query(sql, [threadId])) { return "0"; }
+  if (db.rows() == 0) { return "0"; }
+  return db.value(0, 0);
+}
+
+function previewIsHtml(mime: string): bool {
+  return mime.startsWith("text/html");
+}
+
 function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
   let answer = reply(200, body, previewType(req, artifact.mime));
   answer.headers.set("content-security-policy", previewCsp(req));
@@ -1565,6 +1615,15 @@ function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: 
   answer.headers.set("referrer-policy", "no-referrer");
   answer.headers.set("cache-control", cache);
   return answer;
+}
+
+// previewReply, plus the live chrome when this body qualifies for it.
+function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
+  let served = body;
+  if (cache == "no-store" && previewIsHtml(artifact.mime) && onPreviewHost(req)) {
+    served = body + previewChrome(param(req, "token"), previewStamp(db, artifact.threadId));
+  }
+  return previewReply(req, artifact, served, cache);
 }
 
 // Artifacts as themselves, addressed by token.
@@ -1614,9 +1673,13 @@ class PreviewApi {
     if (artifact.id == "") { return notFound("artifact"); }
     let asked = parseInt(queryParam(req, "v", "")) ?? 0;
     if (asked < 1) {
-      let current = getVersion(this.db, artifact.id, artifact.currentVersion);
+      // Not the cached pointer: the newest row of the log itself, so the bare
+      // URL follows the artifact even when the pointer is a commit stale.
+      let newest = nextVersion(this.db, artifact.id) - 1;
+      let current = getVersion(this.db, artifact.id, newest);
+      if (current.id == "") { current = getVersion(this.db, artifact.id, artifact.currentVersion); }
       if (current.id == "") { return notFound("artifact"); }
-      return previewReply(req, artifact, current.body, "no-store");
+      return previewLiveReply(this.db, req, artifact, current.body, "no-store");
     }
     let row = getVersion(this.db, artifact.id, asked);
     if (row.id == "") { return notFound("artifact"); }
@@ -1653,12 +1716,27 @@ class PreviewApi {
   sibling(req: Request): Reply {
     let artifact = findByToken(this.db, param(req, "token"));
     if (artifact.id == "") { return notFound("artifact"); }
+    // The live-reload stamp. "__version" can never be an artifact path — an
+    // underscore is outside the segment charset — so the name is unclaimable
+    // and the check costs the sibling route nothing. The reply is a bare
+    // number with CORS open: a sandboxed preview has an opaque origin, and a
+    // fetch from one needs the header to read even its own host's answer. The
+    // number is a count of stored versions, which is nothing a token holder
+    // cannot already learn, and the token is still required to ask.
+    if (param(req, "path") == "__version") {
+      let stamp = reply(200, previewStamp(this.db, artifact.threadId), "text/plain; charset=utf-8");
+      stamp.headers.set("access-control-allow-origin", "*");
+      stamp.headers.set("cache-control", "no-store");
+      return stamp;
+    }
     let found = getArtifact(this.db, artifact.threadId, param(req, "path"));
     if (found.id == "") { return notFound("artifact"); }
     let row = getVersion(this.db, found.id, found.currentVersion);
     if (row.id == "") { return notFound("artifact"); }
     // `found`, not `artifact`: the type comes from the row whose body this is.
-    return previewReply(req, found, row.body, "no-store");
+    // Live like the main page, so a menu page navigated to keeps the reload
+    // and its own links keep the base.
+    return previewLiveReply(this.db, req, found, row.body, "no-store");
   }
 }
 
@@ -2052,7 +2130,11 @@ function thoughtsJson(thoughts: Thought[]): string {
   let i: int = 0;
   while (i < thoughts.length) {
     if (i > 0) { out = out + ","; }
-    out = out + "{\"rotation\":" + `${thoughts[i].rotation}`
+    // `seq` for the same reason a step carries one: on a reload the client is
+    // handed every round at once and has to put each thought back above the
+    // message it belongs to.
+    out = out + "{\"seq\":" + `${thoughts[i].seq}`
+      + ",\"rotation\":" + `${thoughts[i].rotation}`
       + ",\"depth\":" + `${thoughts[i].depth}`
       + ",\"text\":" + JSON.stringify(thoughts[i].text) + "}";
     i = i + 1;
@@ -2141,6 +2223,12 @@ export function migrationProblem(db: Db): string {
   let live = stepPlan(db);
   let lv: int = 0;
   while (lv < live.length) { plan.push(live[lv]); lv = lv + 1; }
+  // Where a conversation's scripts run: one container per environment, the
+  // rows here as the record and the container's workspace as cache
+  // (RUN-SCRIPT.md).
+  let envs = envPlan(db);
+  let ev: int = 0;
+  while (ev < envs.length) { plan.push(envs[ev]); ev = ev + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) { return ""; }
   // Logged and carried on with, this served an API whose routes SELECT columns
