@@ -258,9 +258,15 @@ function segmentCharsOk(seg: string): bool {
 // title reaches the system prompt and a note reaches the run log — a newline
 // in either is a fresh line the reader parses as structure, not as the
 // artifact's name.
-function labelProblem(what: string, text: string, cap: int): string {
+// The cap is a byte count and the sentence says so: a string here is UTF-8
+// bytes, so a title written in Arabic is two bytes a letter and one written in
+// emoji is four. Reported as "characters" it is arithmetic the writer cannot
+// reproduce — they count 70 and are told that is 140.
+// Exported for the edit door (artifacts-edit.ts), which stores notes too and
+// must refuse them through the same gate.
+export function labelProblem(what: string, text: string, cap: int): string {
   if (text.length > cap) {
-    return "a " + what + " is at most " + `${cap}` + " characters; this one is " + `${text.length}`;
+    return "a " + what + " is at most " + `${cap}` + " bytes of UTF-8; this one is " + `${text.length}`;
   }
   let i: int = 0;
   while (i < text.length) {
@@ -619,7 +625,9 @@ function maxSlot(db: Db, threadId: string): int {
 // append-only, so old bodies stay on disk and must stay under the budget too.
 // -1 when the log cannot be read, 0 for a thread with none: SUM over no rows
 // is NULL, which reads as empty text.
-function threadBytes(db: Db, threadId: string): int {
+// Exported for the edit door, which appends a version too and must stay
+// under the same budget.
+export function threadBytes(db: Db, threadId: string): int {
   let sql = "SELECT SUM(artifact_versions.bytes) FROM artifact_versions"
     + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
     + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
@@ -630,7 +638,9 @@ function threadBytes(db: Db, threadId: string): int {
   return parseInt(held) ?? -1;
 }
 
-function nextVersion(db: Db, artifactId: string): int {
+// Exported for the edit door: after a lost race its retry reads the log's
+// truth here rather than the pointer's cache, which can be one commit stale.
+export function nextVersion(db: Db, artifactId: string): int {
   let sql = "SELECT MAX(version) FROM artifact_versions WHERE artifact_id = " + placeholderAt(db, 1);
   if (!db.query(sql, [artifactId])) { return 0; }
   if (db.rows() == 0) { return 1; }
@@ -689,7 +699,10 @@ export function artifactBriefing(db: Db, threadId: string): string {
     i = i + 1;
   }
   if (rows.length > shown) {
-    out = out + "\n…and " + `${rows.length - shown}` + " more; list with read_artifact";
+    // "list with read_artifact" stood here once — a false affordance, since
+    // read_artifact lists nothing. search_artifacts is the tool that makes
+    // the sentence true.
+    out = out + "\n…and " + `${rows.length - shown}` + " more; search with search_artifacts";
   }
   // Directly under the list, because it is about the list: the one mistake a
   // model reliably makes here is a near-miss respelling of a path it can see.
