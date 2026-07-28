@@ -25,7 +25,7 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, callScriptTool, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { StepStart, beginStep, endStep, recordThought } from "./steps.ts";
 import { jsonText } from "./scan.ts";
@@ -277,6 +277,17 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     while (a < arts.length) {
       specs.push(arts[a]);
       a = a + 1;
+    }
+    // Scripts, on the same thread-only condition plus one more: run_script
+    // exists only where docker answers. scriptTools() probes the daemon once
+    // per process and returns nothing when it is absent or broken, so the
+    // tool is never offered where it could only fail — a model cannot call a
+    // tool it was never told about (RUN-SCRIPT.md's last rule).
+    let scripts = scriptTools();
+    let sc: int = 0;
+    while (sc < scripts.length) {
+      specs.push(scripts[sc]);
+      sc = sc + 1;
     }
   }
 
@@ -570,6 +581,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         threadId: threadId, name: calls[i].name, args: calls[i].args,
         turnSeq: where.baseSeq, now: now,
       });
+      // Scripts third, same convention: every dispatcher is asked, each
+      // answers only its own fixed name, and run_script belongs to no one
+      // else — so the eager ask costs a string comparison.
+      let scripted = callScriptTool(db, {
+        threadId: threadId, name: calls[i].name, args: calls[i].args,
+        turnSeq: where.baseSeq, now: now,
+      });
       if (fileAnswer.handled) {
         resultOk = fileAnswer.ok;
         resultText = fileAnswer.text;
@@ -579,6 +597,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = artifactAnswer.ok;
         resultText = artifactAnswer.text;
         from = "artifacts";
+        calledTools.push(calls[i].name);
+      } else if (scripted.handled) {
+        resultOk = scripted.ok;
+        resultText = scripted.text;
+        from = "scripts";
         calledTools.push(calls[i].name);
       } else if (child.id != "") {
         let question = jsonText(calls[i].args, "question");
