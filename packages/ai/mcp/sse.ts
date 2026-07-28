@@ -9,8 +9,8 @@
 // hand-rolled HTTP/1.1 client over net.connect, which had no TLS and so could
 // only reach a localhost server or one behind a terminating proxy.
 
-import { mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpResponseId } from "./client.ts";
-import { makeTool } from "../agent/tools.ts";
+import { mcpListToolsRequest, mcpCallToolRequest, parseMcpTools, parseMcpToolResult, mcpIdMatches, mcpBuildArguments, mcpHttpProblem } from "./client.ts";
+import { makeTool, mergeToolsKeepingLocal } from "../agent/tools.ts";
 
 function noStrings(): string[] {
   let e: string[] = [];
@@ -88,14 +88,16 @@ export function sseJsonRpcResponses(body: string): string[] {
 }
 
 // the response whose JSON-RPC `id` matches, else the last one seen, else "".
-// requests here always use id 1, so an interleaved server notification (no id,
-// reading as 0) is skipped.
+// requests here always use id 1, so an interleaved server notification (which
+// carries no id) is skipped. the id is matched as text, so a server that
+// answers `"id":"1"` — legal JSON-RPC, and several MCP servers do — is not
+// mistaken for somebody else's reply.
 function pickJsonRpcResponse(responses: string[], id: int): string {
   let last = "";
   let i: int = 0;
   while (i < responses.length) {
     last = responses[i];
-    if (mcpResponseId(responses[i]) == id) { return responses[i]; }
+    if (mcpIdMatches(responses[i], id)) { return responses[i]; }
     i = i + 1;
   }
   return last;
@@ -121,6 +123,13 @@ export function sseParseResult(raw: string): McpResult {
 // not a running feed; the point of streaming here is that the server may frame
 // its answer as events, and that a slow server does not have to be buffered
 // whole before the first line can be seen.
+// a synthetic id-1 JSON-RPC error frame, so a transport failure travels the
+// same path a server-sent error does.
+function sseHttpErrorResponse(message: string): string {
+  return "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":"
+    + JSON.stringify(message) + "}}";
+}
+
 function sseFetch(url: string, headers: Map<string, string>, requestBody: string): string[] {
   let sendHeaders = new Map<string, string>();
   for (const key of headers.keys()) {
@@ -130,9 +139,13 @@ function sseFetch(url: string, headers: Map<string, string>, requestBody: string
   sendHeaders.set("Accept", "text/event-stream");
 
   let s = http.stream(url, "POST", requestBody, sendHeaders);
-  if (s.status() < 200 || s.status() >= 300) {
+  let problem = mcpHttpProblem(s.status(), "");
+  if (problem != "") {
     s.close();
-    return noStrings();
+    // an empty list here reads downstream as "the server said nothing", which
+    // is how a 401 became an empty tool output. hand back the status as a
+    // JSON-RPC error frame instead, so it reaches the model as a sentence.
+    return [sseHttpErrorResponse(problem)];
   }
   let body = "";
   while (!s.done()) {
@@ -152,14 +165,14 @@ export function sseCall(url: string, headers: Map<string, string>, name: string,
   return parseMcpToolResult(pickJsonRpcResponse(sseFetch(url, headers, mcpCallToolRequest(1, name, argumentsJson)), 1));
 }
 
-// run wraps its single string input as {"input": <input>} — this package's
-// one-string-arg convention — and never throws: neither net's methods nor
+// run turns its single string input into the arguments object the server's own
+// inputSchema describes, and never throws: neither net's methods nor
 // parseMcpToolResult throws, so trouble comes back as text.
 export function sseToolToLumen(url: string, headers: Map<string, string>, entry: McpTool): Tool {
   let toolName = entry.name;
+  let toolSchema = entry.schema;
   return makeTool(entry.name, entry.description, entry.schema, (input: string) => {
-    let args = "{\"input\":" + JSON.stringify(input) + "}";
-    let result = sseCall(url, headers, toolName, args);
+    let result = sseCall(url, headers, toolName, mcpBuildArguments(toolSchema, input));
     if (result.ok) { return result.content; }
     return "error: " + result.error;
   });
@@ -173,6 +186,12 @@ export function sseToolsToRegistry(url: string, headers: Map<string, string>, to
     i = i + 1;
   }
   return out;
+}
+
+// merge a server's tools into a local registry without letting one displace a
+// local tool of the same name; see mcpRegisterTools.
+export function sseRegisterTools(local: Tool[], url: string, headers: Map<string, string>, tools: McpTool[]): Tool[] {
+  return mergeToolsKeepingLocal(local, sseToolsToRegistry(url, headers, tools));
 }
 
 // trusted chunk encoder used by sse.test.ts: the decoder is validated directly

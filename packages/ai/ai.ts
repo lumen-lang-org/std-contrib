@@ -20,8 +20,8 @@ import { buildProviderChatBody } from "./core/provider.ts";
 // retryPromptOutput UNALIASED, so those three are imported unaliased here too;
 // their public wrappers already use different names, so nothing collides.
 import { firstJsonObjectOutput, typedJsonInputOutput, retryPromptOutput, parseTextOutput as readTextOutput, parseLineOutput as readLineOutput, parseStringListOutput as readStringListOutput, parseChoiceOutput as readChoiceOutput, firstFencedBlockOutput as readFirstFencedBlockOutput } from "./prompt/output.ts";
-import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, buildOpenAIChatBodyWithStops, readOpenAIContent, readOpenAIResult, readOpenAIError, readOpenAITokenUsage } from "./providers/openai.ts";
-import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, buildMistralChatBodyWithStops, readMistralContent, readMistralResult, readMistralError, readMistralTokenUsage } from "./providers/mistral.ts";
+import { makeAuthHeaders, runOpenAIChat, runOpenAIChatWithBaseUrl, buildOpenAIChatBody, buildOpenAIChatBodyWithStops, readOpenAIContent, readOpenAIResult, readOpenAIError, readOpenAIFinishReason, readOpenAITokenUsage } from "./providers/openai.ts";
+import { makeMistralAuthHeaders, runMistralChat, runMistralChatWithBaseUrl, buildMistralChatBody, buildMistralChatBodyWithStops, readMistralContent, readMistralResult, readMistralError, readMistralFinishReason, readMistralTokenUsage } from "./providers/mistral.ts";
 // Names a sibling module imports (cosineSimilarity, fakeEmbedding,
 // makeDocument, withMetadata, documentMetadata, emptyVectorStore,
 // addDocuments, searchByText) are imported here WITHOUT an alias: module
@@ -66,7 +66,7 @@ import { SubAgent as defineSubAgent, subAgentAsTool as wrapSubAgent, subAgentsAs
 import { Budget, makeBudget as newBudget, unlimitedBudget as newUnlimitedBudget, budgetIsLimited as readBudgetLimited, budgetRemaining as readBudgetRemaining, budgetExhausted as readBudgetExhausted, messagesCost as readMessagesCost, chargeBudget as applyCharge, chargeMessages as applyChargeMessages, chargeCall as applyChargeCall, budgetAllows as readBudgetAllows, budgetAllowsMessages as readBudgetAllowsMessages, budgetRefusal as readBudgetRefusal } from "./agent/budget.ts";
 import { Chunk, splitChunks as splitTextChunks, splitChunksWith as splitTextChunksWith, splitMarkdownChunks as splitMdChunks, splitCodeChunks as splitSrcChunks, splitDocumentChunks as splitDocChunks, splitDocumentProse as splitDocProse, textSeparators as proseSeparators, markdownSeparators as mdSeparators, codeSeparators as srcSeparators } from "./rag/split.ts";
 import { LoadResult, loadText as readTextDocument, loadFile as readFileDocument, loadDirectory as readDirectoryDocuments, fileExtension as readFileExtension } from "./rag/loader.ts";
-import { StreamEvent, StreamHandler, streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString } from "./providers/stream.ts";
+import { StreamEvent, StreamHandler, streamEventFromLine as readStreamEvent, streamLinePayload as readStreamPayload, streamEventsFromBody as readStreamEvents, streamBodyText as readStreamBodyText, buildStreamChatBody as makeStreamChatBody, streamConfiguredChat as runStreamChat, streamChatToString as runStreamChatToString, streamResultFromBody as readStreamResult } from "./providers/stream.ts";
 import { sseListTools as runSseListTools, sseCall as runSseCall, sseToolToLumen as adaptSseTool, sseToolsToRegistry as adaptSseTools } from "./mcp/sse.ts";
 
 // --- the type names -----------------------------------------------------------
@@ -108,10 +108,14 @@ export function assistant(content: string): Message {
 //
 // No builder function: a record literal in argument position already carries
 // its field names, which is the whole point.
-export type TemplateVar = TemplateVarRecord;
-
-// A chat prompt entry: its role and its template, as one value.
-export type ChatPromptPart = ChatPromptPartRecord;
+//
+// The name is re-exported by the `export { ... }` list above, not declared here
+// as `export type TemplateVar = TemplateVarRecord`: that form declares the name
+// a second time, and in a flat namespace it collides with the very import it
+// aliases (E_DUPLICATE_BINDING). Same for ChatPromptPart, ModelConfig and
+// ModelSpec below — a chat prompt entry is its role and its template, as one
+// value, and the barrel says so by re-exporting the name rather than redeclaring
+// it.
 
 export function renderTemplate(template: string, vars: TemplateVar[]): string {
   return renderPromptTemplate(template, vars);
@@ -243,6 +247,13 @@ export function parseOpenAITokenUsage(raw: string): TokenUsage {
   return readOpenAITokenUsage(raw);
 }
 
+// Why the model stopped. "length" means max_tokens cut the answer off, which
+// `Result` has no field for and a caller cannot otherwise tell from a complete
+// short answer.
+export function parseOpenAIFinishReason(raw: string): string {
+  return readOpenAIFinishReason(raw);
+}
+
 // One chat call, as a record.
 //
 //   let reply = chatMistral({
@@ -293,6 +304,10 @@ export function parseMistralError(status: int, raw: string): ProviderError {
 
 export function parseMistralTokenUsage(raw: string): TokenUsage {
   return readMistralTokenUsage(raw);
+}
+
+export function parseMistralFinishReason(raw: string): string {
+  return readMistralFinishReason(raw);
 }
 
 export function chatMistral(call: ChatCall): Result {
@@ -673,9 +688,9 @@ export function mcpRequestBody(id: int, method: string, params: string): string 
 // options, so a call site names a model instead of threading four arguments.
 // Unlike chatOpenAI / chatMistral, `chat` honours temperature and maxTokens.
 
-// The names, so a caller can annotate a variable of either.
-export type ModelConfig = ModelConfigRecord;
-export type ModelSpec = ModelSpecRecord;
+// Both names reach a caller through the `export { ... }` list at the top of this
+// file. See the note on TemplateVar: redeclaring them here as type aliases is
+// what made the barrel itself fail to build.
 
 export function modelConfig(spec: ModelSpec): ModelConfig {
   return makeModelConfig(spec);
@@ -928,6 +943,13 @@ export function streamChat(cfg: ModelConfig, messages: Message[], onEvent: Strea
 
 export function streamChatCollect(cfg: ModelConfig, messages: Message[]): Result {
   return runStreamChatToString(cfg, messages);
+}
+
+// Replay a captured stream body into the result a live stream would return,
+// including the judgement `streamChat` makes about whether the provider
+// actually finished. A body that stops mid-answer is not ok, and `raw` says so.
+export function streamResult(status: int, body: string): Result {
+  return readStreamResult(status, body);
 }
 
 // --- Structured output ------------------------------------------------------

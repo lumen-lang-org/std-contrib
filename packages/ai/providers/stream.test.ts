@@ -2,7 +2,8 @@
 // bodies are the shape both OpenAI and Mistral send; nothing here touches the
 // network.
 
-import { streamEventFromLine, streamLinePayload, streamEventsFromBody, streamBodyText, buildStreamChatBody, openAIStreamEvent, mistralStreamEvent } from "./stream.ts";
+import { makeModelConfig, modelWithBaseUrl as withStreamTestBaseUrl } from "../core/model.ts";
+import { streamConfiguredChat, streamEventFromLine, streamLinePayload, streamEventsFromBody, streamBodyText, buildStreamChatBody, openAIStreamEvent, mistralStreamEvent, streamResultFromBody } from "./stream.ts";
 
 const CHUNK_HI = "data: {\"id\":\"a\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}";
 const CHUNK_ROLE = "data: {\"id\":\"a\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}";
@@ -221,4 +222,89 @@ test("a payload with no choices array yields no text", () => {
 test("a truncated payload does not hang or throw", () => {
   let e = streamEventFromLine("data: {\"choices\":[{\"delta\":{\"content\":\"unterminated");
   expect(e.kind == "other");
+});
+
+// --- Mid-stream failure -----------------------------------------------------
+// A stream that stops early and a stream that finishes look identical on the
+// wire once the last byte is read: both end. The difference is whether a
+// terminating event was ever seen, and a caller cannot ask the socket.
+
+const ERR_CHUNK = "data: {\"error\":{\"message\":\"upstream model overloaded\",\"type\":\"server_error\",\"code\":null}}";
+
+test("a mid-stream error chunk is an error event, not an inert one", () => {
+  // OpenAI sends this after the headers are out. It starts with `{`, carries no
+  // `choices`, and being classified "other" drops it on the floor.
+  let e = streamEventFromLine(ERR_CHUNK);
+  expect(e.kind == "error");
+  expect(e.delta == "");
+  expect(e.raw.includes("upstream model overloaded"));
+});
+
+test("a chunk with an error and no choices is still an error", () => {
+  let e = streamEventFromLine("data: {\"error\":\"rate limited\"}");
+  expect(e.kind == "error");
+});
+
+test("a body replay reports an error chunk instead of dropping it", () => {
+  let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n" + ERR_CHUNK + "\n";
+  let events = streamEventsFromBody(body);
+  expect(events.length == 2);
+  expect(events[1].kind == "error");
+});
+
+test("a stream that ran to [DONE] is a success", () => {
+  let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n" + CHUNK_STOP + "\n" + DONE + "\n";
+  let r = streamResultFromBody(200, body);
+  expect(r.ok);
+  expect(r.status == 200);
+  expect(r.content == "Hello");
+  // [DONE] carries nothing; the chunk before it carries the finish reason, and
+  // overwriting raw with the sentinel throws that away.
+  expect(r.raw.includes("finish_reason"));
+});
+
+test("a stream closed by a finish_reason with no [DONE] is a success", () => {
+  let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n" + CHUNK_STOP + "\n";
+  let r = streamResultFromBody(200, body);
+  expect(r.ok);
+  expect(r.content == "Hi");
+});
+
+test("a stream cut off mid-answer is not a success", () => {
+  // Two deltas, then the connection dies: no [DONE], no finish_reason. The
+  // partial text is still handed back, but ok must not claim it is the answer.
+  let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n";
+  let r = streamResultFromBody(200, body);
+  expect(!r.ok);
+  expect(r.content == "Hello");
+  expect(r.raw.includes("without a terminating event"));
+});
+
+test("an empty stream is not a success", () => {
+  let r = streamResultFromBody(200, "");
+  expect(!r.ok);
+  expect(r.content == "");
+});
+
+test("a stream that failed mid-generation reports the provider's error", () => {
+  let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n" + ERR_CHUNK + "\n";
+  let r = streamResultFromBody(200, body);
+  expect(!r.ok);
+  expect(r.content == "Hel");
+  expect(r.raw.includes("upstream model overloaded"));
+});
+
+// --- Failing before the first chunk ------------------------------------------
+
+test("a stream to a refused endpoint names the provider, the URL and the reason", () => {
+  // http.stream reports a connect failure as status -1 with no body, which is
+  // indistinguishable from a provider that opened a stream and said nothing.
+  let cfg = withStreamTestBaseUrl(makeModelConfig({ provider: "openai", model: "m", apiKey: "k" }), "http://127.0.0.1:9/v1");
+  let sink: StreamHandler = (event: StreamEvent) => {
+  };
+  let r = streamConfiguredChat(cfg, [], sink);
+  expect(!r.ok);
+  expect(r.status < 0);
+  expect(r.raw.includes("openai"));
+  expect(r.raw.includes("http://127.0.0.1:9/v1/chat/completions"));
 });
