@@ -185,3 +185,73 @@ test("pasting a forged marker as the user mints nothing", async ({ page }) => {
   // Still exactly the one card the real save made.
   await expect(page.locator("agent-console .cards .card")).toHaveCount(1);
 });
+
+test.describe("a round that goes wrong leaves the conversation usable", () => {
+  test("a tool call the model did not finish writing is dropped, not stored", async ({ page, request }) => {
+    // A model asked for a file larger than its maxTokens stops mid-argument.
+    // Stored as-is, that turn announces a call whose JSON cannot be parsed
+    // back — the replay reads one call, meets the break, and stops, so the
+    // next message goes to the provider with one announced call and two
+    // results. Mistral answers "Unexpected tool call id … in tool results"
+    // and EVERY later message in that conversation fails. This is that bug.
+    const threadOf = watchThread(page);
+    await ask(page, "truncate a tool call please");
+    await expect(chat(page)).not.toBeEmpty({ timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+
+    const t = threadOf();
+    expect(t).not.toBe("");
+
+    // The whole call was written, so it lands. The half-written one does not.
+    const listed = (await request.get(`/api/threads/${t}/artifacts`).then((r) => r.json())) as
+      { path: string }[];
+    expect(listed.map((a) => a.path)).toContain("/small.html");
+    expect(listed.map((a) => a.path)).not.toContain("/big.css");
+
+    // And the conversation still works: a second message is answered rather
+    // than refused by the provider for a malformed history.
+    await ask(page, "make me a landing page");
+    await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
+  });
+
+  test("a round with no answer stores nothing, so Retry does not duplicate it", async ({ page, request }) => {
+    // The question reaches the run's context before the provider is called,
+    // so a failure after that point used to file the user's turn under a
+    // round that never happened. The console's Retry then sent the same text
+    // again: the stored copy replayed AND a fresh one appended, permanently,
+    // on every later turn. A round that produced no answer is not a round.
+    const threadOf = watchThread(page);
+
+    // Nothing answers on this port, so the run fails at the provider.
+    await request.put("/api/models/m-double", {
+      data: {
+        id: "m-double", label: "Double", apiName: "double-1", provider: "mistral",
+        kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8999", enabled: true,
+      },
+    });
+
+    await ask(page, "this will not be answered");
+    await page.waitForTimeout(2500);
+    const t = threadOf();
+    expect(t).not.toBe("");
+
+    const turns = (await request.get(`/api/threads/${t}`).then((r) => r.json())) as unknown[];
+    expect(turns).toHaveLength(0);
+
+    // Point it back and ask again: exactly one user turn, not two.
+    await request.put("/api/models/m-double", {
+      data: {
+        id: "m-double", label: "Double", apiName: "double-1", provider: "mistral",
+        kind: "chat", dimensions: 0, baseUrl: DOUBLE, enabled: true,
+      },
+    });
+    await ask(page, "make me a landing page");
+    await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
+
+    const after = (await request.get(`/api/threads/${t}`).then((r) => r.json())) as
+      { role: string; text: string }[];
+    const asked = after.filter((x) => x.role === "user");
+    expect(asked).toHaveLength(1);
+    expect(asked[0].text).toContain("landing page");
+  });
+});

@@ -2,7 +2,7 @@
 //
 //   cd packages/agents && lumen test scan.test.ts
 
-import { jsonFind, jsonRaw, jsonText, jsonList, jsonValueAt, jsonUnescape, jsonStringMember } from "./scan.ts";
+import { jsonFind, jsonRaw, jsonText, jsonList, jsonValueAt, jsonUnescape, jsonStringMember, jsonComplete } from "./scan.ts";
 
 test("a member holding null is stepped over, not mistaken for the text", () => {
   // What a tool-calling reply looks like: the text is null and the answer is
@@ -110,4 +110,62 @@ test("a truncated document reports nothing rather than half a value", () => {
 test("a value can be read from a position", () => {
   let doc = "  {\"a\":1}  ";
   expect(jsonValueAt(doc, 0) == "{\"a\":1}");
+});
+
+// --- is this one whole JSON object? --------------------------------------------
+//
+// What jsonComplete answers decides whether a tool call is dispatched and
+// whether its arguments are spliced raw into the stored `calls` column and
+// back out to the provider. "The brackets balance" is not that question.
+
+test("one complete object is complete", () => {
+  expect(jsonComplete("{}"));
+  expect(jsonComplete("{\"path\":\"/a.css\",\"content\":\"body { color: red }\"}"));
+  expect(jsonComplete("  {\"a\":1}\n"));
+  // A brace or bracket inside a string is text, not structure.
+  expect(jsonComplete("{\"a\":[1,2,{\"b\":\"}]\"}]}"));
+  // An escaped quote does not end the string, and an escaped backslash before
+  // a quote does.
+  expect(jsonComplete("{\"a\":\"say \\\"hi\\\"\"}"));
+  expect(jsonComplete("{\"a\":\"ends with a backslash \\\\\"}"));
+});
+
+test("every shape a cut-off model leaves behind is refused", () => {
+  // The whole reason this exists: a model that hits its output cap partway
+  // through a tool call's arguments produces a prefix.
+  expect(!jsonComplete("{\"path\": \"/a.css\", \"content\": \"body {"));
+  expect(!jsonComplete("{\"a\":1"));
+  expect(!jsonComplete("{\"a\":[1,2"));
+  expect(!jsonComplete("{\"a\":{\"b\":1}"));
+  expect(!jsonComplete("{\"a\":\"unterminated"));
+  expect(!jsonComplete("{\"a\":\"trailing escape\\"));
+  // A raw control character inside a string is not legal JSON and is exactly
+  // what a cut stream leaves behind.
+  expect(!jsonComplete("{\"a\":\"one\ntwo\"}"));
+});
+
+test("something that is not a JSON object is not a complete one", () => {
+  // Every one of these balanced, so the old answer was yes.
+  expect(!jsonComplete(""));
+  expect(!jsonComplete("   "));
+  expect(!jsonComplete("not json at all"));
+  expect(!jsonComplete("[1,2]"));
+  expect(!jsonComplete("\"a string\""));
+  expect(!jsonComplete("42"));
+  expect(!jsonComplete("null"));
+});
+
+test("one document, not two and not one with a tail", () => {
+  // `{"a":1}{"b":2}` is two documents, and the caller splices what it is
+  // given straight into a row and into a provider's `input`.
+  expect(!jsonComplete("{\"a\":1}{\"b\":2}"));
+  expect(!jsonComplete("{\"a\":1} junk"));
+  expect(!jsonComplete("{\"a\":1},"));
+});
+
+test("a closing bracket has to match what it opened", () => {
+  expect(!jsonComplete("{\"a\":[1}"));
+  expect(!jsonComplete("{\"a\":{\"b\":1]}"));
+  expect(!jsonComplete("}{"));
+  expect(!jsonComplete("{\"a\":1}}"));
 });

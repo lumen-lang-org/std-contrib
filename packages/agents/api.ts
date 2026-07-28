@@ -14,17 +14,16 @@
 // it rather than by machinery.
 
 import { controller } from "../rest/controller.ts";
-import { Route, route } from "../rest/router.ts";
-import { Request, Reply, Handler, serve, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, listen, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
 import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
-import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
+import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, schemaPlan } from "./schema.ts";
+import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
-import { chatEndpoint, embeddingEndpoint, complete, embedText, replyText } from "./provider.ts";
+import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
@@ -110,10 +109,9 @@ class ProviderApi {
 
   @del("/:provider/key")
   clearKey(req: Request): Reply {
-    if (!existsById(this.db, credentialsMapping(), "cred-" + param(req, "provider"))) {
+    if (!forgetCredential(this.db, param(req, "provider"))) {
       return notFound("no key for " + param(req, "provider"));
     }
-    deleteById(this.db, credentialsMapping(), "cred-" + param(req, "provider"));
     return noContent();
   }
 }
@@ -405,9 +403,7 @@ class AgentApi {
     if (!existsById(this.db, this.flat, param(req, "id"))) {
       return notFound("agent " + param(req, "id"));
     }
-    executeWith(this.db, "DELETE FROM agent_sub_agents WHERE parent_id = " + this.db.placeholder, [param(req, "id")]);
-    executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder, [param(req, "id")]);
-    deleteById(this.db, this.flat, param(req, "id"));
+    forgetAgent(this.db, param(req, "id"));
     return noContent();
   }
 }
@@ -463,6 +459,8 @@ class TraceApi {
     if (!knownBackend(backendOr(body.backend))) {
       return badRequest("unknown backend \"" + body.backend + "\"; this understands langfuse, otlp, phoenix, braintrust, langsmith and arize");
     }
+    let moved = traceDestinationProblem(this.db, body);
+    if (moved != "") { return badRequest(moved); }
     let row: TraceConfigRow = {
       id: "default",
       backend: backendOr(body.backend),
@@ -487,6 +485,18 @@ class TraceApi {
     let body: TraceSecret = JSON.parse<TraceSecret>(req.body);
     let stored = storeCredential(this.db, { provider: "tracing", apiKey: body.secretKey, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
+    return this.status(req);
+  }
+
+  // Clearing the secret is how the collector's address is moved: writing a
+  // key is what authorises an address, so changing the address means writing
+  // the key again. Destructive on purpose — whoever moves the collector has to
+  // be able to supply the secret a second time.
+  @del("/key")
+  clearKey(req: Request): Reply {
+    if (!forgetCredential(this.db, "tracing")) {
+      return notFound("a tracing key");
+    }
     return this.status(req);
   }
 }
@@ -520,6 +530,8 @@ class ModelApi {
     let m: ModelRow = JSON.parse<ModelRow>(req.body);
     let wrong = modelProblem(m);
     if (wrong != "") { return badRequest(wrong); }
+    let moved = modelDestinationProblem(this.db, m);
+    if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, modelsMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, modelsMapping(), jsonId(req.body)));
@@ -584,6 +596,8 @@ class ModelApi {
     }
     let wrong = modelProblem(row);
     if (wrong != "") { return badRequest(wrong); }
+    let moved = modelDestinationProblem(this.db, row);
+    if (moved != "") { return badRequest(moved); }
 
     // At most one embedding model is enabled at a time. Enforced here rather
     // than asked of a caller: two enabled embedders is not a preference, it is
@@ -749,6 +763,8 @@ class ServerApi {
     if (body.transport != "http") {
       return badRequest("this speaks http; \"" + body.transport + "\" needs a subprocess it cannot spawn");
     }
+    let moved = serverDestinationProblem(this.db, body);
+    if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, mcpServersMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, mcpServersMapping(), jsonId(req.body)));
@@ -779,6 +795,10 @@ class ServerApi {
       + " WHERE id = " + placeholderAt(this.db, 3),
       [body.authKind, body.authHeader, param(req, "id")]);
     if (body.authKind == "none") {
+      // Switching a server to no auth used to leave the token in the store,
+      // where nothing ever read it again and nothing ever deleted it — until
+      // the kind was switched back, or the id was reused.
+      forgetCredential(this.db, "mcp:" + param(req, "id"));
       return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
     }
     let stored = storeCredential(this.db, { provider: "mcp:" + param(req, "id"),
@@ -804,6 +824,8 @@ class ServerApi {
       return badRequest("this speaks http; \"" + row.transport + "\" needs a subprocess it cannot spawn");
     }
     if (row.endpoint.trim() == "") { return badRequest("a server needs an endpoint"); }
+    let moved = serverDestinationProblem(this.db, row);
+    if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, mcpServersMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
@@ -814,8 +836,7 @@ class ServerApi {
     if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
       return notFound("server " + param(req, "id"));
     }
-    executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE server_id = " + this.db.placeholder, [param(req, "id")]);
-    deleteById(this.db, mcpServersMapping(), param(req, "id"));
+    forgetServer(this.db, param(req, "id"));
     return noContent();
   }
 }
@@ -1817,7 +1838,7 @@ function agentNameProblem(name: string): string {
 // provider with no endpoint is accepted today and fails at the first run with
 // a blank URL; a model row naming no width is accepted and fails when the
 // corpus table is made, long after anyone connects the two.
-function modelProblem(m: ModelRow): string {
+export function modelProblem(m: ModelRow): string {
   if (m.label.trim() == "") { return "a model needs a label"; }
   if (m.apiName.trim() == "") { return "a model needs the provider's own name for it"; }
   if (m.kind != "chat" && m.kind != "embedding") {
@@ -1832,7 +1853,130 @@ function modelProblem(m: ModelRow): string {
   if (m.kind == "embedding" && m.dimensions <= 0) {
     return "an embedding model must say how wide its vectors are";
   }
+  // The one field here that decides where a key is sent, and the one this
+  // never read. A base URL that is not an address cannot be compared with the
+  // address the key was stored for, so it is refused where it is written
+  // rather than where it is used.
+  if (m.baseUrl.trim() != "" && destinationOf(m.baseUrl) == "") {
+    return "a base URL is an http or https address, like \"https://gateway.internal/v1\" — not \"" + m.baseUrl + "\"";
+  }
   return "";
+}
+
+// --- a secret's destination --------------------------------------------------
+//
+// See credentials.ts for why these exist. Three routes name a secret and a
+// destination in the same row, and only the secret is write-only; these are
+// the three, asked the same question in the same words.
+
+// Where a model row's calls actually land: its base URL when it has one, and
+// the provider's own endpoint when it does not.
+function modelDestination(m: ModelRow): string {
+  if (m.kind == "embedding") { return endpointFor(m, "embeddings"); }
+  return endpointFor(m, "chat/completions");
+}
+
+// Whether this model row may be written, given what is stored for its
+// provider.
+//
+// A model row names a key — through its provider — and a destination, through
+// its base URL, and only the first of those is write-only. `modelProblem`
+// checks the label, the api name, the kind and the width and has never looked
+// at `baseUrl`, so `PUT /models/:id {"baseUrl":"http://…"}` followed by `POST
+// /models/:id/test` sends `authorization: Bearer <the stored key>` wherever
+// you like. `/test` re-materialises the row with `enabled: true`, so a
+// disabled row is no protection either.
+//
+// A row that does not exist yet is treated as one pointing at the provider's
+// own endpoint: a fresh row naming someone else's host leaks precisely as much
+// as an edited one, and `POST /models` is the shorter way to write it.
+export function modelDestinationProblem(db: Db, row: ModelRow): string {
+  let held = findById(db, modelsMapping(), row.id);
+  let authorised: ModelRow = {
+    id: row.id, label: row.label, apiName: row.apiName, provider: row.provider,
+    kind: row.kind, dimensions: row.dimensions, baseUrl: "", enabled: row.enabled,
+  };
+  if (held != "") { authorised = JSON.parse<ModelRow>(held); }
+  let move: DestinationMove = {
+    subject: "model " + row.id,
+    secretName: "the " + row.provider + " key",
+    clearWith: "DELETE /providers/" + row.provider + "/key",
+    was: modelDestination(authorised),
+    now: modelDestination(row),
+    secretStored: hasCredential(db, row.provider),
+  };
+  return destinationProblem(move);
+}
+
+// Whether this server row may be written, given the token stored under its id.
+//
+// The token lives under "mcp:" + id and is not re-keyed when the endpoint
+// moves, so `PUT /servers/:id` followed by a plain `GET /servers/:id/tools`
+// delivers the bearer token to whatever address was just written. A server
+// with no row yet has no address on record, so any endpoint is a move — which
+// is what catches a recycled id whose predecessor's token is still stored.
+export function serverDestinationProblem(db: Db, row: McpServerRow): string {
+  let held = findById(db, mcpServersMapping(), row.id);
+  let was = "";
+  if (held != "") { was = JSON.parse<McpServerRow>(held).endpoint; }
+  let move: DestinationMove = {
+    subject: "server " + row.id,
+    secretName: "its token",
+    clearWith: "PUT /servers/" + row.id + "/auth with {\"authKind\":\"none\",\"authHeader\":\"\",\"token\":\"\"}",
+    was: was,
+    now: row.endpoint,
+    secretStored: hasCredential(db, "mcp:" + row.id),
+  };
+  return destinationProblem(move);
+}
+
+// Whether the collector may be moved, given the secret stored for it.
+//
+// `PUT /tracing` sets `endpoint` freely and the langfuse backend sends
+// `Authorization: Basic <public>:<secret>` to it.
+export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
+  let held = findById(db, traceConfigMapping(), "default");
+  let was = "";
+  if (held != "") { was = JSON.parse<TraceConfigRow>(held).endpoint; }
+  let move: DestinationMove = {
+    subject: "the trace collector",
+    secretName: "its secret key",
+    clearWith: "DELETE /tracing/key",
+    was: was,
+    now: row.endpoint,
+    secretStored: hasCredential(db, "tracing"),
+  };
+  return destinationProblem(move);
+}
+
+// --- forgetting a row, and everything hung off it ----------------------------
+
+// Delete a server, its token and its links.
+//
+// The token went unnoticed: `remove` deleted the row and the agent links and
+// left `mcp:<id>` in the credential store. Ids come out of the request body
+// and are short human strings, so recycling "s1" is ordinary — and the next
+// run sent the old server's secret to the new server's endpoint.
+export function forgetServer(db: Db, serverId: string): void {
+  executeWith(db, "DELETE FROM agent_mcp_servers WHERE server_id = " + db.placeholder, [serverId]);
+  deleteById(db, mcpServersMapping(), serverId);
+  forgetCredential(db, "mcp:" + serverId);
+}
+
+// Delete an agent, its grants, its retrieval row and its links — in both
+// directions.
+//
+// Neither `agent_scopes` nor `agent_retrieval` has a foreign key and neither
+// was ever cleaned, so recreating an id started the new agent already granted
+// its predecessor's corpus. `agent_sub_agents WHERE child_id` survived too,
+// silently re-attaching it to whoever used to delegate to it.
+export function forgetAgent(db: Db, agentId: string): void {
+  executeWith(db, "DELETE FROM agent_sub_agents WHERE parent_id = " + db.placeholder, [agentId]);
+  executeWith(db, "DELETE FROM agent_sub_agents WHERE child_id = " + db.placeholder, [agentId]);
+  executeWith(db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + db.placeholder, [agentId]);
+  executeWith(db, "DELETE FROM agent_scopes WHERE agent_id = " + db.placeholder, [agentId]);
+  deleteById(db, agentRetrievalMapping(), agentId);
+  deleteById(db, agentsMapping(), agentId);
 }
 
 // The document checks that used to happen inside the request, kept there now
@@ -1864,15 +2008,17 @@ function openDatabase(): Db {
       password: process.env("AGENTS_PG_PASSWORD") ?? "",
     };
     connectDatabase(pg, server);
-    return migrated(pg);
+    return pg;
   }
   let db = sqlite();
   let cfg: DbConfig = { filename: process.env("AGENTS_DB_FILE") ?? "/tmp/agents_api.db" };
   connectDatabase(db, cfg);
-  return migrated(db);
+  return db;
 }
 
-function migrated(db: Db): Db {
+// Bring the schema up to date, and say why it could not be. "" means every
+// step this build knows about has run.
+export function migrationProblem(db: Db): string {
   // One plan, extended — not two plans. A second migrate() call would be
   // handed a plan that lacks the versions already recorded, and refuse.
   let plan = schemaPlan(db);
@@ -1898,8 +2044,16 @@ function migrated(db: Db): Db {
   let ar: int = 0;
   while (ar < results.length) { plan.push(results[ar]); ar = ar + 1; }
   let ran = migrate(db, plan);
-  if (!ran.ok) { console.error(ran.error); }
-  return db;
+  if (ran.ok) { return ""; }
+  // Logged and carried on with, this served an API whose routes SELECT columns
+  // that do not exist: every one of them answers 500, at a distance from the
+  // one line that said why. The master key already refuses to start without
+  // being usable, for the same reason and with the same remedy — fix it and
+  // start again.
+  if (ran.failedVersion != "") {
+    return "the schema is not up to date: migration " + ran.failedVersion + " did not run — " + ran.error;
+  }
+  return "the schema is not up to date: " + ran.error;
 }
 
 
@@ -1941,6 +2095,11 @@ function seed(db: Db): void {
 
 function main(): void {
   let db = openDatabase();
+  let schema = migrationProblem(db);
+  if (schema != "") {
+    console.error(schema);
+    return;
+  }
   seed(db);
   let master = masterKey();
   let keyProblem = masterKeyProblem(master);
@@ -1950,402 +2109,44 @@ function main(): void {
     console.error(keyProblem);
     return;
   }
-  let api = new AgentApi(db, master);
-  let providers = new ProviderApi(db, master);
-  let traces = new RunApi(db);
 
-  let bound = new Map<string, Handler>();
-  // Every binding catches, and the try is inside the lambda because that is
-  // the only place it works: spec 245 propagates a throw through direct calls,
-  // but a handler is reached through a function value, and the fixpoint pass
-  // cannot see through one — so a throw inside a handler lambda escapes any
-  // try in `serve` and kills the process.
+  // Fifteen controllers, handed over whole. Each one is read for its own
+  // `@controller` and its methods bound (specs 477/478), so there is no table
+  // to walk here, no prefix to invent so that four of these classes can all
+  // have a `list`, and no binding map to keep in step with the routes. What is
+  // written is what a reader needs: which controllers there are, and what each
+  // one is given.
   //
-  // It did. `JSON.parse<T>` throws when the body is missing a field the record
-  // declares, and one PUT with a partial body stopped the whole API for
-  // everyone. Twenty-one routes parse a body.
-  bound.set("list", (req: Request) => {
-    try { return api.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("find", (req: Request) => {
-    try { return api.find(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-    bound.set("update", (req: Request) => {
-    try { return api.update(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("create", (req: Request) => {
-    try { return api.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-      bound.set("addServer", (req: Request) => {
-    try { return api.addServer(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("removeServer", (req: Request) => {
-    try { return api.removeServer(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("addChild", (req: Request) => {
-    try { return api.addChild(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("removeChild", (req: Request) => {
-    try { return api.removeChild(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("run", (req: Request) => {
-    try { return api.run(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("scopes", (req: Request) => {
-    try { return api.scopes(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("grant", (req: Request) => {
-    try { return api.grant(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("revoke", (req: Request) => {
-    try { return api.revoke(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("setRetrieval", (req: Request) => {
-    try { return api.setRetrieval(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("runs", (req: Request) => {
-    try { return api.runs(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("remove", (req: Request) => {
-    try { return api.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
+  // The `try` that answers a throwing handler with a 400 lives inside `mount`,
+  // once, for all of them — including the one that used to take the process
+  // down: `JSON.parse<T>` throws when a PUT body omits a field the record
+  // declares, and twenty-one of these routes parse a body.
+  let mounts: Mount[] = [
+    new AgentApi(db, master),
+    new ProviderApi(db, master),
+    new RunApi(db),
+    new ModelApi(db, master),
+    new ConfigApi(db),
+    new PromptApi(db),
+    new WorkspaceApi(db, master),
+    new ThreadApi(db, master),
+    new DocumentApi(db, master),
+    new ScopeApi(db),
+    new JobApi(db),
+    new TraceApi(db, master),
+    new ServerApi(db, master),
+    new ArtifactApi(db),
+    new PreviewApi(db),
+  ];
 
-  bound.set("plist", (req: Request) => {
-    try { return providers.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("pstatus", (req: Request) => {
-    try { return providers.status(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("psetKey", (req: Request) => {
-    try { return providers.setKey(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("pclearKey", (req: Request) => {
-    try { return providers.clearKey(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  bound.set("rfind", (req: Request) => {
-    try { return traces.find(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let workspace = new WorkspaceApi(db, master);
-  bound.set("wlist", (req: Request) => {
-    try { return workspace.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wupload", (req: Request) => {
-    try { return workspace.upload(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wread", (req: Request) => {
-    try { return workspace.read(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wremove", (req: Request) => {
-    try { return workspace.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wpull", (req: Request) => {
-    try { return workspace.pull(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wpromote", (req: Request) => {
-    try { return workspace.promote(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let artifacts = new ArtifactApi(db);
-  bound.set("alist", (req: Request) => {
-    try { return artifacts.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("acreate", (req: Request) => {
-    try { return artifacts.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("abyTurn", (req: Request) => {
-    try { return artifacts.byTurn(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("afind", (req: Request) => {
-    try { return artifacts.find(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("aversion", (req: Request) => {
-    try { return artifacts.version(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("arotate", (req: Request) => {
-    try { return artifacts.rotate(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("aremove", (req: Request) => {
-    try { return artifacts.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  // The preview handlers share the artifact prefix, so their names come out
-  // "apreview" and "asibling" — the class is separate because the paths are,
-  // not because the numbering is. Neither name collides with ArtifactApi's
-  // list/create/find/version/rotate/remove, which is the only thing the shared
-  // prefix requires.
-  let preview = new PreviewApi(db);
-  bound.set("apreview", (req: Request) => {
-    try { return preview.preview(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("asibling", (req: Request) => {
-    try { return preview.sibling(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let threads = new ThreadApi(db, master);
-  bound.set("hlist", (req: Request) => {
-    try { return threads.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("hopen", (req: Request) => {
-    try { return threads.open(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("hsay", (req: Request) => {
-    try { return threads.say(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("htranscript", (req: Request) => {
-    try { return threads.transcript(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let documents = new DocumentApi(db, master);
-  bound.set("dlist", (req: Request) => {
-    try { return documents.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("dupload", (req: Request) => {
-    try { return documents.upload(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("dremove", (req: Request) => {
-    try { return documents.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let jobsApi = new JobApi(db);
-  bound.set("jlist", (req: Request) => {
-    try { return jobsApi.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let scopeApi = new ScopeApi(db);
-  bound.set("kstree", (req: Request) => {
-    try { return scopeApi.tree(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let tracingApi = new TraceApi(db, master);
-  bound.set("tstatus", (req: Request) => {
-    try { return tracingApi.status(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("tconfigure", (req: Request) => {
-    try { return tracingApi.configure(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("tsetKey", (req: Request) => {
-    try { return tracingApi.setKey(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let models = new ModelApi(db, master);
-  bound.set("mlist", (req: Request) => {
-    try { return models.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("mcreate", (req: Request) => {
-    try { return models.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("mupdate", (req: Request) => {
-    try { return models.update(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("mtest", (req: Request) => {
-    try { return models.test(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-    bound.set("mremove", (req: Request) => {
-    try { return models.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let configs = new ConfigApi(db);
-  bound.set("clist", (req: Request) => {
-    try { return configs.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("ccreate", (req: Request) => {
-    try { return configs.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("cremove", (req: Request) => {
-    try { return configs.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let prompts = new PromptApi(db);
-  bound.set("promptlist", (req: Request) => {
-    try { return prompts.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("promptcreate", (req: Request) => {
-    try { return prompts.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let servers = new ServerApi(db, master);
-  bound.set("slist", (req: Request) => {
-    try { return servers.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("stools", (req: Request) => {
-    try { return servers.tools(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("screate", (req: Request) => {
-    try { return servers.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("supdate", (req: Request) => {
-    try { return servers.update(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("ssetAuth", (req: Request) => {
-    try { return servers.setAuth(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-    bound.set("sremove", (req: Request) => {
-    try { return servers.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  // Three controllers, one table. The provider and run handlers are prefixed
-  // because a table is keyed by handler name and the classes share a `find`
-  // and a `list`.
-  let table: Route[] = [];
-  let a: int = 0;
-  while (a < controllerAgentApi.length) { table.push(controllerAgentApi[a]); a = a + 1; }
-  let p: int = 0;
-  while (p < controllerProviderApi.length) {
-    let r = controllerProviderApi[p];
-    table.push(route(r.method, r.pattern, "p" + r.handler));
-    p = p + 1;
-  }
-  let t: int = 0;
-  while (t < controllerRunApi.length) {
-    let r = controllerRunApi[t];
-    table.push(route(r.method, r.pattern, "r" + r.handler));
-    t = t + 1;
-  }
-  let m: int = 0;
-  while (m < controllerModelApi.length) {
-    let r = controllerModelApi[m];
-    table.push(route(r.method, r.pattern, "m" + r.handler));
-    m = m + 1;
-  }
-  let c: int = 0;
-  while (c < controllerConfigApi.length) {
-    let r = controllerConfigApi[c];
-    table.push(route(r.method, r.pattern, "c" + r.handler));
-    c = c + 1;
-  }
-  let pr: int = 0;
-  while (pr < controllerPromptApi.length) {
-    let r = controllerPromptApi[pr];
-    table.push(route(r.method, r.pattern, "prompt" + r.handler));
-    pr = pr + 1;
-  }
-  let wf: int = 0;
-  while (wf < controllerWorkspaceApi.length) {
-    let r = controllerWorkspaceApi[wf];
-    table.push(route(r.method, r.pattern, "w" + r.handler));
-    wf = wf + 1;
-  }
-  let th: int = 0;
-  while (th < controllerThreadApi.length) {
-    let r = controllerThreadApi[th];
-    table.push(route(r.method, r.pattern, "h" + r.handler));
-    th = th + 1;
-  }
-  let dc: int = 0;
-  while (dc < controllerDocumentApi.length) {
-    let r = controllerDocumentApi[dc];
-    table.push(route(r.method, r.pattern, "d" + r.handler));
-    dc = dc + 1;
-  }
-  let sc: int = 0;
-  while (sc < controllerScopeApi.length) {
-    let r = controllerScopeApi[sc];
-    table.push(route(r.method, r.pattern, "ks" + r.handler));
-    sc = sc + 1;
-  }
-  let jb: int = 0;
-  while (jb < controllerJobApi.length) {
-    let r = controllerJobApi[jb];
-    table.push(route(r.method, r.pattern, "j" + r.handler));
-    jb = jb + 1;
-  }
-  let tr: int = 0;
-  while (tr < controllerTraceApi.length) {
-    let r = controllerTraceApi[tr];
-    table.push(route(r.method, r.pattern, "t" + r.handler));
-    tr = tr + 1;
-  }
-  let sv: int = 0;
-  while (sv < controllerServerApi.length) {
-    let r = controllerServerApi[sv];
-    table.push(route(r.method, r.pattern, "s" + r.handler));
-    sv = sv + 1;
-  }
-  let ar: int = 0;
-  while (ar < controllerArtifactApi.length) {
-    let r = controllerArtifactApi[ar];
-    table.push(route(r.method, r.pattern, "a" + r.handler));
-    ar = ar + 1;
-  }
-  let pv: int = 0;
-  while (pv < controllerPreviewApi.length) {
-    let r = controllerPreviewApi[pv];
-    table.push(route(r.method, r.pattern, "a" + r.handler));
-    pv = pv + 1;
-  }
-
+  let table = mountedRoutes(mounts);
   let i: int = 0;
   while (i < table.length) {
     console.log("route  " + table[i].method + " " + table[i].pattern + " -> " + table[i].handler);
     i = i + 1;
   }
 
-  let problem = serve(8100, table, bound);
+  let problem = listen(8100, mounts);
   if (problem != "") { console.error(problem); }
 }
 

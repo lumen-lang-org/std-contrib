@@ -175,6 +175,35 @@ export function scopeCovers(granted: string, path: string): bool {
   return p.startsWith(g + "/");
 }
 
+// The character that turns off a LIKE wildcard, and the one that turns off
+// itself.
+//
+// "!" rather than the conventional backslash because the escape character is
+// written into the SQL as a string literal, and a backslash inside a string
+// literal is itself an escape on MySQL and not on PostgreSQL — so `ESCAPE
+// '\'` is two different statements depending on the driver, and `ESCAPE '!'`
+// is one. Nothing else here treats "!" specially.
+const SCOPE_ESCAPE = "!";
+
+// A path as a LIKE pattern's literal prefix.
+//
+// "%" and "_" are LIKE's wildcards, and a folder is entitled to contain both:
+// "/team_docs" is an ordinary name. Left unescaped it matches "/team-docs" as
+// well, so a grant of one folder silently reads another — and `scopeCovers`,
+// which draws the same tree in memory, disagrees. Two answers to "who may read
+// this" is worse than either of them.
+export function likeLiteral(text: string): string {
+  let out = "";
+  let i: int = 0;
+  while (i < text.length) {
+    let ch = text.charAt(i);
+    if (ch == SCOPE_ESCAPE || ch == "%" || ch == "_") { out = out + SCOPE_ESCAPE; }
+    out = out + ch;
+    i = i + 1;
+  }
+  return out;
+}
+
 // The SQL for "in any of these scopes", and the values it binds.
 //
 // Two parameters per scope — the exact path and the path plus "/%" — rather
@@ -187,7 +216,8 @@ export function scopeClause(db: Db, scopes: string[], from: int): string {
   while (i < scopes.length) {
     if (i > 0) { out = out + " OR "; }
     out = out + "scope = " + placeholderAt(db, from + i * 2)
-      + " OR scope LIKE " + placeholderAt(db, from + i * 2 + 1);
+      + " OR scope LIKE " + placeholderAt(db, from + i * 2 + 1)
+      + " ESCAPE '" + SCOPE_ESCAPE + "'";
     i = i + 1;
   }
   return out + ")";
@@ -198,8 +228,10 @@ export function scopeArgs(scopes: string[]): string[] {
   let i: int = 0;
   while (i < scopes.length) {
     let s = normalScope(scopes[i]);
+    // The exact half is compared with `=` and is a value, not a pattern, so it
+    // is bound as it stands. Only the subtree half is a pattern.
     out.push(s);
-    if (s == "/") { out.push("/%"); } else { out.push(s + "/%"); }
+    if (s == "/") { out.push("/%"); } else { out.push(likeLiteral(s) + "/%"); }
     i = i + 1;
   }
   return out;

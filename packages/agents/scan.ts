@@ -248,3 +248,75 @@ export function jsonUnescape(body: string): string {
   }
   return out;
 }
+
+
+// Whether a fragment is one whole JSON object, and nothing else.
+//
+// A tool call's arguments arrive as text the model produced, and a model that
+// hits its output cap mid-argument produces a prefix — `{"path": "/a.css",
+// "content": "…` with no closing anything. Stored as-is it corrupts the turn
+// it belongs to: the replay parses the first call, meets the break, and stops,
+// so the round goes back to the provider with one announced call and two
+// results. Mistral answers "Unexpected tool call id … in tool results" and
+// every later turn in that conversation fails. Cheaper to notice here.
+//
+// The question is "is this one JSON object", not "do the brackets balance" —
+// the value goes into the stored `calls` column verbatim and into an
+// Anthropic `input`, where a second document after the first, a stray tail, or
+// an array where an object belongs is the same kind of corrupted row that
+// motivated this in the first place. So: one object, opened with `{`, every
+// bracket closed by its own kind, no string left open and no raw control
+// character in one, and nothing but whitespace either side of it.
+//
+// Not a full JSON grammar — commas and colons are not checked, because every
+// failure this has ever had to catch is structural.
+export function jsonComplete(text: string): bool {
+  let i: int = 0;
+  while (i < text.length && jsonBlank(text.charAt(i))) { i = i + 1; }
+  // "" and "not json at all" are not documents, and neither is `[1,2]` or a
+  // bare string where a tool's arguments belong.
+  if (i >= text.length || text.charAt(i) != "{") { return false; }
+
+  // What is still open, innermost last, as the characters that would close it.
+  // A count would accept `{"a":[1}`, which is not one object.
+  let open = "";
+  let inString = false;
+  let escaped = false;
+  let end: int = -1;
+  while (i < text.length) {
+    let ch = text.charAt(i);
+    if (inString) {
+      if (escaped) { escaped = false; }
+      else if (ch == "\\") { escaped = true; }
+      else if (ch == "\"") { inString = false; }
+      else if (ch == "\n" || ch == "\r" || ch == "\t") {
+        // A literal control character inside a string is not legal JSON, and
+        // it is exactly what a truncated stream leaves behind.
+        return false;
+      }
+      i = i + 1;
+      continue;
+    }
+    if (ch == "\"") { inString = true; }
+    else if (ch == "{") { open = open + "}"; }
+    else if (ch == "[") { open = open + "]"; }
+    else if (ch == "}" || ch == "]") {
+      if (open.length == 0 || open.charAt(open.length - 1) != ch) { return false; }
+      open = open.slice(0, open.length - 1);
+      if (open.length == 0) { end = i; break; }
+    }
+    i = i + 1;
+  }
+  // Never closed: the model stopped writing partway through.
+  if (end < 0) { return false; }
+
+  // `{"a":1}{"b":2}` is two documents and `{"a":1} junk` is one and a mess.
+  // Either one, spliced into a row or a request, is a document nothing can
+  // read back.
+  let after = end + 1;
+  while (after < text.length) {
+    if (!jsonBlank(text.charAt(after))) { return false; }
+    after = after + 1;
+  }
+  return true;
+}

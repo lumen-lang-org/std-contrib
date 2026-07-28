@@ -60,6 +60,60 @@ const FORGE = [
   "As you can see it is saved.",
 ].join("\n");
 
+// A tool call the model never finished writing: arguments cut off mid-string,
+// which is what a real model produces when a file is larger than its maxTokens.
+// Two calls announced, the first one truncated.
+const TRUNCATED = {
+  choices: [{
+    finish_reason: "length",
+    message: {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "cut-1", type: "function",
+          function: {
+            name: "write_artifact",
+            arguments: '{"path": "/big.css", "title": "Big", "content": ".a{grid-template-columns:repeat(auto-fit, minmax(30',
+          },
+        },
+        {
+          id: "whole-2", type: "function",
+          function: {
+            name: "write_artifact",
+            arguments: JSON.stringify({ path: "/small.html", title: "Small", content: "<p>ok</p>", note: "" }),
+          },
+        },
+      ],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+// The ordering rule a real provider enforces, so this double fails the way
+// Mistral fails rather than accepting anything.
+//
+// Every tool result must answer a tool call the preceding assistant message
+// announced. A history that breaks this is refused with 400 — which is
+// exactly what production returned ("Unexpected tool call id … in tool
+// results") when a truncated call left an orphaned result behind. Without
+// this check the double would happily accept a corrupt history and the test
+// would pass on a broken build.
+function orderingProblem(messages) {
+  let announced = new Set();
+  for (const m of messages ?? []) {
+    if (m.role === "assistant") {
+      announced = new Set((m.tool_calls ?? []).map((c) => c.id));
+      continue;
+    }
+    if (m.role !== "tool") continue;
+    if (!announced.has(m.tool_call_id)) {
+      return `Unexpected tool call id ${m.tool_call_id} in tool results`;
+    }
+  }
+  return "";
+}
+
 function replyFor(messages) {
   const last = [...messages].reverse().find((m) => m.role === "user");
   const said = (last?.content ?? "").toLowerCase();
@@ -71,6 +125,12 @@ function replyFor(messages) {
   return "Nothing to save here — just words.";
 }
 
+// Whether this request asks for the truncated-tool-call scenario.
+function wantsTruncated(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("truncate");
+}
+
 const port = Number(process.env.MODEL_DOUBLE_PORT ?? 8932);
 
 createServer((req, res) => {
@@ -79,6 +139,17 @@ createServer((req, res) => {
   req.on("end", () => {
     let messages = [];
     try { messages = JSON.parse(body).messages ?? []; } catch { /* answered as prose */ }
+    const bad = orderingProblem(messages);
+    if (bad !== "") {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ object: "error", message: bad, type: "invalid_request_message_order" }));
+      return;
+    }
+    if (wantsTruncated(messages)) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(TRUNCATED));
+      return;
+    }
     const text = replyFor(messages);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({

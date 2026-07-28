@@ -24,7 +24,7 @@ import { Db } from "../plume/driver.ts";
 import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
-import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, replyText, assistantText, toolCallsFrom, userTurn, assistantTurn, toolTurn } from "./provider.ts";
+import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, replyText, assistantText, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { jsonText } from "./scan.ts";
@@ -452,6 +452,33 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
     inputTokens = inputTokens + last.inputTokens;
     outputTokens = outputTokens + last.outputTokens;
+
+    // A reply the model did not finish writing is not an answer, and the
+    // provider's own finish reason is the only thing that says so.
+    //
+    // Read here rather than inferred from an empty call list further down: a
+    // reply cut mid-tool-call loses that call to `jsonComplete` and arrives
+    // with none, which is exactly how a model says it has finished — so the
+    // round below stored the provider's raw JSON as the assistant's answer
+    // where `content` was null, and stored the question with no answer at all
+    // where it was "", with `run.ok` true either way, so asking again
+    // duplicated the round. The reason also catches a reply cut mid-text,
+    // which the call list cannot see at all.
+    //
+    // The counts above are kept: the request happened and it cost what it
+    // cost, whatever came back.
+    let cut = truncationProblem(model.provider, last.text, configRow.maxTokens);
+    if (cut != "") {
+      if (on) { trace = endSpanFailed(trace, agentSpan, { input: userText, message: cut }); }
+      // The reply is still carried as `body` for the run log — what a
+      // truncated round actually received is the first thing anyone reading
+      // it will want — but it is not an answer and `ok` says so.
+      let stopped: Completion = {
+        ok: false, text: last.text, status: last.status, error: cut,
+        inputTokens: last.inputTokens, outputTokens: last.outputTokens, counted: last.counted,
+      };
+      return report(agent, prompt, model, notes, context, steps, stopped, "", "refused", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
+    }
 
     let calls = toolCallsFrom(model.provider, last.text);
     let said = assistantText(model.provider, last.text);

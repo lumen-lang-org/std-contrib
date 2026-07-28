@@ -26,3 +26,8 @@ import "@nuraly/lumenui/textarea/bundle";
 // A surface to work on, as opposed to nr-modal's question to answer. Settings
 // is the former: it is a place you go, not a thing you confirm.
 import "@nuraly/lumenui/overlay/bundle";
+// nr-code-editor — the prompt editor — is deliberately *not* imported here.
+// The canvas bundle already carries it, and importing its own bundle as well
+// threw `define("nr-code-editor") has already been used` before the console
+// had drawn anything at all. Widening the list above is how this file breaks;
+// grep a bundle for the tag before adding it.

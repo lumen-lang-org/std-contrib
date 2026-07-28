@@ -5,7 +5,7 @@
 // names no model.
 
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { JsonText, jsonRaw, jsonText, jsonList, jsonStringMember } from "./scan.ts";
+import { JsonText, jsonFind, jsonRaw, jsonText, jsonList, jsonStringMember, jsonComplete } from "./scan.ts";
 
 export type Completion = {
   ok: bool,
@@ -160,6 +160,23 @@ export function chatEndpoint(provider: string): string {
   if (provider == "anthropic") { return "https://api.anthropic.com/v1/messages"; }
   if (provider == "openai") { return "https://api.openai.com/v1/chat/completions"; }
   return "";
+}
+
+// The path a provider's chat endpoint hangs off a root.
+//
+// Behind a gateway this is the whole of the address, and the wire format
+// belongs to the provider rather than to the gateway: Anthropic speaks
+// `/messages` wherever it is hosted. Asking for `chat/completions` regardless —
+// which is what the one call site used to hardcode — 404s every Anthropic row
+// that has a baseUrl, and only the empty-baseUrl path ever worked.
+export function chatPath(provider: string): string {
+  if (provider == "anthropic") { return "messages"; }
+  return "chat/completions";
+}
+
+// The address a model row's completions are actually sent to.
+export function chatEndpointFor(model: ModelRow): string {
+  return endpointFor(model, chatPath(model.provider));
 }
 
 // Providers disagree about where the key goes and what the body is called, and
@@ -381,6 +398,38 @@ function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: stri
 
 // --- what came back -----------------------------------------------------------
 
+// Why the model stopped writing, in the provider's own word, or "" when it did
+// not say.
+//
+// Two spellings and two homes: OpenAI and Mistral put `finish_reason` on the
+// choice, Anthropic puts `stop_reason` on the reply. Each is looked for under
+// its own provider only — finding the other's would report a finished reply as
+// a cut-off one.
+export function stopReasonOf(provider: string, body: string): string {
+  if (provider == "anthropic") { return jsonText(body, "stop_reason"); }
+  return jsonText(body, "finish_reason");
+}
+
+// The sentence to fail a round with when the model ran out of output space, or
+// "" when it did not.
+//
+// This is the only thing that says a reply was cut short. A reply truncated
+// mid-tool-call loses that call to `jsonComplete` and arrives with no calls at
+// all, which is indistinguishable from a model that has finished — so the
+// round stored the provider's raw JSON as the assistant's answer where
+// `content` was null, and stored the question with no answer at all where it
+// was "". A reply cut mid-*text* nothing noticed in any shape.
+//
+// Emptiness is not the test, then: the reason is. `max_tokens` is Anthropic's
+// word, `length` OpenAI's, `model_length` Mistral's.
+export function truncationProblem(provider: string, body: string, maxTokens: int): string {
+  let reason = stopReasonOf(provider, body);
+  if (reason != "length" && reason != "max_tokens" && reason != "model_length") { return ""; }
+  return "the model ran out of room before it finished this reply (it stopped on \"" + reason
+    + "\"), so nothing was kept: ask for less at a time, or raise this model config's max_tokens, currently "
+    + `${maxTokens}` + ".";
+}
+
 // The calls a reply asked for, in order. None is the ordinary case: it is how
 // a model says it has finished.
 export function toolCallsFrom(provider: string, body: string): ToolCall[] {
@@ -392,8 +441,19 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
     while (b < blocks.length) {
       if (jsonText(blocks[b], "type") == "tool_use") {
         let input = jsonRaw(blocks[b], "input");
-        if (input == "") { input = "{}"; }
-        out.push(toolCall(jsonText(blocks[b], "id"), jsonText(blocks[b], "name"), input));
+        // No `input` member at all is a tool that takes no arguments. An
+        // `input` that is there and reads as nothing is a value jsonValueAt
+        // refused to hand back half of — a different thing entirely, and
+        // turning it into "{}" is how write_artifact came to be called with
+        // an empty path.
+        if (input == "" && jsonFind(blocks[b], "input") < 0) { input = "{}"; }
+        // The same check the OpenAI branch below makes, and for the same
+        // reason: what is stored here is replayed to the provider verbatim,
+        // and a tool_use whose input is not one JSON object is refused —
+        // along with every later message in that conversation.
+        if (jsonComplete(input)) {
+          out.push(toolCall(jsonText(blocks[b], "id"), jsonText(blocks[b], "name"), input));
+        }
       }
       b = b + 1;
     }
@@ -412,7 +472,16 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
       let args = raw;
       if (raw.startsWith("\"")) { args = jsonText(fn, "arguments"); }
       if (args == "") { args = "{}"; }
-      out.push(toolCall(jsonText(calls[i], "id"), jsonText(fn, "name"), args));
+      // A call whose arguments do not close is a call the model did not
+      // finish writing — it ran out of output space partway through, which
+      // happens the moment a model is asked for a file bigger than its
+      // maxTokens. Dropping it here keeps the round consistent: the assistant
+      // turn announces exactly the calls that will be answered. Keeping it
+      // stored a turn whose own JSON could not be parsed back, and every
+      // later message in that conversation was refused by the provider.
+      if (jsonComplete(args)) {
+        out.push(toolCall(jsonText(calls[i], "id"), jsonText(fn, "name"), args));
+      }
     }
     i = i + 1;
   }
@@ -467,7 +536,7 @@ export function complete(model: ModelRow, config: ModelConfigRow, systemPrompt: 
 // One completion over a whole context, with the tools the model may call.
 // `complete` above is this with one turn and no tools.
 export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string): Completion {
-  let endpoint = endpointFor(model, "chat/completions");
+  let endpoint = chatEndpointFor(model);
   if (endpoint == "") {
     let unknown: Completion = { ok: false, text: "", status: 0, error: "no endpoint for provider \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
     return unknown;

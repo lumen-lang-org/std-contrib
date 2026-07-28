@@ -16,7 +16,7 @@
 // go, oldest first, never single turns.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
@@ -233,7 +233,21 @@ function callsJson(calls: ToolCall[]): string {
 // and the database's sentence otherwise — an error a caller must check,
 // because a round that was not stored must not have files extracted against
 // its seq.
+//
+// All of the round or none of it, in one transaction. A round is not a list of
+// rows that happen to arrive together: an assistant turn announcing calls is
+// only replayable beside the tool turns that answer them, and a cut between
+// them leaves a thread every provider refuses from then on — permanently, and
+// the caller is meanwhile told "the round was not stored", which was false.
+// A NUL byte in a tool result is one live trigger: jsonUnescape resolves the
+// escape a provider wrote into the byte itself, and PostgreSQL refuses that in
+// a text parameter. A race losing on migration 54's unique index is another.
 export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int): string {
+  if (turns.length == 0) { return ""; }
+
+  let opened = beginTransaction(db);
+  if (!opened.ok) { return opened.error; }
+
   let i: int = 0;
   while (i < turns.length) {
     let seq = from + i;
@@ -257,10 +271,31 @@ export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int):
       + placeholderAt(db, 4) + ", " + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ", "
       + placeholderAt(db, 7) + ", " + placeholderAt(db, 8) + ")",
       [row.id, row.threadId, `${row.seq}`, row.role, row.text, row.calls, row.callId, row.toolName]);
-    if (!wrote.ok) { return wrote.error; }
+    if (!wrote.ok) {
+      rollbackTransaction(db);
+      return wrote.error;
+    }
     i = i + 1;
   }
+
+  let done = commitTransaction(db);
+  if (!done.ok) {
+    rollbackTransaction(db);
+    return done.error;
+  }
   return "";
+}
+
+// Whether a round's turns are actually in the table.
+//
+// `appendTurns` returns "" for success, and a round that failed before it was
+// ever called leaves that same "" behind — so the sentinel alone says both
+// "the append succeeded" and "no append was attempted". Read as success, a
+// failed round's retrieved chunk ids get filed under a seq the table does not
+// hold, and `chunksShownSince` then excludes them from every later retrieval
+// in that thread, permanently, while the replay never carries them.
+export function roundIsStored(runOk: bool, appendProblem: string): bool {
+  return runOk && appendProblem == "";
 }
 
 // --- trimming -----------------------------------------------------------------------
@@ -406,8 +441,28 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   // transcript cannot account for is worse than a fence left in prose.
   let notes: string[] = [];
   let kept = run.text;
-  let appended = appendTurns(db, threadId, added, held.length);
-  if (appended != "") {
+  // A round that produced no answer is not a round.
+  //
+  // The question still reached `context` before the provider failed, so
+  // storing what the run built would file the user's turn under a round that
+  // never happened — and the console's Retry sends the same text again, so
+  // the next attempt replays the stored copy AND appends a fresh one. The
+  // provider then sees the question twice, which is the least of it: the
+  // duplicate is permanent and every later replay carries it.
+  let appended = "";
+  if (run.ok) {
+    appended = appendTurns(db, threadId, added, held.length);
+  } else {
+    notes.push("the round was not stored: " + run.error);
+  }
+  // Whether the round's turns are in the table — which "" alone cannot say,
+  // since a round nobody tried to store returns the same "".
+  let stored = roundIsStored(run.ok, appended);
+  if (!run.ok) {
+    // Nothing stored, nothing to extract against, and no marker in this text
+    // can be genuine.
+    kept = neutraliseMarkers(run.text, crypto.randomUUID()).text;
+  } else if (appended != "") {
     notes.push("this round could not be stored (" + appended + "), so no files were extracted from the reply");
     // Nothing was written this round, so no marker in this text can be
     // genuine — flattening against a nonce nothing carries turns every
@@ -455,7 +510,7 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   // Only for a stored round: chunks filed under a seq the table does not hold
   // would be excluded from future retrieval by chunksShownSince while the
   // replay never actually carried them.
-  if (appended == "" && shown.length > 0) { recordChunks(db, threadId, held.length, shown); }
+  if (stored && shown.length > 0) { recordChunks(db, threadId, held.length, shown); }
   let reply: ThreadReply = { run: run, text: kept, baseSeq: held.length, notes: notes };
   return reply;
 }

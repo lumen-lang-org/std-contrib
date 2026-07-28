@@ -205,7 +205,7 @@ export class AgentConsole extends LitElement {
           : this.view === "canvas" ? html`<agent-canvas></agent-canvas>` : html`
         <header>
           <span class="title">${this.threadTitle()}</span>
-          <span class="chip"><span class="bolt">⚡</span>
+          <span class="chip"><nr-icon class="bolt" name="zap" size="small"></nr-icon>
             ${this.threadId === "" ? html`
               <select @change=${(e: Event) => { this.agentId = (e.target as HTMLSelectElement).value; }}>
                 ${this.agents.map((a) => html`
@@ -213,9 +213,9 @@ export class AgentConsole extends LitElement {
               </select>` : this.agentName()}
           </span>
           <button class="icon" title="Workspace" aria-pressed=${this.rail === "workspace"}
-            @click=${() => this.show("workspace")}>🗂</button>
+            @click=${() => this.show("workspace")}><nr-icon name="folder" size="small"></nr-icon></button>
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
-            @click=${() => this.show("artifacts")}>📄</button>
+            @click=${() => this.show("artifacts")}><nr-icon name="file-text" size="small"></nr-icon></button>
         </header>
         <main>
           <!-- The session is the controller. Messages are not passed in: the
