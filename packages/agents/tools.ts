@@ -18,13 +18,14 @@ import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, agentsMapping, mcpServersMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
-import { jsonFind, jsonText } from "./scan.ts";
+import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape } from "./scan.ts";
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
 import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts";
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
 import { wireView } from "./artifacts-fence.ts";
+import { SCRIPT_OUTPUT_MAX, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptRun } from "./run-script.ts";
 
 // One tool, and which server answers it.
 export type MountedTool = {
@@ -559,6 +560,183 @@ function searchAnswer(found: ArtifactSearch): string {
     } else {
       out = out + "\n- " + hit.path + " v" + `${hit.version}` + ": " + hit.text;
     }
+    i = i + 1;
+  }
+  return out;
+}
+
+// --- scripts ---------------------------------------------------------------------
+//
+// One more tool beside the artifact four, offered on one condition more: it
+// exists only where docker answers. scriptTools() is the offering door — it
+// returns nothing at all when the probe fails, because a tool that is offered
+// and can only refuse teaches the model a name it will keep trying
+// (RUN-SCRIPT.md: absent, not offered-and-failing).
+
+// The description tells the model everything a run will not teach it: that
+// the environment persists, that there is no network, that deletion never
+// propagates, and what the reply names. All of that is invisible in a single
+// successful call, so — like SELF_CONTAINED above — it has to be said up
+// front.
+export function scriptTool(): ToolSpec {
+  return toolSpec("run_script",
+    "Run a program against this conversation's artifacts when tool calls alone would take too many steps — "
+    + "transform hundreds of entries at once, validate with a real library, compute before deciding what to write. "
+    + "The script runs inside this conversation's environment, a container that persists between runs: what it leaves "
+    + "outside its run directory — installed packages, caches, scratch files — is still there on the next call. That "
+    + "state is cache, not record; when the environment had to be recreated the reply says so, and only artifacts "
+    + "survive for certain. The environment has no network: nothing can be fetched, and package installs will fail. "
+    + "Name in paths every artifact the script reads or rewrites; each is copied into a fresh run directory at its own "
+    + "relative path (the artifact /report.md is the file report.md), the script runs there as a non-root user, and "
+    + "afterwards each file is compared back: unchanged bytes save nothing, changed bytes become the artifact's next "
+    + "version under write_artifact's rules, a file created beyond paths is saved only when mayCreate is true, and "
+    + "nothing is ever deleted — a file the script removed is reported and every stored version stays. "
+    + "The reply carries stdout and stderr, each capped at " + `${SCRIPT_OUTPUT_MAX}` + " bytes of UTF-8, and names "
+    + "what changed, was created, unchanged, missing or refused, with version numbers — read it rather than assuming; "
+    + "a refused path says why. A run may last at most " + `${SCRIPT_WALL_SECONDS}` + " seconds.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"language\":{\"type\":\"string\",\"description\":\"What runs the script: python, node or sh.\"},"
+    + "\"source\":{\"type\":\"string\",\"description\":\"The whole program. It runs with the run directory as its "
+    + "working directory; read and write the materialised files by their relative paths, and print what you want to read back.\"},"
+    + "\"paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"The artifact paths the script "
+    + "works on, named one by one, such as /report.md. A path that is not an artifact of this conversation refuses the "
+    + "whole call before anything runs.\"},"
+    + "\"mayCreate\":{\"type\":\"boolean\",\"description\":\"Whether files the script creates beyond paths are saved "
+    + "as new artifacts. Default false: a created file is reported and dropped.\"},"
+    + "\"environment\":{\"type\":\"string\",\"description\":\"Which of this conversation's environments runs it; "
+    + "empty means main. A new name creates another container.\"}},"
+    + "\"required\":[\"language\",\"source\",\"paths\"]}");
+}
+
+export function scriptTools(): ToolSpec[] {
+  let out: ToolSpec[] = [];
+  if (!scriptDockerWorks()) { return out; }
+  out.push(scriptTool());
+  return out;
+}
+
+// Dispatch run_script. The same contract as callArtifactTool: handled false
+// for a name that is not ours or a bare run, presence checks refusing each
+// missing member by name, and everything quoted back passes through wireView
+// — stdout and stderr are the output of a model-written program, exactly as
+// untrusted as an artifact body.
+export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
+  let not: FileToolResult = { handled: false, ok: false, text: "" };
+  if (call.threadId == "" || call.name != "run_script") { return not; }
+
+  if (jsonFind(call.args, "language") < 0) {
+    let unnamed: FileToolResult = {
+      handled: true, ok: false,
+      text: "run_script needs a member named \"language\" — python, node or sh.",
+    };
+    return unnamed;
+  }
+  if (jsonFind(call.args, "source") < 0) {
+    let unnamed: FileToolResult = {
+      handled: true, ok: false,
+      text: "run_script needs a member named \"source\" — the whole program to run.",
+    };
+    return unnamed;
+  }
+  if (jsonFind(call.args, "paths") < 0) {
+    let unnamed: FileToolResult = {
+      handled: true, ok: false,
+      text: "run_script needs a member named \"paths\" — the artifact paths the script works on, as an array of strings.",
+    };
+    return unnamed;
+  }
+  let entries = jsonList(jsonRaw(call.args, "paths"));
+  let paths: string[] = [];
+  let p: int = 0;
+  while (p < entries.length) {
+    if (!entries[p].startsWith("\"")) {
+      let bad: FileToolResult = {
+        handled: true, ok: false,
+        text: "every entry in run_script's paths must be a string naming an artifact path.",
+      };
+      return bad;
+    }
+    paths.push(jsonUnescape(entries[p].slice(1, entries[p].length - 1)));
+    p = p + 1;
+  }
+
+  let envName = jsonText(call.args, "environment");
+  let asked: ScriptRun = {
+    threadId: call.threadId,
+    language: jsonText(call.args, "language"),
+    source: jsonText(call.args, "source"),
+    paths: paths,
+    // Absent reads as false — the conservative direction: nothing new is
+    // saved unless the model said it may be.
+    mayCreate: jsonRaw(call.args, "mayCreate") == "true",
+    environment: envName,
+    turnSeq: call.turnSeq,
+    now: call.now,
+  };
+  let ran = scriptRun(db, asked);
+  let answered: FileToolResult = {
+    handled: true, ok: ran.ok,
+    text: wireView(scriptRunAnswer(ran, envName == "" ? "main" : envName)).text,
+  };
+  return answered;
+}
+
+// The run's whole story as one reply: what happened, what the script printed,
+// and what each named path came to. The model reads this instead of the run
+// directory, so every list the reconcile produced is named here.
+function scriptRunAnswer(ran: ScriptRan, envName: string): string {
+  let out = "";
+  if (ran.ok) {
+    out = "The script ran in environment \"" + envName + "\".";
+  } else if (ran.problem != "") {
+    out = ran.problem;
+  } else {
+    out = "The script did not complete: it was stopped by " + ran.stopped + ".";
+  }
+  if (ran.recreated) {
+    out = out + "\nThe environment was recreated: whatever it held between runs is gone; artifacts are unaffected.";
+  }
+  // The streams appear whenever the script actually ran — a refusal that
+  // never reached the container has no streams to show.
+  let ranAtAll = ran.ok || ran.stopped != "" || ran.stdout != "" || ran.stderr != "";
+  if (ranAtAll) {
+    if (ran.stdout != "") { out = out + "\nstdout:\n" + ran.stdout; } else { out = out + "\nstdout: (empty)"; }
+    if (ran.stderr != "") { out = out + "\nstderr:\n" + ran.stderr; }
+  }
+  if (ran.changed.length > 0) { out = out + "\nchanged: " + scriptVersionList(ran.changed); }
+  if (ran.created.length > 0) { out = out + "\ncreated: " + scriptVersionList(ran.created); }
+  if (ran.unchanged.length > 0) { out = out + "\nunchanged: " + scriptVersionList(ran.unchanged); }
+  if (ran.missing.length > 0) {
+    out = out + "\ndeleted in the run directory (the artifacts keep every version): " + scriptPathList(ran.missing);
+  }
+  let r: int = 0;
+  while (r < ran.refused.length) {
+    out = out + "\nrefused: " + ran.refused[r].path + " — " + ran.refused[r].problem;
+    r = r + 1;
+  }
+  if (!ran.ok && ran.stopped != "") {
+    out = out + "\nNothing was saved: a run must complete for its files to reconcile.";
+  }
+  return out;
+}
+
+function scriptVersionList(list: ScriptVersioned[]): string {
+  let out = "";
+  let i: int = 0;
+  while (i < list.length) {
+    if (i > 0) { out = out + ", "; }
+    out = out + list[i].path + " v" + `${list[i].version}`;
+    i = i + 1;
+  }
+  return out;
+}
+
+function scriptPathList(list: string[]): string {
+  let out = "";
+  let i: int = 0;
+  while (i < list.length) {
+    if (i > 0) { out = out + ", "; }
+    out = out + list[i];
     i = i + 1;
   }
   return out;
