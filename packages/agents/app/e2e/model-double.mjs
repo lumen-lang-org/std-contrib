@@ -404,6 +404,114 @@ const RUN_DOUBLER = {
   usage: { prompt_tokens: 10, completion_tokens: 20 },
 };
 
+// The scenario from a real conversation that failed: generate an SVG, convert
+// it to PNG, save both as artifacts. The python is real and needs nothing
+// installed — zlib and struct write a valid PNG — so the run is deterministic
+// and proves the binary path: the store holds base64, the preview shows a
+// picture, and v1 of the SVG is untouched.
+const WRITE_SVG = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "The SVG first, as an artifact; then a script can rasterise it without me pasting bytes anywhere.",
+      tool_calls: [{
+        id: "g1", type: "function",
+        function: { name: "write_artifact", arguments: JSON.stringify({
+          path: "/logo.svg", title: "Logo",
+          content: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"64\" height=\"64\"><rect width=\"64\" height=\"64\" fill=\"#34606b\"/></svg>",
+          note: "" }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+const PNG_SCRIPT = [
+  "import struct, zlib",
+  "def chunk(tag, data):",
+  "    c = tag + data",
+  "    return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c))",
+  "# a 64x64 solid PNG in the stdlib alone - no cairo, no pip",
+  "ihdr = struct.pack('>IIBBBBB', 64, 64, 8, 2, 0, 0, 0)",
+  "row = b'\\x00' + bytes([0x34, 0x60, 0x6b]) * 64",
+  "idat = zlib.compress(row * 64)",
+  "png = b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')",
+  "open('logo.png', 'wb').write(png)",
+  "print('png written:', len(png), 'bytes')",
+].join("\n");
+
+const RASTERISE = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "The environment can compute what I cannot: real PNG bytes. The standard library is enough here, and mayCreate lets the new file land as an artifact.",
+      tool_calls: [{
+        id: "g2", type: "function",
+        function: { name: "run_script", arguments: JSON.stringify({
+          language: "python",
+          source: PNG_SCRIPT,
+          paths: ["/logo.svg"],
+          mayCreate: true }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+// Install once, import later: the persistence the environment exists for.
+// cowsay is pure python, tiny, and its absence from the second script's
+// source is the proof — the import only works if the first run's install
+// survived in /workspace.
+const INSTALL_ONE = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "First run installs; nothing is materialised because nothing is needed — an install-only run.",
+      tool_calls: [{
+        id: "i1", type: "function",
+        function: { name: "run_script", arguments: JSON.stringify({
+          language: "sh", source: "pip install --quiet cowsay && echo install-done",
+          paths: [], mayCreate: false }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+const IMPORT_TWO = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "Second run imports what the first installed. If the environment forgot, this import throws and the reply will say so.",
+      tool_calls: [{
+        id: "i2", type: "function",
+        function: { name: "run_script", arguments: JSON.stringify({
+          language: "python", source: "import cowsay\nprint('still-installed:', cowsay.char_names[0])",
+          paths: [], mayCreate: false }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+function wantsPersistence(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("install a package then use it");
+}
+
+function wantsPng(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("convert it to a png");
+}
+
 function wantsScript(messages) {
   const last = [...messages].reverse().find((m) => m.role === "user");
   return (last?.content ?? "").toLowerCase().includes("double the prices");
@@ -446,6 +554,23 @@ function replyObject(messages) {
     return toolResultsPresent(messages)
       ? said(EDIT_DONE, "Both writes came back clean, so the menu exists and the home page links to it.")
       : EDIT_SITE;
+  }
+  if (wantsPersistence(messages)) {
+    const came = lastToolText(messages);
+    if (came.includes("still-installed:")) {
+      return said("The second run imported it without reinstalling: the environment kept the package.",
+        "The import succeeded in a script that never mentions pip, so the install persisted.");
+    }
+    if (came.includes("install-done")) { return IMPORT_TWO; }
+    return came === "" ? INSTALL_ONE : IMPORT_TWO;
+  }
+  if (wantsPng(messages)) {
+    const came = lastToolText(messages);
+    if (came.includes("png written:")) {
+      return said("Drew the logo and rasterised it: /logo.svg and /logo.png are both artifacts now.",
+        "The script printed the byte count and the reconcile lists /logo.png created, so the picture exists in the store.");
+    }
+    return came === "" ? WRITE_SVG : RASTERISE;
   }
   if (wantsScript(messages)) {
     const came = lastToolText(messages);

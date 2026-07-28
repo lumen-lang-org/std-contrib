@@ -28,7 +28,9 @@ import {
 // else — markdown, json, source, plain text — is text, and text is read as
 // text: a <pre> says what the bytes are without asking a parser what they mean.
 function embeds(kind: string): boolean {
-  return kind === "html" || kind === "svg";
+  // An image artifact is base64 text in the store; the preview route wraps it
+  // in a page, so the iframe is how it becomes visible here too.
+  return kind === "html" || kind === "svg" || kind === "image";
 }
 
 @customElement("artifact-panel")

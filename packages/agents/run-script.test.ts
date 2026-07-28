@@ -559,7 +559,7 @@ test("a script runs in its environment and its changed file lands as the next ve
   let asked = argvLines();
   expect(asked[0].indexOf("run -d --name agents-env-t1-main ") == 0);
   expect(asked[0].indexOf("--network none") < 0);
-  let exline = findLine(asked, "exec --user 65534:65534");
+  let exline = findLine(asked, "exec --user 0:0");
   expect(exline != "");
   expect(exline.indexOf("--workdir /tmp/lumen-run-") >= 0);
   expect(exline.indexOf("-e HOME=/workspace") >= 0);
@@ -613,15 +613,18 @@ test("an unknown language is refused naming what is available, before any contai
   expect(envList(database, "t1").length == 0);
 });
 
-test("empty paths are refused before any container exists", () => {
+test("empty paths are an install-only run, not a refusal", () => {
+  // It used to refuse — and a real model burned two of its eight steps
+  // retrying pip install with paths it did not have. Nothing is materialised
+  // and the reconcile walks an empty directory.
   fresh();
   dockerEmulated();
   let none: string[] = [];
   let ran = running("sh", "true", none, false, "1700000000000");
-  expect(!ran.ok);
-  expect(ran.problem.indexOf("paths") >= 0);
-  expect(argvLines().length == 0);
-  expect(envList(database, "t1").length == 0);
+  expect(ran.ok);
+  expect(ran.changed.length == 0);
+  expect(ran.created.length == 0);
+  expect(envList(database, "t1").length == 1);
 });
 
 test("a path that is not an artifact refuses the whole call and mints no container", () => {
@@ -770,4 +773,40 @@ test("an environment name is refused before anything exists: bytes counted as by
   // Neither refusal minted a row or touched docker.
   expect(envList(database, "t1").length == 0);
   expect(argvLines().length == 0);
+});
+
+test("an install-only run has no paths, and mayCreate still gates what it leaves behind", () => {
+  fresh();
+  dockerEmulated();
+  let ran = running("sh", "echo installed-something\ntouch stray.txt", [], false, "1785200000000");
+  expect(ran.ok);
+  expect(ran.stdout.indexOf("installed-something") >= 0);
+  // The stray file was reported and dropped, not saved: mayCreate was false.
+  expect(ran.created.length == 0);
+  expect(ran.refused.length == 1);
+  expect(ran.refused[0].path == "/stray.txt");
+});
+
+test("a binary image round-trips as base64: decoded for the script, re-encoded for the store", () => {
+  // A PNG is not UTF-8, so the store holds base64 and the run directory holds
+  // bytes. The script writes real binary; the reconcile brings it back
+  // encoded; a later run materialises it decoded, byte for byte.
+  fresh();
+  dockerEmulated();
+  // Two real PNG bytes prove nothing — use a header that is invalid UTF-8.
+  let made = running("sh",
+    "printf '\\211PNG\\r\\n\\032\\n' > logo.png\necho wrote-image", [], true, "1785200000000");
+  expect(made.ok);
+  expect(made.created.length == 1);
+  expect(made.created[0].path == "/logo.png");
+  // Stored as base64 of exactly those eight bytes.
+  let stored = getVersion(database, "t1:/logo.png", 1);
+  expect(stored.body == "iVBORw0KGgo=");
+
+  // The next run reads the same eight bytes back.
+  let read = running("sh",
+    "cksum logo.png | cut -d' ' -f2", ["/logo.png"], false, "1785200001000");
+  expect(read.ok);
+  expect(read.stdout.trim() == "8");
+  expect(read.unchanged.length == 1);
 });

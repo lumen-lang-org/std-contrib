@@ -227,7 +227,7 @@ function pathProblem(path: string): string {
     i = i + 1;
   }
   if (kindOf(normal) == "") {
-    return "an artifact path ends in a known extension — .html, .svg, .md, .json, .txt or a source suffix — not \"" + normal + "\"";
+    return "an artifact path ends in a known extension — .html, .svg, .md, .json, .txt, .png or a source suffix — not \"" + normal + "\"";
   }
   return "";
 }
@@ -317,6 +317,24 @@ export function kindOf(path: string): string {
     || ext == "py" || ext == "sql" || ext == "sh"
     || ext == "yaml" || ext == "yml" || ext == "toml") { return "code"; }
   if (ext == "txt" || ext == "csv" || ext == "log") { return "text"; }
+  // A raster image. The BODY of an image artifact is base64 text, never raw
+  // bytes: a Lumen string is UTF-8 and a PNG is not, so the bytes are encoded
+  // on the way in (the script reconcile does it; an upload must arrive
+  // already encoded) and decoded only inside a data: URI where a browser
+  // wants them. That keeps every storage rule — byte caps, JSON transport,
+  // the append-only log — working on text it can actually hold.
+  if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp") { return "image"; }
+  return "";
+}
+
+// The data-URI media type for an image artifact's path. Only meaningful for
+// kind "image"; the preview wrapper embeds the base64 body under this type.
+export function imageMediaType(path: string): string {
+  let ext = extensionOf(path);
+  if (ext == "png") { return "image/png"; }
+  if (ext == "jpg" || ext == "jpeg") { return "image/jpeg"; }
+  if (ext == "gif") { return "image/gif"; }
+  if (ext == "webp") { return "image/webp"; }
   return "";
 }
 
@@ -343,6 +361,11 @@ export function mimeOf(kind: string): string {
   // that sandbox, with connect-src 'none', a script has nothing to reach.
   if (kind == "css") { return "text/css; charset=utf-8"; }
   if (kind == "javascript") { return "text/javascript; charset=utf-8"; }
+  // An image artifact's stored body is base64 TEXT, and that is also what the
+  // wire carries — the preview route wraps it in a page with a data: URI
+  // rather than ever answering raw image bytes, so its mime here is the text
+  // it is, not the picture it encodes.
+  if (kind == "image") { return "text/plain; charset=utf-8"; }
   // Everything else is source, and source is text. Serving it as its own
   // language's type gains nothing and asks a browser to run something nobody
   // linked.

@@ -37,7 +37,7 @@
 
 import { Db } from "../plume/driver.ts";
 import { executeWith, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
-import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, getArtifact, getVersion, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
+import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
 import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { normalScope } from "./knowledge.ts";
 
@@ -153,7 +153,18 @@ function placeFile(dir: string, path: string, body: string): string {
   let parent = dir + path.slice(0, cut);
   try {
     fs.mkdirSync(parent, true);
-    fs.writeFileSync(dir + path, body);
+    if (kindOf(path) == "image") {
+      // The stored body is base64; the script wants the real bytes. Decoded
+      // through sh only because base64 -d reads stdin — the paths here are
+      // the run dir (ours) and an artifact path (whose charset has no quote
+      // to escape), so the single-quoted words below cannot be broken out of.
+      fs.writeFileSync(dir + path + ".b64", body);
+      let dec = child_process.spawnSync("sh", ["-c",
+        "base64 -d < '" + dir + path + ".b64' > '" + dir + path + "' && rm '" + dir + path + ".b64'"]);
+      if (dec.status != 0) { return "could not decode " + path + " into the run directory"; }
+    } else {
+      fs.writeFileSync(dir + path, body);
+    }
   } catch (e) {
     return "could not write " + path + " into the run directory";
   }
@@ -401,7 +412,22 @@ function sizeOf(path: string): int {
 }
 
 // A file's bytes, or ok: false — never a throw, for the lambda rule above.
-function readBack(path: string): ScriptRead {
+//
+// An image is the exception to "read it as a string": a PNG is not UTF-8 and
+// a Lumen string is, so raster files are carried as base64 from the moment
+// they leave the run directory. The encoding is the system base64 binary via
+// spawnSync — an argv vector, no shell — because the runtime has no byte
+// array to hold the raw form in.
+function readBack(artifactPath: string, path: string): ScriptRead {
+  if (kindOf(artifactPath) == "image") {
+    let enc = child_process.spawnSync("base64", ["-w0", path]);
+    if (enc.status != 0) {
+      let bad: ScriptRead = { ok: false, body: "" };
+      return bad;
+    }
+    let out: ScriptRead = { ok: true, body: enc.stdout.trim() };
+    return out;
+  }
   try {
     let body = fs.readFileSync(path);
     let out: ScriptRead = { ok: true, body: body };
@@ -548,7 +574,7 @@ function reconcileKnown(db: Db, run: ScriptReconcile, snap: ScriptFile): ScriptO
     return outcomeRefused(snap.path,
       "an artifact is at most " + `${ARTIFACT_MAX}` + " bytes; this one is " + `${size}`);
   }
-  let read = readBack(run.dir + snap.path);
+  let read = readBack(snap.path, run.dir + snap.path);
   if (!read.ok) {
     return outcomeRefused(snap.path, snap.path + " could not be read back from the run directory");
   }
@@ -593,7 +619,7 @@ function reconcileNew(db: Db, run: ScriptReconcile, path: string): ScriptOutcome
     return outcomeRefused(path,
       "an artifact is at most " + `${ARTIFACT_MAX}` + " bytes; this one is " + `${size}`);
   }
-  let read = readBack(run.dir + path);
+  let read = readBack(path, run.dir + path);
   if (!read.ok) {
     return outcomeRefused(path, path + " could not be read back from the run directory");
   }
@@ -631,7 +657,15 @@ function reconcileNew(db: Db, run: ScriptReconcile, path: string): ScriptOutcome
 // What every environment is built from. Python and sh out of the box; a node
 // script in this image stops with "no node runtime", which is the failure
 // table's answer until per-language images arrive with network environments.
-export const SCRIPT_IMAGE: string = "python:3.12-slim";
+// The runtime image: python AND node with the system libraries the common
+// packages need at run time (cairo, pango, pixbuf), built from the Dockerfile
+// beside RUN-SCRIPT.md. python:3.12-slim alone was a trap a real model walked
+// straight into — it offered node in the tool description and had no node,
+// and every cairo-backed package imported fine and died at load.
+// AGENTS_SCRIPT_IMAGE overrides for a deployment that builds its own.
+export function scriptImage(): string {
+  return process.env("AGENTS_SCRIPT_IMAGE") ?? "agents-runtime:1";
+}
 
 // How many scripts the whole deployment may run at once. Well below the HTTP
 // pool size on purpose: a script holds its handler thread for the entire run,
@@ -646,7 +680,12 @@ export const SCRIPT_OUTPUT_MAX: int = 65536;
 
 // The unprivileged user a script runs as. Numeric, not a name, so it holds in
 // any image whether or not /etc/passwd has a row for it.
-const SCRIPT_UID: string = "65534:65534";
+// Scripts run as root INSIDE the container — an isolated, per-conversation,
+// unprivileged container is the boundary, not the uid — because a real model
+// reaches for apt-get within its first few steps and "Permission denied" as
+// nobody turned a solvable problem into a burned step budget. The host is
+// protected by the container, not by the uid inside it.
+const SCRIPT_UID: string = "0:0";
 
 // Seconds between timeout's TERM and its KILL, for a script that ignores TERM.
 const SCRIPT_KILL_GRACE: string = "5";
@@ -919,9 +958,10 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   if (run.source == "") {
     return scriptRefused("there is no script to run: source is empty");
   }
-  if (run.paths.length == 0) {
-    return scriptRefused("name in paths every artifact the script works on; an empty list gives the run nothing to reconcile against");
-  }
+  // An empty paths list is an install-only run: nothing materialised, nothing
+  // to reconcile against, and mayCreate still gates anything the script
+  // leaves behind. Refusing this cost a real model two steps of its budget
+  // retrying pip install with paths it did not have.
   let envName = run.environment == "" ? "main" : run.environment;
   let named = scriptEnvNameProblem(envName);
   if (named != "") { return scriptRefused(named); }
@@ -965,7 +1005,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // script installs into it, and an installer with nowhere to fetch from is
   // decoration. Creation-time only — the row records it, a script cannot
   // flip it.
-  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: SCRIPT_IMAGE, network: true, now: run.now };
+  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: scriptImage(), network: true, now: run.now };
   let ensured = envEnsure(db, ensure);
   if (!ensured.ok) { return scriptBail(container, stage, ensured.problem); }
   let recreated = known && ensured.created;
