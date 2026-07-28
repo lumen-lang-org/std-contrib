@@ -135,7 +135,7 @@ export function entity(d: Description): DbRepository {
 // by hand; `entity` itself returns whatever it was given, and
 // `repositoryValid` refuses the result — the same path a hand-written mapping
 // takes.
-export function entityProblem(d: Description): string {
+export function entityViolation(d: Description): string {
   if (d.protocol != 1) {
     return "this decorator understands description protocol 1, not " + `${d.protocol}`;
   }

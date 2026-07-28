@@ -7,7 +7,7 @@
 //
 //   cd packages/plume && lumen test entity.test.ts
 
-import { Description, FieldDescription, DecoratorUse, entity, entityProblem, fieldArg, fieldHas, defaultSqlType } from "./entity.ts";
+import { Description, FieldDescription, DecoratorUse, entity, entityViolation, fieldArg, fieldHas, defaultSqlType } from "./entity.ts";
 import { repositoryValid, selectList } from "./plume.ts";
 
 function use(name: string, args: string[]): DecoratorUse {
@@ -124,7 +124,7 @@ test("a field's decorator arguments are read by name and position", () => {
 // --- what it refuses -------------------------------------------------------
 
 test("a description with no problem reports none", () => {
-  expect(entityProblem(agentDescription()) == "");
+  expect(entityViolation(agentDescription()) == "");
 });
 
 test("a protocol it does not know is refused rather than guessed at", () => {
@@ -133,7 +133,7 @@ test("a protocol it does not know is refused rather than guessed at", () => {
     protocol: 2, kind: d.kind, name: d.name, args: d.args,
     file: d.file, line: d.line, fields: d.fields,
   };
-  expect(entityProblem(future).indexOf("protocol 1") >= 0);
+  expect(entityViolation(future).indexOf("protocol 1") >= 0);
 });
 
 test("a missing table name is named as such", () => {
@@ -143,7 +143,7 @@ test("a missing table name is named as such", () => {
     protocol: d.protocol, kind: d.kind, name: d.name, args: empty,
     file: d.file, line: d.line, fields: d.fields,
   };
-  expect(entityProblem(noTable).indexOf("needs a table name") >= 0);
+  expect(entityViolation(noTable).indexOf("needs a table name") >= 0);
 });
 
 test("a class with no key is refused, and says which class", () => {
@@ -155,9 +155,9 @@ test("a class with no key is refused, and says which class", () => {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
-  let problem = entityProblem(keyless);
-  expect(problem.indexOf("Agent") >= 0);
-  expect(problem.indexOf("no @id field") >= 0);
+  let violation = entityViolation(keyless);
+  expect(violation.indexOf("Agent") >= 0);
+  expect(violation.indexOf("no @id field") >= 0);
 });
 
 test("two keys are refused, counted", () => {
@@ -170,7 +170,7 @@ test("two keys are refused, counted", () => {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
-  expect(entityProblem(twoKeys).indexOf("2 @id fields") >= 0);
+  expect(entityViolation(twoKeys).indexOf("2 @id fields") >= 0);
 });
 
 test("an @id without an @column is refused, naming the field", () => {
@@ -183,9 +183,9 @@ test("an @id without an @column is refused, naming the field", () => {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
-  let problem = entityProblem(unmappedKey);
-  expect(problem.indexOf("\"id\"") >= 0);
-  expect(problem.indexOf("no @column") >= 0);
+  let violation = entityViolation(unmappedKey);
+  expect(violation.indexOf("\"id\"") >= 0);
+  expect(violation.indexOf("no @column") >= 0);
 });
 
 test("a class with no mapped field is refused", () => {
@@ -196,7 +196,7 @@ test("a class with no mapped field is refused", () => {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
-  expect(entityProblem(unmapped).indexOf("nothing to map") >= 0);
+  expect(entityViolation(unmapped).indexOf("nothing to map") >= 0);
 });
 
 test("a bad description still produces a mapping that plume refuses", () => {
