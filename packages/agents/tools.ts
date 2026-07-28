@@ -597,6 +597,8 @@ export function scriptTool(): ToolSpec {
     + "afterwards each file is compared back: unchanged bytes save nothing, changed bytes become the artifact's next "
     + "version under write_artifact's rules, a file created beyond paths is saved only when mayCreate is true, and "
     + "nothing is ever deleted — a file the script removed is reported and every stored version stays. "
+    + "Where the environment has a browser, a screenshot is an ordinary script: drive the page, save the .png, let "
+    + "mayCreate keep it. Launch chromium with --no-sandbox — the container is the sandbox. "
     + "A raster image the script writes — .png, .jpg, .gif, .webp — is stored base64 and shown as a picture in the "
     + "preview; generate images with the standard library or installed packages, write the file, and let mayCreate "
     + "save it. Never copy image base64 back through write_artifact yourself: retyping it corrupts it, and the run "
