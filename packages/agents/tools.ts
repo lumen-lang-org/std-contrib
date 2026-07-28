@@ -374,6 +374,10 @@ export function artifactTools(): ToolSpec[] {
 // leaves one place that decides what write_artifact takes.
 export type ArtifactToolCall = {
   threadId: string,
+  // The agent whose call this is. Only run_script reads it, to resolve the
+  // curated image its environments are built from — the choice is the
+  // operator's, made in configuration, never a member of the call.
+  agentId: string,
   name: string,
   // The arguments as the model sent them: JSON text.
   args: string,
@@ -679,6 +683,7 @@ export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
     // saved unless the model said it may be.
     mayCreate: jsonRaw(call.args, "mayCreate") == "true",
     environment: envName,
+    agentId: call.agentId,
     turnSeq: call.turnSeq,
     now: call.now,
   };

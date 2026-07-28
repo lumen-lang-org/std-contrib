@@ -578,14 +578,14 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // own fixed names, so asking both costs two string comparisons and
       // cannot write twice: no name belongs to both.
       let artifactAnswer = callArtifactTool(db, {
-        threadId: threadId, name: calls[i].name, args: calls[i].args,
+        threadId: threadId, agentId: agentId, name: calls[i].name, args: calls[i].args,
         turnSeq: where.baseSeq, now: now,
       });
       // Scripts third, same convention: every dispatcher is asked, each
       // answers only its own fixed name, and run_script belongs to no one
       // else — so the eager ask costs a string comparison.
       let scripted = callScriptTool(db, {
-        threadId: threadId, name: calls[i].name, args: calls[i].args,
+        threadId: threadId, agentId: agentId, name: calls[i].name, args: calls[i].args,
         turnSeq: where.baseSeq, now: now,
       });
       if (fileAnswer.handled) {
@@ -814,7 +814,7 @@ function childFor(children: AgentRow[], name: string): AgentRow {
     if (delegateToolName(children[i].agentName) == name) { return children[i]; }
     i = i + 1;
   }
-  let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", isDefault: false, enabled: false, updatedAt: "" };
+  let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", scriptImageId: "", isDefault: false, enabled: false, updatedAt: "" };
   return none;
 }
 
