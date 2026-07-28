@@ -290,7 +290,10 @@ export type LiveStep = {
 
 // What the model said it was thinking on one rotation, when it says at all.
 // Most providers never do, and a round with none is the ordinary case.
-export type Thought = { rotation: number; depth: number; text: string };
+// `seq` is the round it belongs to, for the same reason a step carries one: a
+// reload asks for every round at once and has to put each thought back above
+// the message that produced it.
+export type Thought = { seq: number; rotation: number; depth: number; text: string };
 
 export type RoundSteps = {
   seq: number; running: boolean; steps: LiveStep[]; thoughts: Thought[];

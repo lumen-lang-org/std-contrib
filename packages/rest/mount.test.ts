@@ -135,3 +135,54 @@ test("two controllers claiming one path is a startup failure", () => {
   let twice: Mount[] = [new ModelApi(), new ModelApi()];
   expect(mountProblem(twice).indexOf("both serve GET /models") >= 0);
 });
+
+// The tracing regression: GET / and PUT / on one controller share the bare
+// root pattern, and the PUT must reach the PUT handler — not the GET one that
+// happens to sit first in the class.
+@controller("/root")
+class RootVerbs {
+  @get("/")
+  status(req: Request): Reply { return ok("\"from-get\""); }
+  @put("/")
+  configure(req: Request): Reply { return ok("\"from-put\""); }
+}
+
+test("a PUT on the controller's own root reaches the PUT handler", () => {
+  let mounts: Mount[] = [mount(new RootVerbs())];
+  expect(dispatchMounted(mounts, "PUT", "/root", "{}", noHeaders()).body == "\"from-put\"");
+  expect(dispatchMounted(mounts, "GET", "/root", "", noHeaders()).body == "\"from-get\"");
+});
+
+// The full tracing shape: root GET and PUT plus a /key pair below them, and
+// a constructor that takes arguments.
+@controller("/shape")
+class ShapeApi {
+  db: string;
+  master: string;
+  constructor(db: string, master: string) { this.db = db; this.master = master; }
+  @get("/")
+  status(req: Request): Reply { return ok("\"s-get\""); }
+  @put("/")
+  configure(req: Request): Reply { return ok("\"s-put\""); }
+  @put("/key")
+  setKey(req: Request): Reply { return ok("\"s-key\""); }
+  @del("/key")
+  clearKey(req: Request): Reply { return ok("\"s-unkey\""); }
+}
+
+test("the tracing shape dispatches every verb to its own method", () => {
+  let mounts: Mount[] = [mount(new ShapeApi("d", "m"))];
+  expect(dispatchMounted(mounts, "PUT", "/shape", "{}", noHeaders()).body == "\"s-put\"");
+  expect(dispatchMounted(mounts, "GET", "/shape", "", noHeaders()).body == "\"s-get\"");
+  expect(dispatchMounted(mounts, "PUT", "/shape/key", "{}", noHeaders()).body == "\"s-key\"");
+  expect(dispatchMounted(mounts, "DELETE", "/shape/key", "", noHeaders()).body == "\"s-unkey\"");
+});
+
+// The way api.ts actually mounts: class instances coerced to Mount by spec
+// 478, several of them, in one array literal — not explicit mount() calls.
+test("implicitly coerced mounts dispatch each verb to its own method", () => {
+  let mounts: Mount[] = [new AgentApi("a"), new ModelApi(), new ShapeApi("d", "m"), new RootVerbs()];
+  expect(dispatchMounted(mounts, "PUT", "/shape", "{}", noHeaders()).body == "\"s-put\"");
+  expect(dispatchMounted(mounts, "GET", "/shape", "", noHeaders()).body == "\"s-get\"");
+  expect(dispatchMounted(mounts, "PUT", "/root", "{}", noHeaders()).body == "\"from-put\"");
+});

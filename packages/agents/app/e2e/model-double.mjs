@@ -317,6 +317,112 @@ const CHILD_WORK = {
   usage: { prompt_tokens: 10, completion_tokens: 20 },
 };
 
+// Find the line, change the line. Three rotations under one message, which is
+// the loop the search and edit tools exist for: the model does not know where
+// the heading is, does not read the file, and never resends it.
+//
+// The `old` here is deliberately the exact text search_artifacts quoted back —
+// that is the contract between the two tools, and a double that invented its
+// own spelling would pass while proving nothing.
+const FIND_HEADING = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "I do not know which file carries the heading or what it says around it, and reading the whole page back to find one line would cost more than the change. I will search for it first.",
+      tool_calls: [{
+        id: "s1", type: "function",
+        function: { name: "search_artifacts", arguments: JSON.stringify({ query: "<h1>Kaffa</h1>" }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+const CHANGE_HEADING = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "The search names the file and quotes the line, so I can replace exactly that text and leave the rest of the page alone.",
+      tool_calls: [{
+        id: "s2", type: "function",
+        function: { name: "edit_artifact", arguments: JSON.stringify({
+          path: "/index.html",
+          old: "<h1>Kaffa</h1>",
+          new: "<h1>Kaffa Roasters</h1>",
+          note: "renamed the shop",
+        }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+// A script over an artifact: write a data file, then have a program rewrite
+// it rather than resending it. This is the run_script loop end to end — the
+// container, the materialise, the reconcile — driven by the same composer as
+// everything else. The python here is real and runs in a real container.
+const WRITE_DATA = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "First the data has to exist as an artifact; then a script can work on it without me resending it.",
+      tool_calls: [{
+        id: "p1", type: "function",
+        function: { name: "write_artifact", arguments: JSON.stringify({
+          path: "/prices.json", title: "Prices",
+          content: JSON.stringify({ prices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }),
+          note: "" }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+const RUN_DOUBLER = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "Ten entries is ten edits, or one script. The script reads the file where it was materialised, doubles every price, writes it back and says how many it touched.",
+      tool_calls: [{
+        id: "p2", type: "function",
+        function: { name: "run_script", arguments: JSON.stringify({
+          language: "python",
+          source: "import json\nwith open('prices.json') as f: d = json.load(f)\nd['prices'] = [p * 2 for p in d['prices']]\nwith open('prices.json', 'w') as f: json.dump(d, f)\nprint(f\"doubled {len(d['prices'])} prices\")",
+          paths: ["/prices.json"],
+          mayCreate: false }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+function wantsScript(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("double the prices");
+}
+
+function wantsRename(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("rename the shop");
+}
+
+// Which of the two tools just came back, read from the result itself. The
+// rotations are otherwise indistinguishable — both are "a tool result last" —
+// and answering the wrong one would either search forever or edit before
+// knowing where.
+function lastToolText(messages) {
+  const tail = (messages ?? [])[(messages ?? []).length - 1];
+  return (tail?.role ?? "") === "tool" ? (tail.content ?? "") : "";
+}
+
 function wantsDelegation(messages) {
   const last = [...messages].reverse().find((m) => m.role === "user");
   return (last?.content ?? "").toLowerCase().includes("ask the helper");
@@ -340,6 +446,22 @@ function replyObject(messages) {
     return toolResultsPresent(messages)
       ? said(EDIT_DONE, "Both writes came back clean, so the menu exists and the home page links to it.")
       : EDIT_SITE;
+  }
+  if (wantsScript(messages)) {
+    const came = lastToolText(messages);
+    if (came.includes("doubled 10 prices")) {
+      return said("The script doubled all 10 prices; /prices.json is at version 2.",
+        "The stdout says ten prices moved and the reconcile lists the file changed, so the work is done and verified.");
+    }
+    return came === "" ? WRITE_DATA : RUN_DOUBLER;
+  }
+  if (wantsRename(messages)) {
+    const came = lastToolText(messages);
+    if (came.startsWith("Edited ")) {
+      return said("Renamed the shop to Kaffa Roasters on /index.html.",
+        "The edit came back with the changed line, so the page says what it should and nothing else moved.");
+    }
+    return came === "" ? FIND_HEADING : CHANGE_HEADING;
   }
   if (wantsDelegation(messages)) {
     return toolResultsPresent(messages)
