@@ -558,6 +558,7 @@ test("a script runs in its environment and its changed file lands as the next ve
   // persists between runs.
   let asked = argvLines();
   expect(asked[0].indexOf("run -d --name agents-env-t1-main ") == 0);
+  expect(asked[0].indexOf("--pids-limit 256") > 0);
   expect(asked[0].indexOf("--network none") < 0);
   let exline = findLine(asked, "exec --user 0:0");
   expect(exline != "");

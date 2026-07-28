@@ -115,6 +115,7 @@ export class ConsoleSidebar extends LitElement {
         ${this.shown().length === 0 ? html`<div class="none">No conversations yet.</div>` : ""}
         ${this.shown().map((t) => html`
           <div class="thread ${t.id === this.activeId ? "active" : ""}"
+            data-thread=${t.id}
             title=${t.title}
             @click=${() => this.dispatchEvent(new CustomEvent("pick-thread", { detail: { id: t.id } }))}>
             ${t.title === "" ? t.agentId : t.title}

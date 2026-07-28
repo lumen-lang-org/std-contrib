@@ -1518,7 +1518,18 @@ function previewCsp(req: Request): string {
   return "default-src 'none'"
     + "; script-src 'unsafe-inline' " + origin
     + "; style-src 'unsafe-inline' " + origin
-    + "; img-src data: " + origin
+    // Images may come from anywhere. This is the one relaxation of
+    // self-containment, and it is deliberate: a model asked for a picture
+    // from the web answered that it could not, and wrote a CSS cat instead —
+    // the restriction was producing worse pages, not safer ones. An <img> is
+    // a passive subresource: it cannot read the page, cannot reach /api, and
+    // the sandbox's opaque origin means it carries no cookie. What it does
+    // cost is a request to a third party carrying the reader's address, so
+    // the tool still teaches fetching-and-saving as the better habit —
+    // referrer-policy: no-referrer on every preview keeps the token out of
+    // that request either way. Scripts, styles and fonts stay local: those
+    // can read the document.
+    + "; img-src data: blob: https: http: " + origin
     + "; font-src data: " + origin
     // connect-src used to be 'none'. The live reload below polls a version
     // stamp on this same origin, and that is the one connection a preview may
