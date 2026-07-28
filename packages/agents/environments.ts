@@ -285,6 +285,12 @@ function envRunArgs(container: string, image: string, network: bool): string[] {
   out.push("--memory"); out.push("1g");
   out.push("--cpus"); out.push("2");
   out.push("--pids-limit"); out.push("256");
+  // Chromium maps a lot of shared memory and docker's default /dev/shm is
+  // 64MB, which it does not crash on so much as silently render blank. A
+  // browser is a first-class reason to have an environment at all — a
+  // screenshot needs one — so the room is given here rather than left for
+  // every script to remember --disable-dev-shm-usage.
+  out.push("--shm-size"); out.push("512m");
   // Nothing inside may gain a privilege it did not start with — a setuid
   // binary cannot raise this container, whatever a script installs.
   out.push("--security-opt"); out.push("no-new-privileges");

@@ -115,7 +115,7 @@ test("first use creates the container and the row, named main by default", () =>
   // persistent, run-user-owned home.
   let asked = argvLines();
   expect(asked.length == 2);
-  expect(asked[0] == "run -d --name agents-env-t1-main --memory 1g --cpus 2 --pids-limit 256 --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
+  expect(asked[0] == "run -d --name agents-env-t1-main --memory 1g --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
   expect(asked[1].indexOf("exec agents-env-t1-main sh -c") == 0);
   expect(asked[1].indexOf("/workspace") > 0);
 
@@ -231,7 +231,7 @@ test("container names are docker-legal whatever the thread id holds", () => {
   expect(made.ok);
   expect(made.container == "agents-env-t-1-x-main");
   let asked = argvLines();
-  expect(asked[0] == "run -d --name agents-env-t-1-x-main --memory 1g --cpus 2 --pids-limit 256 --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
+  expect(asked[0] == "run -d --name agents-env-t-1-x-main --memory 1g --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
 });
 
 test("a docker failure is a problem sentence, not a thrown error and not a row", () => {
@@ -267,7 +267,7 @@ test("a pruned container is recreated from the row's image, reported as created"
   let asked = argvLines();
   expect(asked.length == 3);
   expect(asked[0] == "start agents-env-t1-main");
-  expect(asked[1] == "run -d --name agents-env-t1-main --memory 1g --cpus 2 --pids-limit 256 --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
+  expect(asked[1] == "run -d --name agents-env-t1-main --memory 1g --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
   expect(asked[2].indexOf("exec agents-env-t1-main sh -c") == 0);
 
   expect(envList(database, "t1")[0].status == "running");
@@ -318,6 +318,8 @@ test("a container is created with its guard rails: caps dropped, no new privileg
   expect(made.indexOf("--memory 1g") > 0);
   expect(made.indexOf("--cpus 2") > 0);
   expect(made.indexOf("--pids-limit 256") > 0);
+  // A browser needs shared memory; 64MB renders blank rather than failing.
+  expect(made.indexOf("--shm-size 512m") > 0);
   // Privilege: nothing inside may gain what it did not start with.
   expect(made.indexOf("--security-opt no-new-privileges") > 0);
   // Capabilities: all off, then back only the five apt and pip need.
