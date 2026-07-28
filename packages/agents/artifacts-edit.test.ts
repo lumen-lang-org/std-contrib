@@ -1,0 +1,270 @@
+// What edit_artifact's transaction promises: refusals that quote what they
+// saw, a version log nothing ever replaces, and a pointer whose metadata an
+// edit never touches. All against a SQLite temp file — nothing here reaches
+// :8100, :5173, or the live database.
+//
+//   cd packages/agents && lumen test artifacts-edit.test.ts
+
+import { Db, DbConfig } from "../plume/driver.ts";
+import { sqlite } from "../plume/sqlite.ts";
+import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/plume.ts";
+import { migrate, forgetMigrations } from "../plume/migrate.ts";
+import { ARTIFACT_MAX, THREAD_BYTES_MAX, TURN_SEQ_NONE, artifactPlan, putArtifact, getArtifact, getVersion } from "./artifacts.ts";
+import { ArtifactEdit, editArtifact } from "./artifacts-edit.ts";
+
+let database: Db = sqlite();
+
+function fresh(): void {
+  let cfg: DbConfig = { filename: "/tmp/agents_edit_test.db" };
+  connectDatabase(database, cfg);
+  forgetMigrations(database);
+  execute(database, "DROP TABLE IF EXISTS artifact_versions");
+  execute(database, "DROP TABLE IF EXISTS artifacts");
+  migrate(database, artifactPlan(database));
+}
+
+// The one body most cases start from.
+function seeded(body: string): void {
+  fresh();
+  putArtifact(database, {
+    threadId: "t1", path: "/notes.md", title: "Notes", content: body,
+    note: "first", origin: "generated", mustCreate: false,
+    turnSeq: 3, now: "1000",
+  });
+}
+
+function edit(oldText: string, newText: string): ArtifactEdit {
+  let out: ArtifactEdit = {
+    threadId: "t1", path: "/notes.md",
+    oldText: oldText, newText: newText,
+    note: "", turnSeq: 4, now: "2000",
+  };
+  return out;
+}
+
+// A version row inserted behind the pointer's back — the concurrent winner
+// of the race cases, and the broken states the refusals guard.
+function outOfBand(artifactId: string, version: int, body: string): void {
+  executeWith(database,
+    "INSERT INTO artifact_versions (id, artifact_id, version, body, bytes, origin, turn_seq, note, created_at) VALUES ("
+    + placeholderAt(database, 1) + ", " + placeholderAt(database, 2) + ", " + placeholderAt(database, 3) + ", "
+    + placeholderAt(database, 4) + ", " + placeholderAt(database, 5) + ", " + placeholderAt(database, 6) + ", "
+    + placeholderAt(database, 7) + ", " + placeholderAt(database, 8) + ", " + placeholderAt(database, 9) + ")",
+    [artifactId + ":" + `${version}`, artifactId, `${version}`, body, `${body.length}`,
+     "generated", "9", "out of band", "1500"]);
+}
+
+// n copies of `piece`.
+function fill(piece: string, n: int): string {
+  let out = "";
+  let i: int = 0;
+  while (i < n) { out = out + piece; i = i + 1; }
+  return out;
+}
+
+// --- the happy path, and what it leaves untouched ---------------------------------
+
+test("an edit appends the next version and moves only the pointer's version and date", () => {
+  seeded("alpha\nbeta\ngamma\n");
+  let before = getArtifact(database, "t1", "/notes.md");
+  let done = editArtifact(database, edit("beta", "delta"));
+  expect(done.ok);
+  expect(done.slot == before.slot);
+  expect(done.version == 2);
+  expect(done.line == 2);
+
+  // The new body, whole, and the old one untouched — append-only.
+  expect(getVersion(database, before.id, 2).body == "alpha\ndelta\ngamma\n");
+  expect(getVersion(database, before.id, 1).body == "alpha\nbeta\ngamma\n");
+
+  // The rotate-bug regression: only current_version and updated_at move. An
+  // edit has no opinion about metadata, and a full-row persist is exactly how
+  // a pointer once got rewound (api.ts:1351).
+  let after = getArtifact(database, "t1", "/notes.md");
+  expect(after.currentVersion == 2);
+  expect(after.updatedAt == "2000");
+  expect(after.slot == before.slot);
+  expect(after.title == before.title);
+  expect(after.kind == before.kind);
+  expect(after.mime == before.mime);
+  expect(after.previewToken == before.previewToken);
+  expect(after.createdAt == before.createdAt);
+});
+
+test("the success reply echoes the changed lines with two either side", () => {
+  seeded("l1\nl2\nl3\nold\nl5\nl6\nl7\n");
+  let done = editArtifact(database, edit("old", "new-text"));
+  expect(done.ok);
+  expect(done.context == "l2\nl3\nnew-text\nl5\nl6");
+});
+
+test("an empty note is synthesized so the human log never shows a blank reason", () => {
+  seeded("alpha\nbeta\n");
+  let done = editArtifact(database, edit("beta", "delta"));
+  expect(done.ok);
+  let row = getArtifact(database, "t1", "/notes.md");
+  expect(getVersion(database, row.id, 2).note == "edit at line 2");
+});
+
+test("a note the model did send is stored as sent", () => {
+  seeded("alpha\nbeta\n");
+  let e: ArtifactEdit = {
+    threadId: "t1", path: "/notes.md", oldText: "beta", newText: "delta",
+    note: "fixed the figure", turnSeq: 4, now: "2000",
+  };
+  let done = editArtifact(database, e);
+  expect(done.ok);
+  let row = getArtifact(database, "t1", "/notes.md");
+  expect(getVersion(database, row.id, 2).note == "fixed the figure");
+});
+
+// --- refusals ---------------------------------------------------------------------
+
+test("zero matches refuses, with no version written", () => {
+  seeded("alpha\nbeta\n");
+  let done = editArtifact(database, edit("zeta", "eta"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("matches nothing") >= 0);
+  expect(done.problem.indexOf("/notes.md") >= 0);
+  expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
+});
+
+test("the zero-match refusal names a whitespace near miss when one exists", () => {
+  seeded("alpha\n\tlet x = 1;\ngamma\n");
+  let done = editArtifact(database, edit("  let x = 1;", "  let x = 2;"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("whitespace-insensitive") >= 0);
+  expect(done.problem.indexOf("line 2") >= 0);
+});
+
+test("the zero-match refusal says when there is no near miss either", () => {
+  seeded("alpha\nbeta\n");
+  let done = editArtifact(database, edit("zeta", "eta"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("whitespace-insensitive") < 0);
+  expect(done.problem.indexOf("search_artifacts") >= 0);
+});
+
+test("more than one match refuses with numbered hits, lines and snippets", () => {
+  seeded("value\nother\nvalue\n");
+  let done = editArtifact(database, edit("value", "changed"));
+  expect(!done.ok);
+  expect(done.hits.length == 2);
+  expect(done.hits[0].line == 1);
+  expect(done.hits[1].line == 3);
+  expect(done.problem.indexOf("1. line 1: value") >= 0);
+  expect(done.problem.indexOf("2. line 3: value") >= 0);
+  expect(done.problem.indexOf("more surrounding text") >= 0);
+  expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
+});
+
+test("overlapping occurrences are ambiguous, not unique", () => {
+  // "aa" in "aaa" — counted non-overlapping this would be one match and a
+  // silent wrong-region splice. The refusal is the design decision.
+  seeded("aaa\n");
+  let done = editArtifact(database, edit("aa", "b"));
+  expect(!done.ok);
+  expect(done.hits.length == 2);
+});
+
+test("past eight matches the refusal says more-than rather than listing a body's worth", () => {
+  seeded("x\nx\nx\nx\nx\nx\nx\nx\nx\nx\n");
+  let done = editArtifact(database, edit("x", "y"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("more than 8") >= 0);
+});
+
+test("an empty old refuses before any lookup", () => {
+  seeded("alpha\n");
+  let done = editArtifact(database, edit("", "beta"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("empty") >= 0);
+});
+
+test("old identical to new refuses — a no-op version would lie that something changed", () => {
+  seeded("alpha\n");
+  let done = editArtifact(database, edit("alpha", "alpha"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("identical") >= 0);
+  expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
+});
+
+test("a path with no artifact refuses in read_artifact's sentence, and never creates", () => {
+  fresh();
+  let e: ArtifactEdit = {
+    threadId: "t1", path: "/nope.md", oldText: "a", newText: "b",
+    note: "", turnSeq: 4, now: "2000",
+  };
+  let done = editArtifact(database, e);
+  expect(!done.ok);
+  expect(done.problem.indexOf("no artifact at /nope.md") >= 0);
+  expect(getArtifact(database, "t1", "/nope.md").id == "");
+});
+
+test("a pointer naming a version the log lacks refuses rather than editing an empty body", () => {
+  seeded("alpha\n");
+  execute(database, "UPDATE artifacts SET current_version = 9");
+  let done = editArtifact(database, edit("alpha", "beta"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("version 9") >= 0);
+  expect(done.problem.indexOf("not in its history") >= 0);
+});
+
+test("a splice past the artifact byte cap refuses in putArtifact's words", () => {
+  seeded("alpha\nbeta\n");
+  let done = editArtifact(database, edit("beta", fill("b", ARTIFACT_MAX + 1)));
+  expect(!done.ok);
+  expect(done.problem.indexOf("at most " + `${ARTIFACT_MAX}` + " bytes") >= 0);
+  expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
+});
+
+test("a splice past the thread byte cap refuses, naming the cap", () => {
+  seeded("alpha\nbeta\n");
+  // A sibling whose stored byte count already fills the thread budget — the
+  // cap reads SUM(bytes), so the claim is enough and the test stays cheap.
+  let put = putArtifact(database, {
+    threadId: "t1", path: "/big.md", title: "", content: "tiny",
+    note: "", origin: "generated", mustCreate: false,
+    turnSeq: TURN_SEQ_NONE, now: "1100",
+  });
+  expect(put.ok);
+  executeWith(database, "UPDATE artifact_versions SET bytes = " + placeholderAt(database, 1)
+    + " WHERE artifact_id = " + placeholderAt(database, 2),
+    [`${THREAD_BYTES_MAX}`, "t1:/big.md"]);
+  let done = editArtifact(database, edit("beta", "delta"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("a thread's artifacts hold at most") >= 0);
+  expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
+});
+
+// --- the race: the concurrency section, executable --------------------------------
+
+test("a concurrent append elsewhere in the file merges cleanly on top", () => {
+  // The winner landed version 2 (line 1 changed) and the pointer has not
+  // caught up — exactly the window between the edit's read and its INSERT.
+  // The unique index fails the first INSERT, and the retry re-reads the
+  // winner's body: the edited region is untouched, so the edit lands at
+  // version 3 with both changes, and the winner's version was a parent, not
+  // a casualty.
+  seeded("alpha\nbeta\ngamma\n");
+  outOfBand("t1:/notes.md", 2, "ALPHA\nbeta\ngamma\n");
+  let done = editArtifact(database, edit("beta", "delta"));
+  expect(done.ok);
+  expect(done.version == 3);
+  let row = getArtifact(database, "t1", "/notes.md");
+  expect(row.currentVersion == 3);
+  expect(getVersion(database, row.id, 3).body == "ALPHA\ndelta\ngamma\n");
+  // Nothing was replaced: the winner's body is still on the log, whole.
+  expect(getVersion(database, row.id, 2).body == "ALPHA\nbeta\ngamma\n");
+});
+
+test("a concurrent change inside the edited region refuses as changed-underneath", () => {
+  seeded("alpha\nbeta\ngamma\n");
+  outOfBand("t1:/notes.md", 2, "alpha\nbrave\ngamma\n");
+  let done = editArtifact(database, edit("beta", "delta"));
+  expect(!done.ok);
+  expect(done.problem.indexOf("changed while you were editing") >= 0);
+  // Refused, never silently overwritten: no version 3 exists.
+  let row = getArtifact(database, "t1", "/notes.md");
+  expect(getVersion(database, row.id, 3).id == "");
+});

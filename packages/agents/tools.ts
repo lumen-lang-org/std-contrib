@@ -18,10 +18,13 @@ import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, agentsMapping, mcpServersMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
-import { jsonText } from "./scan.ts";
+import { jsonFind, jsonText } from "./scan.ts";
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
 import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts";
+import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
+import { editArtifact } from "./artifacts-edit.ts";
+import { wireView } from "./artifacts-fence.ts";
 
 // One tool, and which server answers it.
 export type MountedTool = {
@@ -255,9 +258,13 @@ export function serverOf(mounted: Mounted, name: string): string {
 // belong to the thread, and a server that happens to offer a `write_artifact`
 // must not be the thing that answers one.
 //
-// Two tools and not five. A model that can save a body and read the current one
-// can do the work; listing, diffing and rolling a version back are things a
-// person does through the API, with the whole log in front of them.
+// Four tools and not seven. Save, read, find, change is the complete verb set
+// for a file a model owns: write_artifact makes a version, read_artifact
+// returns one whole, search_artifacts finds the line to change, and
+// edit_artifact changes it without resending the rest. Listing, diffing and
+// rolling a version back remain the person's, through the API, with the whole
+// log in front of them — a model given rollback would use it to erase the
+// version that shows what it did.
 
 // The self-containment rule, in the description because it is the one thing
 // about an artifact a model cannot learn by trying. A body that pulls a script
@@ -309,6 +316,41 @@ export function artifactTools(): ToolSpec[] {
     "{\"type\":\"object\",\"properties\":{"
     + "\"path\":{\"type\":\"string\",\"description\":\"The path the artifact was saved under.\"}},"
     + "\"required\":[\"path\"]}"));
+  out.push(toolSpec("search_artifacts",
+    "Find where something lives in this conversation's artifacts before you change it. "
+    + "The query is matched as an exact substring - no patterns, no case folding, one line only - "
+    + "against every artifact's path, title, and the body of its current version. "
+    + "Each hit names the path, the version searched, and the matching line with its line number, "
+    + "which is the text edit_artifact expects as old. "
+    + "A line longer than 160 bytes comes back cut, ending in the marker [cut]; "
+    + "never use a cut line as edit_artifact's old - read_artifact the file instead. "
+    + "At most 20 hits, at most 5 per artifact; no hits is an answer, not an error, "
+    + "and names how many artifacts were searched.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"query\":{\"type\":\"string\",\"description\":\"The exact text to look for, 2 to 200 bytes of UTF-8, no newline. "
+    + "Every length here is bytes, so a letter outside ASCII counts as more than one. "
+    + "Substring only: 'a.*b' finds lines containing those four characters and nothing else.\"}},"
+    + "\"required\":[\"query\"]}"));
+  out.push(toolSpec("edit_artifact",
+    "Change part of an existing artifact without resending the rest. "
+    + "old is matched against the artifact's current version as an exact substring - every character, "
+    + "including whitespace, quotes and indentation, exactly as read_artifact or search_artifacts returned it - "
+    + "and replaced once with new, saved as the next version. "
+    + "The call is refused when old matches nowhere (nothing is guessed or fuzzily matched; the refusal says "
+    + "whether a whitespace-insensitive scan found a near miss and on what line) and refused when old matches "
+    + "more than once (the refusal lists the matches with their lines and text; include more surrounding text "
+    + "until the match is unique). "
+    + "The reply names the slot, the new version number, and shows the changed lines with two lines around them - "
+    + "read that reply; it is how you learn what actually changed in a file you did not reread. "
+    + "If the refusal says the artifact changed while you were editing, read or search it again before retrying. "
+    + "For a file that does not exist yet, or when most of a file changes, use write_artifact.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"path\":{\"type\":\"string\",\"description\":\"The path the artifact was saved under, such as /report.html.\"},"
+    + "\"old\":{\"type\":\"string\",\"description\":\"The exact text to replace, verbatim from the current version. "
+    + "Must occur exactly once.\"},"
+    + "\"new\":{\"type\":\"string\",\"description\":\"What replaces it. May be empty to delete the old text.\"},"
+    + "\"note\":{\"type\":\"string\",\"description\":\"Why this version exists, in a few words.\"}},"
+    + "\"required\":[\"path\",\"old\",\"new\"]}"));
   return out;
 }
 
@@ -418,5 +460,106 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
     return read;
   }
 
+  if (call.name == "search_artifacts") {
+    // Presence-checked before anything else: jsonText answers "" for a
+    // missing member, and a refusal must name the member that was absent,
+    // not complain about an empty query.
+    if (jsonFind(call.args, "query") < 0) {
+      let unnamed: FileToolResult = {
+        handled: true, ok: false,
+        text: "search_artifacts needs a member named \"query\" — the exact text to look for.",
+      };
+      return unnamed;
+    }
+    let found = searchArtifacts(db, call.threadId, jsonText(call.args, "query"));
+    if (!found.ok) {
+      let refused: FileToolResult = { handled: true, ok: false, text: found.problem };
+      return refused;
+    }
+    // Every quoted line below is an artifact body, and an artifact body is
+    // untrusted — wireView keeps a marker planted in one from arriving in
+    // model context as a reference the model never earned.
+    let answered: FileToolResult = {
+      handled: true, ok: true, text: wireView(searchAnswer(found)).text,
+    };
+    return answered;
+  }
+
+  if (call.name == "edit_artifact") {
+    // The same presence checks, one refusal per member, so an omitted or
+    // misspelled member is named instead of arriving as "".
+    if (jsonFind(call.args, "path") < 0) {
+      let unnamed: FileToolResult = {
+        handled: true, ok: false,
+        text: "edit_artifact needs a member named \"path\" — the path the artifact was saved under.",
+      };
+      return unnamed;
+    }
+    if (jsonFind(call.args, "old") < 0) {
+      let unnamed: FileToolResult = {
+        handled: true, ok: false,
+        text: "edit_artifact needs a member named \"old\" — the exact text to replace.",
+      };
+      return unnamed;
+    }
+    if (jsonFind(call.args, "new") < 0) {
+      let unnamed: FileToolResult = {
+        handled: true, ok: false,
+        text: "edit_artifact needs a member named \"new\" — the replacement, which may be empty to delete old.",
+      };
+      return unnamed;
+    }
+    // The wire says old/new; the record says oldText/newText, because `new`
+    // is a reserved word. This unpacking is what decouples the spellings.
+    let edited = editArtifact(db, {
+      threadId: call.threadId,
+      path: normalScope(jsonText(call.args, "path")),
+      oldText: jsonText(call.args, "old"),
+      newText: jsonText(call.args, "new"),
+      note: jsonText(call.args, "note"),
+      turnSeq: call.turnSeq,
+      now: call.now,
+    });
+    if (!edited.ok) {
+      // The refusal may quote body lines — numbered multi-match snippets —
+      // so it passes through the same neutralisation the success echo does.
+      let refused: FileToolResult = { handled: true, ok: false, text: wireView(edited.problem).text };
+      return refused;
+    }
+    let changed: FileToolResult = {
+      handled: true, ok: true,
+      text: wireView("Edited " + normalScope(jsonText(call.args, "path")) + ": artifact " + `${edited.slot}`
+        + " is now version " + `${edited.version}` + " (" + `${edited.bytes}` + " bytes)."
+        + " Changed at line " + `${edited.line}` + ":\n" + edited.context).text,
+    };
+    return changed;
+  }
+
   return not;
+}
+
+// A search's hits as the model reads them. Line 0 marks a hit on the path or
+// title rather than in the body, so those rows skip the line number.
+function searchAnswer(found: ArtifactSearch): string {
+  let what = found.searched == 1 ? " artifact" : " artifacts";
+  if (found.hits.length == 0) {
+    return "0 hits in " + `${found.searched}` + what + " searched.";
+  }
+  let hitWord = found.hits.length == 1 ? " hit" : " hits";
+  let out = `${found.hits.length}` + hitWord + " in " + `${found.searched}` + what + " searched";
+  if (found.capped) {
+    out = out + " (capped: more matches exist; narrow the query)";
+  }
+  out = out + ":";
+  let i: int = 0;
+  while (i < found.hits.length) {
+    let hit = found.hits[i];
+    if (hit.line > 0) {
+      out = out + "\n- " + hit.path + " v" + `${hit.version}` + ", line " + `${hit.line}` + ": " + hit.text;
+    } else {
+      out = out + "\n- " + hit.path + " v" + `${hit.version}` + ": " + hit.text;
+    }
+    i = i + 1;
+  }
+  return out;
 }
