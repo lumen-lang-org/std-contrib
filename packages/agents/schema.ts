@@ -103,7 +103,26 @@ export type AgentRow = {
   enabled: bool,
   // The agent a new conversation opens against.
   isDefault: bool,
+  // Which curated image this agent's script environments are built from. ""
+  // means the deployment default. An id into script_images and never an image
+  // reference: a model that could name its own image could make the server
+  // pull anything off the internet and run it, which is the one thing an
+  // operator curating a list is for.
+  scriptImageId: string,
   updatedAt: string,
+};
+
+// An image an operator is willing to run scripts in. A row rather than a
+// setting because a deployment has more than one kind of work — a data
+// container and a web toolchain are different images — and because the set
+// belongs to whoever runs the server, not to whoever is talking to it.
+export type ScriptImageRow = {
+  id: string,
+  // What it is called where somebody picks it.
+  label: string,
+  // The reference docker is handed: agents-runtime:1, ghcr.io/x/y@sha256:...
+  image: string,
+  enabled: bool,
 };
 
 // --- mappings ----------------------------------------------------------------
@@ -253,6 +272,16 @@ export function credentialsMapping(): DbRepository {
   return repository("provider_credentials", "id", "id", fs);
 }
 
+export function scriptImagesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("image", "image", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("script_images", "id", "id", fs);
+}
+
 export function agentsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -261,6 +290,9 @@ export function agentsMapping(): DbRepository {
     field("modelConfigId", "model_config_id", "text"),
     field("promptId", "prompt_id", "text"),
     field("enabled", "enabled", "bool"),
+    // Added after migration 5 shipped, so it arrives as an ALTER at 66 and
+    // agentsMappingV1 below keeps generating the original CREATE.
+    field("scriptImageId", "script_image_id", "text"),
     // The agent a new conversation opens against. Without it the console took
     // whichever sorted first by name, which is how a blank name became the
     // default for everyone.
@@ -334,6 +366,12 @@ export function schemaPlan(db: Db): Migration[] {
       + "child_id " + db.textType + " NOT NULL)"),
     // One prompt name has many versions, and a lookup by name is the common
     // read, so it is worth an index rather than a scan.
+    // The images an operator will run scripts in, and the agent's choice among
+    // them. Two migrations because they are two facts: the table is new, the
+    // column is an ALTER on a table whose CREATE was checksummed long ago.
+    migration("65", "curated script images", createTableSql(db, scriptImagesMapping())),
+    migration("66", "an agent chooses its script image",
+      "ALTER TABLE agents ADD COLUMN script_image_id " + db.textType + " NOT NULL DEFAULT ''"),
     migration("61", "a model config can ask for thinking",
       "ALTER TABLE model_configs ADD COLUMN thinking " + db.textType + " NOT NULL DEFAULT ''"),
     migration("8", "provider credentials", createTableSql(db, credentialsMapping())),

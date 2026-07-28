@@ -196,8 +196,8 @@ test("deleting an MCP server deletes its stored token", () => {
 
 test("deleting an agent takes its scopes, its retrieval row and its parents' links", () => {
   fresh();
-  let a1: AgentRow = { id: "a1", agentName: "lead", description: "d", modelConfigId: "c1", promptId: "p1", isDefault: true, enabled: true, updatedAt: "t" };
-  let a2: AgentRow = { id: "a2", agentName: "scout", description: "d", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
+  let a1: AgentRow = { id: "a1", agentName: "lead", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: true, enabled: true, updatedAt: "t" };
+  let a2: AgentRow = { id: "a2", agentName: "scout", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(a1));
   persist(database, agentsMapping(), JSON.stringify(a2));
   execute(database, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");

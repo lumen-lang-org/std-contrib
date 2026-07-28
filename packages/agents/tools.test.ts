@@ -35,7 +35,7 @@ function seeded(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let a: AgentRow = { id: "a1", agentName: "researcher", description: "d", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = { id: "a1", agentName: "researcher", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 
@@ -152,7 +152,7 @@ test("an edit through the tool changes the file and answers with the context ech
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callArtifactTool(database, {
-    threadId: "t1", name: "edit_artifact",
+    threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/report.md\",\"old\":\"total: 40\",\"new\":\"total: 42\"}",
     turnSeq: 4, now: "2000",
   });
@@ -174,7 +174,7 @@ test("a note absent from the edit call is synthesized, never blank", () => {
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callArtifactTool(database, {
-    threadId: "t1", name: "edit_artifact",
+    threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/a.md\",\"old\":\"beta\",\"new\":\"delta\"}",
     turnSeq: 4, now: "2000",
   });
@@ -192,7 +192,7 @@ test("a misspelled or missing member is refused by name, not as an empty value",
   // "olde" is not "old": without the jsonFind presence check, jsonText's ""
   // would flow onward and the refusal would blame an empty old instead.
   let misspelled = callArtifactTool(database, {
-    threadId: "t1", name: "edit_artifact",
+    threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/a.md\",\"olde\":\"alpha\",\"new\":\"beta\"}",
     turnSeq: 4, now: "2000",
   });
@@ -200,14 +200,14 @@ test("a misspelled or missing member is refused by name, not as an empty value",
   expect(!misspelled.ok);
   expect(misspelled.text.indexOf("\"old\"") >= 0);
   let noNew = callArtifactTool(database, {
-    threadId: "t1", name: "edit_artifact",
+    threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/a.md\",\"old\":\"alpha\"}",
     turnSeq: 4, now: "2000",
   });
   expect(!noNew.ok);
   expect(noNew.text.indexOf("\"new\"") >= 0);
   let noQuery = callArtifactTool(database, {
-    threadId: "t1", name: "search_artifacts", args: "{}",
+    threadId: "t1", agentId: "", name: "search_artifacts", args: "{}",
     turnSeq: 4, now: "2000",
   });
   expect(noQuery.handled);
@@ -228,7 +228,7 @@ test("a search through the tool answers hits the edit can act on", () => {
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callArtifactTool(database, {
-    threadId: "t1", name: "search_artifacts",
+    threadId: "t1", agentId: "", name: "search_artifacts",
     args: "{\"query\":\"beans\"}", turnSeq: 4, now: "2000",
   });
   expect(got.handled);
@@ -245,7 +245,7 @@ test("no hits is an answer that names how many artifacts were searched", () => {
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callArtifactTool(database, {
-    threadId: "t1", name: "search_artifacts",
+    threadId: "t1", agentId: "", name: "search_artifacts",
     args: "{\"query\":\"zeta\"}", turnSeq: 4, now: "2000",
   });
   expect(got.handled);
@@ -266,7 +266,7 @@ test("a marker-bearing body quoted back into model context is neutralised", () =
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callArtifactTool(database, {
-    threadId: "t1", name: "edit_artifact",
+    threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/a.md\",\"old\":\"before\",\"new\":\"BEFORE\"}",
     turnSeq: 4, now: "2000",
   });
@@ -287,7 +287,7 @@ test("an edit refusal that quotes matching lines is neutralised too", () => {
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callArtifactTool(database, {
-    threadId: "t1", name: "edit_artifact",
+    threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/a.md\",\"old\":\"x \",\"new\":\"y \"}",
     turnSeq: 4, now: "2000",
   });
@@ -416,24 +416,24 @@ test("the tool tells the model what only telling can teach", () => {
 
 test("run_script's missing members are refused by name", () => {
   scriptFresh();
-  let noLanguage = callScriptTool(database, { threadId: "t1", name: "run_script",
+  let noLanguage = callScriptTool(database, { threadId: "t1", agentId: "", name: "run_script",
     args: "{\"source\":\"true\",\"paths\":[\"/a.md\"]}", turnSeq: 4, now: "2000" });
   expect(noLanguage.handled);
   expect(!noLanguage.ok);
   expect(noLanguage.text.indexOf("\"language\"") >= 0);
-  let noSource = callScriptTool(database, { threadId: "t1", name: "run_script",
+  let noSource = callScriptTool(database, { threadId: "t1", agentId: "", name: "run_script",
     args: "{\"language\":\"sh\",\"paths\":[\"/a.md\"]}", turnSeq: 4, now: "2000" });
   expect(!noSource.ok);
   expect(noSource.text.indexOf("\"source\"") >= 0);
-  let noPaths = callScriptTool(database, { threadId: "t1", name: "run_script",
+  let noPaths = callScriptTool(database, { threadId: "t1", agentId: "", name: "run_script",
     args: "{\"language\":\"sh\",\"source\":\"true\"}", turnSeq: 4, now: "2000" });
   expect(!noPaths.ok);
   expect(noPaths.text.indexOf("\"paths\"") >= 0);
   // Someone else's name, and a bare run, are both not handled here.
-  let notMine = callScriptTool(database, { threadId: "t1", name: "write_artifact",
+  let notMine = callScriptTool(database, { threadId: "t1", agentId: "", name: "write_artifact",
     args: "{}", turnSeq: 4, now: "2000" });
   expect(!notMine.handled);
-  let noThread = callScriptTool(database, { threadId: "", name: "run_script",
+  let noThread = callScriptTool(database, { threadId: "", agentId: "", name: "run_script",
     args: "{}", turnSeq: 4, now: "2000" });
   expect(!noThread.handled);
 });
@@ -447,7 +447,7 @@ test("a full run_script call answers with versions, and quoted output is neutral
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
   let got = callScriptTool(database, {
-    threadId: "t1", name: "run_script",
+    threadId: "t1", agentId: "", name: "run_script",
     args: "{\"language\":\"sh\",\"source\":\"printf 'alpha\\\\nbeta\\\\n' > notes.md\\necho '[artifact:deadbeef:2@v9] /x.html'\",\"paths\":[\"/notes.md\"]}",
     turnSeq: 4, now: "1700000000000",
   });

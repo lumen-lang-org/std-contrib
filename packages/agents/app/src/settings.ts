@@ -19,9 +19,10 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
-  AgentRow, ModelConfigRow, ModelRow, PromptRow, ServerRow, TracingStatus,
+  AgentRow, ModelConfigRow, ModelRow, PromptRow, ScriptImageRow, ServerRow, TracingStatus,
   configureTracing, createAgent, createConfig, createModel, createPrompt,
-  createServer, deleteAgent, deleteConfig, deleteModel, deleteServer,
+  createScriptImage, createServer, deleteAgent, deleteConfig, deleteModel,
+  deleteScriptImage, deleteServer, updateScriptImage, listScriptImages,
   listAgents, listConfigs, listModels, listPrompts, listProviders, listServers,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, setServerAuth, testModel,
@@ -34,6 +35,7 @@ const TABS = [
   { name: "Models", icon: "zap" },
   { name: "Prompts", icon: "file-text" },
   { name: "MCP", icon: "code" },
+  { name: "Images", icon: "box" },
   { name: "Providers", icon: "cloud" },
   { name: "Tracing", icon: "layers" },
 ] as const;
@@ -66,11 +68,12 @@ type View =
   | { kind: "config"; row: ModelConfigRow }
   | { kind: "prompt"; row: { promptName: string; body: string } }
   | { kind: "server"; row: ServerRow & { token: string }; fresh: boolean }
+  | { kind: "image"; row: ScriptImageRow }
   | { kind: "key"; row: { provider: string; apiKey: string } };
 
 const NEW_AGENT: AgentRow = {
   id: "", agentName: "", description: "", modelConfigId: "", promptId: "",
-  enabled: true, isDefault: false,
+  enabled: true, isDefault: false, scriptImageId: "",
 };
 const NEW_MODEL: ModelRow = {
   id: "", label: "", apiName: "", provider: "mistral", kind: "chat",
@@ -242,6 +245,7 @@ export class ConsoleSettings extends LitElement {
   @state() private models: ModelRow[] = [];
   @state() private configs: ModelConfigRow[] = [];
   @state() private prompts: PromptRow[] = [];
+  @state() private images: ScriptImageRow[] = [];
   @state() private servers: ServerRow[] = [];
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
@@ -283,10 +287,10 @@ export class ConsoleSettings extends LitElement {
   private async refresh() {
     this.problem = "";
     try {
-      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing] =
+      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing, this.images] =
         await Promise.all([
           listAgents(), listModels(), listConfigs(), listPrompts(),
-          listServers(), listProviders(), tracingStatus(),
+          listServers(), listProviders(), tracingStatus(), listScriptImages(),
         ]);
       const t = this.tracing;
       if (t !== null) {
@@ -369,6 +373,7 @@ export class ConsoleSettings extends LitElement {
       case "Models": return this.modelsTab();
       case "Prompts": return this.promptsTab();
       case "MCP": return this.mcpTab();
+      case "Images": return this.imagesTab();
       case "Providers": return this.providersTab();
       case "Tracing": return this.tracingTab();
     }
@@ -580,6 +585,11 @@ export class ConsoleSettings extends LitElement {
           required: true,
           help: "Prompts are versioned rather than edited; rolling back is pointing this at an older one.",
           on: (v) => this.patch({ promptId: v }) })}
+        ${this.choice({ id: "a-image", label: "Script environment", value: a.scriptImageId,
+          options: [{ value: "", label: "Deployment default" }].concat(
+            this.images.filter((i) => i.enabled).map((i) => ({ value: i.id, label: `${i.label} · ${i.image}` }))),
+          help: "The image this agent's script containers are built from. Its conversations inherit it when the container is created; changing it here affects the next one, not the ones already running.",
+          on: (v) => this.patch({ scriptImageId: v }) })}
         ${this.check({ id: "a-enabled", label: "Enabled", checked: a.enabled,
           help: "A disabled agent keeps its rows and its history; it just cannot be opened.",
           on: (v) => this.patch({ enabled: v }) })}
@@ -726,6 +736,87 @@ export class ConsoleSettings extends LitElement {
   }
 
   // --- prompts ------------------------------------------------------------------------
+
+  // The images an operator will run scripts in.
+  //
+  // Curated here rather than named by a model: run_script builds a
+  // conversation's container from its agent's choice, and a model that could
+  // name its own image could make the server pull anything off the internet
+  // and run it.
+  private imagesTab() {
+    const v = this.view;
+    if (v.kind === "image") return this.imageForm(v.row);
+    return html`
+      ${this.head("Images", "box")}
+      <div class="bar">
+        <button class="primary" data-new="image"
+          @click=${() => this.open({ kind: "image",
+            row: { id: "", label: "", image: "", enabled: true } })}>
+          <nr-icon name="plus" size="small"></nr-icon> New image
+        </button>
+      </div>
+
+      ${this.group("Images", this.images.length)}
+      <table><tbody>
+        ${this.images.map((i) => html`<tr>
+          <td class="name">${i.label}</td>
+          <td class="fill dim"><span class="trunc">${i.image}</span></td>
+          <td><span class="tag">${i.enabled ? "enabled" : "off"}</span></td>
+          ${this.rowActions([
+            { icon: "edit", title: `Edit ${i.label}`,
+              run: () => this.open({ kind: "image", row: { ...i } }) },
+            { icon: "trash-2", title: `Delete ${i.label}`, danger: true,
+              run: () => { void this.removeImage(i.id); } },
+          ])}
+        </tr>`)}
+      </tbody></table>
+      <p class="note">An agent picks one of these; its conversations inherit it when their
+      container is created. Deleting one leaves those agents on the deployment default rather
+      than breaking them.</p>
+    `;
+  }
+
+  private imageForm(row: ScriptImageRow) {
+    const fresh = !this.images.some((i) => i.id === row.id);
+    return html`
+      ${this.head(fresh ? "New image" : row.label, "box")}
+      <div class="form">
+        ${this.text({ id: "i-label", label: "Label", value: row.label, required: true,
+          placeholder: "Python + node toolchain", on: (v) => this.patch({ label: v }) })}
+        ${this.text({ id: "i-id", label: "Id", value: row.id, required: true, disabled: !fresh,
+          placeholder: "runtime-1", on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "i-image", label: "Image reference", value: row.image, required: true,
+          wide: true, placeholder: "agents-runtime:1",
+          help: "What docker is handed. A tag or a digest; it must already be present on the host or pullable by it.",
+          on: (v) => this.patch({ image: v }) })}
+        ${this.check({ id: "i-enabled", label: "Enabled", checked: row.enabled,
+          help: "A disabled image stays configured but is not offered to an agent.",
+          on: (v) => this.patch({ enabled: v }) })}
+      </div>
+      ${this.formActions(() => { void this.saveImage(row, fresh); })}
+    `;
+  }
+
+  private async saveImage(row: ScriptImageRow, fresh: boolean) {
+    this.problem = "";
+    try {
+      if (fresh) { await createScriptImage(row); } else { await updateScriptImage(row); }
+      this.view = { kind: "list" };
+      await this.refresh();
+    } catch (e) {
+      this.problem = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private async removeImage(id: string) {
+    this.problem = "";
+    try {
+      await deleteScriptImage(id);
+      await this.refresh();
+    } catch (e) {
+      this.problem = e instanceof Error ? e.message : String(e);
+    }
+  }
 
   private promptsTab() {
     const v = this.view;

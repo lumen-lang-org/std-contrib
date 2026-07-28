@@ -13,7 +13,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ARTIFACT_MAX, THREAD_BYTES_MAX, artifactPlan, putArtifact, getArtifact, getVersion } from "./artifacts.ts";
-import { ScriptFile, ScriptReconcile, ScriptRun, ScriptRan, scriptMaterialise, scriptReconcile, scriptRun, scriptAcquire, scriptRelease, scriptRunningCount, scriptWallOverride, scriptOutputOverride, scriptProbeReset, scriptDockerWorks } from "./run-script.ts";
+import { ScriptFile, ScriptReconcile, ScriptRun, ScriptRan, scriptMaterialise, scriptReconcile, scriptRun, scriptAcquire, scriptRelease, scriptRunningCount, scriptWallOverride, scriptOutputOverride, scriptProbeReset, scriptDockerWorks, scriptImage, scriptImageFor } from "./run-script.ts";
 import { EnvSweep, ENV_IDLE_MS, envPlan, envIdle, envList, envContainerName, envDockerOverride } from "./environments.ts";
 
 let database: Db = sqlite();
@@ -530,7 +530,7 @@ function findLine(lines: string[], prefix: string): string {
 function running(language: string, source: string, paths: string[], mayCreate: bool, now: string): ScriptRan {
   let asked: ScriptRun = {
     threadId: "t1", language: language, source: source, paths: paths,
-    mayCreate: mayCreate, environment: "", turnSeq: 7, now: now,
+    mayCreate: mayCreate, environment: "", agentId: "", turnSeq: 7, now: now,
   };
   return scriptRun(database, asked);
 }
@@ -756,7 +756,7 @@ test("an environment name is refused before anything exists: bytes counted as by
   while (i < 60) { wide = wide + "ل"; i = i + 1; }
   let long = scriptRun(database, {
     threadId: "t1", language: "sh", source: "true", paths: ["/a.md"],
-    mayCreate: false, environment: wide, turnSeq: -1, now: "1785200000000",
+    mayCreate: false, environment: wide, agentId: "", turnSeq: -1, now: "1785200000000",
   });
   expect(!long.ok);
   expect(long.problem.includes("bytes of UTF-8"));
@@ -766,7 +766,7 @@ test("an environment name is refused before anything exists: bytes counted as by
   // two such names would share a container.
   let odd = scriptRun(database, {
     threadId: "t1", language: "sh", source: "true", paths: ["/a.md"],
-    mayCreate: false, environment: "prod env", turnSeq: -1, now: "1785200000000",
+    mayCreate: false, environment: "prod env", agentId: "", turnSeq: -1, now: "1785200000000",
   });
   expect(!odd.ok);
   expect(odd.problem.includes("letters, digits, dot, dash and underscore"));
@@ -810,4 +810,37 @@ test("a binary image round-trips as base64: decoded for the script, re-encoded f
   expect(read.ok);
   expect(read.stdout.trim() == "8");
   expect(read.unchanged.length == 1);
+});
+
+test("an agent's curated image is what its containers are built from, with a working fallback", () => {
+  // The choice is configuration's, never the call's: nothing a model sends
+  // names an image, and scriptRun asks the agent's row.
+  fresh();
+  dockerEmulated();
+  execute(database, "CREATE TABLE IF NOT EXISTS script_images (id text PRIMARY KEY, label text NOT NULL, image text NOT NULL, enabled integer NOT NULL)");
+  execute(database, "CREATE TABLE IF NOT EXISTS agents (id text PRIMARY KEY, agent_name text NOT NULL, description text NOT NULL, model_config_id text NOT NULL, prompt_id text NOT NULL, enabled integer NOT NULL, is_default integer NOT NULL, script_image_id text NOT NULL DEFAULT '', updated_at text NOT NULL)");
+  execute(database, "INSERT INTO script_images VALUES ('img-node', 'Node toolchain', 'node:22-bookworm', 1)");
+  execute(database, "INSERT INTO script_images VALUES ('img-off', 'Retired', 'old:1', 0)");
+  execute(database, "INSERT INTO agents VALUES ('a-node', 'node agent', '', 'c1', 'p1', 1, 0, 'img-node', 'now')");
+  execute(database, "INSERT INTO agents VALUES ('a-gone', 'stale agent', '', 'c1', 'p1', 1, 0, 'img-vanished', 'now')");
+  execute(database, "INSERT INTO agents VALUES ('a-off', 'retired image', '', 'c1', 'p1', 1, 0, 'img-off', 'now')");
+  execute(database, "INSERT INTO agents VALUES ('a-plain', 'no choice', '', 'c1', 'p1', 1, 0, '', 'now')");
+
+  expect(scriptImageFor(database, "a-node") == "node:22-bookworm");
+  // Every way of not having a usable choice falls back to the deployment
+  // default rather than refusing: an operator retiring an image must not
+  // break the conversations that pointed at it.
+  expect(scriptImageFor(database, "a-plain") == scriptImage());
+  expect(scriptImageFor(database, "a-gone") == scriptImage());
+  expect(scriptImageFor(database, "a-off") == scriptImage());
+  expect(scriptImageFor(database, "") == scriptImage());
+
+  // And the run builds the container from it.
+  seeded("/notes.md", "alpha\n");
+  let ran = scriptRun(database, {
+    threadId: "t1", language: "sh", source: "true", paths: ["/notes.md"],
+    mayCreate: false, environment: "", agentId: "a-node", turnSeq: 3, now: "1785200000000",
+  });
+  expect(ran.ok);
+  expect(argvLines()[0].indexOf("node:22-bookworm sleep infinity") > 0);
 });

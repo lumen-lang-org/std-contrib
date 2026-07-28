@@ -26,6 +26,7 @@ type AgentView = {
   promptId: string,
   enabled: bool,
   isDefault: bool,
+  scriptImageId: string,
   updatedAt: string,
   prompt: PromptView,
   config: ConfigView,
@@ -78,8 +79,8 @@ function seeded(): void {
   persist(database, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(database, mcpServersMapping(), JSON.stringify(ghSrv));
 
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
-  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p3", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p3", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
   persist(database, agentsMapping(), JSON.stringify(lead));
   persist(database, agentsMapping(), JSON.stringify(scout));
 
@@ -93,12 +94,13 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Fourteen: five tables from mappings, two link tables, the credentials
-  // table, the index, and the five ALTERs that add columns those tables did
-  // not have when they were first created — the newest of which lets a config
-  // ask the model to think. Asserting the number rather than "some" is what
-  // catches a migration silently dropped from the plan.
-  expect(r.applied == 14);
+  // Sixteen: six tables from mappings (the newest being the curated script
+  // images), two link tables, the credentials table, the index, and the six
+  // ALTERs that add columns those tables did not have when they were first
+  // created — the newest of which lets an agent choose its script image.
+  // Asserting the number rather than "some" is what catches a migration
+  // silently dropped from the plan.
+  expect(r.applied == 16);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -106,7 +108,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 14);
+  expect(migrate(database, schemaPlan(database)).applied == 16);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

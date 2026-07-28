@@ -36,10 +36,11 @@
 //   cd packages/agents && lumen test run-script.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { executeWith, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { executeWith, findById, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
 import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { normalScope } from "./knowledge.ts";
+import { AgentRow, ScriptImageRow, agentsMapping, scriptImagesMapping } from "./schema.ts";
 
 // One materialised path: which version the run directory holds, or why it
 // holds nothing. The list of these IS the snapshot reconcile compares against
@@ -667,6 +668,32 @@ export function scriptImage(): string {
   return process.env("AGENTS_SCRIPT_IMAGE") ?? "agents-runtime:1";
 }
 
+// The image THIS agent's environments are built from: its curated choice, or
+// the deployment default when it has none.
+//
+// Resolved from the agent's row rather than taken from the call, and never
+// from the model: a run_script that could name its own image would let a
+// sentence in a retrieved document make this server pull an arbitrary image
+// off the internet and run it. The operator curates script_images; an agent
+// points at one; a conversation inherits whatever its agent had when its
+// container was created.
+//
+// A disabled or missing row falls back to the default rather than refusing —
+// an operator retiring an image should not break every conversation that
+// pointed at it, and the fallback is a working image by definition.
+export function scriptImageFor(db: Db, agentId: string): string {
+  if (agentId == "") { return scriptImage(); }
+  let held = findById(db, agentsMapping(), agentId);
+  if (held == "") { return scriptImage(); }
+  let chosen = JSON.parse<AgentRow>(held).scriptImageId;
+  if (chosen == "") { return scriptImage(); }
+  let row = findById(db, scriptImagesMapping(), chosen);
+  if (row == "") { return scriptImage(); }
+  let image: ScriptImageRow = JSON.parse<ScriptImageRow>(row);
+  if (!image.enabled || image.image == "") { return scriptImage(); }
+  return image.image;
+}
+
 // How many scripts the whole deployment may run at once. Well below the HTTP
 // pool size on purpose: a script holds its handler thread for the entire run,
 // and the API must keep answering — including the steps poll that draws the
@@ -850,6 +877,9 @@ export type ScriptRun = {
   mayCreate: bool,
   // Which environment runs it; "" means "main".
   environment: string,
+  // Whose curated image to build the container from. The agent's id, not an
+  // image reference: the choice belongs to configuration, never to the call.
+  agentId: string,
   turnSeq: int,
   now: string,
 };
@@ -1005,7 +1035,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // script installs into it, and an installer with nowhere to fetch from is
   // decoration. Creation-time only — the row records it, a script cannot
   // flip it.
-  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: scriptImage(), network: true, now: run.now };
+  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: scriptImageFor(db, run.agentId), network: true, now: run.now };
   let ensured = envEnsure(db, ensure);
   if (!ensured.ok) { return scriptBail(container, stage, ensured.problem); }
   let recreated = known && ensured.created;

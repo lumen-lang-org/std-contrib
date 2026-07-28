@@ -11,6 +11,18 @@ export type AgentRow = {
   enabled: boolean;
   // The agent a new conversation opens against. Exactly one.
   isDefault: boolean;
+  // Which curated image this agent's script containers are built from. "" is
+  // the deployment default. An id, never an image reference: the operator
+  // curates the list, so nothing the model says can name what gets pulled.
+  scriptImageId: string;
+};
+
+// An image an operator is willing to run scripts in.
+export type ScriptImageRow = {
+  id: string;
+  label: string;
+  image: string;
+  enabled: boolean;
 };
 
 export type ModelRow = {
@@ -240,6 +252,15 @@ export const setRetrieval = (agentId: string, r: Omit<Retrieval, "agentId">) =>
 
 export const deleteAgent = (id: string) =>
   call<unknown>(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const listScriptImages = () => call<ScriptImageRow[]>("/script-images");
+export const createScriptImage = (row: ScriptImageRow) =>
+  call<ScriptImageRow>("/script-images", { method: "POST", body: JSON.stringify(row) });
+export const updateScriptImage = (row: ScriptImageRow) =>
+  call<ScriptImageRow>(`/script-images/${encodeURIComponent(row.id)}`,
+    { method: "PUT", body: JSON.stringify(row) });
+export const deleteScriptImage = (id: string) =>
+  call<unknown>(`/script-images/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 export const deleteModel = (id: string) =>
   call<unknown>(`/models/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const deleteServer = (id: string) =>

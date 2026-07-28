@@ -34,7 +34,7 @@ let database: Db = sqlite();
 function testKey(): string { return "0123456789abcdef0123456789abcdef"; }
 
 function agent(id: string, name: string, description: string): void {
-  let a: AgentRow = { id: id, agentName: name, description: description, modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = { id: id, agentName: name, description: description, modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 
@@ -81,13 +81,13 @@ test("a name a provider would refuse is made safe rather than rejected", () => {
 });
 
 test("a child is described by its own row", () => {
-  let a: AgentRow = { id: "a2", agentName: "scout", description: "searches the archive", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = { id: "a2", agentName: "scout", description: "searches the archive", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
   expect(delegateDescription(a).indexOf("scout") >= 0);
   expect(delegateDescription(a).indexOf("searches the archive") >= 0);
 });
 
 test("a child with no description still says what it is", () => {
-  let bare: AgentRow = { id: "a3", agentName: "scout", description: "", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
+  let bare: AgentRow = { id: "a3", agentName: "scout", description: "", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
   expect(delegateDescription(bare).indexOf("scout") >= 0);
 });
 
@@ -184,7 +184,7 @@ test("a disabled child is not offered, and the run says why", () => {
   seeded();
   storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
   agent("a1", "lead", "delegates");
-  let off: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: false, updatedAt: "t" };
+  let off: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: false, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(off));
   delegates("a1", "a2");
 
