@@ -172,3 +172,61 @@ export function modelRow(over: Partial<ModelFlat> & { id: string }): ModelFlat {
 export async function pickAgent(page: Page, agentId: string) {
   await shell(page).locator("header select").selectOption(agentId);
 }
+
+// --- the e2e fixtures --------------------------------------------------------
+//
+// The suites run against agents of their own — e2e-doubled and its child
+// e2e-helper, wired to the scripted model double — and never against anything
+// a person made. This grows them on a database that lacks them, idempotently:
+// every row is looked for before it is created, nothing that exists is
+// edited, and no default flag is ever touched. A provider key is written only
+// where none exists, because a key can never be read back and a fixture that
+// overwrites one cannot restore it.
+export const E2E_AGENT = "e2e-doubled";
+export const E2E_HELPER = "e2e-helper";
+
+type Req = Page["request"];
+
+async function rows(request: Req, path: string): Promise<Record<string, unknown>[]> {
+  return await request.get(path).then((r) => r.json()) as Record<string, unknown>[];
+}
+
+export async function ensureDoubled(request: Req): Promise<string> {
+  const agents = await rows(request, "/api/agents");
+  const held = agents.find((a) => a.agentName === E2E_AGENT);
+  if (held) return held.id as string;
+
+  if (!(await rows(request, "/api/models")).some((m) => m.id === "m-double")) {
+    await request.post("/api/models", { data: {
+      id: "m-double", label: "Double", apiName: "double-1", provider: "openai",
+      kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true,
+    } });
+  }
+  const providers = await request.get("/api/providers").then((r) => r.json()) as string[];
+  if (!providers.includes("openai")) {
+    await request.put("/api/providers/openai/key", { data: { apiKey: "e2e-double-not-a-real-key" } });
+  }
+  if (!(await rows(request, "/api/model-configs")).some((c) => c.id === "c-double")) {
+    await request.post("/api/model-configs", { data: {
+      id: "c-double", modelId: "m-double", temperature: 0, maxTokens: 1024, topP: 1,
+      extra: "{}", thinking: "",
+    } });
+  }
+  let prompt = (await rows(request, "/api/prompts")).find((p) => p.promptName === "e2e-double");
+  if (!prompt) {
+    prompt = await request.post("/api/prompts", { data: {
+      id: "", promptName: "e2e-double", version: 0,
+      body: "You are a test double. Answer as arranged.", createdAt: "",
+    } }).then((r) => r.json()) as Record<string, unknown>;
+  }
+
+  const mk = async (id: string, name: string, why: string) =>
+    await request.post("/api/agents", { data: {
+      id, agentName: name, description: why, modelConfigId: "c-double",
+      promptId: prompt!.id as string, isDefault: false, enabled: true, updatedAt: "now",
+    } });
+  await mk("a-double", E2E_AGENT, "e2e fixture: answers from the scripted model double; not for people");
+  await mk("a-helper", E2E_HELPER, "e2e fixture: sub-agent on the model double; not for people");
+  await request.post("/api/agents/a-double/sub-agents", { data: { childId: "a-helper" } });
+  return "a-double";
+}

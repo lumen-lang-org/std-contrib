@@ -574,7 +574,7 @@ function searchAnswer(found: ArtifactSearch): string {
 // (RUN-SCRIPT.md: absent, not offered-and-failing).
 
 // The description tells the model everything a run will not teach it: that
-// the environment persists, that there is no network, that deletion never
+// the environment persists, that installs into it stick, that deletion never
 // propagates, and what the reply names. All of that is invisible in a single
 // successful call, so — like SELF_CONTAINED above — it has to be said up
 // front.
@@ -585,7 +585,7 @@ export function scriptTool(): ToolSpec {
     + "The script runs inside this conversation's environment, a container that persists between runs: what it leaves "
     + "outside its run directory — installed packages, caches, scratch files — is still there on the next call. That "
     + "state is cache, not record; when the environment had to be recreated the reply says so, and only artifacts "
-    + "survive for certain. The environment has no network: nothing can be fetched, and package installs will fail. "
+    + "survive for certain. The environment has the network, and HOME is /workspace and persists: pip install and npm install work, and what one run installs the next run finds. "
     + "Name in paths every artifact the script reads or rewrites; each is copied into a fresh run directory at its own "
     + "relative path (the artifact /report.md is the file report.md), the script runs there as a non-root user, and "
     + "afterwards each file is compared back: unchanged bytes save nothing, changed bytes become the artifact's next "

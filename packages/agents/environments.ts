@@ -173,6 +173,9 @@ export type EnvEnsure = {
   threadId: string,
   name: string,
   image: string,
+  // Whether the container may reach out. Read at creation only: an existing
+  // environment keeps whatever its row says.
+  network: bool,
   now: string,
 };
 
@@ -202,8 +205,11 @@ function envRefused(problem: string): EnvEnsured {
 //
 // An empty name means "main", matching the tool's contract. The image and the
 // network setting are creation-time properties: once the row exists the
-// caller's image is ignored, and network stays whatever the row says — this
-// slice always writes it off.
+// caller's image is ignored, and network stays whatever the row says. The
+// decision (2026-07-28): environments have the network, because the point of
+// a persistent container is what a script installs into it and an installer
+// with nowhere to fetch from is decoration. The row records it; a script can
+// never flip it.
 export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   if (e.threadId == "") {
     return envRefused("an environment belongs to a conversation, and this call names none");
@@ -219,12 +225,15 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     // `sleep infinity` is the container's whole process: something for docker
     // to keep alive between runs, so `docker start` has a thing to start.
     // Scripts arrive later as execs, not as the entrypoint.
-    let made = envDocker(["run", "-d", "--name", container, "--network", "none",
-      e.image, "sleep", "infinity"]);
+    let made = envDocker(envRunArgs(container, e.image, e.network));
     if (made.status != 0) {
       return envRefused(envDockerProblem("create the environment", made));
     }
-    envSave(db, e.threadId, name, e.image, "running", e.now, e.now);
+    // A writable home, owned by the run user. Installs land here — pip and
+    // npm both respect HOME — and here is inside the container, so what a
+    // script installs persists between runs and dies with the environment.
+    envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
+    envSave(db, e.threadId, name, e.image, e.network, "running", e.now, e.now);
     let fresh: EnvEnsured = { ok: true, container: container, created: true, warmed: false, problem: "" };
     return fresh;
   }
@@ -241,27 +250,37 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       // the record and the workspace was only cache, so recreate from the
       // image the row remembers; `created` tells the caller to say the cache
       // was lost.
-      let remade = envDocker(["run", "-d", "--name", container, "--network", "none",
-        row.image, "sleep", "infinity"]);
+      let remade = envDocker(envRunArgs(container, row.image, row.network != 0));
       if (remade.status != 0) {
         return envRefused(envDockerProblem("start the environment", remade));
       }
+      envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
       created = true;
     }
   }
-  envSave(db, row.threadId, row.name, row.image, "running", row.createdAt, e.now);
+  envSave(db, row.threadId, row.name, row.image, row.network != 0, "running", row.createdAt, e.now);
   let back: EnvEnsured = { ok: true, container: container, created: created, warmed: warmed, problem: "" };
   return back;
 }
 
 // The whole row, written whole: `persist` is an upsert over every column, so
 // a partial document would write empty over the rest.
-function envSave(db: Db, threadId: string, name: string, image: string, status: string, createdAt: string, lastUsedAt: string): void {
+function envSave(db: Db, threadId: string, name: string, image: string, network: bool, status: string, createdAt: string, lastUsedAt: string): void {
   let row: EnvRow = {
     id: threadId + ":" + name, threadId: threadId, name: name, image: image,
-    network: 0, status: status, createdAt: createdAt, lastUsedAt: lastUsedAt,
+    network: network ? 1 : 0, status: status, createdAt: createdAt, lastUsedAt: lastUsedAt,
   };
   persist(db, envMapping(), JSON.stringify(row));
+}
+
+// The container, as an environment wants it: detached, named, `sleep infinity`
+// as the thing docker keeps alive between runs, and offline only when the
+// environment was made that way.
+function envRunArgs(container: string, image: string, network: bool): string[] {
+  let out: string[] = ["run", "-d", "--name", container];
+  if (!network) { out.push("--network"); out.push("none"); }
+  out.push(image); out.push("sleep"); out.push("infinity");
+  return out;
 }
 
 // --- idle -----------------------------------------------------------------------
@@ -293,7 +312,7 @@ export function envIdle(db: Db, s: EnvSweep): int {
     let row = rows[i];
     if (!envStampLess(deadline, row.lastUsedAt)) {
       envDocker(["stop", envContainerName(row.threadId, row.name)]);
-      envSave(db, row.threadId, row.name, row.image, "stopped", row.createdAt, row.lastUsedAt);
+      envSave(db, row.threadId, row.name, row.image, row.network != 0, "stopped", row.createdAt, row.lastUsedAt);
       stopped = stopped + 1;
     }
     i = i + 1;

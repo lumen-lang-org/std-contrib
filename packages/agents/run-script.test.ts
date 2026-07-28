@@ -483,6 +483,7 @@ function dockerEmulated(): void {
     + "    case \"$1\" in\n"
     + "    --user) shift 2 ;;\n"
     + "    --workdir) WD=\"$2\"; shift 2 ;;\n"
+    + "    -e) shift 2 ;;\n"
     + "    *) break ;;\n"
     + "    esac\n"
     + "  done\n"
@@ -551,13 +552,17 @@ test("a script runs in its environment and its changed file lands as the next ve
   let rows = envList(database, "t1");
   expect(rows.length == 1);
   expect(rows[0].name == "main");
-  // Created network-off; the script ran as a non-root user, under a wall
-  // clock, with the per-run directory as its working directory.
+  // Created WITH the network — installs are the point of a persistent
+  // container — and the script ran as a non-root user, under a wall clock,
+  // with the per-run directory as its working directory and a home that
+  // persists between runs.
   let asked = argvLines();
-  expect(asked[0].indexOf("run -d --name agents-env-t1-main --network none") == 0);
+  expect(asked[0].indexOf("run -d --name agents-env-t1-main ") == 0);
+  expect(asked[0].indexOf("--network none") < 0);
   let exline = findLine(asked, "exec --user 65534:65534");
   expect(exline != "");
   expect(exline.indexOf("--workdir /tmp/lumen-run-") >= 0);
+  expect(exline.indexOf("-e HOME=/workspace") >= 0);
   expect(exline.indexOf("timeout -k 5 60 sh /tmp/lumen-job-") >= 0);
   // The run released its slot.
   expect(scriptRunningCount() == 0);

@@ -371,6 +371,7 @@ function dockerEmulated(): void {
     + "    case \"$1\" in\n"
     + "    --user) shift 2 ;;\n"
     + "    --workdir) WD=\"$2\"; shift 2 ;;\n"
+    + "    -e) shift 2 ;;\n"
     + "    *) break ;;\n"
     + "    esac\n"
     + "  done\n"
@@ -406,7 +407,7 @@ test("the tool tells the model what only telling can teach", () => {
   let spec = scriptTool();
   expect(spec.name == "run_script");
   expect(spec.description.indexOf("persists between runs") >= 0);
-  expect(spec.description.indexOf("no network") >= 0);
+  expect(spec.description.indexOf("pip install and npm install work") >= 0);
   expect(spec.description.indexOf("bytes of UTF-8") >= 0);
   expect(spec.description.indexOf("nothing is ever deleted") >= 0);
   expect(spec.schema.indexOf("mayCreate") >= 0);

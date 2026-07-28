@@ -961,7 +961,11 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     if (before[b].name == envName) { known = true; }
     b = b + 1;
   }
-  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: SCRIPT_IMAGE, now: run.now };
+  // With the network: the whole point of a persistent container is what a
+  // script installs into it, and an installer with nowhere to fetch from is
+  // decoration. Creation-time only — the row records it, a script cannot
+  // flip it.
+  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: SCRIPT_IMAGE, network: true, now: run.now };
   let ensured = envEnsure(db, ensure);
   if (!ensured.ok) { return scriptBail(container, stage, ensured.problem); }
   let recreated = known && ensured.created;
@@ -989,7 +993,13 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
       scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("prepare the run directory", owned)));
   }
 
-  let ran = scriptDocker(["exec", "--user", SCRIPT_UID, "--workdir", runDir, container,
+  // HOME is /workspace — writable, owned by the run user, and OUTSIDE the
+  // per-run directory, so `pip install` and `npm install -g` land somewhere
+  // that persists between runs. That is the point of the environment: the
+  // second script finds what the first one installed.
+  let ran = scriptDocker(["exec", "--user", SCRIPT_UID, "--workdir", runDir,
+    "-e", "HOME=/workspace", "-e", "PATH=/workspace/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    container,
     "timeout", "-k", SCRIPT_KILL_GRACE, `${scriptWallSeconds()}`, runtime, jobAt]);
 
   // The output caps are enforced here on the host: what the model reads back
