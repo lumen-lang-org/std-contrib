@@ -171,6 +171,11 @@ export type SayReply = {
   refs: WireRef[];
   seq: number;
   toolCalls: number;
+  // The calls this round dispatched, arriving with the answer rather than
+  // through a second request. The poll is for watching a round that is still
+  // running; this is the round that is over, and they must agree.
+  steps: LiveStep[];
+  thoughts: Thought[];
   inputTokens: number;
   outputTokens: number;
   traceId: string;
@@ -260,6 +265,45 @@ export const openThread = (agentId: string) =>
   call<{ id: string }>("/threads", { method: "POST", body: JSON.stringify({ agentId }) });
 export const transcript = (id: string) =>
   call<TranscriptTurn[]>(`/threads/${encodeURIComponent(id)}`);
+// One dispatched call, as the API reports it while the round is still running.
+// `running` is the whole liveness signal; `millis` is -1 until it stops.
+export type LiveStep = {
+  seq: number;
+  // Which rotation of the model loop dispatched it. One message is not one
+  // exchange: the model calls tools, reads the results, and may call more
+  // before it answers, and each rotation asked for its own set.
+  rotation: number;
+  // How far down the delegation it was made: 0 is the agent you are talking to,
+  // 1 is a sub-agent it asked. The card indents by this, so a child's tools sit
+  // under the delegation that caused them.
+  depth: number;
+  idx: number;
+  // "tool" for anything dispatched by name, "agent" for a delegation.
+  kind: string;
+  name: string;
+  target: string;
+  args: string;
+  running: boolean;
+  ok: boolean;
+  millis: number;
+};
+
+// What the model said it was thinking on one rotation, when it says at all.
+// Most providers never do, and a round with none is the ordinary case.
+export type Thought = { rotation: number; depth: number; text: string };
+
+export type RoundSteps = {
+  seq: number; running: boolean; steps: LiveStep[]; thoughts: Thought[];
+};
+
+// What the run is doing right now. Polled while POST /messages is outstanding —
+// that request answers once, at the end, so this is the only way to see inside
+// a round. `seq=all` is the whole transcript, for a console that has reloaded
+// and needs a card above every message that called something.
+export const threadSteps = (threadId: string, seq?: number | "all") =>
+  call<RoundSteps>(`/threads/${encodeURIComponent(threadId)}/steps`
+    + (seq === undefined ? "" : `?seq=${seq}`));
+
 export const say = (id: string, text: string) =>
   call<SayReply>(`/threads/${encodeURIComponent(id)}/messages`, {
     method: "POST",

@@ -125,10 +125,294 @@ function replyFor(messages) {
   return "Nothing to save here — just words.";
 }
 
+// The scenario that makes a round visibly slow.
+//
+// Every other reply here answers in a millisecond, which is the right shape for
+// testing what was stored and the wrong shape for testing what is *running*: a
+// tool that opens and closes within one tick of a 400ms poll can never be
+// caught in flight. So this one calls a tool the MCP double deliberately sits
+// on, and the step rows stay open long enough for the console to draw them.
+const SLOW_CALL = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "The ledger is large, so reading it will take a moment. I will call slow_read once and summarise what comes back rather than guessing.",
+      tool_calls: [{
+        id: "slow-1", type: "function",
+        function: { name: "slow_read", arguments: JSON.stringify({ path: "/ledger.txt" }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+
+// A site, then an edit to it. Two scenarios rather than one, because the
+// interesting part is the second turn: it writes a file that does not exist yet
+// AND a second version of one that does, in the same exchange, so a card has to
+// show two calls under one message and the artifact list has to show v2 of the
+// page without losing v1.
+const BUILD_SITE = {
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "A site is three files, not one: the page, its stylesheet and its script. I will write all three in this exchange so they can reference each other by relative path.",
+        "tool_calls": [
+          {
+            "id": "b1",
+            "type": "function",
+            "function": {
+              "name": "write_artifact",
+              "arguments": "{\"path\": \"/index.html\", \"title\": \"Home\", \"content\": \"<!doctype html><html><head><link rel=stylesheet href=css/main.css></head><body><nav><a href=/index.html>Home</a></nav><h1>Kaffa</h1><script src=js/app.js></script></body></html>\", \"note\": \"\"}"
+            }
+          },
+          {
+            "id": "b2",
+            "type": "function",
+            "function": {
+              "name": "write_artifact",
+              "arguments": "{\"path\": \"/css/main.css\", \"title\": \"Stylesheet\", \"content\": \"body{font-family:system-ui;margin:2rem}nav a{margin-right:1rem}\", \"note\": \"\"}"
+            }
+          },
+          {
+            "id": "b3",
+            "type": "function",
+            "function": {
+              "name": "write_artifact",
+              "arguments": "{\"path\": \"/js/app.js\", \"title\": \"Script\", \"content\": \"console.log('kaffa');\", \"note\": \"\"}"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 20
+  }
+};
+
+const EDIT_SITE = {
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "The menu is a new page, and the home page's nav has to link to it \u2014 so this is two writes, one of which is a second version of a file that already exists.",
+        "tool_calls": [
+          {
+            "id": "e1",
+            "type": "function",
+            "function": {
+              "name": "write_artifact",
+              "arguments": "{\"path\": \"/menu.html\", \"title\": \"Menu\", \"content\": \"<!doctype html><html><body><h1>Menu</h1><p>Espresso, filter, cold brew.</p></body></html>\", \"note\": \"\"}"
+            }
+          },
+          {
+            "id": "e2",
+            "type": "function",
+            "function": {
+              "name": "write_artifact",
+              "arguments": "{\"path\": \"/index.html\", \"title\": \"Home\", \"content\": \"<!doctype html><html><head><link rel=stylesheet href=css/main.css></head><body><nav><a href=/index.html>Home</a><a href=/menu.html>Menu</a></nav><h1>Kaffa</h1><script src=js/app.js></script></body></html>\", \"note\": \"\"}"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 20
+  }
+};
+
+const SITE_DONE = "The site is up: a home page, its stylesheet and its script.";
+const EDIT_DONE = "Added /menu.html and linked it from the home page's navigation.";
+
+function wantsBuild(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("build the site");
+}
+
+function wantsEdit(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("add a menu page");
+}
+
+// Whether this request asks for the slow-tool scenario, and whether that call
+// has already come back — the second round has to answer with words, or the
+// run would call the tool again forever.
+function wantsSlow(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("slowly");
+}
+
+// Whether the calls of *this* rotation have just come back — not whether the
+// conversation has ever seen a tool result.
+//
+// The difference only shows on the second turn of a thread: the history still
+// carries the first turn's results, so "has any result" is true before the new
+// question has called anything, and the double answers with words instead of
+// dispatching. The tail is what says where we are: a tool result last means we
+// are mid-round, a user message last means the round has just begun.
+function toolResultsPresent(messages) {
+  const tail = (messages ?? [])[(messages ?? []).length - 1];
+  return (tail?.role ?? "") === "tool";
+}
+
 // Whether this request asks for the truncated-tool-call scenario.
 function wantsTruncated(messages) {
   const last = [...messages].reverse().find((m) => m.role === "user");
   return (last?.content ?? "").toLowerCase().includes("truncate");
+}
+
+// The same scenarios, delivered as Server-Sent Events when the request asks for
+// them. Written out slowly on purpose: thinking that arrives in one chunk is
+// indistinguishable from thinking that was never streamed, so the deltas are
+// spaced far enough apart for a poll to catch the text growing.
+
+
+// A delegation, and what the child does with it.
+//
+// The parent asks its sub-agent; the sub-agent writes a file and answers. Two
+// agents, one thread, one round — which is the case that used to corrupt the
+// card: a child's step counter starts at zero, so its first call took the id of
+// the parent's delegation and replaced it.
+const DELEGATE = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "The helper knows the ledger better than I do; I will ask it rather than guess.",
+      tool_calls: [{
+        id: "d1", type: "function",
+        function: { name: "ask_helper", arguments: JSON.stringify({ question: "write the ledger summary" }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+const CHILD_WORK = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "I was asked for a summary, so I will write one file and say where it is.",
+      tool_calls: [{
+        id: "c1", type: "function",
+        function: { name: "write_artifact", arguments: JSON.stringify({
+          path: "/ledger.md", title: "Ledger summary", content: "# Ledger\n\nNothing unusual.", note: "" }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+function wantsDelegation(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("ask the helper");
+}
+
+// The child's own question, as the parent phrased it.
+function isTheChild(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("write the ledger summary");
+}
+
+// The whole canned answer for this request, in one shape, whichever scenario
+// matched: `{ choices: [{ finish_reason, message }], usage }`.
+function replyObject(messages) {
+  if (wantsBuild(messages)) {
+    return toolResultsPresent(messages)
+      ? said(SITE_DONE, "Three files written and each accepted, so the site is up and there is nothing left to call.")
+      : BUILD_SITE;
+  }
+  if (wantsEdit(messages)) {
+    return toolResultsPresent(messages)
+      ? said(EDIT_DONE, "Both writes came back clean, so the menu exists and the home page links to it.")
+      : EDIT_SITE;
+  }
+  if (wantsDelegation(messages)) {
+    return toolResultsPresent(messages)
+      ? said("The helper wrote /ledger.md.", "The helper answered and its file exists, so there is nothing left to do.")
+      : DELEGATE;
+  }
+  if (isTheChild(messages)) {
+    return toolResultsPresent(messages)
+      ? said("Written to /ledger.md.", "The write came back clean.")
+      : CHILD_WORK;
+  }
+  if (wantsSlow(messages)) {
+    return toolResultsPresent(messages)
+      ? said("The ledger reads clean.", "The tool came back with nothing unusual, so a one-line answer is enough.")
+      : SLOW_CALL;
+  }
+  if (wantsTruncated(messages)) { return TRUNCATED; }
+  return said(replyFor(messages), "");
+}
+
+function said(content, reasoning) {
+  const message = { role: "assistant", content };
+  if (reasoning !== "") message.reasoning_content = reasoning;
+  return {
+    choices: [{ finish_reason: "stop", message }],
+    usage: { prompt_tokens: 10, completion_tokens: 20 },
+  };
+}
+
+function sseChunk(delta, finish) {
+  const body = { choices: [{ index: 0, delta, finish_reason: finish ?? null }] };
+  return `data: ${JSON.stringify(body)}\n\n`;
+}
+
+function streamScenario(res, reply) {
+  const message = reply.choices[0].message;
+  const finish = reply.choices[0].finish_reason;
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+
+  const events = [];
+  for (const word of (message.reasoning_content ?? "").split(" ")) {
+    if (word !== "") events.push(sseChunk({ reasoning_content: word + " " }));
+  }
+  for (const call of message.tool_calls ?? []) {
+    events.push(sseChunk({ tool_calls: [{ index: message.tool_calls.indexOf(call), id: call.id,
+      type: "function", function: { name: call.function.name, arguments: "" } }] }));
+    // The arguments in two pieces, because that is how a real stream sends them
+    // and reassembling them is the part most likely to be wrong.
+    const args = call.function.arguments;
+    const half = Math.floor(args.length / 2);
+    events.push(sseChunk({ tool_calls: [{ index: message.tool_calls.indexOf(call),
+      function: { arguments: args.slice(0, half) } }] }));
+    events.push(sseChunk({ tool_calls: [{ index: message.tool_calls.indexOf(call),
+      function: { arguments: args.slice(half) } }] }));
+  }
+  for (const word of (message.content ?? "").split(" ")) {
+    if (word !== "") events.push(sseChunk({ content: word + " " }));
+  }
+  events.push(sseChunk({}, finish));
+  events.push("data: [DONE]\n\n");
+
+  let i = 0;
+  const tick = () => {
+    if (i >= events.length) { res.end(); return; }
+    res.write(events[i]);
+    i += 1;
+    setTimeout(tick, 60);
+  };
+  tick();
+}
+
+function wantsStream(body) {
+  try { return JSON.parse(body).stream === true; } catch { return false; }
 }
 
 const port = Number(process.env.MODEL_DOUBLE_PORT ?? 8932);
@@ -145,17 +429,18 @@ createServer((req, res) => {
       res.end(JSON.stringify({ object: "error", message: bad, type: "invalid_request_message_order" }));
       return;
     }
-    if (wantsTruncated(messages)) {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(TRUNCATED));
-      return;
-    }
-    const text = replyFor(messages);
+
+    // One place decides *what* to answer and one place decides *how*.
+    //
+    // They were tangled for a while, with two scenarios wired for events and
+    // the rest still answering JSON — so the moment the server started asking
+    // for a stream, every other scenario returned a body the reader could find
+    // no events in, and half the suite failed for a reason that had nothing to
+    // do with what it was testing.
+    const reply = replyObject(messages);
+    if (wantsStream(body)) { streamScenario(res, reply); return; }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      choices: [{ message: { role: "assistant", content: text } }],
-      usage: { prompt_tokens: 10, completion_tokens: 20 },
-    }));
+    res.end(JSON.stringify(reply));
   });
 }).listen(port, "127.0.0.1", () => {
   console.log(`model double on http://127.0.0.1:${port}`);

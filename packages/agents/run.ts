@@ -24,9 +24,10 @@ import { Db } from "../plume/driver.ts";
 import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
-import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, replyText, assistantText, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
+import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
+import { StepStart, beginStep, endStep, recordThought } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -74,7 +75,7 @@ function stamp(): string { return `${Date.now()}`; }
 // the document has, even one this path reads separately.
 type NestedModel = { id: string, label: string, apiName: string, provider: string, enabled: bool };
 type ConfigWithModel = {
-  id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string,
+  id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string, thinking: string,
   model: NestedModel,
 };
 
@@ -244,7 +245,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   let configRow: ModelConfigRow = {
     id: config.id, modelId: config.modelId, temperature: config.temperature,
-    maxTokens: config.maxTokens, topP: config.topP, extra: config.extra,
+    maxTokens: config.maxTokens, topP: config.topP, extra: config.extra, thinking: config.thinking,
   };
 
   let key = credentialFor(db, model.provider, master);
@@ -425,7 +426,26 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   while (rounds < MAX_TOOL_STEPS) {
     let modelSpan = startSpan(model.apiName, TRACE_GENERATION, agentSpan.id);
-    last = completeTurns(model, configRow, system, context, specs, key);
+    // Streamed, so the rotation's thinking is written while the model is still
+    // writing it rather than when the reply lands. What comes back is the same
+    // whole body the buffered path returns — the deltas are reassembled in
+    // provider.ts — so nothing below this line knows or cares which path fetched
+    // it. Anthropic keeps the buffered path: its stream is a different shape and
+    // reassembling it is its own piece of work.
+    //
+    // The callback writes straight through to the row the console polls. It
+    // cannot throw, and it must not: a throw does not cross a function value
+    // here, so it would escape every `try` between this and the handler.
+    let thinkingSeq = where.baseSeq;
+    let thinkingDepth = where.depth;
+    let thinkingRotation = rounds;
+    if (model.provider == "anthropic") {
+      last = completeTurns(model, configRow, system, context, specs, key);
+    } else {
+      last = streamTurns(model, configRow, system, context, specs, key, (soFar: string) => {
+        recordThought(db, threadId, thinkingSeq, thinkingDepth, thinkingRotation, soFar, stamp());
+      });
+    }
     rounds = rounds + 1;
     if (!last.ok) {
       // Token counts are not read back: a failed call has none, and inventing
@@ -482,6 +502,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
     let calls = toolCallsFrom(model.provider, last.text);
     let said = assistantText(model.provider, last.text);
+    // What it thought on this rotation, if it says. Written before the calls
+    // are dispatched, so it is readable while they run.
+    recordThought(db, threadId, where.baseSeq, where.depth, rounds - 1,
+      assistantThinking(model.provider, last.text), stamp());
 
     if (calls.length == 0) {
       // No calls is how a model says it has finished. `replyText` rather than
@@ -518,6 +542,24 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // artifact write made in the same call carry the same instant rather
       // than two readings a query apart.
       let now = stamp();
+      // What this call is, said out loud before it is dispatched.
+      //
+      // The row lands where `POST /threads/:id/messages` cannot: that request
+      // answers once, at the end, and a round can take a minute. A second
+      // request reads this while the first is still inside the loop, which is
+      // only possible because the server runs handlers on a thread pool.
+      //
+      // A run with no thread has nobody to tell, so it writes nothing.
+      let liveKind = "tool";
+      if (child.id != "") { liveKind = "agent"; }
+      let live: StepStart = {
+        threadId: threadId, seq: where.baseSeq, depth: where.depth,
+        rotation: rounds - 1, idx: steps.length,
+        kind: liveKind, name: calls[i].name, target: child.id,
+        args: calls[i].args, now: now,
+      };
+      let startedMs = Date.now();
+      if (threadId != "") { beginStep(db, live); }
       let fileAnswer = callWorkspaceTool(db, threadId, calls[i].name,
         jsonText(calls[i].args, "name"), jsonText(calls[i].args, "content"), now);
       // Artifacts beside the workspace and ahead of MCP, for the same reason.
@@ -611,6 +653,22 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         calledTools.push(calls[i].name);
       }
       if (on) { trace = endTool(trace, callSpan, { input: calls[i].args, output: resultText }, resultOk); }
+      // Closed with what only the dispatch knows: which server answered, or
+      // which child. Rewritten whole rather than patched, because `persist` is
+      // an upsert over every column.
+      if (threadId != "") {
+        let done: StepStart = {
+          threadId: live.threadId, seq: live.seq, depth: live.depth,
+          rotation: live.rotation, idx: live.idx, kind: live.kind,
+          name: live.name, target: from, args: live.args, now: live.now,
+        };
+        // `Date.now()` is i64 and a step's duration is an int, which is i32.
+        // A call lasting more than 24 days would not fit — and a call lasting
+        // 24 days has a different problem — so the narrowing is safe, but it
+        // has to be written down rather than assumed by the compiler.
+        let took = parseInt(`${Date.now() - startedMs}`, 10) ?? -1;
+        endStep(db, done, resultOk, stamp(), took);
+      }
       let step: AgentStep = {
         index: steps.length,
         tool: calls[i].name,

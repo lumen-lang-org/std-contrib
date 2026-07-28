@@ -21,6 +21,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
 import { TURN_SEQ_NONE } from "./artifacts.ts";
+import { forgetRound, forgetThoughts } from "./steps.ts";
 import { extractFiles, neutraliseMarkers } from "./artifacts-fence.ts";
 import { Tracer, noTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonList, jsonText } from "./scan.ts";
@@ -412,6 +413,12 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   }
 
   let held = threadTurns(db, threadId);
+  // This round owns its seq. A round that failed stored nothing, so the count
+  // below has not moved and this run reuses its number — and its dispatched
+  // calls are still in the table under it. Clearing first is what keeps a
+  // message's card describing the round that produced it.
+  forgetRound(db, threadId, held.length);
+  forgetThoughts(db, threadId, held.length);
   let replayed = withinBudget(held, threadBudget());
   // The replay's first surviving turn: chunks shown before it were trimmed
   // away with their rounds and may be retrieved afresh.

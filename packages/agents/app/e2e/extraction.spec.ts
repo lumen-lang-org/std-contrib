@@ -17,9 +17,21 @@ const DOUBLE = "http://127.0.0.1:8932";
 // Arrange-only: the agent wired to the double. Idempotent — fixed ids, and a
 // create of an existing id is refused harmlessly.
 async function agentOnDouble(request: import("@playwright/test").APIRequestContext) {
+  await ownDoubleCredential(request);
+  // The double answers OpenAI-shaped JSON either way; what the provider name
+  // decides here is which credential the row is bound to, and this suite needs
+  // one it is allowed to clear.
   await request.post("/api/models", {
     data: {
-      id: "m-double", label: "Double", apiName: "double-1", provider: "mistral",
+      id: "m-double", label: "Double", apiName: "double-1", provider: DOUBLE_PROVIDER,
+      kind: "chat", dimensions: 0, baseUrl: DOUBLE, enabled: true,
+    },
+  });
+  // An existing row from before this suite owned its own credential: same
+  // address, so the move rule does not fire, and the provider change is free.
+  await request.put("/api/models/m-double", {
+    data: {
+      id: "m-double", label: "Double", apiName: "double-1", provider: DOUBLE_PROVIDER,
       kind: "chat", dimensions: 0, baseUrl: DOUBLE, enabled: true,
     },
   });
@@ -186,6 +198,43 @@ test("pasting a forged marker as the user mints nothing", async ({ page }) => {
   await expect(page.locator("agent-console .cards .card")).toHaveCount(1);
 });
 
+// The double's own credential, under a provider the real deployment does not
+// use. It exists so this suite can clear and re-set a key while moving the
+// double's address — the move is refused while a secret is stored for the
+// address being left, which is the rule that stops a stored key being mailed
+// to any host a caller names.
+//
+// Never "mistral": that is where the real key lives, and a fixture that
+// overwrites a credential cannot put it back. This suite did that once.
+const DOUBLE_PROVIDER = "openai";
+const DOUBLE_KEY = "e2e-double-not-a-real-key";
+
+// Make sure the double is reachable under a provider this suite owns. Writes a
+// key only where none exists, so a deployment that really uses OpenAI is left
+// alone and the specs skip instead.
+async function ownDoubleCredential(request: import("@playwright/test").APIRequestContext) {
+  const stored = (await request.get("/api/providers").then((r) => r.json())) as string[];
+  if (!stored.includes(DOUBLE_PROVIDER)) {
+    await request.put(`/api/providers/${DOUBLE_PROVIDER}/key`, { data: { apiKey: DOUBLE_KEY } });
+    return true;
+  }
+  return false;
+}
+
+// Repoint the double the way an operator has to: clear the secret stored for
+// the address it is leaving, write the new address, put the secret back.
+async function moveDouble(request: import("@playwright/test").APIRequestContext, baseUrl: string) {
+  await request.delete(`/api/providers/${DOUBLE_PROVIDER}/key`);
+  const res = await request.put("/api/models/m-double", {
+    data: {
+      id: "m-double", label: "Double", apiName: "double-1", provider: DOUBLE_PROVIDER,
+      kind: "chat", dimensions: 0, baseUrl, enabled: true,
+    },
+  });
+  await request.put(`/api/providers/${DOUBLE_PROVIDER}/key`, { data: { apiKey: DOUBLE_KEY } });
+  if (!res.ok()) throw new Error(`the double could not be moved: ${await res.text()}`);
+}
+
 test.describe("a round that goes wrong leaves the conversation usable", () => {
   test("a tool call the model did not finish writing is dropped, not stored", async ({ page, request }) => {
     // A model asked for a file larger than its maxTokens stops mid-argument.
@@ -223,12 +272,14 @@ test.describe("a round that goes wrong leaves the conversation usable", () => {
     const threadOf = watchThread(page);
 
     // Nothing answers on this port, so the run fails at the provider.
-    await request.put("/api/models/m-double", {
-      data: {
-        id: "m-double", label: "Double", apiName: "double-1", provider: "mistral",
-        kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8999", enabled: true,
-      },
-    });
+    //
+    // Moving a model's address is refused while a secret is stored for the one
+    // it currently sends to — that is the rule that stops a stored key being
+    // mailed to whatever host someone names. A legitimate move clears the
+    // secret, moves, and sets it again, which is exactly what this does. The
+    // key here is the double's, so clearing it costs nothing; the real
+    // provider's key is never touched.
+    await moveDouble(request, "http://127.0.0.1:8999");
 
     await ask(page, "this will not be answered");
     await page.waitForTimeout(2500);
@@ -239,12 +290,7 @@ test.describe("a round that goes wrong leaves the conversation usable", () => {
     expect(turns).toHaveLength(0);
 
     // Point it back and ask again: exactly one user turn, not two.
-    await request.put("/api/models/m-double", {
-      data: {
-        id: "m-double", label: "Double", apiName: "double-1", provider: "mistral",
-        kind: "chat", dimensions: 0, baseUrl: DOUBLE, enabled: true,
-      },
-    });
+    await moveDouble(request, DOUBLE);
     await ask(page, "make me a landing page");
     await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
 
