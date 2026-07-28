@@ -30,8 +30,8 @@ async function ask(page: Page, text: string) {
   await composer.press("Enter");
 }
 
-async function answered(page: Page, words: string) {
-  await expect(shell(page).locator("nr-chatbot")).toContainText(words, { timeout: 90000 });
+async function answered(page: Page, words: string, opts: { timeout?: number } = {}) {
+  await expect(shell(page).locator("nr-chatbot")).toContainText(words, { timeout: opts.timeout ?? 90000 });
 }
 
 async function currentThread(page: Page): Promise<string> {
@@ -123,4 +123,56 @@ test("a script runs in the conversation's container and its rewrite lands as a v
   const v1 = (await page.request.get(`/api/threads/${threadId}/artifacts/${data.slot}/versions/1`)
     .then((r) => r.json())) as { content: string };
   expect(JSON.parse(v1.content).prices).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+});
+
+test("an svg becomes a real png artifact, stored base64 and shown as a picture", async ({ page }) => {
+  // The conversation that failed for real: generate an svg, convert to png,
+  // save it. The store cannot hold raw binary — a Lumen string is UTF-8 — so
+  // the png lands as base64, and the preview wraps it in a page whose data:
+  // URI shows the picture.
+  await agentOnDouble(page);
+  await page.goto("/");
+  await pickAgent(page, "a-double");
+  await ask(page, "draw a logo and convert it to a png");
+  await answered(page, "/logo.png are both artifacts");
+  const threadId = await currentThread(page);
+
+  const listed = (await page.request.get(`/api/threads/${threadId}/artifacts`)
+    .then((r) => r.json())) as { path: string; slot: number; version: number; kind: string; previewToken: string }[];
+  const png = listed.find((a) => a.path === "/logo.png")!;
+  expect(png.kind).toBe("image");
+  expect(png.version).toBe(1);
+
+  // The stored body is base64 of a real PNG: the magic decodes back.
+  const v1 = (await page.request.get(`/api/threads/${threadId}/artifacts/${png.slot}/versions/1`)
+    .then((r) => r.json())) as { content: string };
+  const bytes = Buffer.from(v1.content, "base64");
+  expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+  // And the preview host shows a picture, not a page of base64.
+  await page.goto(`${PREVIEW_HOST}/preview/${png.previewToken}`);
+  const img = page.locator("img");
+  await expect(img).toBeVisible();
+  expect(await img.getAttribute("src")).toContain("data:image/png;base64,");
+  // The image actually decoded: a broken data URI has zero natural width.
+  const width = await img.evaluate((el) => (el as HTMLImageElement).naturalWidth);
+  expect(width).toBe(64);
+});
+
+test("what one run installs, the next run imports — the environment remembers", async ({ page }) => {
+  // pip install in run one, import in run two, no reinstall. This is the
+  // whole reason environments persist — and it needs the network and a
+  // writable home, both of which this asserts by consequence.
+  await agentOnDouble(page);
+  await page.goto("/");
+  await pickAgent(page, "a-double");
+  await ask(page, "install a package then use it");
+  await answered(page, "second run imported it", { timeout: 120000 });
+  const threadId = await currentThread(page);
+
+  const all = (await page.request.get(`/api/threads/${threadId}/steps?seq=all`)
+    .then((r) => r.json())) as { steps: { name: string; ok: boolean }[] };
+  const scripts = all.steps.filter((s) => s.name === "run_script");
+  expect(scripts).toHaveLength(2);
+  expect(scripts.every((s) => s.ok)).toBe(true);
 });

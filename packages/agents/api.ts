@@ -33,7 +33,7 @@ import { ThreadListing, ThreadTurnRow, listThreads, openThread, threadAgent, thr
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
-import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
+import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
 import { envPlan } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
@@ -1608,6 +1608,32 @@ function previewIsHtml(mime: string): bool {
   return mime.startsWith("text/html");
 }
 
+// An image artifact served as a page. The stored body is base64 text; raw
+// image bytes never ride a Reply (a Lumen string is UTF-8 and a PNG is not),
+// so the browser gets a page whose data: URI carries them — which the CSP
+// already allows (img-src data:). Off the preview host this is never called
+// and the base64 text is served as the text it is.
+function previewImagePage(artifact: ArtifactRow, b64: string): string {
+  return "<!doctype html><html><head><title>" + artifact.path + "</title></head>"
+    + "<body style=\"margin:0;display:grid;place-items:center;min-height:100vh;background:#181a1d\">"
+    + "<img alt=\"" + artifact.path + "\" style=\"max-width:100%;max-height:100vh\""
+    + " src=\"data:" + imageMediaType(artifact.path) + ";base64," + b64 + "\"></body></html>";
+}
+
+// The artifact, with its body as a page when it is an image on the preview
+// host: the wrapper is html, so the row it is served under says html too —
+// that is what previewType and the live chrome read.
+function previewPresentable(req: Request, artifact: ArtifactRow, body: string): ArtifactRow {
+  if (artifact.kind != "image" || !onPreviewHost(req)) { return artifact; }
+  let asPage: ArtifactRow = {
+    id: artifact.id, threadId: artifact.threadId, slot: artifact.slot,
+    path: artifact.path, title: artifact.title, kind: artifact.kind,
+    mime: "text/html; charset=utf-8", currentVersion: artifact.currentVersion,
+    previewToken: artifact.previewToken, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt,
+  };
+  return asPage;
+}
+
 function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
   let answer = reply(200, body, previewType(req, artifact.mime));
   answer.headers.set("content-security-policy", previewCsp(req));
@@ -1617,13 +1643,18 @@ function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: 
   return answer;
 }
 
-// previewReply, plus the live chrome when this body qualifies for it.
+// previewReply, plus the live chrome when this body qualifies for it. An
+// image is wrapped into a page first, so it reloads like any other page.
 function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
+  let row = previewPresentable(req, artifact, body);
   let served = body;
-  if (cache == "no-store" && previewIsHtml(artifact.mime) && onPreviewHost(req)) {
-    served = body + previewChrome(param(req, "token"), previewStamp(db, artifact.threadId));
+  if (row.kind == "image" && row.mime.startsWith("text/html")) {
+    served = previewImagePage(row, body);
   }
-  return previewReply(req, artifact, served, cache);
+  if (cache == "no-store" && previewIsHtml(row.mime) && onPreviewHost(req)) {
+    served = served + previewChrome(param(req, "token"), previewStamp(db, row.threadId));
+  }
+  return previewReply(req, row, served, cache);
 }
 
 // Artifacts as themselves, addressed by token.
@@ -1683,7 +1714,15 @@ class PreviewApi {
     }
     let row = getVersion(this.db, artifact.id, asked);
     if (row.id == "") { return notFound("artifact"); }
-    return previewReply(req, artifact, row.body, "private, max-age=31536000, immutable");
+    // Pinned history gets the image wrapper too — a version pill that opened
+    // onto a page of base64 would read as broken — but never the live chrome:
+    // a pinned version is immutable and immutable things do not reload.
+    let pinnedRow = previewPresentable(req, artifact, row.body);
+    let pinnedBody = row.body;
+    if (pinnedRow.kind == "image" && pinnedRow.mime.startsWith("text/html")) {
+      pinnedBody = previewImagePage(pinnedRow, row.body);
+    }
+    return previewReply(req, pinnedRow, pinnedBody, "private, max-age=31536000, immutable");
   }
 
   // Another artifact in the same thread, by path.
