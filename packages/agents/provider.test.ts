@@ -20,7 +20,7 @@ function gateway(provider: string, baseUrl: string): ModelRow {
 }
 
 function config(): ModelConfigRow {
-  let c: ModelConfigRow = { id: "c", modelId: "m", temperature: 0.2, maxTokens: 64, topP: 1.0, extra: "{}" };
+  let c: ModelConfigRow = { id: "c", modelId: "m", temperature: 0.2, maxTokens: 64, topP: 1.0, extra: "{}", thinking: "" };
   return c;
 }
 

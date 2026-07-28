@@ -44,6 +44,21 @@ export class AgentConsole extends LitElement {
        the component's messages. Its artifact mode re-extracts fences from the
        displayed text and matches them to rows by position, which is exactly
        the text-order mapping the refs exist to replace. */
+    /* What the run is doing. Sits above the artifact cards: those are what a
+       round produced, this is what it is doing to produce them. */
+    .run { border: 1px solid var(--border); border-radius: 10px;
+           background: var(--bg-card); margin: 0 16px 8px; overflow: hidden; }
+    .run-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+                border-bottom: 1px solid var(--border); font-weight: 500; }
+    .run-row { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+               color: var(--muted); font-size: 13px; }
+    .run-row + .run-row { border-top: 1px solid var(--border); }
+    .run-row.on { color: var(--fg); }
+    .run-name { font-family: var(--mono); color: var(--fg); white-space: nowrap; }
+    .run-args { flex: 1; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+    .run-ms { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
     .cards { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 18px 12px;
              border-top: 1px solid var(--border); background: var(--bg); }
     .card { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
@@ -103,6 +118,8 @@ export class AgentConsole extends LitElement {
   async connectedCallback() {
     super.connectedCallback();
     this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
+    // The run says what it is doing while it is doing it. Held here so the
+    // card re-renders; the session owns the list and never rebuilds it.
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentRow[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled);

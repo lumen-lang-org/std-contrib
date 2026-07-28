@@ -47,6 +47,11 @@ export type ModelConfigRow = {
   maxTokens: int,
   topP: number,
   extra: string,
+  // How hard to think before answering, when the provider can be told. Empty is
+  // "as it normally would". A token budget for Anthropic, an effort — low,
+  // medium or high — for the reasoning models that take one; `thinkingJson`
+  // decides what the text means, per provider.
+  thinking: string,
 };
 
 // A prompt, versioned. A row is never edited: a change writes a new version and
@@ -165,6 +170,29 @@ export function modelsMapping(): DbRepository {
 
 // Takes the connection for the same reason agentsFull does: its relation
 // projects a bool, and SQLite and MySQL store those as 0 and 1.
+// The shape migration 2 recorded, frozen.
+//
+// Adding a field to the live mapping above would rewrite this statement, and a
+// migration's text is checksummed: every database that has already run it would
+// refuse the whole plan, while a fresh one migrated happily and CI stayed
+// green. Migrations 1, 4 and 5 already carry a frozen copy for the same reason;
+// this one was still generated from the live mapping when `thinking` was added,
+// which is exactly the moment the hazard fires.
+//
+// It takes no `db` because it has no relation to widen: `createTableSql` reads
+// fields only.
+function modelConfigsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("modelId", "model_id", "text"),
+    field("temperature", "temperature", "float8"),
+    field("maxTokens", "max_tokens", "int"),
+    field("topP", "top_p", "float8"),
+    field("extra", "extra", "text"),
+  ];
+  return repository("model_configs", "id", "id", fs);
+}
+
 export function modelConfigsMapping(db: Db): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -173,6 +201,11 @@ export function modelConfigsMapping(db: Db): DbRepository {
     field("maxTokens", "max_tokens", "int"),
     field("topP", "top_p", "float8"),
     field("extra", "extra", "text"),
+    // How hard the model should think before it answers, when it can. Empty is
+    // the default: think as the provider normally would. What a non-empty value
+    // means is the provider's business — a token budget for Anthropic, an
+    // effort for OpenAI's reasoning models — so it is text, not a number.
+    field("thinking", "thinking", "text"),
   ];
   let rs: DbRelation[] = [
     hasOne("model", "models", "model_id", "id",
@@ -254,7 +287,7 @@ export function agentsFull(db: Db): DbRepository {
     hasOne("prompt", "prompts", "prompt_id", "id",
            "id, prompt_name AS \"promptName\", version, body"),
     hasOne("config", "model_configs", "model_config_id", "id",
-           "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra"),
+           "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking"),
     hasManyThrough({
       field: "servers", table: "mcp_servers", foreignColumn: "id",
       linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
@@ -287,7 +320,7 @@ export function agentsFull(db: Db): DbRepository {
 export function schemaPlan(db: Db): Migration[] {
   let plan: Migration[] = [
     migration("1", "models", createTableSql(db, modelsMappingV1())),
-    migration("2", "model configs", createTableSql(db, modelConfigsMapping(db))),
+    migration("2", "model configs", createTableSql(db, modelConfigsMappingV1())),
     migration("3", "prompts", createTableSql(db, promptsMapping())),
     migration("4", "mcp servers", createTableSql(db, mcpServersMappingV1())),
     migration("5", "agents", createTableSql(db, agentsMappingV1())),
@@ -301,6 +334,8 @@ export function schemaPlan(db: Db): Migration[] {
       + "child_id " + db.textType + " NOT NULL)"),
     // One prompt name has many versions, and a lookup by name is the common
     // read, so it is worth an index rather than a scan.
+    migration("61", "a model config can ask for thinking",
+      "ALTER TABLE model_configs ADD COLUMN thinking " + db.textType + " NOT NULL DEFAULT ''"),
     migration("8", "provider credentials", createTableSql(db, credentialsMapping())),
     migration("9", "prompts by name",
       "CREATE INDEX IF NOT EXISTS prompts_by_name ON prompts (prompt_name)"),

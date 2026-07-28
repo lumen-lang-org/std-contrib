@@ -13,7 +13,7 @@ let database: Db = sqlite();
 
 // What one read of an agent gives back.
 type PromptView = { id: string, promptName: string, version: int, body: string };
-type ConfigView = { id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string };
+type ConfigView = { id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string, thinking: string };
 // Exactly what agentsFull projects for a linked server — no more, or
 // JSON.parse refuses the row for a field the query never selected.
 type ServerView = { id: string, serverName: string, transport: string, endpoint: string, enabled: bool };
@@ -61,8 +61,8 @@ function seeded(): void {
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
 
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}" };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}" };
+  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "" };
+  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "" };
   persist(database, modelConfigsMapping(database), JSON.stringify(careful));
   persist(database, modelConfigsMapping(database), JSON.stringify(quick));
 
@@ -93,11 +93,12 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Thirteen: five tables from mappings, two link tables, the credentials
-  // table, the index, and the four ALTERs that add columns those tables did
-  // not have when they were first created. Asserting the number rather than
-  // "some" is what catches a migration silently dropped from the plan.
-  expect(r.applied == 13);
+  // Fourteen: five tables from mappings, two link tables, the credentials
+  // table, the index, and the five ALTERs that add columns those tables did
+  // not have when they were first created — the newest of which lets a config
+  // ask the model to think. Asserting the number rather than "some" is what
+  // catches a migration silently dropped from the plan.
+  expect(r.applied == 14);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -105,7 +106,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 13);
+  expect(migrate(database, schemaPlan(database)).applied == 14);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

@@ -372,16 +372,21 @@ test("every provider the console offers is one the code can reach", async ({ pag
 // --- every field round-trips through its row PUT ---------------------------------------
 
 test("a model's whole row round-trips, base url included", async ({ page }) => {
+  // Anthropic on purpose: this row is written and read, never called, and no
+  // credential is stored for it. A model whose provider has a secret cannot be
+  // repointed without clearing that secret first — which is the rule, not a
+  // detour around it — and this test is about the columns round-tripping, not
+  // about the rule.
   const id = `e2e_row_${Date.now()}`;
   await page.request.post("/api/models", {
     data: {
-      id, label: "Row Probe", apiName: "mistral-small-latest", provider: "mistral",
+      id, label: "Row Probe", apiName: "claude-haiku-4-5-20251001", provider: "anthropic",
       kind: "chat", dimensions: 0, baseUrl: "", enabled: false,
     },
   });
   const res = await page.request.put(`/api/models/${id}`, {
     data: {
-      id, label: "Row Probe Edited", apiName: "mistral-large-latest", provider: "mistral",
+      id, label: "Row Probe Edited", apiName: "claude-opus-5", provider: "anthropic",
       kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434/v1", enabled: false,
     },
   });
@@ -391,7 +396,7 @@ test("a model's whole row round-trips, base url included", async ({ page }) => {
     { id: string; label: string; apiName: string; baseUrl: string }[];
   const mine = models.find((m) => m.id === id);
   expect(mine?.label).toBe("Row Probe Edited");
-  expect(mine?.apiName).toBe("mistral-large-latest");
+  expect(mine?.apiName).toBe("claude-opus-5");
   expect(mine?.baseUrl).toBe("http://127.0.0.1:11434/v1");
   await page.request.delete(`/api/models/${id}`);
 });

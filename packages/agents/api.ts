@@ -34,6 +34,7 @@ import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mi
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
 import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
+import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, LiveStep, Thought } from "./steps.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
@@ -573,7 +574,7 @@ class ModelApi {
         + ",\"error\":" + JSON.stringify(agrees ? "" : "the model returned a different width than this row declares") + "}");
     }
 
-    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" };
+    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" , thinking: "" };
     let said = complete(model, config, "Reply with the single word: ok", "ping", key);
     if (!said.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(said.error) + "}"); }
     // The provider's whole envelope is not an answer. replyText pulls the
@@ -897,6 +898,50 @@ class ThreadApi {
     return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(body.agentId) + "}");
   }
 
+  // What the run is doing right now.
+  //
+  // Polled while `POST /:id/messages` is still in flight, which is the only
+  // way to see inside a round: that request answers once, at the end. The
+  // answer is the round's dispatched calls, each either open — no `endedAt` —
+  // or closed with how long it took.
+  //
+  // Steps belong to a round, never to a thread at large: every row carries its
+  // `seq`, which is the same number an artifact of that round carries, so a
+  // card joins to the message that produced it exactly as an artifact card
+  // does.
+  //
+  // `?seq=` names a round. `?seq=all` is the whole transcript, for a console
+  // that has just reloaded and needs a card above every message that called
+  // something. Without either, the newest round — what a console watching the
+  // message it just sent wants. A thread that has never called a tool answers
+  // an empty list rather than a 404: having nothing to show is the ordinary
+  // case, not a mistake.
+  @get("/:id/steps")
+  steps(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let asked = queryParam(req, "seq", "");
+    let round = latestRound(this.db, param(req, "id"));
+    let live: LiveStep[] = [];
+    if (asked == "all") {
+      // The whole transcript's worth, so a reloaded conversation draws a card
+      // above every message that called something, not only the last one.
+      round = TURN_SEQ_NONE;
+      live = stepsOfThread(this.db, param(req, "id"));
+    } else {
+      if (asked != "") { round = parseInt(asked, 10) ?? -1; }
+      if (round >= 0) { live = stepsOfRound(this.db, param(req, "id"), round); }
+    }
+
+    let thoughts: Thought[] = [];
+    if (round >= 0) { thoughts = thoughtsOfRound(this.db, param(req, "id"), round); }
+    return ok("{\"seq\":" + `${round}`
+      + ",\"running\":" + boolJson(roundRunning(live))
+      + ",\"thoughts\":" + thoughtsJson(thoughts)
+      + ",\"steps\":" + stepsJson(live) + "}");
+  }
+
   // Ask the thread. The reply is this turn's answer; the transcript is a GET.
   @post("/:id/messages")
   say(req: Request): Reply {
@@ -930,6 +975,8 @@ class ThreadApi {
       + ",\"refs\":" + refsJson(view.refs)
       + ",\"seq\":" + `${answered.baseSeq}`
       + ",\"toolCalls\":" + `${run.steps.length}`
+      + ",\"steps\":" + stepsJson(stepsOfRound(this.db, param(req, "id"), answered.baseSeq))
+      + ",\"thoughts\":" + thoughtsJson(thoughtsOfRound(this.db, param(req, "id"), answered.baseSeq))
       + ",\"inputTokens\":" + `${run.inputTokens}`
       + ",\"outputTokens\":" + `${run.outputTokens}`
       + ",\"traceId\":" + JSON.stringify(traced)
@@ -1993,6 +2040,52 @@ function sourceProblem(source: string, body: string): string {
 
 // One clock for every row this API writes. Six routes wrote the four letters
 // "now" into a timestamp column, which reads as a value and sorts as garbage.
+// `true` or `false` for a JSON body built by hand.
+// The calls of one round, as the wire carries them.
+//
+// Written here rather than only behind GET /steps because a card belongs to
+// the message it describes: the answer carries its own calls, and so does each
+// turn of a reloaded transcript. Polling is for watching a round that is still
+// running; this is for the round that is over, and the two must not disagree.
+function thoughtsJson(thoughts: Thought[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < thoughts.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + "{\"rotation\":" + `${thoughts[i].rotation}`
+      + ",\"depth\":" + `${thoughts[i].depth}`
+      + ",\"text\":" + JSON.stringify(thoughts[i].text) + "}";
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+function stepsJson(live: LiveStep[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < live.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + "{\"seq\":" + `${live[i].seq}`
+      + ",\"depth\":" + `${live[i].depth}`
+      + ",\"rotation\":" + `${live[i].rotation}`
+      + ",\"idx\":" + `${live[i].idx}`
+      + ",\"kind\":" + JSON.stringify(live[i].kind)
+      + ",\"name\":" + JSON.stringify(live[i].name)
+      + ",\"target\":" + JSON.stringify(live[i].target)
+      + ",\"args\":" + JSON.stringify(live[i].args)
+      + ",\"running\":" + boolJson(live[i].endedAt == "")
+      + ",\"ok\":" + boolJson(live[i].ok)
+      + ",\"millis\":" + `${stepMillis(live[i])}` + "}";
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+function boolJson(v: bool): string {
+  if (v) { return "true"; }
+  return "false";
+}
+
 function stamp(): string {
   return `${Date.now()}`;
 }
@@ -2043,6 +2136,11 @@ export function migrationProblem(db: Db): string {
   let results = artifactPlan(db);
   let ar: int = 0;
   while (ar < results.length) { plan.push(results[ar]); ar = ar + 1; }
+  // What a run is doing while it is still doing it, so the console can show a
+  // tool running rather than a spinner with nothing behind it.
+  let live = stepPlan(db);
+  let lv: int = 0;
+  while (lv < live.length) { plan.push(live[lv]); lv = lv + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) { return ""; }
   // Logged and carried on with, this served an API whose routes SELECT columns
@@ -2073,8 +2171,8 @@ function seed(db: Db): void {
   persist(db, modelsMapping(), JSON.stringify(haiku));
   persist(db, modelsMapping(), JSON.stringify(embed));
   persist(db, modelsMapping(), JSON.stringify(embedSmall));
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}" };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}" };
+  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "" };
+  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "" };
   persist(db, modelConfigsMapping(db), JSON.stringify(careful));
   persist(db, modelConfigsMapping(db), JSON.stringify(quick));
   let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
