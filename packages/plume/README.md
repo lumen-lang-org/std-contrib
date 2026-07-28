@@ -5,17 +5,56 @@ MySQL/MariaDB.
 
 Nothing is inferred. A table name, a key, every column and every SQL type is
 written out; plume never guesses a column from a field name or a table from a
-type. The mapping is a value you construct, so it can be built, inspected and
-tested like any other value.
+type. The mapping is an ordinary value either way — derived from a decorated
+class, or constructed directly — so it can be built, inspected and tested like
+any other value.
 
 ```ts
 import { Db, DbConfig } from "./driver.ts";
 import { postgres } from "./postgres.ts";
-import { field, repository, connectDatabase, createTable, persist, findById } from "./plume.ts";
+import { entity } from "./entity.ts";
+import { connectDatabase, createTable, persist, findById } from "./plume.ts";
 
-type Agent = { id: string, agentName: string, maxSteps: int, temperature: number };
+@entity("agents")
+class Agent {
+  @id @column("id", "text")            id: string;
+  @column("agent_name", "text")        agentName: string;
+  @column("max_steps", "int")          maxSteps: int;
+  @column("temperature", "float8")     temperature: number;
+}
 
 let database: Db = postgres();
+let config: DbConfig = { host: "127.0.0.1", database: "app", user: "lumen" };
+connectDatabase(database, config);
+createTable(database, entityAgent);
+
+persist(database, entityAgent,
+  "{\"id\":\"a1\",\"agentName\":\"researcher\",\"maxSteps\":5,\"temperature\":0.2}");
+
+let back: Agent = JSON.parse<Agent>(findById(database, entityAgent, "a1"));
+```
+
+The class states each field once and `@entity` derives the mapping from it. The
+column and its SQL type are still written out, because nothing here is inferred:
+`agentName` does not become `agent_name` by convention, and a field without
+`@column` is not mapped at all.
+
+The row goes in as JSON and comes back as the class, which is worth saying
+plainly: a decorated class is a mapping *and* a shape to read into, but it is
+not built from a record literal — `let a: Agent = { id: "a1", … }` is a type
+mismatch. Either write the document, as above, or keep a record type of your own
+beside the class and `JSON.stringify` it.
+
+<details>
+<summary>Building the mapping by hand, without the decorator</summary>
+
+A mapping is an ordinary value, and the decorator only builds one. Constructing
+it directly is the same thing said longer, and it is what you want when the
+shape is decided at run time — a table name from configuration, a column list
+that varies — or when you are testing the mapping itself.
+
+```ts
+import { field, repository } from "./plume.ts";
 
 function agents(): DbRepository {
   let fields: DbField[] = [
@@ -27,15 +66,13 @@ function agents(): DbRepository {
   return repository("agents", "id", "id", fields);
 }
 
-let config: DbConfig = { host: "127.0.0.1", database: "app", user: "lumen" };
-connectDatabase(database, config);
-createTable(database, agents());
-
-let a: Agent = { id: "a1", agentName: "researcher", maxSteps: 5, temperature: 0.2 };
 persist(database, agents(), JSON.stringify(a));
-
-let back: Agent = JSON.parse<Agent>(findById(database, agents(), "a1"));
 ```
+
+`entity_live.test.ts` checks that the two forms produce an identical mapping and
+that every operation works against either.
+
+</details>
 
 A record crosses the boundary as JSON in both directions. That is what lets one
 set of operations serve any record type without a generated mapper per type:
@@ -393,7 +430,7 @@ building and it still runs. Nothing requires `embedDir`, though:
 `migrationsFrom` takes any list of names and contents.
 
 A file that is not a migration — a `README.md` beside the SQL — is left out of
-the plan and reported by `migrationNameProblem`. It is not silently skipped: a
+the plan and reported by `migrationNameViolation`. It is not silently skipped: a
 migration named wrongly would otherwise never run and never be missed.
 
 Everything after the name is still checked. Ordering is by version, so `10`
@@ -425,21 +462,7 @@ database they run against.
 
 ## The `@entity` decorator
 
-`entity.ts` derives a mapping from a decorated class, so the fields are stated
-once instead of twice:
-
-```ts
-@entity("agents")
-class Agent {
-  @id @column("id", "text")
-  id: string;
-
-  @column("agent_name", "text")
-  agentName: string;
-}
-
-persist(database, entityAgent, JSON.stringify(a));
-```
+The form at the top of this file, and what it rests on.
 
 A decorator in Lumen is a pure function from a description of the declaration
 to a value — here, a `DbRepository`. That is why `entity` is an ordinary
@@ -447,12 +470,9 @@ function of an ordinary type, tested by calling it, and why `entity.test.ts`
 exists before the compiler can run a decorator at all (spec 455 is not landed).
 
 Still nothing is inferred: a field without `@column` is not mapped, a class
-without `@id` has no key and `entityProblem` says so. The one exception is a
+without `@id` has no key and `entityViolation` says so. The one exception is a
 `@column("id")` with no type, which falls back to the declared type — the
 column type can always be stated outright.
-
-`entity_live.test.ts` checks that the generated mapping is identical to the
-hand-written one and that every operation works against it.
 
 ## Testing
 
