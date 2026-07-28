@@ -84,13 +84,46 @@ export async function errorOf(res: { text(): Promise<string> }): Promise<string>
 // specs do not each have to know that a field is a component rather than an
 // element.
 export function field(root: Locator, id: string): Locator {
-  return root.locator(`#${id} input, #${id} textarea`).first();
+  return root.locator(`#${id} input, #${id} textarea, #${id} code.editor`).first();
+}
+
+// Typing into the prompt editor.
+//
+// It is a contenteditable with CodeJar behind it, and CodeJar only learns of
+// text that arrives as keystrokes. `fill()` sets the node's text without one,
+// so the highlighter never runs, the gutter stays at one line, and — the part
+// that matters — the form's draft never hears about the change, so Save stores
+// an empty prompt while the screen shows a full one.
+export async function typeInEditor(root: Locator, id: string, text: string) {
+  const el = root.locator(`#${id} code.editor`);
+  await el.click();
+  await el.press("ControlOrMeta+a");
+  await el.pressSequentially(text);
 }
 
 // A LumenUI select shows its value as text rather than as an <option>, so it
 // is read, not asked for `inputValue`.
 export function selectValue(root: Locator, id: string): Locator {
   return root.locator(`#${id}`);
+}
+
+// Choosing in a LumenUI select. There is no <select> to `selectOption`: the
+// trigger opens a listbox of divs, each carrying its value as `data-value`.
+export async function choose(root: Locator, id: string, value: string) {
+  await root.locator(`#${id} .wrapper`).click();
+  await root.locator(`#${id} .option[data-value="${value}"]`).click();
+}
+
+// A LumenUI checkbox copies its id onto the <input> it renders, so an id on
+// its own matches two elements. This is the control — the thing that clicks.
+export function toggle(root: Locator, id: string): Locator {
+  return root.locator(`input#${id}`);
+}
+
+// What a select offers, whether or not it is open — the listbox is in the DOM
+// either way, which is what makes this readable without a click.
+export function choices(root: Locator, id: string): Locator {
+  return root.locator(`#${id} .option`);
 }
 
 // The flat columns of an agent row, and nothing else.

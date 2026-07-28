@@ -163,6 +163,62 @@ test("the scope clause binds two parameters per scope", () => {
   expect(args[3] == "/policies/%");
 });
 
+// A grant is compared twice: in SQL, to pick documents, and in memory, to draw
+// the folder tree. The two have to give the same answer, and LIKE has two
+// wildcards that a folder name is entitled to contain.
+
+test("a scope holding an underscore grants that folder and no lookalike", () => {
+  fresh();
+  execute(database, "CREATE TABLE IF NOT EXISTS scope_probe (scope text)");
+  execute(database, "DELETE FROM scope_probe");
+  execute(database, "INSERT INTO scope_probe VALUES ('/team_docs/handbook')");
+  execute(database, "INSERT INTO scope_probe VALUES ('/team-docs/handbook')");
+
+  let granted: string[] = ["/team_docs"];
+  let sql = "SELECT scope FROM scope_probe WHERE " + scopeClause(database, granted, 1) + " ORDER BY scope";
+  database.query(sql, scopeArgs(granted));
+  // "_" is LIKE's single-character wildcard, so an unescaped pattern hands
+  // /team-docs to whoever was granted /team_docs.
+  expect(database.rows() == 1);
+  expect(database.value(0, 0) == "/team_docs/handbook");
+
+  // And the tree says the same thing. Two answers to "who may read this" is
+  // worse than either answer on its own.
+  expect(scopeCovers("/team_docs", "/team_docs/handbook"));
+  expect(!scopeCovers("/team_docs", "/team-docs/handbook"));
+});
+
+test("a scope holding a percent grants that folder and not the whole corpus", () => {
+  fresh();
+  execute(database, "CREATE TABLE IF NOT EXISTS scope_probe (scope text)");
+  execute(database, "DELETE FROM scope_probe");
+  execute(database, "INSERT INTO scope_probe VALUES ('/a%/notes')");
+  execute(database, "INSERT INTO scope_probe VALUES ('/anything/secret')");
+
+  let granted: string[] = ["/a%"];
+  let sql = "SELECT scope FROM scope_probe WHERE " + scopeClause(database, granted, 1) + " ORDER BY scope";
+  database.query(sql, scopeArgs(granted));
+  expect(database.rows() == 1);
+  expect(database.value(0, 0) == "/a%/notes");
+  expect(!scopeCovers("/a%", "/anything/secret"));
+});
+
+test("an ordinary scope still matches its own subtree", () => {
+  fresh();
+  execute(database, "CREATE TABLE IF NOT EXISTS scope_probe (scope text)");
+  execute(database, "DELETE FROM scope_probe");
+  execute(database, "INSERT INTO scope_probe VALUES ('/specs')");
+  execute(database, "INSERT INTO scope_probe VALUES ('/specs/plume')");
+  execute(database, "INSERT INTO scope_probe VALUES ('/specifications')");
+
+  let granted: string[] = ["/specs"];
+  let sql = "SELECT scope FROM scope_probe WHERE " + scopeClause(database, granted, 1) + " ORDER BY scope";
+  database.query(sql, scopeArgs(granted));
+  expect(database.rows() == 2);
+  expect(database.value(0, 0) == "/specs");
+  expect(database.value(1, 0) == "/specs/plume");
+});
+
 test("no scopes produces no clause, and the root binds a wildcard", () => {
   let db = sqlite();
   let none: string[] = [];

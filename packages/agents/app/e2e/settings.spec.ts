@@ -6,7 +6,10 @@
 // and fails a person.
 
 import { expect, test } from "@playwright/test";
-import { agentRow, modelRow, errorOf, openSettings, openTab, settings, shell } from "./console.js";
+import {
+  agentRow, choices, choose, field, modelRow, errorOf, openSettings, openTab, settings, shell,
+  toggle, typeInEditor,
+} from "./console.js";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -21,29 +24,38 @@ test("the agents tab lists every agent with its model config and prompt", async 
   const rows = settings(page).locator("tr");
   const listed = (await page.request.get("/api/agents").then((r) => r.json())) as unknown[];
   await expect(rows).toHaveCount(listed.length);
-  // Each row offers the one action that opens it. It is an icon now, so it is
-  // named by what it does rather than by the glyph it draws.
-  await expect(rows.first().locator("button.act")).toHaveAttribute("title", /^Edit /);
+  // Each row offers the actions that open it and remove it. They are icons, so
+  // each is named by what it does rather than by the glyph it draws.
+  await expect(rows.first().locator("button.act").first()).toHaveAttribute("title", /^Edit /);
+  await expect(rows.first().locator("button.act").last()).toHaveAttribute("title", /^Delete /);
 });
 
-test("the edit form offers every editable field", async ({ page }) => {
+test("the edit form offers every editable field, each one labelled", async ({ page }) => {
+  // Every field is a labelled box rather than a placeholder that leaves as
+  // soon as it is typed into — that is the whole difference between this form
+  // and the strip of anonymous inputs it replaced.
   await openTab(page, "Agents");
-  await settings(page).locator("tr").first().locator("button.act").click();
+  await settings(page).locator("tr").first().locator("button.act").first().click();
 
-  const form = settings(page).locator(".row");
-  await expect(form.filter({ hasText: "Name" }).locator("input")).toBeVisible();
-  await expect(form.filter({ hasText: "Description" }).locator("input")).toBeVisible();
-  await expect(form.filter({ hasText: "Model config" }).locator("select")).toBeVisible();
-  await expect(form.filter({ hasText: "Prompt" }).locator("select")).toBeVisible();
-  await expect(form.filter({ hasText: "Enabled" }).locator("input[type=checkbox]")).toBeVisible();
+  const form = settings(page).locator(".grid");
+  await expect(form.locator(".f", { hasText: "Name" }).first()).toBeVisible();
+  await expect(field(settings(page), "a-name")).toBeVisible();
+  await expect(field(settings(page), "a-desc")).toBeVisible();
+  await expect(settings(page).locator("#a-config")).toBeVisible();
+  await expect(settings(page).locator("#a-prompt")).toBeVisible();
+  await expect(toggle(settings(page), "a-enabled")).toBeVisible();
+  await expect(toggle(settings(page), "a-default")).toBeVisible();
+
+  // The id cannot be retyped: it is what every other row points at.
+  await expect(settings(page).locator("#a-id input")).toBeDisabled();
 });
 
 test("cancel leaves the agent as it was", async ({ page }) => {
   await openTab(page, "Agents");
   const before = await settings(page).locator("tr").first().textContent();
 
-  await settings(page).locator("tr").first().locator("button.act").click();
-  await settings(page).locator(".row input").nth(1).fill("typed then abandoned");
+  await settings(page).locator("tr").first().locator("button.act").first().click();
+  await field(settings(page), "a-desc").fill("typed then abandoned");
   await settings(page).locator("button", { hasText: "Cancel" }).click();
 
   await expect(settings(page).locator("tr").first()).toHaveText(before ?? "");
@@ -53,8 +65,8 @@ test("editing an agent saves and the row shows it", async ({ page }) => {
   await openTab(page, "Agents");
   const mark = `edited at ${Date.now()}`;
 
-  await settings(page).locator("tr").first().locator("button.act").click();
-  await settings(page).locator(".row input").nth(1).fill(mark);
+  await settings(page).locator("tr").first().locator("button.act").first().click();
+  await field(settings(page), "a-desc").fill(mark);
   await settings(page).locator("button", { hasText: "Save" }).click();
 
   await expect(settings(page).locator("tr").first()).toContainText(mark);
@@ -78,29 +90,57 @@ test("an agent cannot be pointed at a model config that does not exist", async (
 
 // --- models ---------------------------------------------------------------------------
 
-test("only one embedding model is enabled at a time", async ({ page }) => {
-  await openTab(page, "Models");
-  const embedRows = settings(page).locator("tr", { has: page.locator("input[type=radio]") });
-  const count = await embedRows.count();
-  test.skip(count < 2, "needs two embedding models to observe the exchange");
+test("enabling a second embedder from its form turns the first one off", async ({ page }) => {
+  // The rule lives in the row's PUT, so it holds however the row is written —
+  // but this is the door a person actually uses, and it was a bare radio button
+  // in a table with nothing on screen saying what checking it would cost.
+  //
+  // The second embedder is made here rather than found: the one this database
+  // ships with is an Ollama model, and the server has no embedding endpoint for
+  // Ollama, so the save is refused for a reason that has nothing to do with the
+  // rule under test.
+  const id = `e2e_ui_emb_${Date.now()}`;
+  const label = `Second Embedder ${id}`;
+  const before = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; label: string; kind: string; enabled: boolean }[];
+  const was = before.find((m) => m.kind === "embedding" && m.enabled);
+  await page.request.post("/api/models", {
+    data: modelRow({ id, label, apiName: "mistral-embed", provider: "mistral",
+      kind: "embedding", dimensions: 1024, enabled: false }),
+  });
 
-  await embedRows.nth(1).locator("input").check();
-  const models = (await page.request.get("/api/models").then((r) => r.json())) as
-    { kind: string; enabled: boolean }[];
-  const on = models.filter((m) => m.kind === "embedding" && m.enabled);
+  await page.reload();
+  await openSettings(page);
+  await openTab(page, "Models");
+  await settings(page).locator("tr", { hasText: label }).locator('button[title^="Edit"]').click();
+  await toggle(settings(page), "m-enabled").click();
+  await settings(page).locator("button", { hasText: "Save" }).click();
+
+  await expect(settings(page).locator("tr", { hasText: label })).toContainText("on");
+  const after = (await page.request.get("/api/models").then((r) => r.json())) as
+    { id: string; kind: string; enabled: boolean }[];
+  const on = after.filter((m) => m.kind === "embedding" && m.enabled);
   expect(on).toHaveLength(1);
+  expect(on[0].id).toBe(id);
+
+  // Put the corpus back: leaving a different embedder active would silently
+  // split it for every spec that runs afterwards.
+  await page.request.delete(`/api/models/${id}`);
+  if (was) {
+    await page.request.put(`/api/models/${was.id}`, { data: modelRow({ ...was, enabled: true }) });
+  }
 });
 
-test("embedding models are one-of and chat models are not", async ({ page }) => {
+test("models are grouped by what they are for, each group counted", async ({ page }) => {
   await openTab(page, "Models");
   const models = (await page.request.get("/api/models").then((r) => r.json())) as
     { kind: string }[];
   const embedders = models.filter((m) => m.kind === "embedding").length;
-  const chats = models.filter((m) => m.kind === "chat").length;
 
-  // In the table only — the add-model row has an "enabled" checkbox of its own.
-  await expect(settings(page).locator("table input[type=radio]")).toHaveCount(embedders);
-  await expect(settings(page).locator("table input[type=checkbox]")).toHaveCount(chats);
+  const groups = settings(page).locator(".group");
+  await expect(groups.filter({ hasText: "Generation" })).toContainText(
+    String(models.length - embedders));
+  await expect(groups.filter({ hasText: "Embedding" })).toContainText(String(embedders));
 });
 
 test("a model id that is already taken is refused rather than overwriting", async ({ page }) => {
@@ -122,21 +162,75 @@ test("the prompts tab renders its rows and its form", async ({ page }) => {
   // and the API answers `body`, so the template threw and drew nothing.
   await openTab(page, "Prompts");
   await expect(settings(page).locator("table tr")).not.toHaveCount(0);
-  await expect(settings(page).locator("input[name=name]")).toBeVisible();
-  await expect(settings(page).locator("textarea[name=content]")).toBeVisible();
+
+  await settings(page).locator('button[data-new="prompt"]').click();
+  await expect(field(settings(page), "p-name")).toBeVisible();
+  await expect(field(settings(page), "p-body")).toBeVisible();
+});
+
+test("a new version starts from the text of the one it follows", async ({ page }) => {
+  // Writing the next version of a prompt from a blank box means retyping what
+  // was already there, and what gets retyped gets changed by accident.
+  await openTab(page, "Prompts");
+  const first = settings(page).locator("tbody tr").first();
+  await first.locator('button[title^="New version"]').click();
+
+  // The list is ordered by name then version, so the first row is the first
+  // version of the first name — and the form opens on *that* row's text.
+  const prompts = (await page.request.get("/api/prompts").then((r) => r.json())) as
+    { promptName: string; version: number; body: string }[];
+  const from = prompts[0];
+  const newest = prompts
+    .filter((p) => p.promptName === from.promptName)
+    .reduce((a, b) => (a.version > b.version ? a : b));
+
+  await expect(field(settings(page), "p-name")).toHaveValue(from.promptName);
+  // The editor is a contenteditable, so its text is read, not its value.
+  await expect(field(settings(page), "p-body")).toHaveText(from.body);
+  // And the head says which version this will become — the next one, never one
+  // that already exists.
+  await expect(settings(page).locator(".formhead")).toContainText(`version ${newest.version + 1}`);
+});
+
+test("the prompt editor stores the markdown typed into it, and shows its structure", async ({ page }) => {
+  // A prompt is markdown, so the field is an editor rather than a box: it
+  // keeps the whitespace, numbers the lines, and marks the structure up while
+  // it is being written. What it must not do is show one thing and store
+  // another — the editor is a contenteditable, and text that arrives without
+  // a keystroke reaches the screen without ever reaching the draft.
+  await openTab(page, "Prompts");
+  const name = `e2e_md_${Date.now()}`;
+  const body = "# Desk\n\nAnswer **briefly**.\n\n- never invent an order number";
+
+  await settings(page).locator('button[data-new="prompt"]').click();
+  await field(settings(page), "p-name").fill(name);
+  await typeInEditor(settings(page), "p-body", body);
+
+  // Marked up as markdown, not left as one flat run of text.
+  await expect(settings(page).locator("#p-body .hljs-section")).toHaveCount(1);
+  await expect(settings(page).locator("#p-body .hljs-strong")).toHaveCount(1);
+  // And the lines are numbered, which is how a long prompt is talked about.
+  await expect(settings(page).locator("#p-body .line-number")).toHaveCount(5);
+
+  await settings(page).locator("button", { hasText: "Save version" }).click();
+  const prompts = (await page.request.get("/api/prompts").then((r) => r.json())) as
+    { promptName: string; body: string }[];
+  expect(prompts.find((p) => p.promptName === name)?.body).toBe(body);
 });
 
 test("saving a prompt creates a new version rather than editing one", async ({ page }) => {
   await openTab(page, "Prompts");
   const name = `e2e_${Date.now()}`;
 
-  await settings(page).locator("input[name=name]").fill(name);
-  await settings(page).locator("textarea[name=content]").fill("First version.");
+  await settings(page).locator('button[data-new="prompt"]').click();
+  await field(settings(page), "p-name").fill(name);
+  await typeInEditor(settings(page), "p-body", "First version.");
   await settings(page).locator("button", { hasText: "Save version" }).click();
   await expect(settings(page).locator("tr", { hasText: name })).toHaveCount(1);
 
-  await settings(page).locator("input[name=name]").fill(name);
-  await settings(page).locator("textarea[name=content]").fill("Second version.");
+  await settings(page).locator('button[data-new="prompt"]').click();
+  await field(settings(page), "p-name").fill(name);
+  await typeInEditor(settings(page), "p-body", "Second version.");
   await settings(page).locator("button", { hasText: "Save version" }).click();
 
   // Two rows, two versions — the first is still there.
@@ -179,7 +273,7 @@ test("an unknown tracing backend is refused when it is set, not later", async ({
 
 test("the tracing tab offers exactly the backends the tracer understands", async ({ page }) => {
   await openTab(page, "Tracing");
-  const offered = await settings(page).locator("select[name=backend] option").allTextContents();
+  const offered = await choices(settings(page), "t-backend").allTextContents();
   expect(offered.map((s) => s.trim()).sort()).toEqual(
     ["arize", "braintrust", "langfuse", "langsmith", "otlp", "phoenix"],
   );
@@ -234,9 +328,13 @@ test("a model that is neither chat nor embedding is refused", async ({ page }) =
 
 test("the models form asks for dimensions only when the kind needs them", async ({ page }) => {
   await openTab(page, "Models");
-  await expect(settings(page).locator("input[name=dimensions]")).toHaveCount(0);
-  await settings(page).locator("select[name=kind]").selectOption("embedding");
-  await expect(settings(page).locator("input[name=dimensions]")).toBeVisible();
+  await settings(page).locator('button[data-new="model"]').click();
+  await expect(settings(page).locator("#m-dimensions")).toHaveCount(0);
+
+  await choose(settings(page), "m-kind", "embedding");
+  await expect(settings(page).locator("#m-dimensions")).toBeVisible();
+  // And it says what a wrong answer costs, rather than only asking for a number.
+  await expect(settings(page).locator(".grid")).toContainText("1024 for mistral-embed");
 });
 
 test("saving tracing keeps the service name and environment it was given", async ({ page }) => {
@@ -253,8 +351,8 @@ test("saving tracing keeps the service name and environment it was given", async
   await page.reload();
   await openSettings(page);
   await openTab(page, "Tracing");
-  await expect(settings(page).locator("input[name=serviceName]")).toHaveValue("e2e-service");
-  await expect(settings(page).locator("input[name=environment]")).toHaveValue("staging");
+  await expect(field(settings(page), "t-service")).toHaveValue("e2e-service");
+  await expect(field(settings(page), "t-env")).toHaveValue("staging");
 
   await settings(page).locator("button", { hasText: "Save" }).click();
   const after = (await page.request.get("/api/tracing").then((r) => r.json())) as
@@ -265,7 +363,8 @@ test("saving tracing keeps the service name and environment it was given", async
 
 test("every provider the console offers is one the code can reach", async ({ page }) => {
   await openTab(page, "Providers");
-  const offered = await settings(page).locator("select[name=provider] option").allTextContents();
+  await settings(page).locator('button[data-new="key"]').click();
+  const offered = await choices(settings(page), "k-provider").allTextContents();
   expect(offered.map((s) => s.trim()).sort()).toEqual(["anthropic", "mistral", "openai"]);
 });
 

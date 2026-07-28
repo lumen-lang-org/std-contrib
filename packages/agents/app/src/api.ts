@@ -398,6 +398,11 @@ export const testModel = (id: string) =>
 export const listConfigs = () => call<ModelConfigRow[]>("/model-configs");
 export const createConfig = (row: ModelConfigRow) =>
   call<ModelConfigRow>("/model-configs", { method: "POST", body: JSON.stringify(row) });
+// There is no PUT: a config is created and repointed, never edited, because an
+// agent mid-conversation reads it every round. The API refuses to delete one an
+// agent still names.
+export const deleteConfig = (id: string) =>
+  call<unknown>(`/model-configs/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 export const listPrompts = () => call<PromptRow[]>("/prompts");
 // The server assigns the id and the version — a caller picking either is how

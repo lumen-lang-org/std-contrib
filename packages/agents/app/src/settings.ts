@@ -1,14 +1,28 @@
 // Settings: the database rows the platform runs on, editable while it runs —
-// which is the point of the whole package. One tab per table, each a thin
-// list-and-form over the API; the heavier editors (scopes, evals, traces)
-// belong to later iterations and are absent rather than mocked.
+// which is the point of the whole package.
+//
+// Every tab is the same shape, and the shape is borrowed from a settings modal
+// with twice as many tabs as this one: a titled head over a hairline, the one
+// action that makes a new row on the right, rows gathered under an uppercase
+// group label with its count, and — this is the part that matters — a form
+// that *replaces* the list instead of sitting underneath it as a strip of
+// unlabelled boxes.
+//
+// What was here before was that strip: a `<table>` and a row of bare inputs
+// whose only clue was a placeholder. A placeholder is not a label; it leaves
+// the moment you type, so a half-filled form is a row of anonymous values.
+//
+// The layout is taken. The palette is not: this console's action colour is
+// ink, and borrowing another product's indigo would have made it look like
+// that product.
 
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   AgentRow, ModelConfigRow, ModelRow, PromptRow, ServerRow, TracingStatus,
-  configureTracing, createModel, createPrompt, createServer, listAgents,
-  listConfigs, listModels, listPrompts, listProviders, listServers,
+  configureTracing, createAgent, createConfig, createModel, createPrompt,
+  createServer, deleteAgent, deleteConfig, deleteModel, deleteServer,
+  listAgents, listConfigs, listModels, listPrompts, listProviders, listServers,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, setServerAuth, testModel,
 } from "./api.js";
@@ -24,6 +38,65 @@ const TABS = [
   { name: "Tracing", icon: "layers" },
 ] as const;
 type Tab = typeof TABS[number]["name"];
+
+const PROVIDERS = ["mistral", "openai", "anthropic"];
+const BACKENDS = ["langfuse", "otlp", "phoenix", "braintrust", "langsmith", "arize"];
+
+// The value a LumenUI field is now carrying. Read off the element rather than
+// out of the event detail: nr-input, nr-select and nr-textarea each describe
+// their payload differently, and `value` is the one thing all three agree on.
+function valueOf(e: Event): string {
+  return (e.target as unknown as { value?: string }).value ?? "";
+}
+
+const options = (values: string[]) => values.map((v) => ({ value: v, label: v }));
+
+// The values this form offers, plus whatever the row already holds. A row
+// stored before the list was what it is now still shows what it actually is,
+// rather than being silently redrawn as the first option that happens to fit.
+const withCurrent = (values: string[], current: string) =>
+  options(current === "" || values.includes(current) ? values : [...values, current]);
+
+// What is open on top of a list. A form replaces its list, so this is one
+// value rather than a flag per table.
+type View =
+  | { kind: "list" }
+  | { kind: "agent"; row: AgentRow; fresh: boolean }
+  | { kind: "model"; row: ModelRow; fresh: boolean }
+  | { kind: "config"; row: ModelConfigRow }
+  | { kind: "prompt"; row: { promptName: string; body: string } }
+  | { kind: "server"; row: ServerRow & { token: string }; fresh: boolean }
+  | { kind: "key"; row: { provider: string; apiKey: string } };
+
+const NEW_AGENT: AgentRow = {
+  id: "", agentName: "", description: "", modelConfigId: "", promptId: "",
+  enabled: true, isDefault: false,
+};
+const NEW_MODEL: ModelRow = {
+  id: "", label: "", apiName: "", provider: "mistral", kind: "chat",
+  dimensions: 0, baseUrl: "", enabled: true,
+};
+const NEW_CONFIG: ModelConfigRow = {
+  id: "", modelId: "", temperature: 0.2, maxTokens: 4096, topP: 1, extra: "",
+};
+const NEW_SERVER: ServerRow & { token: string } = {
+  id: "", serverName: "", transport: "http", endpoint: "",
+  authKind: "none", authHeader: "", enabled: true, token: "",
+};
+
+// What markdown looks like while it is being written. Weight and shape carry
+// most of it — a heading is heavier, emphasis leans, a quote greys out — with
+// one hue for the two things that are addresses rather than prose: a link and
+// a piece of code.
+const MARKDOWN_TOKENS = `
+  .hljs-section { color: var(--fg, #17171A); font-weight: 650; }
+  .hljs-strong { font-weight: 700; }
+  .hljs-emphasis { font-style: italic; }
+  .hljs-bullet { color: var(--muted, #6B6B76); }
+  .hljs-quote { color: var(--muted, #6B6B76); font-style: italic; }
+  .hljs-code { color: #0F766E; }
+  .hljs-link, .hljs-symbol { color: var(--focus, #2563EB); }
+`;
 
 @customElement("console-settings")
 export class ConsoleSettings extends LitElement {
@@ -59,31 +132,30 @@ export class ConsoleSettings extends LitElement {
     aside .item.on { background: var(--bg-sunken); color: var(--fg); font-weight: 500; }
     aside .item .ic { width: 16px; display: grid; place-items: center; opacity: 0.8; }
 
-    main { flex: 1; overflow-y: auto; padding: 22px 26px 30px; min-width: 0; }
+    main { flex: 1; overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
 
-    /* Page head: the title, and the one action that makes a new one. */
-    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-    .head h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; flex: 1; }
+    /* Page head: what this tab is, over a hairline that runs the width of the
+       page. The hairline is what makes the head a head rather than a first
+       paragraph. */
+    .head { display: flex; align-items: center; gap: 10px;
+            padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .head h2 { margin: 0; font-size: 19px; font-weight: 600;
+               letter-spacing: -0.01em; flex: 1; }
     .head .ic { color: var(--muted); }
 
-    .primary { background: var(--accent); color: var(--accent-fg); border: 0;
-               border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 500;
-               cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-    .primary:hover { background: var(--accent-hover); }
+    /* The actions that make new rows, right-aligned under the rule. */
+    .bar { display: flex; justify-content: flex-end; gap: 8px; margin: 16px 0 2px; }
 
-    /* Tabs carry their count, so the number is read without opening them. */
-    .tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border);
-            margin-bottom: 4px; }
-    .tabs .tab { padding: 8px 2px; cursor: pointer; color: var(--muted);
-                 border-bottom: 2px solid transparent; margin-bottom: -1px;
-                 display: flex; align-items: center; gap: 7px; font-size: 14px; }
-    .tabs .tab:hover { color: var(--fg); }
-    .tabs .tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
-    .tabs .tab .n { color: var(--muted); font-size: 12.5px;
-                    font-variant-numeric: tabular-nums; }
+    .primary, .ghost { border-radius: 8px; padding: 8px 14px; font: inherit;
+                       font-weight: 500; cursor: pointer;
+                       display: inline-flex; align-items: center; gap: 6px; }
+    .primary { background: var(--accent); color: var(--accent-fg); border: 0; }
+    .primary:hover { background: var(--accent-hover); }
+    .ghost { background: var(--bg); color: var(--fg); border: 1px solid var(--border); }
+    .ghost:hover { background: var(--bg-sunken); }
 
     /* A group of rows, headed by what it is and how many. */
-    .group { display: flex; align-items: center; padding: 16px 2px 6px; }
+    .group { display: flex; align-items: baseline; padding: 20px 2px 4px; }
     .group .label { flex: 1; font-size: 11px; letter-spacing: 0.09em;
                     text-transform: uppercase; color: var(--muted); font-weight: 600; }
     .group .n { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
@@ -92,36 +164,78 @@ export class ConsoleSettings extends LitElement {
     td, th { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
     tbody tr:hover { background: var(--bg-rail); }
-    td.right { text-align: right; white-space: nowrap; }
+    td.right { text-align: right; white-space: nowrap; width: 1%; }
+    td.name { font-weight: 500; white-space: nowrap; }
+    td.fill { width: 60%; }
 
     /* An id is a value to copy, not prose: monospace, on a sunken chip. */
     .slug { font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken);
-            border-radius: 6px; padding: 2px 8px; color: var(--fg); }
+            border-radius: 6px; padding: 2px 8px; color: var(--fg);
+            white-space: nowrap; }
     /* A tag is a label something was given, not a value it holds. */
     .tag { font-size: 12.5px; background: var(--bg-sunken); border-radius: 999px;
-           padding: 2px 10px; color: var(--muted); font-style: italic; }
+           padding: 2px 10px; color: var(--muted); font-style: italic;
+           white-space: nowrap; }
+    .tag.live { color: var(--ok); font-style: normal; }
+    .tag.off { color: var(--danger); font-style: normal; }
     .dim { color: var(--muted); }
+    .trunc { display: block; max-width: 46ch; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
 
     /* Row actions: ghosts until the row is under the pointer. */
+    .acts { display: inline-flex; gap: 2px; }
     .act { background: none; border: 0; color: var(--muted); cursor: pointer;
-           padding: 4px 6px; border-radius: 6px; font-size: 14px; }
+           padding: 5px 6px; border-radius: 6px; line-height: 0; }
     .act:hover { background: var(--bg-sunken); color: var(--fg); }
     .act.danger:hover { color: var(--danger); }
 
-    input, select, textarea { background: var(--bg-card); border: 1px solid var(--border);
-             color: inherit; border-radius: 8px; padding: 7px 10px; font: inherit; }
-    input:focus-visible, select:focus-visible, textarea:focus-visible,
-    .item:focus-visible, .tab:focus-visible, button:focus-visible {
-      outline: 2px solid var(--focus); outline-offset: 1px; }
-    button { background: var(--accent); color: var(--accent-fg); border: 0;
-             border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
-    button:hover { background: var(--accent-hover); }
-    .row { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; align-items: center; }
-    .note { color: var(--muted); }
-    .err { color: var(--danger); }
+    /* --- forms ------------------------------------------------------------ */
+
+    .formhead { display: flex; align-items: center; gap: 12px; margin: 18px 0 20px; }
+    .formhead h3 { margin: 0; font-size: 16px; font-weight: 500; }
+
+    /* Something true about the row that no field can hold. */
+    .banner { background: var(--bg-rail); border: 1px solid var(--border);
+              border-radius: 8px; padding: 11px 14px; color: var(--muted);
+              margin-bottom: 22px; }
+
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px 24px; max-width: 1000px; align-items: start; }
+    .f { display: flex; flex-direction: column; min-width: 0; }
+    .f.wide { grid-column: 1 / -1; }
+    .f .help { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+    /* The label belongs to the field, so it is slotted into the component
+       rather than sitting beside it — that is what a screen reader reads. */
+    [slot="label"], .f > .label { display: block; font-size: 13px; font-weight: 500;
+                     margin-bottom: 6px; color: var(--fg); }
+    /* The editor keeps the border the rest of the fields have, and a ground
+       that is the page rather than the component's own near-white. */
+    nr-code-editor::part(editor-container) {
+      border-color: var(--border); background: var(--bg-card);
+    }
+    .req { color: var(--danger); font-style: normal; margin-left: 2px; }
+    nr-input, nr-select, nr-textarea { display: block; width: 100%; }
+    /* A checkbox is its own label, so it needs the room a label would take. */
+    .f.check { justify-content: end; padding-top: 22px; }
+    /* LumenUI fills a checked box violet — a hue this console spends on the
+       graph, where a colour means which kind of node something is. The colour
+       is hard-coded inside the component, so its exposed part is the way in. */
+    nr-checkbox[checked]::part(input) {
+      background-color: var(--accent); border-color: var(--accent);
+    }
+    nr-checkbox:hover::part(input) { border-color: var(--accent); }
+
+    .formacts { display: flex; gap: 8px; margin-top: 26px; padding-top: 18px;
+                border-top: 1px solid var(--border); max-width: 1000px; }
+
+    .note { color: var(--muted); font-style: italic; margin-top: 22px; }
+    .err { color: var(--danger); margin: 12px 0 0; }
+    .said { color: var(--muted); margin: 12px 0 0;
+            font-family: var(--mono); font-size: 12.5px; }
+    .empty { color: var(--muted); padding: 18px 2px; }
+
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   `;
-
-
 
   @property() tab: Tab = "Agents";
   @state() private agents: AgentRow[] = [];
@@ -132,12 +246,72 @@ export class ConsoleSettings extends LitElement {
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
-  @state() private editing: AgentRow | null = null;
-  // Which kind the "add model" row is on, so the dimensions input appears only
-  // for an embedding model, where it is required.
-  @state() private newKind = "chat";
+  @state() private view: View = { kind: "list" };
   // What the last Test said, so the answer appears where the button is.
   @state() private probed = "";
+  // The tracing panel is a form with no list, so its draft lives here.
+  @state() private trace = {
+    backend: "langfuse", endpoint: "", publicKey: "",
+    serviceName: "lumen-agents", environment: "production", enabled: false,
+    secret: "",
+  };
+
+  async connectedCallback() {
+    super.connectedCallback();
+    await this.refresh();
+  }
+
+  // highlight.js labels markdown with token classes the editor's own
+  // stylesheet has no colours for: it dresses javascript, json and css and
+  // stops there, so a prompt highlighted "as markdown" came out uniformly
+  // black — spans everywhere, not one of them visible. The spans live inside
+  // that component's shadow root, where a rule of ours cannot reach, so the
+  // sheet is handed to the root itself. Custom properties do cross a shadow
+  // boundary, which is what keeps this on the console's palette instead of
+  // introducing a second one.
+  protected updated() {
+    for (const el of this.renderRoot.querySelectorAll("nr-code-editor")) {
+      const root = el.shadowRoot as (ShadowRoot & { dressed?: boolean }) | null;
+      if (root === null || root.dressed === true) continue;
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(MARKDOWN_TOKENS);
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+      root.dressed = true;
+    }
+  }
+
+  private async refresh() {
+    this.problem = "";
+    try {
+      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing] =
+        await Promise.all([
+          listAgents(), listModels(), listConfigs(), listPrompts(),
+          listServers(), listProviders(), tracingStatus(),
+        ]);
+      const t = this.tracing;
+      if (t !== null) {
+        this.trace = {
+          ...this.trace,
+          backend: t.backend === "" ? "langfuse" : t.backend,
+          endpoint: t.endpoint,
+          serviceName: t.serviceName === "" ? "lumen-agents" : t.serviceName,
+          environment: t.environment === "" ? "production" : t.environment,
+          enabled: t.active,
+        };
+      }
+    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+  }
+
+  // Every write goes through here: the list is re-read from the server rather
+  // than patched in place, so what is on screen is what was stored.
+  private async act(work: () => Promise<unknown>, then: View = { kind: "list" }) {
+    this.problem = "";
+    try {
+      await work();
+      await this.refresh();
+      this.view = then;
+    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+  }
 
   private async probe(id: string) {
     this.probed = "testing…";
@@ -151,43 +325,15 @@ export class ConsoleSettings extends LitElement {
     }
   }
 
-  async connectedCallback() {
-    super.connectedCallback();
-    await this.refresh();
-  }
+  private close() { this.view = { kind: "list" }; this.problem = ""; }
 
-  private async refresh() {
-    this.problem = "";
-    try {
-      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing] =
-        await Promise.all([
-          listAgents(), listModels(), listConfigs(), listPrompts(),
-          listServers(), listProviders(), tracingStatus(),
-        ]);
-    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
-  }
+  // Editing a row edits a copy of it, so Cancel is dropping the copy.
+  private open(view: View) { this.view = view; this.problem = ""; }
 
-  private async act(work: () => Promise<unknown>) {
-    this.problem = "";
-    try { await work(); await this.refresh(); }
-    catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
-  }
-
-  private field(form: HTMLElement, name: string): string {
-    return (form.querySelector(`[name=${name}]`) as HTMLInputElement | null)?.value ?? "";
-  }
-
-  // How many rows each tab holds, so the rail and the tabs can say so without
-  // being opened. A tab with nothing behind it shows nothing rather than a
-  // zero, which reads as a count that failed to load.
-  private countOf(tab: Tab): number {
-    switch (tab) {
-      case "Agents": return this.agents.length;
-      case "Models": return this.models.length;
-      case "Prompts": return this.prompts.length;
-      case "MCP": return this.servers.length;
-      default: return 0;
-    }
+  private patch(fields: Record<string, unknown>) {
+    const v = this.view;
+    if (v.kind === "list") return;
+    this.view = { ...v, row: { ...v.row, ...fields } } as View;
   }
 
   render() {
@@ -203,30 +349,18 @@ export class ConsoleSettings extends LitElement {
             <div class="label">Settings</div>
             ${TABS.map((t) => html`
               <div class="item ${t.name === this.tab ? "on" : ""}" data-tab=${t.name}
-                @click=${() => { this.tab = t.name; }}>
+                @click=${() => { this.tab = t.name; this.close(); }}>
                 <span class="ic"><nr-icon name=${t.icon} size="small"></nr-icon></span>
                 <span>${t.name}</span>
               </div>`)}
           </aside>
           <main>
-            ${this.problem === "" ? "" : html`<p class="err">${this.problem}</p>`}
             ${this.renderTab()}
+            ${this.problem === "" ? "" : html`<p class="err" role="alert">${this.problem}</p>`}
           </main>
         </div>
       </nr-overlay>
     `;
-  }
-
-  // The heading every tab shares: what it is, how many, and the one action
-  // that adds another.
-  private head(title: string, icon: string) {
-    const n = this.countOf(title as Tab);
-    return html`
-      <div class="head">
-        <span class="ic"><nr-icon name=${icon} size="small"></nr-icon></span>
-        <h2>${title}</h2>
-        ${n > 0 ? html`<span class="dim">${n}</span>` : ""}
-      </div>`;
   }
 
   private renderTab() {
@@ -240,244 +374,589 @@ export class ConsoleSettings extends LitElement {
     }
   }
 
+  // --- the pieces every tab is built from ---------------------------------------------
+
+  private head(title: string, icon: string) {
+    return html`
+      <div class="head">
+        <span class="ic"><nr-icon name=${icon} size="small"></nr-icon></span>
+        <h2>${title}</h2>
+      </div>`;
+  }
+
+  // A count is shown when there is something to count. A group that is a
+  // heading rather than a list — the tracing secret — would otherwise carry a
+  // "0" that reads as a number that failed to load.
+  private group(label: string, n?: number) {
+    return html`
+      <div class="group"><span class="label">${label}</span>
+        ${n === undefined ? "" : html`<span class="n">${n}</span>`}</div>`;
+  }
+
+  private formHead(title: string) {
+    return html`
+      <div class="formhead">
+        <button class="act" title="Back to the list" @click=${() => this.close()}>
+          <nr-icon name="chevron-left" size="small"></nr-icon>
+        </button>
+        <h3>${title}</h3>
+      </div>`;
+  }
+
+  private formActions(save: () => void, label = "Save") {
+    return html`
+      <div class="formacts">
+        <button class="primary" @click=${save}>${label}</button>
+        <button class="ghost" @click=${() => this.close()}>Cancel</button>
+      </div>`;
+  }
+
+  // A field is described, not spelled out: one record per field rather than a
+  // line of positional arguments nobody can read at the call site.
+  private text(f: {
+    id: string; label: string; value: string; on: (v: string) => void;
+    required?: boolean; help?: string; placeholder?: string; type?: string;
+    wide?: boolean; disabled?: boolean;
+  }) {
+    return html`
+      <div class="f ${f.wide === true ? "wide" : ""}">
+        <nr-input id=${f.id} .value=${f.value} type=${f.type ?? "text"}
+          placeholder=${f.placeholder ?? ""} ?disabled=${f.disabled === true}
+          @nr-input=${(e: Event) => f.on(valueOf(e))}
+          @input=${(e: Event) => f.on(valueOf(e))}>
+          <span slot="label">${f.label}${f.required === true ? html`<em class="req">*</em>` : ""}</span>
+        </nr-input>
+        ${f.help === undefined ? "" : html`<p class="help">${f.help}</p>`}
+      </div>`;
+  }
+
+  private choice(f: {
+    id: string; label: string; value: string; on: (v: string) => void;
+    options: { value: string; label: string }[];
+    required?: boolean; help?: string; wide?: boolean;
+  }) {
+    return html`
+      <div class="f ${f.wide === true ? "wide" : ""}">
+        <!-- block, or the field sizes itself to its longest option and a form
+             of full-width boxes has one field that is not. -->
+        <nr-select block id=${f.id} .value=${f.value} .options=${f.options}
+          @nr-change=${(e: Event) => f.on(valueOf(e))}>
+          <span slot="label">${f.label}${f.required === true ? html`<em class="req">*</em>` : ""}</span>
+        </nr-select>
+        ${f.help === undefined ? "" : html`<p class="help">${f.help}</p>`}
+      </div>`;
+  }
+
+  private area(f: {
+    id: string; label: string; value: string; on: (v: string) => void;
+    rows?: number; required?: boolean; help?: string; placeholder?: string;
+  }) {
+    return html`
+      <div class="f wide">
+        <!-- outlined: nr-textarea defaults to an underline while nr-input
+             defaults to a box, so a form with both has one field that reads as
+             a different kind of control. -->
+        <nr-textarea variant="outlined" id=${f.id} .value=${f.value} rows=${f.rows ?? 6}
+          placeholder=${f.placeholder ?? ""}
+          @nr-input=${(e: Event) => f.on(valueOf(e))}
+          @input=${(e: Event) => f.on(valueOf(e))}>
+          <span slot="label">${f.label}${f.required === true ? html`<em class="req">*</em>` : ""}</span>
+        </nr-textarea>
+        ${f.help === undefined ? "" : html`<p class="help">${f.help}</p>`}
+      </div>`;
+  }
+
+  // A prompt is written rather than filled in, so it gets an editor rather
+  // than a box: monospace, its own scroll, and markdown highlighted as it is
+  // typed — headings, lists, emphasis and fenced code all visible without
+  // rendering anything. The component is CodeJar over a contenteditable, which
+  // is why the value arrives on the event's detail: there is no <textarea>
+  // underneath to read `.value` from.
+  private editor(f: {
+    id: string; label: string; value: string; on: (v: string) => void;
+    language?: string; height?: string; required?: boolean; help?: string;
+  }) {
+    return html`
+      <div class="f wide">
+        <span class="label" id="${f.id}-label">
+          ${f.label}${f.required === true ? html`<em class="req">*</em>` : ""}</span>
+        <nr-code-editor
+          id=${f.id}
+          theme="vs"
+          language=${f.language ?? "markdown"}
+          word-wrap
+          .code=${f.value}
+          style=${`height:${f.height ?? "420px"}`}
+          @nr-change=${(e: CustomEvent) => f.on((e.detail as { value: string }).value)}>
+        </nr-code-editor>
+        ${f.help === undefined ? "" : html`<p class="help">${f.help}</p>`}
+      </div>`;
+  }
+
+  private check(f: {
+    id: string; label: string; checked: boolean; on: (v: boolean) => void; help?: string;
+  }) {
+    return html`
+      <div class="f check">
+        <nr-checkbox id=${f.id} ?checked=${f.checked}
+          @nr-change=${(e: CustomEvent) => f.on(e.detail.checked as boolean)}>${f.label}</nr-checkbox>
+        ${f.help === undefined ? "" : html`<p class="help">${f.help}</p>`}
+      </div>`;
+  }
+
+  private rowActions(items: { icon: string; title: string; danger?: boolean; run: () => void }[]) {
+    return html`
+      <td class="right"><span class="acts">
+        ${items.map((i) => html`
+          <button class="act ${i.danger === true ? "danger" : ""}" title=${i.title}
+            @click=${i.run}><nr-icon name=${i.icon} size="small"></nr-icon></button>`)}
+      </span></td>`;
+  }
+
+  // --- agents -------------------------------------------------------------------------
+
   private agentsTab() {
-    if (this.editing !== null) return this.agentForm(this.editing);
+    const v = this.view;
+    if (v.kind === "agent") return this.agentForm(v.row, v.fresh);
     const entry = this.agents.find((a) => a.isDefault);
     return html`
       ${this.head("Agents", "message-square")}
-
-      <div class="group">
-        <span class="label">General</span>
-        <span class="n">${this.agents.length}</span>
+      <div class="bar">
+        <button class="primary" data-new="agent"
+          @click=${() => this.open({ kind: "agent", row: { ...NEW_AGENT,
+            modelConfigId: this.configs[0]?.id ?? "", promptId: this.prompts[0]?.id ?? "" },
+            fresh: true })}>
+          <nr-icon name="plus" size="small"></nr-icon> New agent
+        </button>
       </div>
 
-      <table>
-        <tbody>
+      ${this.group("General", this.agents.length)}
+      <table><tbody>
         ${this.agents.map((a) => html`<tr>
-          <td>
-            ${a.agentName}
-            ${a.id === entry?.id ? html`<span class="tag">entry</span>` : ""}
-          </td>
+          <td class="name">${a.agentName}</td>
+          <td><span class="slug">${a.id}</span></td>
           <!-- What the agent is for. Dropped in the first pass of this table
                in favour of the id and the config, which is exactly backwards:
                those two are addresses, and this is the only column that says
                what the row does. -->
-          <td class="dim">${a.description.length > 52 ? a.description.slice(0, 52) + "…" : a.description}</td>
-          <td><span class="slug">${a.id}</span></td>
+          <td class="fill dim"><span class="trunc">${a.description}</span></td>
           <td><span class="tag">${this.prompts.find((p) => p.id === a.promptId)?.promptName ?? a.promptId}</span></td>
-          <td class="dim">${a.enabled ? "" : "off"}</td>
-          <td class="right">
-            <button class="act" title="Edit ${a.agentName}"
-              @click=${() => { this.editing = { ...a }; }}>✎</button>
-          </td>
+          <td>${a.id === entry?.id ? html`<span class="tag live">entry</span>` : ""}
+              ${a.enabled ? "" : html`<span class="tag off">off</span>`}</td>
+          ${this.rowActions([
+            { icon: "edit", title: `Edit ${a.agentName}`, run: () => this.open({ kind: "agent", row: { ...a }, fresh: false }) },
+            { icon: "trash", title: `Delete ${a.agentName}`, danger: true,
+              run: () => this.act(() => deleteAgent(a.id)) },
+          ])}
         </tr>`)}
-        </tbody>
-      </table>
+      </tbody></table>
       <p class="note">Changes take effect on the next message — no restart.</p>
     `;
   }
 
-  // One form, every editable field, one PUT. The row being edited is a copy,
-  // so Cancel is just dropping it.
-  private agentForm(a: AgentRow) {
-    const bind = (field: keyof AgentRow) => (e: Event) => {
-      const el = e.target as HTMLInputElement;
-      this.editing = { ...this.editing!, [field]: el.type === "checkbox" ? el.checked : el.value };
-    };
+  private agentForm(a: AgentRow, fresh: boolean) {
     return html`
-      <h3 style="margin-top:0">Edit ${a.id}</h3>
-      <div class="row"><label style="width:110px">Name</label>
-        <input .value=${a.agentName} @input=${bind("agentName")} style="flex:1" /></div>
-      <div class="row"><label style="width:110px">Description</label>
-        <input .value=${a.description} @input=${bind("description")} style="flex:1" /></div>
-      <div class="row"><label style="width:110px">Model config</label>
-        <select @change=${bind("modelConfigId")}>
-          ${this.configs.map((c) => html`
-            <option value=${c.id} ?selected=${c.id === a.modelConfigId}>${c.id} · ${c.modelId}</option>`)}
-        </select></div>
-      <div class="row"><label style="width:110px">Prompt</label>
-        <select @change=${bind("promptId")}>
-          ${this.prompts.map((p) => html`
-            <option value=${p.id} ?selected=${p.id === a.promptId}>${p.promptName} v${p.version}</option>`)}
-        </select></div>
-      <div class="row"><label style="width:110px">Enabled</label>
-        <input type="checkbox" ?checked=${a.enabled} @change=${bind("enabled")} /></div>
-      <div class="row">
-        <button @click=${() => this.act(async () => { await updateAgent(this.editing!); this.editing = null; })}>Save</button>
-        <button style="background:none;color:var(--muted);border:1px solid var(--border)"
-          @click=${() => { this.editing = null; }}>Cancel</button>
+      ${this.formHead(fresh ? "New agent" : `Edit ${a.agentName}`)}
+      <div class="banner">A change here is read by the next message of every
+        conversation already open — there is no restart and no reconnect.</div>
+
+      <div class="grid">
+        ${this.text({ id: "a-name", label: "Name", value: a.agentName, required: true,
+          placeholder: "What this agent is called", on: (v) => this.patch({ agentName: v }) })}
+        ${this.text({ id: "a-id", label: "Id", value: a.id, required: true,
+          disabled: !fresh, placeholder: "support-desk",
+          help: fresh ? "Its address everywhere else — in the API, in a link, on the graph. It cannot be changed later."
+                      : "An id is what other rows point at, so it is fixed once the row exists.",
+          on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "a-desc", label: "Description", value: a.description, wide: true,
+          placeholder: "What this agent is for", on: (v) => this.patch({ description: v }) })}
+        ${this.choice({ id: "a-config", label: "Model configuration", value: a.modelConfigId,
+          options: this.configs.map((c) => ({ value: c.id, label: `${c.id} · ${c.modelId}` })),
+          required: true,
+          help: "Which model answers, and the temperature and token budget it answers with.",
+          on: (v) => this.patch({ modelConfigId: v }) })}
+        ${this.choice({ id: "a-prompt", label: "Prompt", value: a.promptId,
+          options: this.prompts.map((p) => ({ value: p.id, label: `${p.promptName} v${p.version}` })),
+          required: true,
+          help: "Prompts are versioned rather than edited; rolling back is pointing this at an older one.",
+          on: (v) => this.patch({ promptId: v }) })}
+        ${this.check({ id: "a-enabled", label: "Enabled", checked: a.enabled,
+          help: "A disabled agent keeps its rows and its history; it just cannot be opened.",
+          on: (v) => this.patch({ enabled: v }) })}
+        ${this.check({ id: "a-default", label: "Entry agent", checked: a.isDefault,
+          help: "The agent a new conversation opens against. Exactly one, so turning this on turns another off.",
+          on: (v) => this.patch({ isDefault: v }) })}
       </div>
+
+      ${this.formActions(() => this.act(() => fresh ? createAgent(a) : updateAgent(a)))}
     `;
   }
 
+  // --- models and their configurations ------------------------------------------------
+
   private modelsTab() {
+    const v = this.view;
+    if (v.kind === "model") return this.modelForm(v.row, v.fresh);
+    if (v.kind === "config") return this.configForm(v.row);
+
+    const chat = this.models.filter((m) => m.kind !== "embedding");
+    const embedding = this.models.filter((m) => m.kind === "embedding");
     return html`
-      <table>
-        <tr><th>Label</th><th>API name</th><th>Provider</th><th>Kind</th><th>Enabled</th><th></th></tr>
-        ${this.models.map((m) => html`<tr>
-          <td>${m.label}</td><td>${m.apiName}</td><td>${m.provider}</td><td>${m.kind}</td>
-          <td><input type=${m.kind === "embedding" ? "radio" : "checkbox"} name="embedder"
-            ?checked=${m.enabled}
-            @change=${(e: Event) => this.act(() =>
-              updateModel({ ...m, enabled: (e.target as HTMLInputElement).checked }))} /></td>
-          <td><button class="ghost" @click=${() => this.probe(m.id)}>Test</button></td>
-        </tr>`)}
-      </table>
+      ${this.head("Models", "zap")}
+      <div class="bar">
+        <button class="ghost" data-new="config"
+          @click=${() => this.open({ kind: "config", row: { ...NEW_CONFIG,
+            modelId: this.models.find((m) => m.kind !== "embedding")?.id ?? "" } })}>
+          <nr-icon name="settings" size="small"></nr-icon> New configuration
+        </button>
+        <button class="primary" data-new="model"
+          @click=${() => this.open({ kind: "model", row: { ...NEW_MODEL }, fresh: true })}>
+          <nr-icon name="plus" size="small"></nr-icon> New model
+        </button>
+      </div>
+
+      ${this.group("Generation", chat.length)}
+      <table><tbody>${chat.map((m) => this.modelRow(m))}</tbody></table>
+
+      ${this.group("Embedding", embedding.length)}
+      <table><tbody>${embedding.map((m) => this.modelRow(m))}</tbody></table>
       <p class="note">One embedding model is active at a time, and turning one on turns
       the others off — documents embedded by different models cannot see each other, so a
       second active embedder splits the corpus with nothing to report it.</p>
-      ${this.probed === "" ? "" : html`<p class="note">${this.probed}</p>`}
-      <div class="row" id="newModel">
-        <input name="id" placeholder="id" style="width:70px" />
-        <input name="label" placeholder="Label" />
-        <input name="apiName" placeholder="api name" />
-        <select name="provider">
-          <option>mistral</option><option>openai</option><option>anthropic</option>
-        </select>
-        <select name="kind" @change=${(e: Event) => {
-          this.newKind = (e.target as HTMLSelectElement).value;
-        }}><option>chat</option><option>embedding</option></select>
-        ${this.newKind === "embedding" ? html`
-          <input name="dimensions" type="number" min="1" placeholder="dimensions"
-            style="width:120px" title="How wide this model's vectors are — 1024 for mistral-embed" />` : ""}
-        <input name="baseUrl" placeholder="base url — blank for the provider's own"
-          style="flex:1" title="An OpenAI-compatible gateway: Ollama, vLLM, a company proxy" />
-        <label><input name="enabled" type="checkbox" checked /> enabled</label>
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => createModel({
-            id: this.field(f, "id"), label: this.field(f, "label"),
-            apiName: this.field(f, "apiName"), provider: this.field(f, "provider"),
-            kind: this.field(f, "kind"),
-            // Not a constant: an embedding model that lies about its width
-            // builds a vector column the provider's own answers do not fit.
-            dimensions: parseInt(this.field(f, "dimensions") || "0", 10),
-            baseUrl: this.field(f, "baseUrl"),
-            enabled: (f.querySelector("[name=enabled]") as HTMLInputElement).checked,
-          }));
-        }}>Add</button>
-      </div>
+
+      ${this.group("Configurations", this.configs.length)}
+      <table><tbody>
+        ${this.configs.map((c) => html`<tr>
+          <td class="name">${c.id}</td>
+          <td><span class="slug">${c.modelId}</span></td>
+          <td class="fill dim">temperature ${c.temperature} · ${c.maxTokens} max tokens · top-p ${c.topP}</td>
+          ${this.rowActions([
+            { icon: "trash", title: `Delete ${c.id}`, danger: true,
+              run: () => this.act(() => deleteConfig(c.id)) },
+          ])}
+        </tr>`)}
+      </tbody></table>
+      <p class="note">A configuration is created and repointed rather than edited: an agent
+      mid-conversation reads it every round.</p>
+
+      ${this.probed === "" ? "" : html`<p class="said">${this.probed}</p>`}
     `;
   }
+
+  private modelRow(m: ModelRow) {
+    return html`<tr>
+      <td class="name">${m.label}</td>
+      <td><span class="tag">${m.provider}</span></td>
+      <td><span class="slug">${m.apiName}</span></td>
+      <td class="fill dim">${m.baseUrl === "" ? "" : m.baseUrl}
+        ${m.kind === "embedding" && m.dimensions > 0 ? `${m.dimensions} dimensions` : ""}</td>
+      <td>${m.enabled ? html`<span class="tag live">on</span>` : html`<span class="tag off">off</span>`}</td>
+      ${this.rowActions([
+        { icon: "play", title: `Test ${m.label}`, run: () => this.probe(m.id) },
+        { icon: "edit", title: `Edit ${m.label}`, run: () => this.open({ kind: "model", row: { ...m }, fresh: false }) },
+        { icon: "trash", title: `Delete ${m.label}`, danger: true, run: () => this.act(() => deleteModel(m.id)) },
+      ])}
+    </tr>`;
+  }
+
+  private modelForm(m: ModelRow, fresh: boolean) {
+    const embedding = m.kind === "embedding";
+    return html`
+      ${this.formHead(fresh ? "New model" : `Edit ${m.label}`)}
+      <div class="grid">
+        ${this.text({ id: "m-label", label: "Name", value: m.label, required: true,
+          placeholder: "What to call it here", on: (v) => this.patch({ label: v }) })}
+        ${this.text({ id: "m-id", label: "Id", value: m.id, required: true, disabled: !fresh,
+          placeholder: "mistral-small", on: (v) => this.patch({ id: v }) })}
+        ${this.choice({ id: "m-provider", label: "Provider", value: m.provider, required: true,
+          options: withCurrent(PROVIDERS, m.provider), on: (v) => this.patch({ provider: v }) })}
+        ${this.text({ id: "m-apiname", label: "Model identifier", value: m.apiName, required: true,
+          placeholder: "mistral-small-latest",
+          help: "The name the provider itself knows it by.",
+          on: (v) => this.patch({ apiName: v }) })}
+        ${this.text({ id: "m-baseurl", label: "Base URL", value: m.baseUrl, wide: true,
+          placeholder: "https://api.groq.com/openai/v1",
+          help: "Blank for the provider's own address; fill it in for an OpenAI-compatible host — a gateway, a proxy, Ollama.",
+          on: (v) => this.patch({ baseUrl: v }) })}
+        ${this.choice({ id: "m-kind", label: "Kind", value: m.kind,
+          options: options(["chat", "embedding"]),
+          on: (v) => this.patch({ kind: v }) })}
+        ${embedding ? this.text({ id: "m-dimensions", label: "Dimensions", type: "number",
+          value: String(m.dimensions), required: true, placeholder: "1024",
+          help: "How wide this model's vectors are — 1024 for mistral-embed. A width that does not match builds a column the provider's own answers will not fit.",
+          on: (v) => this.patch({ dimensions: parseInt(v || "0", 10) }) }) : ""}
+        ${this.check({ id: "m-enabled", label: "Enabled", checked: m.enabled,
+          help: embedding
+            ? "One embedding model is active at a time: turning this on turns the others off."
+            : "Only an enabled model can be named by a configuration.",
+          on: (v) => this.patch({ enabled: v }) })}
+      </div>
+      ${this.formActions(() => this.act(() => fresh ? createModel(m) : updateModel(m)))}
+    `;
+  }
+
+  private configForm(c: ModelConfigRow) {
+    return html`
+      ${this.formHead("New configuration")}
+      <div class="banner">A configuration is how an agent names a model: the id here is
+        what its <em>Model configuration</em> field points at.</div>
+      <div class="grid">
+        ${this.text({ id: "c-id", label: "Id", value: c.id, required: true,
+          placeholder: "mistral-big", on: (v) => this.patch({ id: v }) })}
+        ${this.choice({ id: "c-model", label: "Model", value: c.modelId, required: true,
+          options: this.models.map((m) => ({ value: m.id, label: `${m.label} · ${m.apiName}` })),
+          on: (v) => this.patch({ modelId: v }) })}
+        ${this.text({ id: "c-maxtokens", label: "Max tokens", type: "number",
+          value: String(c.maxTokens), required: true, placeholder: "8192",
+          help: "The ceiling on one reply. A model that reaches it while writing a tool call stops mid-call, and a reply cut off there cannot be stored — so a budget too small for the work is felt as a conversation that stops answering.",
+          on: (v) => this.patch({ maxTokens: parseInt(v || "0", 10) }) })}
+        ${this.text({ id: "c-temperature", label: "Temperature", type: "number",
+          value: String(c.temperature), placeholder: "0.2",
+          help: "0 for work that must be repeatable, higher for prose.",
+          on: (v) => this.patch({ temperature: Number(v || "0") }) })}
+        ${this.text({ id: "c-topp", label: "Top-p", type: "number", value: String(c.topP),
+          placeholder: "1", on: (v) => this.patch({ topP: Number(v || "0") }) })}
+        ${this.area({ id: "c-extra", label: "Extra", value: c.extra, rows: 3,
+          placeholder: "{}",
+          help: "Sent to the provider as-is, for the fields this form does not carry.",
+          on: (v) => this.patch({ extra: v }) })}
+      </div>
+      ${this.formActions(() => this.act(() => createConfig(c)), "Create")}
+    `;
+  }
+
+  // --- prompts ------------------------------------------------------------------------
 
   private promptsTab() {
+    const v = this.view;
+    if (v.kind === "prompt") return this.promptForm(v.row);
     return html`
-      <table>
-        <tr><th>Name</th><th>Version</th><th>Content</th></tr>
-        ${this.prompts.map((p) => html`<tr>
-          <td>${p.promptName}</td><td>v${p.version}</td>
-          <td class="note">${p.body.slice(0, 90)}${p.body.length > 90 ? "…" : ""}</td>
-        </tr>`)}
-      </table>
-      <div class="row" id="newPrompt" style="align-items:flex-start">
-        <input name="name" placeholder="name" />
-        <textarea name="content" placeholder="Prompt text — saving creates the next version" rows="3" style="flex:1"></textarea>
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => createPrompt(this.field(f, "name"), this.field(f, "content")));
-        }}>Save version</button>
+      ${this.head("Prompts", "file-text")}
+      <div class="bar">
+        <button class="primary" data-new="prompt"
+          @click=${() => this.open({ kind: "prompt", row: { promptName: "", body: "" } })}>
+          <nr-icon name="plus" size="small"></nr-icon> New prompt
+        </button>
       </div>
-      <p class="note">Prompts are never edited — a change is a new version, and rollback is pointing an agent at an older one.</p>
+
+      ${this.group("Versions", this.prompts.length)}
+      <table><tbody>
+        ${this.prompts.map((p) => html`<tr>
+          <td class="name">${p.promptName}</td>
+          <td><span class="tag">v${p.version}</span></td>
+          <td class="fill dim"><span class="trunc">${p.body}</span></td>
+          ${this.rowActions([
+            { icon: "plus", title: `New version of ${p.promptName}`,
+              run: () => this.open({ kind: "prompt", row: { promptName: p.promptName, body: p.body } }) },
+          ])}
+        </tr>`)}
+      </tbody></table>
+      <p class="note">Prompts are never edited — a change is a new version, and rollback is
+      pointing an agent at an older one.</p>
     `;
   }
+
+  private promptForm(p: { promptName: string; body: string }) {
+    const prior = this.prompts.filter((x) => x.promptName === p.promptName);
+    const next = prior.length === 0 ? 1 : Math.max(...prior.map((x) => x.version)) + 1;
+    return html`
+      ${this.formHead(prior.length === 0 ? "New prompt" : `${p.promptName} · version ${next}`)}
+      <div class="grid">
+        ${this.text({ id: "p-name", label: "Name", value: p.promptName, required: true,
+          placeholder: "support-desk",
+          help: "A name that already exists gets the next version rather than replacing one.",
+          on: (v) => this.patch({ promptName: v }) })}
+        ${this.editor({ id: "p-body", label: "Prompt", value: p.body, required: true,
+          help: "Markdown, highlighted as you type. It is sent to the model as the text it is — nothing here renders it.",
+          on: (v) => this.patch({ body: v }) })}
+      </div>
+      ${this.formActions(
+        () => this.act(() => createPrompt(p.promptName, p.body)), "Save version")}
+    `;
+  }
+
+  // --- MCP servers --------------------------------------------------------------------
 
   private mcpTab() {
+    const v = this.view;
+    if (v.kind === "server") return this.serverForm(v.row, v.fresh);
     return html`
-      <table>
-        <tr><th>Name</th><th>Endpoint</th><th>Transport</th><th>Enabled</th></tr>
+      ${this.head("MCP", "code")}
+      <div class="bar">
+        <button class="primary" data-new="server"
+          @click=${() => this.open({ kind: "server", row: { ...NEW_SERVER }, fresh: true })}>
+          <nr-icon name="plus" size="small"></nr-icon> New server
+        </button>
+      </div>
+
+      ${this.group("Servers", this.servers.length)}
+      <table><tbody>
         ${this.servers.map((s) => html`<tr>
-          <td>${s.serverName}</td><td>${s.endpoint}</td><td>${s.transport}</td>
-          <td><input type="checkbox" ?checked=${s.enabled}
-            @change=${(e: Event) => this.act(() =>
-              updateServer({ ...s, enabled: (e.target as HTMLInputElement).checked }))} /></td>
+          <td class="name">${s.serverName}</td>
+          <td class="fill"><span class="slug">${s.endpoint}</span></td>
+          <td><span class="tag">${s.transport}</span></td>
+          <td><span class="tag">${s.authKind === "none" ? "no auth" : s.authKind}</span></td>
+          <td>${s.enabled ? "" : html`<span class="tag off">off</span>`}</td>
+          ${this.rowActions([
+            { icon: "edit", title: `Edit ${s.serverName}`,
+              run: () => this.open({ kind: "server", row: { ...s, token: "" }, fresh: false }) },
+            { icon: "trash", title: `Delete ${s.serverName}`, danger: true,
+              run: () => this.act(() => deleteServer(s.id)) },
+          ])}
         </tr>`)}
-      </table>
-      <div class="row" id="newAuth">
-        <select name="authFor">
-          ${this.servers.map((s) => html`<option value=${s.id}>${s.serverName}</option>`)}
-        </select>
-        <select name="authKind">
-          <option value="none">no auth</option><option value="bearer">bearer</option>
-          <option value="header">custom header</option>
-        </select>
-        <input name="authHeader" placeholder="header name" style="width:130px" />
-        <input name="token" type="password" placeholder="token" style="flex:1" />
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => setServerAuth(this.field(f, "authFor"), this.field(f, "authKind"),
-            this.field(f, "authHeader"), this.field(f, "token")));
-        }}>Set auth</button>
-      </div>
-      <p class="note">A token is stored encrypted under the server's id and never read back.</p>
-      <div class="row" id="newServer">
-        <input name="id" placeholder="id" style="width:70px" />
-        <input name="serverName" placeholder="Name" />
-        <input name="endpoint" placeholder="http://…" style="flex:1" />
-        <!-- Only what the API accepts. It offered "sse", which every create refused. -->
-        <select name="transport"><option>http</option></select>
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => createServer({
-            id: this.field(f, "id"), serverName: this.field(f, "serverName"),
-            endpoint: this.field(f, "endpoint"), transport: this.field(f, "transport"),
-            authKind: "none", authHeader: "", enabled: true,
-          }));
-        }}>Add</button>
-      </div>
+      </tbody></table>
+      <p class="note">A server's tools are asked of the server itself, so a tool appears here
+      the moment the server offers it.</p>
     `;
   }
+
+  private serverForm(s: ServerRow & { token: string }, fresh: boolean) {
+    return html`
+      ${this.formHead(fresh ? "New server" : `Edit ${s.serverName}`)}
+      <div class="grid">
+        ${this.text({ id: "s-name", label: "Name", value: s.serverName, required: true,
+          placeholder: "What this server is called", on: (v) => this.patch({ serverName: v }) })}
+        ${this.text({ id: "s-id", label: "Id", value: s.id, required: true, disabled: !fresh,
+          placeholder: "docflow", on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "s-endpoint", label: "Endpoint", value: s.endpoint, required: true,
+          wide: true, placeholder: "http://…/mcp", on: (v) => this.patch({ endpoint: v }) })}
+        <!-- http is the only transport the API accepts: stdio is a subprocess
+             and this server has none to spawn. -->
+        ${this.choice({ id: "s-transport", label: "Transport", value: s.transport,
+          options: withCurrent(["http"], s.transport),
+          on: (v) => this.patch({ transport: v }) })}
+        ${this.choice({ id: "s-authkind", label: "Authentication", value: s.authKind,
+          options: [
+            { value: "none", label: "none" },
+            { value: "bearer", label: "bearer" },
+            { value: "header", label: "custom header" },
+          ],
+          on: (v) => this.patch({ authKind: v }) })}
+        ${s.authKind === "header" ? this.text({ id: "s-authheader", label: "Header name",
+          value: s.authHeader, required: true, placeholder: "X-Api-Key",
+          on: (v) => this.patch({ authHeader: v }) }) : ""}
+        ${s.authKind === "none" ? "" : this.text({ id: "s-token", label: "Token",
+          type: "password", value: s.token, placeholder: fresh ? "" : "unchanged",
+          help: "Stored encrypted under the server's id and never read back. Leaving it blank keeps the token already stored.",
+          on: (v) => this.patch({ token: v }) })}
+        ${this.check({ id: "s-enabled", label: "Enabled", checked: s.enabled,
+          on: (v) => this.patch({ enabled: v }) })}
+      </div>
+      ${this.formActions(() => this.act(async () => {
+        const row: ServerRow = {
+          id: s.id, serverName: s.serverName, transport: s.transport,
+          endpoint: s.endpoint, authKind: s.authKind, authHeader: s.authHeader,
+          enabled: s.enabled,
+        };
+        if (fresh) { await createServer(row); } else { await updateServer(row); }
+        // Only when one was typed: an empty token here would replace a working
+        // credential with an unreadable envelope, and it can never be read back
+        // to notice.
+        if (s.token !== "") { await setServerAuth(s.id, s.authKind, s.authHeader, s.token); }
+      }))}
+    `;
+  }
+
+  // --- provider credentials -----------------------------------------------------------
 
   private providersTab() {
+    const v = this.view;
+    if (v.kind === "key") return this.keyForm(v.row);
     return html`
-      <p>Credentials stored (names only — the API never returns a key): ${this.providers.join(", ") || "none"}</p>
-      <div class="row" id="newKey">
-        <select name="provider">
-          <option>mistral</option><option>openai</option><option>anthropic</option>
-        </select>
-        <input name="apiKey" placeholder="sk-…" type="password" style="flex:1" />
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => storeProviderKey(this.field(f, "provider"), this.field(f, "apiKey")));
-        }}>Store</button>
+      ${this.head("Providers", "cloud")}
+      <div class="bar">
+        <button class="primary" data-new="key"
+          @click=${() => this.open({ kind: "key", row: { provider: PROVIDERS[0], apiKey: "" } })}>
+          <nr-icon name="plus" size="small"></nr-icon> New credential
+        </button>
       </div>
-      <p class="note">Keys are encrypted under LUMEN_MASTER_KEY and can be replaced but never read back.</p>
+
+      ${this.group("Credentials", this.providers.length)}
+      ${this.providers.length === 0
+        ? html`<p class="empty">No credential is stored, so no model can be reached.</p>`
+        : html`<table><tbody>
+            ${this.providers.map((p) => html`<tr>
+              <td class="name">${p}</td>
+              <td class="fill"><span class="tag live">stored</span></td>
+              ${this.rowActions([
+                { icon: "key", title: `Replace the ${p} key`,
+                  run: () => this.open({ kind: "key", row: { provider: p, apiKey: "" } }) },
+              ])}
+            </tr>`)}
+          </tbody></table>`}
+      <p class="note">Keys are encrypted under LUMEN_MASTER_KEY. The API answers which
+      providers have one, never the key itself.</p>
     `;
   }
 
+  private keyForm(k: { provider: string; apiKey: string }) {
+    const held = this.providers.includes(k.provider);
+    return html`
+      ${this.formHead(held ? `Replace the ${k.provider} key` : "New credential")}
+      <div class="grid">
+        ${this.choice({ id: "k-provider", label: "Provider", value: k.provider, required: true,
+          options: withCurrent(PROVIDERS, k.provider), on: (v) => this.patch({ provider: v }) })}
+        ${this.text({ id: "k-key", label: "API key", value: k.apiKey, type: "password",
+          required: true, placeholder: "sk-…",
+          help: "Written once and never read back — replacing it is the only way to change it.",
+          on: (v) => this.patch({ apiKey: v }) })}
+      </div>
+      ${this.formActions(() => this.act(() => storeProviderKey(k.provider, k.apiKey)), "Store")}
+    `;
+  }
+
+  // --- tracing ------------------------------------------------------------------------
+
+  // A panel rather than a list: there is one row and it is always the same one.
   private tracingTab() {
     const t = this.tracing;
+    const state = t === null ? "…"
+      : t.configured ? (t.active ? "Active" : "Configured, disabled")
+      : "Not configured";
+    const edit = (fields: Partial<typeof this.trace>) => { this.trace = { ...this.trace, ...fields }; };
     return html`
-      <p>Status: ${t === null ? "…" : t.configured ? (t.active ? "active" : "configured, disabled") : "not configured"}</p>
-      <div class="row" id="traceCfg">
-        <select name="backend">
-          ${["langfuse", "otlp", "phoenix", "braintrust", "langsmith", "arize"].map((b) => html`
-            <option ?selected=${t?.backend === b}>${b}</option>`)}
-        </select>
-        <input name="endpoint" placeholder="https://…/v1/traces" .value=${t?.endpoint ?? ""} style="flex:1" />
-        <input name="publicKey" placeholder="public key / project / space" />
-        <input name="serviceName" placeholder="service name" .value=${t?.serviceName ?? "lumen-agents"} />
-        <input name="environment" placeholder="environment" .value=${t?.environment ?? "production"} />
-        <label><input name="enabled" type="checkbox" ?checked=${t?.active ?? false} /> enabled</label>
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => configureTracing({
-            id: "default", backend: this.field(f, "backend"), endpoint: this.field(f, "endpoint"),
-            publicKey: this.field(f, "publicKey"),
-            // Read back from the form, which was filled from the row. These
-            // were constants, so anyone who opened this tab and pressed Save
-            // filed a staging deployment's traces under "production".
-            serviceName: this.field(f, "serviceName"),
-            environment: this.field(f, "environment"),
-            enabled: (f.querySelector("[name=enabled]") as HTMLInputElement).checked,
-          }));
-        }}>Save</button>
+      ${this.head("Tracing", "layers")}
+      <div class="formhead"><h3>${state}</h3></div>
+
+      <div class="grid">
+        ${this.choice({ id: "t-backend", label: "Backend", value: this.trace.backend,
+          options: withCurrent(BACKENDS, this.trace.backend), required: true,
+          help: "Checked when it is set rather than at the first trace — a typo that silently turns tracing off later is found by nobody.",
+          on: (v) => edit({ backend: v }) })}
+        ${this.text({ id: "t-endpoint", label: "Endpoint", value: this.trace.endpoint,
+          placeholder: "https://…/v1/traces", on: (v) => edit({ endpoint: v }) })}
+        ${this.text({ id: "t-public", label: "Public key", value: this.trace.publicKey,
+          placeholder: "public key, project or space",
+          on: (v) => edit({ publicKey: v }) })}
+        ${this.text({ id: "t-service", label: "Service name", value: this.trace.serviceName,
+          placeholder: "lumen-agents", on: (v) => edit({ serviceName: v }) })}
+        ${this.text({ id: "t-env", label: "Environment", value: this.trace.environment,
+          placeholder: "production",
+          help: "These two were constants once, so opening this tab and pressing Save refiled a staging deployment's traces under production.",
+          on: (v) => edit({ environment: v }) })}
+        ${this.check({ id: "t-enabled", label: "Enabled", checked: this.trace.enabled,
+          on: (v) => edit({ enabled: v }) })}
       </div>
-      <div class="row" id="traceKey">
-        <input name="secret" placeholder="secret key" type="password" style="flex:1" />
-        <button @click=${(e: Event) => {
-          const f = (e.target as HTMLElement).parentElement!;
-          this.act(() => setTracingSecret(this.field(f, "secret")));
-        }}>Store secret</button>
+      <div class="formacts">
+        <button class="primary" @click=${() => this.act(() => configureTracing({
+          id: "default", backend: this.trace.backend, endpoint: this.trace.endpoint,
+          publicKey: this.trace.publicKey, serviceName: this.trace.serviceName,
+          environment: this.trace.environment, enabled: this.trace.enabled,
+        }), { kind: "list" })}>Save</button>
+      </div>
+
+      ${this.group("Secret")}
+      <div class="grid">
+        ${this.text({ id: "t-secret", label: "Secret key", value: this.trace.secret,
+          type: "password", placeholder: "sk-lf-…",
+          help: "Stored the same way a provider key is: encrypted, and never handed back.",
+          on: (v) => edit({ secret: v }) })}
+      </div>
+      <div class="formacts">
+        <button class="ghost" @click=${() => this.act(async () => {
+          await setTracingSecret(this.trace.secret);
+          this.trace = { ...this.trace, secret: "" };
+        }, { kind: "list" })}>Store secret</button>
       </div>
     `;
   }
