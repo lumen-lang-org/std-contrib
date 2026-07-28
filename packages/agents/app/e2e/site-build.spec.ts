@@ -305,9 +305,12 @@ test("the cards are still there after a reload", async ({ page }) => {
   await answered(page, "Added /menu.html");
   await expect(shell(page).locator("nr-chatbot .tool-card")).toHaveCount(2, { timeout: 60000 });
 
-  // The reload, and the conversation opened again the way a person opens it.
+  // The reload, and the conversation opened again the way a person opens it —
+  // this conversation by id, not "whichever row is first": the suite leaves
+  // several threads with the same title behind it.
+  const mine = await currentThread(page);
   await page.reload();
-  const row = shell(page).locator("console-sidebar .thread").first();
+  const row = shell(page).locator(`console-sidebar .thread[data-thread="${mine}"]`);
   await expect(row).toBeVisible({ timeout: 30000 });
   await row.click();
   await expect(shell(page).locator("nr-chatbot")).toContainText("Added /menu.html", { timeout: 30000 });
@@ -363,7 +366,7 @@ test("a sub-agent's work shows under the delegation that asked for it", async ({
 
   // The delegation, and beneath it the call the child made.
   expect(round.steps.map((s) => [s.depth, s.kind, s.name])).toEqual([
-    [0, "agent", "ask_helper"],
+    [0, "agent", "ask_e2e-helper"],
     [1, "tool", "write_artifact"],
   ]);
 
@@ -383,6 +386,6 @@ test("a sub-agent's work shows under the delegation that asked for it", async ({
   // On screen: the child's row is indented under the delegation, and the card
   // names the sub-agent as a separate voice.
   const card = shell(page).locator("nr-chatbot .tool-card").first();
-  await expect(card.locator(".tool-name")).toHaveText(["ask_helper", "write_artifact"]);
+  await expect(card.locator(".tool-name")).toHaveText(["ask_e2e-helper", "write_artifact"]);
   await expect(card).toContainText("the sub-agent is thinking");
 });

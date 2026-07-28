@@ -1037,6 +1037,12 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // per-run directory, so `pip install` and `npm install -g` land somewhere
   // that persists between runs. That is the point of the environment: the
   // second script finds what the first one installed.
+  //
+  // `language` picks an interpreter and constrains nothing else: a python
+  // script may shell out, change directory, apt-get and curl, deliberately.
+  // The guard rails are the container's — capabilities dropped to the few
+  // apt and pip need, no-new-privileges so nothing inside can regain the
+  // rest, and the memory/cpu/pid caps on the container itself.
   let ran = scriptDocker(["exec", "--user", SCRIPT_UID, "--workdir", runDir,
     "-e", "HOME=/workspace", "-e", "PATH=/workspace/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     container,

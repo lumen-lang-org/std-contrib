@@ -115,7 +115,7 @@ test("first use creates the container and the row, named main by default", () =>
   // persistent, run-user-owned home.
   let asked = argvLines();
   expect(asked.length == 2);
-  expect(asked[0] == "run -d --name agents-env-t1-main --network none python:3.12-slim sleep infinity");
+  expect(asked[0] == "run -d --name agents-env-t1-main --memory 1g --cpus 2 --pids-limit 256 --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
   expect(asked[1].indexOf("exec agents-env-t1-main sh -c") == 0);
   expect(asked[1].indexOf("/workspace") > 0);
 
@@ -231,7 +231,7 @@ test("container names are docker-legal whatever the thread id holds", () => {
   expect(made.ok);
   expect(made.container == "agents-env-t-1-x-main");
   let asked = argvLines();
-  expect(asked[0] == "run -d --name agents-env-t-1-x-main --network none python:3.12-slim sleep infinity");
+  expect(asked[0] == "run -d --name agents-env-t-1-x-main --memory 1g --cpus 2 --pids-limit 256 --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
 });
 
 test("a docker failure is a problem sentence, not a thrown error and not a row", () => {
@@ -267,7 +267,7 @@ test("a pruned container is recreated from the row's image, reported as created"
   let asked = argvLines();
   expect(asked.length == 3);
   expect(asked[0] == "start agents-env-t1-main");
-  expect(asked[1] == "run -d --name agents-env-t1-main --network none python:3.12-slim sleep infinity");
+  expect(asked[1] == "run -d --name agents-env-t1-main --memory 1g --cpus 2 --pids-limit 256 --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none python:3.12-slim sleep infinity");
   expect(asked[2].indexOf("exec agents-env-t1-main sh -c") == 0);
 
   expect(envList(database, "t1")[0].status == "running");
@@ -302,4 +302,35 @@ test("two names in one thread are two rows and two containers", () => {
   expect(rows[0].name == "main");
   expect(rows[1].name == "web");
   expect(rows[1].image == "node:22-slim");
+});
+
+test("a container is created with its guard rails: caps dropped, no new privileges, resources bounded", () => {
+  // `language` constrains nothing — a python script may shell out, cd, apt-get
+  // and curl on purpose — so these are what actually bound a run. Asserted as
+  // one list because a rail quietly dropped from the argv is invisible
+  // otherwise: the container would still work, and be weaker.
+  fresh();
+  dockerFine();
+  ensure("t1", "", "python:3.12-slim", "1700000000000");
+  let made = argvLines()[0];
+
+  // Resources: a runaway script cannot take the host's memory, cores or pids.
+  expect(made.indexOf("--memory 1g") > 0);
+  expect(made.indexOf("--cpus 2") > 0);
+  expect(made.indexOf("--pids-limit 256") > 0);
+  // Privilege: nothing inside may gain what it did not start with.
+  expect(made.indexOf("--security-opt no-new-privileges") > 0);
+  // Capabilities: all off, then back only the five apt and pip need.
+  expect(made.indexOf("--cap-drop ALL") > 0);
+  expect(made.indexOf("--cap-add CHOWN") > 0);
+  expect(made.indexOf("--cap-add DAC_OVERRIDE") > 0);
+  expect(made.indexOf("--cap-add FOWNER") > 0);
+  expect(made.indexOf("--cap-add SETUID") > 0);
+  expect(made.indexOf("--cap-add SETGID") > 0);
+  // And the ones that must never come back, whatever else changes here.
+  expect(made.indexOf("SYS_ADMIN") < 0);
+  expect(made.indexOf("NET_ADMIN") < 0);
+  expect(made.indexOf("NET_RAW") < 0);
+  expect(made.indexOf("SYS_PTRACE") < 0);
+  expect(made.indexOf("--privileged") < 0);
 });

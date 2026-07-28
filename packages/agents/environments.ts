@@ -278,6 +278,28 @@ function envSave(db: Db, threadId: string, name: string, image: string, network:
 // environment was made that way.
 function envRunArgs(container: string, image: string, network: bool): string[] {
   let out: string[] = ["run", "-d", "--name", container];
+  // The container is the boundary, so the boundary carries the resource caps:
+  // the language field constrains nothing (a python script can shell out and
+  // cd wherever it likes, deliberately), and without these a script owned the
+  // host's CPU and memory until its wall clock ran out.
+  out.push("--memory"); out.push("1g");
+  out.push("--cpus"); out.push("2");
+  out.push("--pids-limit"); out.push("256");
+  // Nothing inside may gain a privilege it did not start with — a setuid
+  // binary cannot raise this container, whatever a script installs.
+  out.push("--security-opt"); out.push("no-new-privileges");
+  // Capabilities: everything off, then back only what the workload genuinely
+  // needs. apt and pip write files as other owners (CHOWN, DAC_OVERRIDE,
+  // FOWNER) and drop privileges to run maintainer scripts (SETUID, SETGID);
+  // proven by running a real apt-get install and pip install under exactly
+  // this set. Absent from the list, and never coming back: SYS_ADMIN,
+  // NET_ADMIN, NET_RAW, SYS_PTRACE, MKNOD, SYS_MODULE.
+  out.push("--cap-drop"); out.push("ALL");
+  out.push("--cap-add"); out.push("CHOWN");
+  out.push("--cap-add"); out.push("DAC_OVERRIDE");
+  out.push("--cap-add"); out.push("FOWNER");
+  out.push("--cap-add"); out.push("SETUID");
+  out.push("--cap-add"); out.push("SETGID");
   if (!network) { out.push("--network"); out.push("none"); }
   out.push(image); out.push("sleep"); out.push("infinity");
   return out;

@@ -173,6 +173,38 @@ export class ArtifactPanel extends LitElement {
     }
   }
 
+  // The rail stays current on its own. A conversation produces artifacts
+  // while the panel is open — a round's writes, a script's reconcile — and a
+  // list that only moved when the thread changed sat on "nothing produced
+  // yet" through all of it. A 4-second poll of a listing endpoint is cheaper
+  // than the confusion; it stops the moment the panel leaves the DOM.
+  private ticker: ReturnType<typeof setInterval> | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this.ticker = setInterval(() => { void this.tick(); }, 4000);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.ticker !== null) { clearInterval(this.ticker); this.ticker = null; }
+  }
+
+  private async tick() {
+    if (this.threadId === "") return;
+    await this.refresh();
+    // The artifact being read moved on: follow its pointer so the pills and
+    // the preview show the version that now exists, not the one from when it
+    // was opened.
+    if (this.open !== null) {
+      const fresh = this.artifacts.find((a) => a.slot === this.open!.slot);
+      if (fresh && fresh.version !== this.open.version) {
+        this.open = fresh;
+        await this.show(fresh, fresh.version);
+      }
+    }
+  }
+
   async refresh() {
     if (this.threadId === "") {
       this.artifacts = [];

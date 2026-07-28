@@ -293,7 +293,7 @@ const DELEGATE = {
       reasoning_content: "The helper knows the ledger better than I do; I will ask it rather than guess.",
       tool_calls: [{
         id: "d1", type: "function",
-        function: { name: "ask_helper", arguments: JSON.stringify({ question: "write the ledger summary" }) },
+        function: { name: "ask_e2e-helper", arguments: JSON.stringify({ question: "write the ledger summary" }) },
       }],
     },
   }],

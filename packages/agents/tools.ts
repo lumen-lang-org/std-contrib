@@ -275,9 +275,11 @@ export function serverOf(mounted: Mounted, name: string): string {
 const SELF_CONTAINED: string = "An artifact may reach its siblings and nothing else. "
   + "Files you save in this same conversation are served next to each other, so a page at /index.html can link "
   + "<link rel=\"stylesheet\" href=\"css/main.css\"> or <script src=\"js/app.js\"> and they will load — save each one with its own "
-  + "write_artifact call, at the path the page refers to. Nothing from another host will: the preview blocks every "
-  + "request off this origin, so a CDN script, a Google font or a remote image is simply missing when a reader opens it. "
-  + "Draw rather than link, and inline anything too small to be its own file.";
+  + "write_artifact call, at the path the page refers to. Images are the exception the other way: an <img> may point "
+  + "at any https URL and it will load, so a photograph or a GIF from the web is allowed. Everything else from another "
+  + "host is blocked — a CDN script, a Google font, a remote stylesheet is simply missing when a reader opens the page. "
+  + "Draw rather than link, inline anything too small to be its own file, and prefer saving an image you were given a "
+  + "URL for (fetch it in run_script) so the page keeps working when that host does not.";
 
 // The fence convention, for the system prompt. A prompt line rather than a
 // tool description because the fence is not a tool call: a model deciding how
@@ -594,7 +596,9 @@ export function scriptTool(): ToolSpec {
     + "A raster image the script writes — .png, .jpg, .gif, .webp — is stored base64 and shown as a picture in the "
     + "preview; generate images with the standard library or installed packages, write the file, and let mayCreate "
     + "save it. Never copy image base64 back through write_artifact yourself: retyping it corrupts it, and the run "
-    + "already saved the exact bytes. "
+    + "already saved the exact bytes. An image from the web may be hot-linked in a page — img is the one thing a "
+    + "preview may load from another host — but fetching it in a script and saving it with mayCreate is better: the "
+    + "page then keeps working when that host does not, and tells no third party who is reading it. "
     + "The reply carries stdout and stderr, each capped at " + `${SCRIPT_OUTPUT_MAX}` + " bytes of UTF-8, and names "
     + "what changed, was created, unchanged, missing or refused, with version numbers — read it rather than assuming; "
     + "a refused path says why. A run may last at most " + `${SCRIPT_WALL_SECONDS}` + " seconds.",

@@ -22,6 +22,7 @@
 // button, they get added here deliberately.
 
 import { LiveStep, RoundSteps, Thought, WireRef, openThread, say, threadSteps, transcript } from "./api.js";
+import { renderMarkdown } from "./markdown.js";
 
 export type ChatMessage = {
   id: string;
@@ -271,11 +272,18 @@ export class ChatSession {
   // thread pool. A failure here is silent by design — a console that cannot
   // show a spinner is a much smaller problem than a send that fails because
   // the spinner could not be drawn.
+  // The last round known to be over. The poll below asks for "the newest
+  // round", and until the round just sent writes its first row, the newest
+  // round IS the previous one — so without this, a fresh question wore the
+  // old answer's card for the first few hundred milliseconds.
+  private doneSeq = -1;
+
   private watch(): void {
     if (this.polling !== 0 || this.threadId === "") return;
     this.polling = window.setInterval(async () => {
       try {
         const round = await threadSteps(this.threadId);
+        if (round.seq <= this.doneSeq) return;
         this.live = round.steps;
         this.thoughts = round.thoughts ?? [];
         this.paintLive();
@@ -348,6 +356,7 @@ export class ChatSession {
       // The answer carries its own calls, so the card settles on what the
       // server recorded rather than on whatever the last poll tick caught.
       this.unwatch();
+      this.doneSeq = Math.max(this.doneSeq, reply.seq);
       this.live = reply.steps ?? [];
       this.thoughts = reply.thoughts ?? [];
       this.emit("steps:changed", { seq: reply.seq, running: false, steps: this.live });
@@ -360,7 +369,7 @@ export class ChatSession {
       this.replaceLive({
         id: reply.runId,
         sender: "bot",
-        text: stepsCard(this.live, this.thoughts) + escapeHtml(reply.ok ? reply.text : reply.error),
+        text: stepsCard(this.live, this.thoughts) + renderMarkdown(escapeHtml(reply.ok ? reply.text : reply.error)),
         refs: reply.refs,
         error: !reply.ok,
       }, liveId);
@@ -413,6 +422,7 @@ export class ChatSession {
     for (const s of past.steps) round(s.seq).steps.push(s);
     for (const t of past.thoughts) round(t.seq).thoughts.push(t);
     const pending = [...rounds.keys()].sort((a, b) => a - b);
+    this.doneSeq = pending.length > 0 ? pending[pending.length - 1] : -1;
 
     this.setMessages(turns.map((t, i) => {
       let card = "";
@@ -426,7 +436,7 @@ export class ChatSession {
       return {
         id: `t${i}`,
         sender: t.role === "user" ? "user" : "bot" as const,
-        text: card + escapeHtml(t.text),
+        text: t.role === "user" ? escapeHtml(t.text) : card + renderMarkdown(escapeHtml(t.text)),
         refs: t.refs,
         timestamp: new Date().toISOString(),
       };
@@ -436,6 +446,7 @@ export class ChatSession {
   /** Start a fresh conversation. Nothing is stored until something is said. */
   fresh(): void {
     this.threadId = "";
+    this.doneSeq = -1;
     this.setMessages([]);
   }
 
