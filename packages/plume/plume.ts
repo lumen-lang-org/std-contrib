@@ -484,12 +484,34 @@ export function exprOf(part: string): string {
 // between single quotes, so it must be a plain name: a key carrying a quote
 // would end the literal, and the projection is refused rather than repaired.
 export function keyFromAlias(alias: string): string {
+  let wasQuoted = alias.length >= 2 && alias.startsWith("\"") && alias.endsWith("\"");
   let name = alias;
-  if (name.length >= 2 && name.startsWith("\"") && name.endsWith("\"")) {
+  if (wasQuoted) {
     name = name.substring(1, name.length - 1);
   }
   if (!safeIdentifier(name)) { return ""; }
+  // An unquoted alias is not the same key on every database. PostgreSQL folds
+  // an unquoted identifier to lower case, so `agent_name AS agentName` names
+  // the key "agentname" there and "agentName" on a pairs driver, which builds
+  // the document itself and never sees SQL's folding. The DTO that parses on
+  // SQLite is then refused by PostgreSQL for an unknown field and a missing
+  // one at once — the exact failure this rule exists to prevent.
+  //
+  // Quoting is what makes a mixed-case key mean the same thing everywhere, so
+  // a mixed-case alias must carry its quotes.
+  if (!wasQuoted && hasUpperCase(name)) { return ""; }
   return name;
+}
+
+// Whether a name carries a letter SQL's identifier folding would change.
+function hasUpperCase(name: string): bool {
+  let i: int = 0;
+  while (i < name.length) {
+    let c = name.charCodeAt(i);
+    if (c >= 65 && c <= 90) { return true; }
+    i = i + 1;
+  }
+  return false;
 }
 
 // Whether a select list can be read the same way by every driver.
@@ -522,8 +544,9 @@ export function pairsFromColumns(columns: string): string {
       let key = "";
       if (alias == "") {
         // No alias: the expression itself names the key, so it has to be a
-        // plain column.
-        if (!safeIdentifier(part)) { return ""; }
+        // plain column — and, for the reason keyFromAlias gives, one whose
+        // case survives PostgreSQL's folding.
+        if (!safeIdentifier(part) || hasUpperCase(part)) { return ""; }
         key = part;
         expr = part;
       } else {
@@ -583,11 +606,35 @@ export function boolColumn(db: Db, column: string): string {
   return db.boolJson.replaceAll("{c}", column);
 }
 
+// Whether a declared type is a floating-point one, whatever vocabulary it is
+// spelled in.
+//
+// `dialectType` passes a name it does not know through untouched, which is how
+// a column is declared in the database's own words — and that is documented as
+// supported. Comparing the result against `db.floatType` therefore recognised
+// "float8" and missed "double precision", so SQLite truncated
+// 1234567890.123456 to fifteen digits for a column whose type was spelled the
+// way the database itself spells it.
+export function floatSqlType(db: Db, sqlType: string): bool {
+  let t = dialectType(db, sqlType).trim().toLowerCase();
+  if (t == db.floatType.trim().toLowerCase()) { return true; }
+  return t == "float8" || t == "float4" || t == "double precision"
+    || t == "double" || t == "real" || t == "float";
+}
+
+// The same for a boolean. An exact "bool" was the only spelling recognised, so
+// a column declared "boolean" came back as 1 where "bool" came back as true,
+// and JSON.parse refuses the first against a record declaring a bool.
+export function boolSqlType(sqlType: string): bool {
+  let t = sqlType.trim().toLowerCase();
+  return t == "bool" || t == "boolean";
+}
+
 function jsonValue(db: Db, f: DbField): string {
-  if (db.floatJson != "" && dialectType(db, f.sqlType) == db.floatType) {
+  if (db.floatJson != "" && floatSqlType(db, f.sqlType)) {
     return db.floatJson.replaceAll("{c}", f.column);
   }
-  if (db.boolJson != "" && f.sqlType == "bool") {
+  if (db.boolJson != "" && boolSqlType(f.sqlType)) {
     return db.boolJson.replaceAll("{c}", f.column);
   }
   return f.column;
@@ -876,9 +923,37 @@ export function dropTable(db: Db, repo: DbRepository): DbResult {
 // Insert or replace one record, given its JSON. The document's keys are the
 // mapping's field names; the database reads them with json_to_record under the
 // declared types and writes them to the declared columns.
+// What is wrong with a document handed to `persist`, or "".
+//
+// A document with no members in it is not a record: `json_to_record("{}")`
+// and `json_extract("{}", '$.id')` both yield NULL for every field, so the
+// insert writes a row of nulls and reports that it worked. A table built by
+// `createTableSql` is saved by its NOT NULL columns, but a schema built by a
+// migration — the documented production path — generally is not, and neither
+// is one plume did not create.
+//
+// An array is refused for the same reason: `persistMany` is the call that
+// takes one, and reading `[]` as a single document produces the same row of
+// nulls on the drivers that do not raise on it.
+export function persistViolation(json: string): string {
+  let text = json.trim();
+  if (text == "") { return "refusing to persist an empty document"; }
+  if (text.startsWith("[")) {
+    return "refusing to persist an array as one record; persistMany takes a list";
+  }
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return "refusing to persist a document that is not a JSON object";
+  }
+  if (text.substring(1, text.length - 1).trim() == "") {
+    return "refusing to persist a document with no fields in it";
+  }
+  return "";
+}
+
 export function persist(db: Db, repo: DbRepository, json: string): DbResult {
   if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
-  if (json == "") { return dbErr("refusing to persist an empty document"); }
+  let violation = persistViolation(json);
+  if (violation != "") { return dbErr(violation); }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
     + readOne(db, repo) + upsertClause(db, repo);
   if (!db.query(sql, [json])) {
@@ -968,6 +1043,12 @@ export function listWhere(db: Db, repo: DbRepository, where: string, args: strin
 }
 
 // A projected list, for DTOs.
+//
+// One document per row, assembled here, exactly as `listWhere` does it. It
+// aggregated in SQL instead, which returned the whole array in a single row —
+// and `rowsAsArray` then wrapped that row in an array of its own, so every
+// driver answered `[[{"id":"a1"},{"id":"a2"}]]`, and `[[]]` for no rows. The
+// documented use is `JSON.parse<DTO[]>`, which refuses both.
 export function listProjected(db: Db, repo: DbRepository, columns: string, where: string, args: string[]): string {
   if (!safeIdentifier(repo.table)) { return "[]"; }
   if (!projectionValid(columns)) { return "[]"; }
@@ -976,13 +1057,12 @@ export function listProjected(db: Db, repo: DbRepository, columns: string, where
     // The caller's aliases name the keys; the expressions stay as written.
     let pairs = pairsFromColumns(columns);
     if (pairs == "") { return "[]"; }
-    sql = "SELECT coalesce(" + db.jsonAgg + "(" + db.rowToJson + "("
-      + pairs + ")), '[]') FROM " + repo.table;
+    sql = "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + repo.table;
     if (where != "") { sql = sql + " WHERE " + where; }
   } else {
     let inner = "SELECT " + columns + " FROM " + repo.table;
     if (where != "") { inner = inner + " WHERE " + where; }
-    sql = "SELECT coalesce(" + db.jsonAgg + "(r), '[]'::json) FROM (" + inner + ") r";
+    sql = "SELECT " + db.rowToJson + "(r) FROM (" + inner + ") r";
   }
   if (!db.query(sql, args)) { return "[]"; }
   return rowsAsArray(db);
@@ -1128,11 +1208,10 @@ export function pickFields(json: string, keys: string[]): string {
 // Strings are skipped whole and nesting is counted, so a brace inside a value
 // does not end it early.
 export function jsonMember(json: string, key: string): string {
-  let marker = "\"" + key + "\":";
-  let at = findJsonMember(json, marker);
+  let at = findJsonMember(json, key);
   if (at < 0) { return ""; }
   let i = at;
-  while (i < json.length && json.charAt(i) == " ") { i = i + 1; }
+  while (i < json.length && jsonSpace(json.charAt(i))) { i = i + 1; }
   let start = i;
   let depth: int = 0;
   let inString: bool = false;
@@ -1152,20 +1231,38 @@ export function jsonMember(json: string, key: string): string {
       if (c == "\"") { inString = true; }
       else if (c == "{" || c == "[") { depth = depth + 1; }
       else if (c == "}" || c == "]") {
-        if (depth == 0) { return json.slice(start, i); }
+        if (depth == 0) { return json.slice(start, i).trim(); }
         depth = depth - 1;
         if (depth == 0) { return json.slice(start, i + 1); }
       }
-      else if (c == "," && depth == 0) { return json.slice(start, i); }
+      else if (c == "," && depth == 0) { return json.slice(start, i).trim(); }
     }
     i = i + 1;
   }
   return "";
 }
 
+// Whitespace, as JSON defines it. `{"id" : "a1"}` is as legal a document as
+// `{"id":"a1"}` and JSON.parse<T> takes both, so a scanner that knows only the
+// second disagrees with the compiler's own mapper about what a document says —
+// and `pickFields` returned "{}" for a document every field of which was
+// there.
+function jsonSpace(c: string): bool {
+  return c == " " || c == "\t" || c == "\n" || c == "\r";
+}
+
 // The index just past a top-level `"key":`, skipping matches inside strings
-// and nested objects.
-function findJsonMember(json: string, marker: string): int {
+// and nested objects. Whitespace may sit between the key and its colon.
+function findJsonMember(json: string, key: string): int {
+  // A member belongs to an object. A document that is an array has elements
+  // rather than members — its objects' fields sit one level further in — so
+  // there is nothing here to find, and saying so outright beats leaving it to
+  // fall out of the depth counting below.
+  let head: int = 0;
+  while (head < json.length && jsonSpace(json.charAt(head))) { head = head + 1; }
+  if (head >= json.length || json.charAt(head) != "{") { return -1; }
+
+  let quotedKey = "\"" + key + "\"";
   let depth: int = 0;
   let inString: bool = false;
   let escaped: bool = false;
@@ -1180,8 +1277,14 @@ function findJsonMember(json: string, marker: string): int {
       continue;
     }
     if (c == "\"") {
-      if (depth == 1 && i + marker.length <= json.length) {
-        if (json.slice(i, i + marker.length) == marker) { return i + marker.length; }
+      if (depth == 1 && i + quotedKey.length <= json.length
+        && json.slice(i, i + quotedKey.length) == quotedKey) {
+        // A colon is what makes this a key rather than a string value that
+        // happens to read the same, so the whitespace before it is skipped
+        // and the colon itself is still required.
+        let j = i + quotedKey.length;
+        while (j < json.length && jsonSpace(json.charAt(j))) { j = j + 1; }
+        if (j < json.length && json.charAt(j) == ":") { return j + 1; }
       }
       inString = true;
       i = i + 1;

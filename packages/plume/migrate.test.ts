@@ -28,6 +28,11 @@ function clean(): void {
   execute(database, "DROP TABLE IF EXISTS mig_b");
 }
 
+// Whether a table is there, asked in SQL every driver speaks.
+function tableExists(name: string): bool {
+  return database.query("SELECT 1 FROM " + name + " WHERE 1 = 0", []);
+}
+
 function basePlan(): Migration[] {
   let plan: Migration[] = [
     migration("1", "create a", "CREATE TABLE mig_a (id text PRIMARY KEY)"),
@@ -324,6 +329,78 @@ test("a repeatable step re-runs when its statement changes and not otherwise", (
   database.query("SELECT count(*) FROM " + historyTable() + " WHERE description = 'mig_view'", []);
   expect(database.value(0, 0) == "1");
   execute(database, "DROP VIEW IF EXISTS mig_view");
+});
+
+test("a repeatable step answers for itself by its description", () => {
+  // migrationApplied's own comment says to pass the description as the
+  // version, and the query matched on `version` alone — which a repeatable
+  // stores empty. It therefore answered false for every repeatable there is,
+  // and a guard written on it did its work again on every boot.
+  clean();
+  execute(database, "DROP VIEW IF EXISTS mig_view");
+  let plan: Migration[] = [
+    migration("1", "create a", "CREATE TABLE mig_a (id text PRIMARY KEY)"),
+    repeatable("mig_view", "CREATE VIEW mig_view AS SELECT id FROM mig_a"),
+  ];
+  expect(!migrationApplied(database, "mig_view"));
+  expect(migrate(database, plan).ok);
+  expect(migrationApplied(database, "mig_view"));
+  expect(migrationApplied(database, "1"));
+  // A versioned step is still found by its version and not by its text.
+  expect(!migrationApplied(database, "create a"));
+  expect(!migrationApplied(database, "no such step"));
+  execute(database, "DROP VIEW IF EXISTS mig_view");
+});
+
+// --- applied and recorded together -----------------------------------------
+
+test("a migration that cannot be recorded is rolled back, not left applied", () => {
+  // The statement and its history row were two autocommitted round trips, and
+  // anything landing between them left the migration applied and still
+  // pending: it re-ran on every boot, failed on the table it had already
+  // created, and neither repairChecksums nor forgetMigrations could get out of
+  // it. A history table that refuses the INSERT stands in for the interruption.
+  clean();
+  execute(database, "DROP TABLE IF EXISTS mig_a");
+  expect(execute(database, "CREATE TABLE " + historyTable() + " ("
+    + "installed_rank integer NOT NULL, version text NOT NULL, "
+    + "description text NOT NULL, checksum integer NOT NULL, "
+    + "installed_on text NOT NULL DEFAULT '', execution_ms integer NOT NULL DEFAULT 0, "
+    + "success integer NOT NULL DEFAULT 1, recorded_by text NOT NULL, "
+    + "PRIMARY KEY (version, description))").ok);
+
+  let r = migrate(database, basePlan());
+  expect(!r.ok);
+  expect(r.failedVersion == "1");
+  // The statement went back with the row that could not be written.
+  expect(!tableExists("mig_a"));
+  expect(!tableExists("mig_b"));
+
+  // And because it did, a repaired history runs the whole plan cleanly rather
+  // than tripping over a table that is already there.
+  forgetMigrations(database);
+  let again = migrate(database, basePlan());
+  expect(again.ok);
+  expect(again.applied == 2);
+  expect(tableExists("mig_a"));
+  expect(tableExists("mig_b"));
+});
+
+test("a failing statement inside the transaction still reports itself and records nothing", () => {
+  clean();
+  let plan: Migration[] = [
+    migration("1", "create a", "CREATE TABLE mig_a (id text PRIMARY KEY)"),
+    migration("2", "nonsense", "CREATE TABLE mig_b (this is not sql"),
+  ];
+  let r = migrate(database, plan);
+  expect(!r.ok);
+  expect(r.failedVersion == "2");
+  expect(r.error.indexOf("failed") >= 0);
+  // The first one stands; the second left nothing.
+  expect(migrationApplied(database, "1"));
+  expect(!migrationApplied(database, "2"));
+  expect(tableExists("mig_a"));
+  expect(!tableExists("mig_b"));
 });
 
 // --- baseline --------------------------------------------------------------
