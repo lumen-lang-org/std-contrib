@@ -27,6 +27,7 @@ import {
   updateScriptImage, listScriptImages,
   listAgents, listConfigs, listModels, listPrompts, listProviders, listServers,
   listSkillFiles, listSkills, linkSkill, unlinkSkill,
+  TemplateRow, listTemplates, deleteTemplate,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
 } from "./api.js";
@@ -38,6 +39,7 @@ const TABS = [
   { name: "Models", icon: "zap" },
   { name: "Prompts", icon: "file-text" },
   { name: "Skills", icon: "sticky-note" },
+  { name: "Templates", icon: "file-text" },
   { name: "MCP", icon: "code" },
   { name: "Images", icon: "box" },
   { name: "Providers", icon: "cloud" },
@@ -255,6 +257,7 @@ export class ConsoleSettings extends LitElement {
   @state() private configs: ModelConfigRow[] = [];
   @state() private prompts: PromptRow[] = [];
   @state() private skills: SkillRow[] = [];
+  @state() private templates: TemplateRow[] = [];
   @state() private images: ScriptImageRow[] = [];
   // The agent form's skill checklist, drafted here and diffed against the
   // stored links on save — the canvas's diff-apply idea, in form clothes.
@@ -300,10 +303,11 @@ export class ConsoleSettings extends LitElement {
   private async refresh() {
     this.problem = "";
     try {
-      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing, this.images, this.skills] =
+      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing, this.images, this.skills, this.templates] =
         await Promise.all([
           listAgents(), listModels(), listConfigs(), listPrompts(),
           listServers(), listProviders(), tracingStatus(), listScriptImages(), listSkills(),
+        listTemplates(),
         ]);
       const t = this.tracing;
       if (t !== null) {
@@ -386,6 +390,7 @@ export class ConsoleSettings extends LitElement {
       case "Models": return this.modelsTab();
       case "Prompts": return this.promptsTab();
       case "Skills": return this.skillsTab();
+      case "Templates": return this.templatesTab();
       case "MCP": return this.mcpTab();
       case "Images": return this.imagesTab();
       case "Providers": return this.providersTab();
@@ -900,6 +905,42 @@ export class ConsoleSettings extends LitElement {
       </div>
       ${this.formActions(
         () => this.act(() => createPrompt(p.promptName, p.body)), "Save version")}
+    `;
+  }
+
+  // --- templates ----------------------------------------------------------------------
+  //
+  // Read-only here, deliberately. A template's value is its FILES — a real
+  // .docx with its styles and tables already set — and a form that edited a
+  // row while leaving the files untouchable would look like editing and not
+  // be. Seeding is scenarios/office/seed_templates.py; this page is where an
+  // operator sees what is offered, in what order, and retires one.
+
+  private templatesTab() {
+    return html`
+      ${this.head("Templates", "file-text")}
+      <div class="bar">
+        <span class="dim">Starting points the capability pages offer. Files are
+          seeded — scenarios/office/seed_templates.py — and shown here as they
+          will appear.</span>
+      </div>
+
+      ${this.group("Templates", this.templates.length)}
+      <table><tbody>
+        ${this.templates.map((t) => html`<tr>
+          <td class="name">${t.label}</td>
+          <td><span class="tag">${t.kind}</span></td>
+          <td class="fill dim"><span class="trunc">${t.description}</span></td>
+          <td><span class="tag">${t.skillName === "" ? "no skill" : t.skillName}</span></td>
+          <td><span class="tag">${(t.featuredRank ?? 0) === 0 ? "not featured" : `rank ${t.featuredRank}`}</span></td>
+          ${this.rowActions([
+            { icon: "trash", title: `Delete ${t.label}`, danger: true,
+              run: () => this.act(() => deleteTemplate(t.id)) },
+          ])}
+        </tr>`)}
+      </tbody></table>
+      ${this.templates.length === 0
+        ? html`<div class="none">No templates yet — run the seed script.</div>` : ""}
     `;
   }
 

@@ -61,6 +61,7 @@ export type PromptRow = {
 
 export type TemplateRow = {
   id: string;
+  visibility?: string;
   label: string;
   description: string;
   // Which capability page shows it: doc, sheet, deck, page.
@@ -71,6 +72,17 @@ export type TemplateRow = {
 };
 
 export const featuredSkills = () => call<SkillRow[]>("/skills?featured=1");
+export const listTemplates = () => call<TemplateRow[]>("/templates");
+export const saveTemplate = (t: TemplateRow) =>
+  call<TemplateRow>(t.id === "" ? "/templates" : `/templates/${encodeURIComponent(t.id)}`, {
+    method: t.id === "" ? "POST" : "PUT",
+    body: JSON.stringify(t.id === "" ? { ...t, id: `tpl-${Date.now()}` } : t),
+  });
+export const deleteTemplate = (id: string) =>
+  call<void>(`/templates/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const listTemplateFiles = (id: string) =>
+  call<{ id: string; templateId: string; path: string; title: string; body: string }[]>(
+    `/templates/${encodeURIComponent(id)}/files`);
 export const templatesOfKind = (kind: string) =>
   call<TemplateRow[]>(`/templates?kind=${encodeURIComponent(kind)}`);
 export const startFromTemplate = (threadId: string, templateId: string) =>
