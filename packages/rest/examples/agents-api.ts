@@ -22,7 +22,7 @@ function agents(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("api_agents", "id", "id", fs);
+  return repository({ table: "api_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The handlers. Each closes over `database` — which is the dependency

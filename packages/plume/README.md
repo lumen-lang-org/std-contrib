@@ -5,37 +5,59 @@ MySQL/MariaDB.
 
 Nothing is inferred. A table name, a key, every column and every SQL type is
 written out; plume never guesses a column from a field name or a table from a
-type. The mapping is a value you construct, so it can be built, inspected and
-tested like any other value.
+type. The declaration that states the shape states the mapping with it:
 
 ```ts
+import { entity } from "./entity.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { postgres } from "./postgres.ts";
-import { field, repository, connectDatabase, createTable, persist, findById } from "./plume.ts";
+import { DbRepository, connectDatabase, createTable, persist, findById } from "./plume.ts";
 
-type Agent = { id: string, agentName: string, maxSteps: int, temperature: number };
+@entity("agents")
+class Agent {
+  @id @column("id", "text")
+  id: string;
 
-let database: Db = postgres();
+  @column("agent_name", "text")
+  agentName: string;
 
-function agents(): DbRepository {
-  let fields: DbField[] = [
-    field("id", "id", "text"),
-    field("agentName", "agent_name", "text"),
-    field("maxSteps", "max_steps", "int"),
-    field("temperature", "temperature", "float8"),
-  ];
-  return repository("agents", "id", "id", fields);
+  @column("max_steps", "int")
+  maxSteps: int;
+
+  @column("temperature", "float8")
+  temperature: number;
+
+  // No @column, so no column: a field the program keeps and the table does not.
+  scratch: string;
 }
 
+// A row still crosses the boundary as a record, because a class instance cannot
+// travel as JSON yet (spec 456).
+type AgentRow = { id: string, agentName: string, maxSteps: int, temperature: number };
+
+let database: Db = postgres();
 let config: DbConfig = { host: "127.0.0.1", database: "app", user: "lumen" };
 connectDatabase(database, config);
-createTable(database, agents());
 
-let a: Agent = { id: "a1", agentName: "researcher", maxSteps: 5, temperature: 0.2 };
-persist(database, agents(), JSON.stringify(a));
+let agents: DbRepository = entityAgent;
+createTable(database, agents);
 
-let back: Agent = JSON.parse<Agent>(findById(database, agents(), "a1"));
+let a: AgentRow = { id: "a1", agentName: "researcher", maxSteps: 5, temperature: 0.2 };
+persist(database, agents, JSON.stringify(a));
+
+let back: AgentRow = JSON.parse<AgentRow>(findById(database, agents, "a1"));
 ```
+
+`agentName` becomes `agent_name` because the decorator was told to, not because
+a convention inferred it. The compiler runs `entity` while compiling and leaves
+its return value behind as a constant named for the decorator and the class —
+`entityAgent`, a `DbRepository` record literal, so the program does no work at
+startup to have it.
+
+The decorator needs the decorator compiler (Lumen spec 455, merged). Everything
+else in this package works on any Lumen build, and a mapping is an ordinary value
+either way — a hand-built one is at the end, and every operation below takes
+both.
 
 A record crosses the boundary as JSON in both directions. That is what lets one
 set of operations serve any record type without a generated mapper per type:
@@ -143,9 +165,9 @@ an annotation:
 let summary = findProjected(database, agents(), "id, agent_name AS \"agentName\"", "a1");
 ```
 
-`listWhere`, `listProjected`, `pageWhere`, `countWhere` and `deleteWhere` take
-an array of values, one per marker in the clause, and the driver binds each in
-its own place:
+`listWhere`, `listProjected`, `countWhere` and `deleteWhere` take an array of
+values, one per marker in the clause, and the driver binds each in its own place
+— as does `args` on the query record the ordered reads take:
 
 ```ts
 let where = "agent_name = " + placeholderAt(database, 1)
@@ -158,9 +180,16 @@ listWhere(database, agents(), where, ["critic", "4"]);
 ### Ordering
 
 ```ts
-listOrdered(database, agents, "", [], [desc("max_steps"), asc("agent_name")]);
-pageOrdered(database, agents, "", [], [asc("max_steps"), asc("id")], 20, 40);
+listOrdered(database, agents, { order: [desc("max_steps"), asc("agent_name")] });
+pageOrdered(database, agents, { order: [asc("max_steps"), asc("id")], limit: 20, offset: 40 });
+listOrdered(database, agents, { where: "enabled = " + database.placeholder, args: ["1"],
+                                order: [asc("agent_name")] });
 ```
+
+What to read past the mapping is one `DbQuery` record — `where`, `args`, `order`
+or `orderBy`, `limit`, `offset`, every field optional, so `{}` is every row. It
+was a positional tail ending in two bare numbers, and a caller who passed the
+offset where the limit goes got a page the database was happy to return.
 
 `asc` and `desc` are what every SQL builder calls these. A key that is not a
 plain identifier refuses the whole query rather than being escaped into it, and
@@ -190,7 +219,8 @@ let agents = store(database, agentsMapping());
 
 agents.findById("a1");
 agents.list();
-agents.listOrdered("max_steps <= " + agents.db.placeholder, ["4"], [asc("agent_name")]);
+agents.listOrdered({ where: "max_steps <= " + agents.db.placeholder, args: ["4"],
+                     order: [asc("agent_name")] });
 agents.persist(JSON.stringify(a));
 agents.count();
 ```
@@ -215,10 +245,13 @@ A related row, or rows, fetched with the record that points at them:
 
 ```ts
 let rs: DbRelation[] = [
-  hasOne("team", "teams", "team_id", "id", "id, team_name AS \"teamName\""),
-  hasMany("tasks", "tasks", "id", "agent_id", "id, title"),
+  hasOne({ field: "team", table: "teams", localColumn: "team_id", foreignColumn: "id",
+           columns: "id, team_name AS \"teamName\"" }),
+  hasMany({ field: "tasks", table: "tasks", localColumn: "id", foreignColumn: "agent_id",
+            columns: "id, title" }),
 ];
-let agents = repositoryWith("agents", "id", "id", fields, rs);
+let agents = repository({ table: "agents", idField: "id", idColumn: "id",
+                          fields: fields, relations: rs });
 
 findById(database, agents, "a1");
 ```
@@ -255,6 +288,12 @@ class Agent {
   tasks: Task[];
 }
 ```
+
+The decorator's arguments stay positional where `hasOne` and `hasMany` take a
+record, because the compiler hands a decorator its arguments as a list of
+strings — `DecoratorUse.args` — and a record literal is not one. Same four
+values, same order as the record's fields, and `entity` is what turns one into
+the other.
 
 ### Foreign keys
 
@@ -425,36 +464,50 @@ two of them in one database is a way to apply everything twice.
 Migration bodies are your SQL, not plume's, so they are spelled for the
 database they run against.
 
-## The `@entity` decorator
+## A mapping built by hand
 
-`entity.ts` derives a mapping from a decorated class, so the fields are stated
-once instead of twice:
+A mapping is an ordinary value, so nothing requires a decorator to produce it.
+`repository` takes the table, the key's field and column, and the fields:
 
 ```ts
-@entity("agents")
-class Agent {
-  @id @column("id", "text")
-  id: string;
+import { field, repository, DbField, DbRepository } from "./plume.ts";
 
-  @column("agent_name", "text")
-  agentName: string;
+type AgentRow = { id: string, agentName: string, maxSteps: int, temperature: number };
+
+function agents(): DbRepository {
+  let fields: DbField[] = [
+    field("id", "id", "text"),
+    field("agentName", "agent_name", "text"),
+    field("maxSteps", "max_steps", "int"),
+    field("temperature", "temperature", "float8"),
+  ];
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fields });
 }
 
-persist(database, entityAgent, JSON.stringify(a));
+persist(database, agents(), JSON.stringify(a));
 ```
 
-A decorator in Lumen is a pure function from a description of the declaration
-to a value — here, a `DbRepository`. That is why `entity` is an ordinary
-function of an ordinary type, tested by calling it, and why `entity.test.ts`
-exists before the compiler can run a decorator at all (spec 455 is not landed).
+Every operation in this README takes the result either way — `entityAgent` and
+`agents()` are the same record. Use this form on a Lumen build without the
+decorator compiler, or where the mapping is computed rather than declared:
+`agentsFull` in the `agents` package builds its relations from a list, which a
+class cannot state.
+
+The cost is that the shape is written twice, and the two can disagree without
+anything saying so. That is what `@entity` removes.
+
+### Why the decorator is a function
+
+A decorator in Lumen is a pure function from a description of the declaration to
+a value — here, a `DbRepository`. That is why `entity` is an ordinary function of
+an ordinary type, tested by calling it: `entity.test.ts` needs no compiler
+support to run, and `entity_live.test.ts` checks that the generated mapping is
+identical to the hand-written one and that every operation works against it.
 
 Still nothing is inferred: a field without `@column` is not mapped, a class
 without `@id` has no key and `entityProblem` says so. The one exception is a
 `@column("id")` with no type, which falls back to the declared type — the
 column type can always be stated outright.
-
-`entity_live.test.ts` checks that the generated mapping is identical to the
-hand-written one and that every operation works against it.
 
 <!-- website:skip -->
 ## Testing

@@ -121,7 +121,7 @@ export function artifactsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("artifacts", "id", "id", fs);
+  return repository({ table: "artifacts", idField: "id", idColumn: "id", fields: fs });
 }
 
 // Frozen the day a column is added, for the same reason as the mapping above:
@@ -139,7 +139,7 @@ export function artifactVersionsMapping(): DbRepository {
     field("note", "note", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("artifact_versions", "id", "id", fs);
+  return repository({ table: "artifact_versions", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function artifactPlan(db: Db): Migration[] {
@@ -675,7 +675,7 @@ export function artifactBriefing(db: Db, threadId: string): string {
   // least likely to be meant. Slot breaks ties so two writes in one stamp
   // still list in a stable order.
   let keys: DbOrder[] = [desc("updated_at"), desc("slot")];
-  let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return ""; }
   let rows = JSON.parse<ArtifactRow[]>(listed);
   if (rows.length == 0) { return ""; }
@@ -709,7 +709,7 @@ export function artifactBriefing(db: Db, threadId: string): string {
 export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let none: ArtifactRow[] = [];
   let keys: DbOrder[] = [asc("slot")];
-  let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<ArtifactRow[]>(listed);
 }

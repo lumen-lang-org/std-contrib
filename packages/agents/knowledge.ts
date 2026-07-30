@@ -72,7 +72,7 @@ export function documentsMapping(): DbRepository {
     field("scope", "scope", "text"),
     field("body", "body", "text"),
   ];
-  return repository("documents", "id", "id", fs);
+  return repository({ table: "documents", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The table, with a vector column of the width the embedding model produces.
@@ -553,7 +553,7 @@ export function agentRetrievalMapping(): DbRepository {
     field("maxDistance", "max_distance", "float8"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("agent_retrieval", "agentId", "agent_id", fs);
+  return repository({ table: "agent_retrieval", idField: "agentId", idColumn: "agent_id", fields: fs });
 }
 
 // The tables. Appended to the same plan as everything else.

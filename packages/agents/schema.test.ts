@@ -187,7 +187,7 @@ test("listing agents does not multiply them by their relations", () => {
   // a1 has two servers and one sub-agent; a join would repeat it.
   expect(countWhere(database, agentsFull(database), "", []) == 2);
   let keys: DbOrder[] = [asc("agent_name")];
-  let json = listOrdered(database, agentsFull(database), "", [], keys);
+  let json = listOrdered(database, agentsFull(database), { order: keys });
   expect(json.indexOf("lead") == json.lastIndexOf("lead") - 0 || json.indexOf("lead") >= 0);
   expect(json.indexOf("scout") >= 0);
 });

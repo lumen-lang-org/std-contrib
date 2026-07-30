@@ -21,7 +21,7 @@
 // convention, and plume has none — but stating it once beside the field is not
 // repetition, it is the declaration.
 
-import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany } from "./plume.ts";
+import { DbField, DbRelation, DbRepository, field, repository, hasOne, hasMany } from "./plume.ts";
 
 // --- the description the compiler passes in --------------------------------
 //
@@ -105,11 +105,9 @@ export function entity(d: Description): DbRepository {
     // fetched alongside. @hasOne/@hasMany name the other table, the column on
     // each side, and the select list that shapes what comes back.
     if (fieldHas(f, "hasOne")) {
-      relations.push(hasOne(f.name, fieldArg(f, "hasOne", 0), fieldArg(f, "hasOne", 1),
-        fieldArg(f, "hasOne", 2), fieldArg(f, "hasOne", 3)));
+      relations.push(hasOne({ field: f.name, table: fieldArg(f, "hasOne", 0), localColumn: fieldArg(f, "hasOne", 1), foreignColumn: fieldArg(f, "hasOne", 2), columns: fieldArg(f, "hasOne", 3) }));
     } else if (fieldHas(f, "hasMany")) {
-      relations.push(hasMany(f.name, fieldArg(f, "hasMany", 0), fieldArg(f, "hasMany", 1),
-        fieldArg(f, "hasMany", 2), fieldArg(f, "hasMany", 3)));
+      relations.push(hasMany({ field: f.name, table: fieldArg(f, "hasMany", 0), localColumn: fieldArg(f, "hasMany", 1), foreignColumn: fieldArg(f, "hasMany", 2), columns: fieldArg(f, "hasMany", 3) }));
     } else if (fieldHas(f, "column")) {
       let column = fieldArg(f, "column", 0);
       if (column == "") { column = f.name; }
@@ -126,8 +124,8 @@ export function entity(d: Description): DbRepository {
 
   let table = "";
   if (d.args.length > 0) { table = d.args[0]; }
-  if (relations.length == 0) { return repository(table, idField, idColumn, fields); }
-  return repositoryWith(table, idField, idColumn, fields, relations);
+  if (relations.length == 0) { return repository({ table: table, idField: idField, idColumn: idColumn, fields: fields }); }
+  return repository({ table: table, idField: idField, idColumn: idColumn, fields: fields, relations: relations });
 }
 
 // Whether a description would produce a usable mapping, and why not. Called by

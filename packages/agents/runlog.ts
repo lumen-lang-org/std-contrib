@@ -15,7 +15,7 @@
 // joins both.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasMany, boolColumn, desc, persist, pageOrdered, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasMany, boolColumn, desc, persist, pageOrdered, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { AgentRun } from "./run.ts";
 
@@ -66,7 +66,7 @@ export function runsMapping(): DbRepository {
     field("error", "error", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("runs", "id", "id", fs);
+  return repository({ table: "runs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function runStepsMapping(): DbRepository {
@@ -80,18 +80,17 @@ export function runStepsMapping(): DbRepository {
     field("result", "result", "text"),
     field("ok", "ok", "bool"),
   ];
-  return repository("run_steps", "id", "id", fs);
+  return repository({ table: "run_steps", idField: "id", idColumn: "id", fields: fs });
 }
 
 // A run with its steps nested, one query. Takes the connection because the
 // relation projects a bool, and SQLite and MySQL store those as 0 and 1.
 export function runsFull(db: Db): DbRepository {
   let rs: DbRelation[] = [
-    hasMany("steps", "run_steps", "id", "run_id",
-            "step_index AS \"stepIndex\", tool, server, args, result, "
-            + boolColumn(db, "ok") + " AS \"ok\""),
+    hasMany({ field: "steps", table: "run_steps", localColumn: "id", foreignColumn: "run_id", columns: "step_index AS \"stepIndex\", tool, server, args, result, "
+            + boolColumn(db, "ok") + " AS \"ok\"" }),
   ];
-  return repositoryWith("runs", "id", "id", runsMapping().fields, rs);
+  return repository({ table: "runs", idField: "id", idColumn: "id", fields: runsMapping().fields, relations: rs });
 }
 
 // The tables, as steps for the same plan the rest of the schema uses.
@@ -155,5 +154,5 @@ export function recordRun(db: Db, agentId: string, question: string, run: AgentR
 // them.
 export function runsOf(db: Db, agentId: string, limit: int): string {
   let keys: DbOrder[] = [desc("created_at")];
-  return pageOrdered(db, runsMapping(), "agent_id = " + db.placeholder, [agentId], keys, limit, 0);
+  return pageOrdered(db, runsMapping(), { where: "agent_id = " + db.placeholder, args: [agentId], order: keys, limit: limit, offset: 0 });
 }
