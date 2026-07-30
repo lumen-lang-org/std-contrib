@@ -688,6 +688,96 @@ export function skillFileProblem(row: SkillFileRow): string {
   return "";
 }
 
+// Templates: the cards a capability page shows. Read is open — a template is
+// a starting point, not a secret — and writes are the operator's, the same
+// posture as curated script images.
+@controller("/templates")
+class TemplateApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  // `?kind=doc` is what a capability page asks with; without it, everything
+  // public, ranked. Both orders are by rank then label so a page's cards do
+  // not reshuffle between visits.
+  @get("/")
+  list(req: Request): Reply {
+    let keys: DbOrder[] = [asc("featured_rank"), asc("label")];
+    let kind = queryParam(req, "kind", "");
+    if (kind != "") {
+      return ok(listOrdered(this.db, templatesMapping(),
+        "visibility = 'public' AND kind = " + placeholderAt(this.db, 1), [kind], keys));
+    }
+    return ok(listOrdered(this.db, templatesMapping(), "visibility = 'public'", [], keys));
+  }
+
+  @get("/:id")
+  find(req: Request): Reply {
+    let held = findById(this.db, templatesMapping(), param(req, "id"));
+    if (held == "") { return notFound("template " + param(req, "id")); }
+    return ok(held);
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let problem = createProblem(this.db, templatesMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
+    let written = persist(this.db, templatesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, templatesMapping(), jsonId(req.body)));
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
+    if (!existsById(this.db, templatesMapping(), param(req, "id"))) {
+      return notFound("template " + param(req, "id"));
+    }
+    let written = persist(this.db, templatesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, templatesMapping(), param(req, "id")));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, templatesMapping(), param(req, "id"))) {
+      return notFound("template " + param(req, "id"));
+    }
+    deleteWhere(this.db, templateFilesMapping(), "template_id = " + placeholderAt(this.db, 1),
+      [param(req, "id")]);
+    deleteById(this.db, templatesMapping(), param(req, "id"));
+    return noContent();
+  }
+
+  @get("/:id/files")
+  files(req: Request): Reply {
+    let keys: DbOrder[] = [asc("path")];
+    return ok(listOrdered(this.db, templateFilesMapping(),
+      "template_id = " + placeholderAt(this.db, 1), [param(req, "id")], keys));
+  }
+
+  @post("/:id/files")
+  addFile(req: Request): Reply {
+    if (!existsById(this.db, templatesMapping(), param(req, "id"))) {
+      return notFound("template " + param(req, "id"));
+    }
+    let written = persist(this.db, templateFilesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, templateFilesMapping(), jsonId(req.body)));
+  }
+
+  @put("/:id/files/:fileId")
+  putFile(req: Request): Reply {
+    if (!existsById(this.db, templateFilesMapping(), param(req, "fileId"))) {
+      return notFound("template file " + param(req, "fileId"));
+    }
+    let written = persist(this.db, templateFilesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, templateFilesMapping(), param(req, "fileId")));
+  }
+}
+
 @controller("/skills")
 class SkillApi {
   db: Db;
@@ -1613,6 +1703,54 @@ class ArtifactApi {
       + ",\"path\":" + JSON.stringify(normalScope(body.path))
       + ",\"version\":" + `${written.version}`
       + ",\"previewToken\":" + JSON.stringify(written.previewToken) + "}");
+  }
+
+  // Start this conversation from a template: its files land as version 1,
+  // in one call, before anything is said. "uploaded" for the same reason the
+  // route above is — a template is a person choosing a starting point, and
+  // nothing generated it.
+  //
+  // Partial application is possible and deliberate: a template whose third
+  // file is refused still lays down the first two, and the reply names what
+  // did not land. The alternative — a transaction across artifact writes —
+  // would make one bad path lose the whole start.
+  @post("/from-template")
+  fromTemplate(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let templateId = jsonText(req.body, "templateId");
+    if (templateId == "") { return badRequest("a body is required: {\"templateId\":\"tpl-...\"}"); }
+    let held = findById(this.db, templatesMapping(), templateId);
+    if (held == "") { return notFound("template " + templateId); }
+    let tpl: TemplateRow = JSON.parse<TemplateRow>(held);
+    if (tpl.visibility != "public") { return notFound("template " + templateId); }
+
+    let where = "template_id = " + placeholderAt(this.db, 1);
+    let listed = listWhere(this.db, templateFilesMapping(), where, [templateId]);
+    let files: TemplateFileRow[] = listed == "" ? [] : JSON.parse<TemplateFileRow[]>(listed);
+    let wrote = "";
+    let refused = "";
+    let i: int = 0;
+    while (i < files.length) {
+      let put = putArtifact(this.db, {
+        threadId: param(req, "id"), path: files[i].path, title: files[i].title,
+        content: files[i].body, note: "started from template " + tpl.label,
+        origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE, now: stamp(),
+      });
+      if (put.ok) {
+        if (wrote != "") { wrote = wrote + ","; }
+        wrote = wrote + JSON.stringify(normalScope(files[i].path));
+      } else {
+        if (refused != "") { refused = refused + ","; }
+        refused = refused + JSON.stringify(files[i].path + ": " + put.problem);
+      }
+      i = i + 1;
+    }
+    return created("{\"template\":" + JSON.stringify(tpl.label)
+      + ",\"skillName\":" + JSON.stringify(tpl.skillName)
+      + ",\"wrote\":[" + wrote + "]"
+      + ",\"refused\":[" + refused + "]}");
   }
 
   // Which versions each round produced — the join a chat client renders its
@@ -2896,6 +3034,7 @@ function main(): void {
     new RunApi(db),
     new ScriptImageApi(db),
     new SkillApi(db),
+    new TemplateApi(db),
     new ModelApi(db, master),
     new ConfigApi(db),
     new PromptApi(db),

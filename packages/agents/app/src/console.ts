@@ -14,7 +14,8 @@ import "./canvas.js";
 import "./login-overlay.js";
 import {
   AgentRow, ArtifactListing, Me, ThreadListing, TurnArtifactRef, WireRef,
-  SIGNED_OUT, artifactsByTurn, listAgents, listArtifacts, listThreads, previewUrl, whoami,
+  SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
+  listThreads, previewUrl, startFromTemplate, templatesOfKind, whoami,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -28,6 +29,19 @@ function currentId(): string {
   const m = /^\/c\/([^/?#]+)/.exec(location.pathname);
   return m === null ? "" : decodeURIComponent(m[1]);
 }
+
+/* A capability's face in the row. The engine knows skills by name; the row
+   shows a verb and a glyph, and this is the one place that mapping lives.
+   A skill with no entry here still appears, under its own name — the row is
+   generated from the operator's featured list, not from this table. */
+const CAPS: Record<string, { label: string; icon: string; kind: string }> = {
+  "make-doc": { label: "Docs", icon: "file-text", kind: "doc" },
+  "make-sheet": { label: "Sheets", icon: "table", kind: "sheet" },
+  "make-deck": { label: "Slides", icon: "image", kind: "deck" },
+};
+const capLabel = (name: string) => CAPS[name]?.label ?? name;
+const capIcon = (name: string) => CAPS[name]?.icon ?? "book-open";
+const capKind = (name: string) => CAPS[name]?.kind ?? "";
 
 @customElement("agent-console")
 export class AgentConsole extends LitElement {
@@ -141,6 +155,43 @@ export class AgentConsole extends LitElement {
       .card { max-width: 100%; }
     }
 
+    /* The capability row, Kimi's: borderless, one line, scrolls sideways.
+       Verbs rather than buttons — an outlined pill each would read as a
+       toolbar, and a second line would push the composer off a phone. */
+    /* In the empty state the composer sizes to its content and the group —
+       wordmark, composer, capabilities — centres together. Without this
+       nr-chatbot keeps flex:1, eats the column, and the row lands at the
+       bottom edge of the window with the composer stranded in the middle. */
+    main.empty { display: flex; flex-direction: column; justify-content: center; }
+    main.empty nr-chatbot { flex: 0 0 auto; height: auto; }
+    main.empty nr-chatbot::part(boxed-area) { padding-top: 0 !important; }
+
+    .caps { display: flex; gap: 4px; padding: 14px 18px 0; max-width: 768px;
+            margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
+    .caps::-webkit-scrollbar { display: none; }
+    .cap { display: inline-flex; align-items: center; gap: 7px; flex: none;
+           padding: 7px 14px; border: 0; border-radius: 999px; cursor: pointer;
+           background: none; font: inherit; font-size: 14px; color: var(--muted);
+           white-space: nowrap; }
+    .cap:hover { background: var(--bg-user); color: var(--fg); }
+    .cap.on { background: var(--bg-user); color: var(--fg); font-weight: 600; }
+    /* Starting points for the pinned capability. Cards, because each is a
+       thing you would recognise by name — Kimi's "Featured cases". */
+    .starts-head { max-width: 768px; margin: 18px auto 8px; padding: 0 18px;
+                   font-size: 13px; color: var(--muted); }
+    .starts { display: flex; gap: 10px; padding: 0 18px; max-width: 768px;
+              margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
+    .starts::-webkit-scrollbar { display: none; }
+    .start { flex: none; width: 210px; text-align: left; cursor: pointer;
+             display: flex; flex-direction: column; gap: 3px; padding: 12px 14px;
+             border: 1px solid var(--border); border-radius: 14px;
+             background: var(--bg-card); font: inherit; }
+    .start:hover { border-color: var(--accent); }
+    .start-name { font-weight: 600; font-size: 13.5px; color: var(--fg); }
+    .start-why { font-size: 12px; color: var(--muted); line-height: 1.35;
+                 display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                 overflow: hidden; }
+
     .cards { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 18px 12px;
              border-top: 1px solid var(--border); background: var(--bg); }
     .card { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
@@ -227,6 +278,19 @@ export class AgentConsole extends LitElement {
   @property({ attribute: false }) seedTurns: unknown[] = [];
   @property({ attribute: false }) seedPast: unknown = { steps: [], thoughts: [] };
 
+  /* The capability row. Public featured skills, in rank order, straight from
+     the engine — promoting a skill to the row is an operator edit, never a
+     console deploy. */
+  @state() private capabilities: SkillRow[] = [];
+  /* The skill this round runs under, pinned by a chip and shown in the
+     composer. Empty is the normal case: the model still chooses from its
+     briefing, which is how a document gets written when nobody pressed
+     anything. */
+  @state() private pinned = "";
+  /* Starting points for the pinned capability, shown as cards under the
+     composer once one is picked. */
+  @state() private starts: TemplateRow[] = [];
+
   /* Seeding happens here and not in connectedCallback, and that is the whole
      reason the conversation can be server-rendered at all.
      @lit-labs/ssr's renderer skips connectedCallback by default — it is opt-in
@@ -260,6 +324,7 @@ export class AgentConsole extends LitElement {
       if (id === "") { this.fresh(); } else if (id !== this.threadId) { void this.open(id); }
     });
     this.me = await whoami().catch(() => null);
+    this.capabilities = await featuredSkills().catch(() => []);
     // The run says what it is doing while it is doing it. Held here so the
     // card re-renders; the session owns the list and never rebuilds it.
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
@@ -449,6 +514,70 @@ export class AgentConsole extends LitElement {
   // opens the panel on that file's diff. The card is markup inside
   // nr-chatbot's shadow root, so the console cannot attach handlers to it —
   // instead the click bubbles (composed) and is read off its data attributes.
+  /* What the composer's + offers. Files first because it is the common act;
+     then the capabilities, which is where a person who knows what they want
+     says so. Kimi puts Skills behind the same button, and it is the right
+     place: the alternative is a second affordance beside the composer for
+     the same job. */
+  private attachMenu() {
+    let items = [{ id: "upload-file", label: "Add files", icon: "paperclip" }];
+    for (const c of this.capabilities) {
+      items = [...items, { id: "skill:" + c.skillName, label: c.skillName, icon: "book-open" }];
+    }
+    return items;
+  }
+
+  /* The capability row: what this deployment can do, in the operator's order.
+     Borderless like Kimi's — these are verbs, not buttons, and a row of
+     outlined pills reads as a toolbar. Scrolls sideways rather than wrapping,
+     because a second line of capabilities pushes the composer off a phone. */
+  private capabilityRow() {
+    if (this.capabilities.length === 0) { return ""; }
+    return html`
+      <div class="caps">
+        ${this.capabilities.map((c) => html`
+          <button class=${this.pinned === c.skillName ? "cap on" : "cap"}
+            title=${c.description}
+            @click=${() => { void this.pin(c.skillName); }}>
+            <nr-icon name=${capIcon(c.skillName)} size="small"></nr-icon>
+            <span>${capLabel(c.skillName)}</span>
+          </button>`)}
+      </div>
+      ${this.starts.length === 0 ? "" : html`
+        <div class="starts-head">Start from</div>
+        <div class="starts">
+          ${this.starts.map((t) => html`
+            <button class="start" title=${t.description}
+              @click=${() => { void this.startWith(t); }}>
+              <span class="start-name">${t.label}</span>
+              <span class="start-why">${t.description}</span>
+            </button>`)}
+        </div>`}`;
+  }
+
+  /* Pinning a capability shows its starting points; pinning it twice lets go.
+     Nothing is sent yet — the pin is a statement of intent, and the round
+     still carries whatever the person types. */
+  private async pin(skillName: string): Promise<void> {
+    if (this.pinned === skillName) { this.pinned = ""; this.starts = []; return; }
+    this.pinned = skillName;
+    this.starts = await templatesOfKind(capKind(skillName)).catch(() => []);
+  }
+
+  /* A template starts the conversation: its files land as version 1, and the
+     first message names the skill so the round that follows works on them. */
+  private async startWith(t: TemplateRow): Promise<void> {
+    const id = await this.session.ensureThread();
+    if (id === "") { return; }
+    await startFromTemplate(id, t.id).catch(() => null);
+    this.pinned = "";
+    this.starts = [];
+    await this.open(id);
+    await this.session.sendMessage(
+      `Start from the ${t.label} template — /brief.md is in this conversation's files. `
+      + `Read it, ask me for anything it leaves blank, then use your ${t.skillName} skill to build it.`);
+  }
+
   private async chipClick(e: Event) {
     const path = e.composedPath() as HTMLElement[];
     const diff = path.find((el) => el?.getAttribute?.("data-diff-path"));
@@ -510,7 +639,7 @@ export class AgentConsole extends LitElement {
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
             @click=${() => this.show("artifacts")}><nr-icon name="folder" size="small"></nr-icon></button>
         </header>
-        <main>
+        <main class=${this.session.getState().messages.length === 0 ? "empty" : ""}>
           <!-- The session is the controller. Messages are not passed in: the
                component reads them from the controller's state, and a second
                binding would fight it. The message-sent event is not listened
@@ -529,7 +658,11 @@ export class AgentConsole extends LitElement {
             boxed
             welcome-message="Agents."
             placeholder="Ask ${this.agentName()}…"
+            attach-icon="plus"
+            .i18n=${{ input: { attachButton: "" } }}
+            .attachItems=${this.attachMenu()}
           ></nr-chatbot>
+          ${this.session.getState().messages.length > 0 ? "" : this.capabilityRow()}
         </main>
         ${cards.length === 0 ? "" : html`
         <div class="cards">
