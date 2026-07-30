@@ -776,12 +776,19 @@ export class ArtifactPanel extends LitElement {
       ${this.grip()}
       <div class="view">
         <div class="head">
+          <!-- Kimi's split: back returns to the file list, X puts the whole
+               rail away. Before this the X did back's job and nothing did
+               X's, which read as a preview you could not leave. -->
+          <nr-button id="a-back" size="small" title="Back to files"
+            @click=${() => this.close()}>
+            <nr-icon name="chevron-left" size="small"></nr-icon>
+          </nr-button>
           <div class="name">
             ${this.label(a)}
             <div class="meta">${a.path}</div>
           </div>
-          <nr-button id="a-close" size="small" title="Back to the list"
-            @click=${() => this.close()}>
+          <nr-button id="a-close" size="small" title="Close the panel"
+            @click=${() => { this.close(); this.dispatchEvent(new CustomEvent("close-rail")); }}>
             <nr-icon name="x" size="small"></nr-icon>
           </nr-button>
         </div>

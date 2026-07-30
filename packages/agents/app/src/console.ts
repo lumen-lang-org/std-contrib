@@ -535,6 +535,7 @@ export class AgentConsole extends LitElement {
 
       ${this.rail === "artifacts"
         ? html`<artifact-panel .threadId=${this.threadId}
+            @close-rail=${() => { this.rail = ""; this.railClosed = true; }}
             .ensureThread=${() => this.session.ensureThread()}></artifact-panel>` : ""}
       ${this.settings ? html`<console-settings @close=${() => {
         this.settings = false;
