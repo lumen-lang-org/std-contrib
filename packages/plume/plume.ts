@@ -1023,26 +1023,29 @@ export function listProjected(db: Db, repo: DbRepository, columns: string, where
 // `asc` and `desc` are what every SQL builder calls these, so they are what
 // these are called.
 //
-//   listOrdered(db, agents, { order: [desc("max_steps"), asc("agent_name")] })
+//   listOrdered(db, agents, { order: [{ column: "max_steps", direction: "desc" }] })
 //
 // A column name cannot be bound as a parameter — SQL has no placeholder for
 // one — so it is checked rather than trusted, and a key that is not a plain
 // name refuses the whole query.
 
+// A key is a record, written as one:
+//
+//   { order: [{ column: "max_steps", direction: "desc" }, { column: "agent_name" }] }
+//
+// There were `asc(column)` and `desc(column)` constructors for this. A
+// constructor whose whole body is a record literal is a second way to spell the
+// value and a name to import, and it hides which field it set: `desc("x")` reads
+// as a direction, `{ column: "x", direction: "desc" }` reads as the row it is.
+//
+// `direction` is a string-literal union rather than a `descending: bool`,
+// because a boolean only reads correctly beside the name of the function that
+// set it — `{ column: "agent_name", descending: false }` says "not descending"
+// where SQL, and every caller, says ascending. Omitted is "asc", as in SQL.
 export type DbOrder = {
   column: string,
-  descending: bool,
+  direction?: "asc" | "desc",
 };
-
-export function asc(column: string): DbOrder {
-  let o: DbOrder = { column: column, descending: false };
-  return o;
-}
-
-export function desc(column: string): DbOrder {
-  let o: DbOrder = { column: column, descending: true };
-  return o;
-}
 
 // `ORDER BY a DESC, b`, or an empty string when there is nothing to order by.
 // Returns "!" for a key that is not a plain identifier, which the callers
@@ -1056,7 +1059,7 @@ export function orderClause(keys: DbOrder[]): string {
     if (!safeIdentifier(keys[i].column)) { return "!"; }
     if (i > 0) { out = out + ", "; }
     out = out + keys[i].column;
-    if (keys[i].descending) { out = out + " DESC"; }
+    if ((keys[i].direction ?? "asc") == "desc") { out = out + " DESC"; }
     i = i + 1;
   }
   return " ORDER BY " + out;
@@ -1066,8 +1069,8 @@ export function orderClause(keys: DbOrder[]): string {
 // window. Every field is optional, so `{}` is every row in no stated order —
 // which `listWhere` already was.
 //
-//   listOrdered(db, agents, { order: [desc("max_steps"), asc("agent_name")] })
-//   pageOrdered(db, agents, { order: [asc("id")], limit: 20, offset: 40 })
+//   listOrdered(db, agents, { order: [{ column: "max_steps", direction: "desc" }] })
+//   pageOrdered(db, agents, { order: [{ column: "id" }], limit: 20, offset: 40 })
 //
 // A record because the tail was `where, args, keys, limit, offset`: two bare
 // numbers at the end that read as each other, and a caller who passed the

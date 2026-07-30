@@ -19,7 +19,7 @@
 // trace and a checkable expectation in an eval.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
@@ -147,7 +147,7 @@ export function getFile(db: Db, threadId: string, fileName: string): WorkspaceFi
 
 export function listFiles(db: Db, threadId: string): WorkspaceFileRow[] {
   let none: WorkspaceFileRow[] = [];
-  let keys: DbOrder[] = [asc("file_name")];
+  let keys: DbOrder[] = [{ column: "file_name" }];
   let listed = listOrdered(db, workspaceFilesMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<WorkspaceFileRow[]>(listed);

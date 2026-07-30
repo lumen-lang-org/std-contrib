@@ -16,7 +16,7 @@
 // go, oldest first, never single turns.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
@@ -153,7 +153,7 @@ export type ThreadListing = {
 // limit is required, not defaulted.
 export function listThreads(db: Db, limit: int, offset: int): ThreadListing[] {
   let out: ThreadListing[] = [];
-  let newest: DbOrder[] = [desc("created_at")];
+  let newest: DbOrder[] = [{ column: "created_at", direction: "desc" }];
   let page = pageOrdered(db, threadsMapping(), { order: newest, limit: limit, offset: offset });
   if (page == "" || page == "[]") { return out; }
   let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(page);
@@ -183,7 +183,7 @@ export function threadAgent(db: Db, threadId: string): string {
 // A thread's context, in order.
 export function threadTurns(db: Db, threadId: string): Turn[] {
   let out: Turn[] = [];
-  let keys: DbOrder[] = [asc("seq")];
+  let keys: DbOrder[] = [{ column: "seq" }];
   let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
@@ -481,7 +481,7 @@ export function threadMessages(db: Db, threadId: string): Turn[] {
 // Turn — the provider's shape — deliberately does not carry one.
 export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {
   let out: ThreadTurnRow[] = [];
-  let keys: DbOrder[] = [asc("seq")];
+  let keys: DbOrder[] = [{ column: "seq" }];
   let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
