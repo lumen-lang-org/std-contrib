@@ -19,13 +19,16 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
-  AgentRow, ModelConfigRow, ModelRow, PromptRow, ScriptImageRow, ServerRow, TracingStatus,
+  AgentFull, AgentRow, ModelConfigRow, ModelRow, PromptRow, ScriptImageRow, ServerRow,
+  SkillFileRow, SkillRow, TracingStatus,
   configureTracing, createAgent, createConfig, createModel, createPrompt,
-  createScriptImage, createServer, deleteAgent, deleteConfig, deleteModel,
-  deleteScriptImage, deleteServer, updateScriptImage, listScriptImages,
+  createScriptImage, createServer, createSkill, createSkillFile, deleteAgent, deleteConfig,
+  deleteModel, deleteScriptImage, deleteServer, deleteSkill, deleteSkillFile,
+  updateScriptImage, listScriptImages,
   listAgents, listConfigs, listModels, listPrompts, listProviders, listServers,
+  listSkillFiles, listSkills, linkSkill, unlinkSkill,
   setTracingSecret, storeProviderKey, tracingStatus,
-  updateAgent, updateModel, updateServer, setServerAuth, testModel,
+  updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
 } from "./api.js";
 
 // Each tab, with the mark that stands for it in the rail. The icons are the
@@ -34,6 +37,7 @@ const TABS = [
   { name: "Agents", icon: "message-square" },
   { name: "Models", icon: "zap" },
   { name: "Prompts", icon: "file-text" },
+  { name: "Skills", icon: "sticky-note" },
   { name: "MCP", icon: "code" },
   { name: "Images", icon: "box" },
   { name: "Providers", icon: "cloud" },
@@ -41,7 +45,9 @@ const TABS = [
 ] as const;
 type Tab = typeof TABS[number]["name"];
 
-const PROVIDERS = ["mistral", "openai", "anthropic"];
+// "vertex" authenticates with a whole service-account JSON pasted as the
+// key; the server mints short-lived OAuth tokens from it per request.
+const PROVIDERS = ["mistral", "openai", "anthropic", "vertex"];
 const BACKENDS = ["langfuse", "otlp", "phoenix", "braintrust", "langsmith", "arize"];
 
 // The value a LumenUI field is now carrying. Read off the element rather than
@@ -67,6 +73,9 @@ type View =
   | { kind: "model"; row: ModelRow; fresh: boolean }
   | { kind: "config"; row: ModelConfigRow }
   | { kind: "prompt"; row: { promptName: string; body: string } }
+  // A skill's files ride the view: they are loaded when the form opens and
+  // edited beside the body, each write its own call.
+  | { kind: "skill"; row: SkillRow; fresh: boolean; files: SkillFileRow[] }
   | { kind: "server"; row: ServerRow & { token: string }; fresh: boolean }
   | { kind: "image"; row: ScriptImageRow }
   | { kind: "key"; row: { provider: string; apiKey: string } };
@@ -241,11 +250,15 @@ export class ConsoleSettings extends LitElement {
   `;
 
   @property() tab: Tab = "Agents";
-  @state() private agents: AgentRow[] = [];
+  @state() private agents: AgentFull[] = [];
   @state() private models: ModelRow[] = [];
   @state() private configs: ModelConfigRow[] = [];
   @state() private prompts: PromptRow[] = [];
+  @state() private skills: SkillRow[] = [];
   @state() private images: ScriptImageRow[] = [];
+  // The agent form's skill checklist, drafted here and diffed against the
+  // stored links on save — the canvas's diff-apply idea, in form clothes.
+  @state() private skillDraft: string[] = [];
   @state() private servers: ServerRow[] = [];
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
@@ -287,10 +300,10 @@ export class ConsoleSettings extends LitElement {
   private async refresh() {
     this.problem = "";
     try {
-      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing, this.images] =
+      [this.agents, this.models, this.configs, this.prompts, this.servers, this.providers, this.tracing, this.images, this.skills] =
         await Promise.all([
           listAgents(), listModels(), listConfigs(), listPrompts(),
-          listServers(), listProviders(), tracingStatus(), listScriptImages(),
+          listServers(), listProviders(), tracingStatus(), listScriptImages(), listSkills(),
         ]);
       const t = this.tracing;
       if (t !== null) {
@@ -372,6 +385,7 @@ export class ConsoleSettings extends LitElement {
       case "Agents": return this.agentsTab();
       case "Models": return this.modelsTab();
       case "Prompts": return this.promptsTab();
+      case "Skills": return this.skillsTab();
       case "MCP": return this.mcpTab();
       case "Images": return this.imagesTab();
       case "Providers": return this.providersTab();
@@ -528,9 +542,9 @@ export class ConsoleSettings extends LitElement {
       ${this.head("Agents", "message-square")}
       <div class="bar">
         <button class="primary" data-new="agent"
-          @click=${() => this.open({ kind: "agent", row: { ...NEW_AGENT,
+          @click=${() => { this.skillDraft = []; this.open({ kind: "agent", row: { ...NEW_AGENT,
             modelConfigId: this.configs[0]?.id ?? "", promptId: this.prompts[0]?.id ?? "" },
-            fresh: true })}>
+            fresh: true }); }}>
           <nr-icon name="plus" size="small"></nr-icon> New agent
         </button>
       </div>
@@ -549,7 +563,10 @@ export class ConsoleSettings extends LitElement {
           <td>${a.id === entry?.id ? html`<span class="tag live">entry</span>` : ""}
               ${a.enabled ? "" : html`<span class="tag off">off</span>`}</td>
           ${this.rowActions([
-            { icon: "edit", title: `Edit ${a.agentName}`, run: () => this.open({ kind: "agent", row: { ...a }, fresh: false }) },
+            { icon: "edit", title: `Edit ${a.agentName}`, run: () => {
+              this.skillDraft = (a.skills ?? []).map((s) => s.id);
+              this.open({ kind: "agent", row: { ...a }, fresh: false });
+            } },
             { icon: "trash", title: `Delete ${a.agentName}`, danger: true,
               run: () => this.act(() => deleteAgent(a.id)) },
           ])}
@@ -598,7 +615,27 @@ export class ConsoleSettings extends LitElement {
           on: (v) => this.patch({ isDefault: v }) })}
       </div>
 
-      ${this.formActions(() => this.act(() => fresh ? createAgent(a) : updateAgent(a)))}
+      ${this.skills.length === 0 ? "" : html`
+        ${this.group("Skills", this.skillDraft.length)}
+        <div class="grid">
+          ${this.skills.map((k) => this.check({
+            id: `a-skill-${k.skillName}`, label: k.skillName,
+            checked: this.skillDraft.includes(k.id),
+            help: k.description,
+            on: (on) => { this.skillDraft = on
+              ? [...this.skillDraft.filter((x) => x !== k.id), k.id]
+              : this.skillDraft.filter((x) => x !== k.id); } }))}
+        </div>
+      `}
+
+      ${this.formActions(() => this.act(async () => {
+        // The row first — a fresh agent needs to exist before a link can name
+        // it — then the checklist's diff against what was stored.
+        if (fresh) { await createAgent(a); } else { await updateAgent(a); }
+        const before = fresh ? [] : (this.agents.find((x) => x.id === a.id)?.skills ?? []).map((s) => s.id);
+        for (const id of this.skillDraft.filter((x) => !before.includes(x))) { await linkSkill(a.id, id); }
+        for (const id of before.filter((x) => !this.skillDraft.includes(x))) { await unlinkSkill(a.id, id); }
+      }))}
     `;
   }
 
@@ -864,6 +901,128 @@ export class ConsoleSettings extends LitElement {
       ${this.formActions(
         () => this.act(() => createPrompt(p.promptName, p.body)), "Save version")}
     `;
+  }
+
+  // --- skills -------------------------------------------------------------------------
+
+  private skillsTab() {
+    const v = this.view;
+    if (v.kind === "skill") return this.skillForm(v.row, v.fresh, v.files);
+    const usedBy = (id: string) =>
+      this.agents.filter((a) => (a.skills ?? []).some((s) => s.id === id)).length;
+    return html`
+      ${this.head("Skills", "sticky-note")}
+      <div class="bar">
+        <button class="primary" data-new="skill"
+          @click=${() => this.open({ kind: "skill", fresh: true, files: [],
+            row: { id: "", skillName: "", description: "", body: "", updatedAt: "" } })}>
+          <nr-icon name="plus" size="small"></nr-icon> New skill
+        </button>
+      </div>
+
+      ${this.group("Skills", this.skills.length)}
+      <table><tbody>
+        ${this.skills.map((k) => html`<tr>
+          <td class="name">${k.skillName}</td>
+          <td class="fill dim"><span class="trunc">${k.description}</span></td>
+          <td><span class="tag">${usedBy(k.id)} agent${usedBy(k.id) === 1 ? "" : "s"}</span></td>
+          ${this.rowActions([
+            { icon: "edit", title: `Edit ${k.skillName}`,
+              run: async () => this.open({ kind: "skill", row: { ...k }, fresh: false,
+                files: await listSkillFiles(k.id) }) },
+            { icon: "trash", title: `Delete ${k.skillName}`, danger: true,
+              run: () => this.act(() => deleteSkill(k.id)) },
+          ])}
+        </tr>`)}
+      </tbody></table>
+      <p class="note">The briefing shows each agent its skills as one line each; the body arrives
+      only when the model loads it with use_skill. Editing is in place — a skill is read fresh on
+      every load, so the next call sees the change.</p>
+    `;
+  }
+
+  private skillForm(k: SkillRow, fresh: boolean, files: SkillFileRow[]) {
+    return html`
+      ${this.formHead(fresh ? "New skill" : `Edit ${k.skillName}`)}
+      <div class="grid">
+        ${this.text({ id: "sk-name", label: "Name", value: k.skillName, required: true,
+          disabled: !fresh, placeholder: "read-proto-enums",
+          help: fresh
+            ? "What the model sends to use_skill — and a directory name in the container, so letters, digits, dot, dash, underscore."
+            : "The name is what agents' briefings already say, so it is fixed once the row exists.",
+          on: (v) => this.patch({ skillName: v }) })}
+        ${this.text({ id: "sk-id", label: "Id", value: k.id, required: true,
+          disabled: !fresh, placeholder: "k-read-proto-enums",
+          on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "sk-desc", label: "Description", value: k.description, wide: true, required: true,
+          placeholder: "One line: when should a model reach for this?",
+          help: "The line the briefing shows on every turn — it is how the skill is chosen, so write it for the moment of need.",
+          on: (v) => this.patch({ description: v }) })}
+        ${this.editor({ id: "sk-body", label: "Instructions", value: k.body, required: true,
+          help: "Markdown. Loaded whole by use_skill when a task matches the description — procedures, invocations, the files below and how to run them.",
+          on: (v) => this.patch({ body: v }) })}
+      </div>
+      ${this.formActions(() => this.act(() =>
+        fresh ? createSkill({ ...k, updatedAt: new Date().toISOString() })
+              : updateSkill({ ...k, updatedAt: new Date().toISOString() })))}
+
+      ${fresh ? "" : html`
+        ${this.group("Files", files.length)}
+        <p class="note">Staged into the conversation's container at
+        <span class="slug">/skills/${k.skillName}/</span> fresh on every run — the body should tell
+        the model to run them rather than retype them.</p>
+        ${files.map((f) => html`
+          <div class="grid">
+            ${this.editor({ id: `sk-file-${f.path}`, label: f.path, value: f.body,
+              on: (v) => this.patchFile(f.id, v) })}
+          </div>
+          <div class="bar">
+            <button class="act" title=${`Save ${f.path}`}
+              @click=${() => this.fileAct(k, () => updateSkillFile(files.find((x) => x.id === f.id) ?? f))}>
+              <nr-icon name="check" size="small"></nr-icon> Save ${f.path}</button>
+            <button class="act danger" title=${`Delete ${f.path}`}
+              @click=${() => this.fileAct(k, () => deleteSkillFile(k.id, f.id))}>
+              <nr-icon name="trash" size="small"></nr-icon></button>
+          </div>
+        `)}
+        <div class="grid">
+          ${this.text({ id: "sk-newfile", label: "New file", value: "",
+            placeholder: "enums.py",
+            help: "A plain name; it appears under this skill's directory. Add it, then edit its body above.",
+            on: () => undefined })}
+        </div>
+        <div class="bar">
+          <button class="act" data-new="skill-file" @click=${() => this.addFile(k)}>
+            <nr-icon name="plus" size="small"></nr-icon> Add file</button>
+        </div>
+      `}
+    `;
+  }
+
+  // A file edit stays on the form: the view's copy is patched as the editor
+  // types, and a save re-reads the file list rather than trusting the draft.
+  private patchFile(fileId: string, body: string) {
+    const v = this.view;
+    if (v.kind !== "skill") return;
+    this.view = { ...v, files: v.files.map((f) => f.id === fileId ? { ...f, body } : f) };
+  }
+
+  private async fileAct(k: SkillRow, work: () => Promise<unknown>) {
+    this.problem = "";
+    try {
+      await work();
+      const files = await listSkillFiles(k.id);
+      this.view = { kind: "skill", row: k, fresh: false, files };
+    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+  }
+
+  private async addFile(k: SkillRow) {
+    const name = (this.renderRoot.querySelector("#sk-newfile") as unknown as { value?: string })?.value ?? "";
+    if (name.trim() === "") { this.problem = "a file needs a name"; return; }
+    await this.fileAct(k, () => createSkillFile({
+      id: `${k.id}:${name.trim()}`, skillId: k.id, path: name.trim(),
+      body: "# " + name.trim() + "\n",
+    }));
   }
 
   // --- MCP servers --------------------------------------------------------------------

@@ -218,22 +218,29 @@ export type SayReply = {
 
 const BASE = "/api";
 
-// Where a refused request sends the browser. A deployment that fronts this
-// console with an authenticating proxy serves a login there; a community
-// deployment never answers 401 at all, so this is never reached.
-const LOGIN = "/auth/login";
+// What a refused request raises. The console answers 401 with an overlay of
+// its own (src/login-overlay.ts) rather than a navigation: leaving the page
+// meant the gateway had to serve another application's whole single-page
+// build under this hostname, and that proxying — its entry chunk, the modules
+// that chunk imports, its stylesheets, its loader routes — was the cause of
+// three separate outages in one day, none of them about signing in.
+//
+// An event, not a direct render, because `call` is used from every component
+// and must not know which one is holding the shell.
+export const SIGNED_OUT = "agents:signed-out";
 
 // A 401 is not an error to render — it means nobody is signed in, and the only
 // useful response is to go and sign in. Without this the console drew an empty
 // conversation list to a logged-out visitor: the product, apparently working,
 // apparently containing nothing. `returnTo` is a path, never a full URL, so a
 // crafted link cannot use this to bounce anyone off-site.
-let leaving = false;
+let announced = false;
 function toLogin(): void {
-  if (leaving) { return; }
-  leaving = true;
-  const here = location.pathname + location.search;
-  location.assign(`${LOGIN}?returnTo=${encodeURIComponent(here)}`);
+  // Once per page: several calls fail together on a cold load, and the shell
+  // needs one signal, not one per request in flight.
+  if (announced) { return; }
+  announced = true;
+  window.dispatchEvent(new CustomEvent(SIGNED_OUT));
 }
 
 // The signed-in caller, as the front door describes them. Shaped by the

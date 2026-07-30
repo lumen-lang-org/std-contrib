@@ -11,7 +11,7 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@nuraly/lumenjs": "file:vendor/nuraly-lumenjs-0.16.2.tgz",
+    "@nuraly/lumenjs": "file:vendor/nuraly-lumenjs-0.16.3-codejar.tgz",
     "@nuraly/lumenui": "file:vendor/nuraly-lumenui-0.16.2.tgz",
     "better-sqlite3": "^12.11.1",
     "docx-preview": "^0.4.0",

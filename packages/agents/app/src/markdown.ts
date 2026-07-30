@@ -34,23 +34,43 @@ export function renderMarkdown(escaped: string): string {
   const lines = escaped.split("\n");
   const out: string[] = [];
   let list: "ul" | "ol" | null = null;
-  let fenced = false;
+  // How many backticks opened the fence we are inside, or 0 for "not in one".
+  //
+  // The count is the whole point, and getting it wrong loses text. A fence is
+  // closed only by a run of AT LEAST as many backticks as opened it — so a
+  // ```` block can quote a ``` block, which is exactly how a model shows a
+  // reader what a save instruction looks like without issuing one. Treating
+  // every line that starts with three backticks as a delimiter closed the
+  // outer fence on the inner opener, ate that line, and rendered the quoted
+  // payload as an ordinary paragraph: the console showed
+  // `<script>fetch(...)</script>` as prose and silently dropped the
+  // `path=/owned.html` beside it, which is the half of the quote that tells
+  // the reader what they are looking at.
+  let fence = 0;
 
   const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  const ticks = (line: string) => /^(`{3,})/.exec(line)?.[1].length ?? 0;
 
   for (const line of lines) {
-    if (line.startsWith("```")) {
-      closeList();
-      if (!fenced) {
-        out.push('<pre style="background:rgba(125,125,125,.1);padding:10px 12px;border-radius:8px;overflow-x:auto;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap"><code>');
-        fenced = true;
-      } else {
+    const run = ticks(line);
+    // Inside a fence, only a bare run of at least the opening length closes it.
+    // Anything else — including a shorter fence, or a longer one carrying an
+    // info string — is content.
+    if (fence > 0) {
+      if (run >= fence && line.slice(run).trim() === "") {
         out.push("</code></pre>");
-        fenced = false;
+        fence = 0;
+      } else {
+        out.push(line + "\n");
       }
       continue;
     }
-    if (fenced) { out.push(line + "\n"); continue; }
+    if (run > 0) {
+      closeList();
+      out.push('<pre style="background:rgba(125,125,125,.1);padding:10px 12px;border-radius:8px;overflow-x:auto;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap"><code>');
+      fence = run;
+      continue;
+    }
 
     const heading = /^(#{1,4})\s+(.*)$/.exec(line);
     if (heading) {
@@ -77,6 +97,8 @@ export function renderMarkdown(escaped: string): string {
     out.push(`<div>${inline(line)}</div>`);
   }
   closeList();
-  if (fenced) { out.push("</code></pre>"); }
+  // A fence the model never closed — a reply cut off mid-block — still has to
+  // produce balanced markup.
+  if (fence > 0) { out.push("</code></pre>"); }
   return out.join("");
 }

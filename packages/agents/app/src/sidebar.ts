@@ -3,7 +3,8 @@
 
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { ThreadListing } from "./api.js";
+import type { Me, ThreadListing } from "./api.js";
+import { isAdmin } from "./api.js";
 
 @customElement("console-sidebar")
 export class ConsoleSidebar extends LitElement {
@@ -23,14 +24,16 @@ export class ConsoleSidebar extends LitElement {
     /* Actions and navigation share one row shape, so the rail reads as a
        single list rather than as three stacked widgets. */
     .item { display: flex; align-items: center; gap: 10px; margin: 1px 8px;
-            padding: 7px 8px; border-radius: 8px; cursor: pointer;
-            color: var(--fg); font-size: 14px; }
+            padding: 8px 10px; border-radius: 12px; cursor: pointer;
+            color: var(--fg); font-size: 14px;
+            transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .item:hover { background: var(--bg-sunken); }
     .item nr-icon { color: var(--muted); }
 
     /* Search is a row until it is used, like every other row here. */
     .find { display: flex; align-items: center; gap: 10px; margin: 1px 8px;
-            padding: 7px 8px; border-radius: 8px; }
+            padding: 8px 10px; border-radius: 12px;
+            transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .find:focus-within { background: var(--bg-sunken); }
     .find nr-icon { color: var(--muted); }
     .find input { flex: 1; min-width: 0; background: none; border: 0; padding: 0;
@@ -41,16 +44,19 @@ export class ConsoleSidebar extends LitElement {
              font-weight: 500; }
 
     nav { flex: 1; overflow-y: auto; padding-bottom: 8px; }
-    .thread { margin: 1px 8px; padding: 7px 8px; cursor: pointer; border-radius: 8px;
+    .thread { margin: 1px 8px; padding: 7px 10px; cursor: pointer; border-radius: 12px;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-              font-size: 13.5px; color: var(--muted); }
+              font-size: 13.5px; color: var(--muted);
+              transition: background-color .15s cubic-bezier(.23,1,.32,1),
+                          color .15s cubic-bezier(.23,1,.32,1); }
     .thread:hover { background: var(--bg-sunken); color: var(--fg); }
     .thread.active { color: var(--fg); background: var(--bg-sunken); }
     .none { padding: 8px 16px; color: var(--muted); font-size: 13px; }
 
     footer { position: relative; border-top: 1px solid var(--border); padding: 8px; }
     .me { display: flex; align-items: center; gap: 10px; cursor: pointer;
-          border-radius: 8px; padding: 6px 8px; }
+          border-radius: 12px; padding: 6px 10px;
+          transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .me:hover { background: var(--bg-sunken); }
     .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--brand);
               color: var(--accent-fg); display: grid; place-items: center;
@@ -71,8 +77,25 @@ export class ConsoleSidebar extends LitElement {
 
   @property({ type: Array }) threads: ThreadListing[] = [];
   @property() activeId = "";
+  // Null until asked, and null again where nothing authenticates — see
+  // `whoami` in api.ts for why those two are not the same answer.
+  @property({ attribute: false }) me: Me | null = null;
   @state() private filter = "";
   @state() private menu = false;
+
+  // A name to show, preferring what a person would recognise. The gateway
+  // fills `username` from the token's email when the claim carries no name,
+  // so an address is the common case and the local part reads better in 13px.
+  private name(): string {
+    if (this.me === null) { return "Agents"; }
+    const said = this.me.username !== "" ? this.me.username : this.me.email;
+    return said.includes("@") ? said.split("@")[0] : said;
+  }
+
+  private initial(): string {
+    const n = this.name();
+    return n === "" ? "?" : n[0].toUpperCase();
+  }
 
   private shown(): ThreadListing[] {
     const q = this.filter.trim().toLowerCase();
@@ -124,12 +147,18 @@ export class ConsoleSidebar extends LitElement {
 
       <footer>
         ${this.menu ? html`<div class="menu">
-          <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>
+          ${isAdmin(this.me) ? html`
+            <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>
+          ` : ""}
+          ${this.me !== null ? html`
+            <div @click=${() => { location.assign("/logout"); }}>Sign out</div>
+          ` : ""}
           <div class="about">Agent console · std-contrib</div>
         </div>` : ""}
-        <div class="me" @click=${() => { this.menu = !this.menu; }}>
-          <span class="avatar">A</span>
-          <span class="who">Agents</span>
+        <div class="me" @click=${() => { this.menu = !this.menu; }}
+             title=${this.me === null ? "" : this.me.email}>
+          <span class="avatar">${this.initial()}</span>
+          <span class="who">${this.me === null ? "Agents" : this.name()}</span>
           <nr-icon name="chevron-up" size="small"></nr-icon>
         </div>
       </footer>
