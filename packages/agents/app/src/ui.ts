@@ -41,6 +41,28 @@ import "@nuraly/lumenui/overlay";
 // Composites: each of these needs some of the above already registered.
 import "@nuraly/lumenui/select";
 import "@nuraly/lumenui/popconfirm";
-import "@nuraly/lumenui/code-editor";
-import "@nuraly/lumenui/canvas";
+// Browser-only, and `ssr.external` is not the lever for it.
+//
+// codejar's first line is `const globalWindow = window`, evaluated on import.
+// Externalising the specifier only changes WHO loads it — Node then evaluates
+// the same line and throws the same ReferenceError, which is why an
+// ssr.external entry for it made no difference at all. The module simply must
+// not be loaded on the server.
+//
+// The cost is nothing: nr-code-editor is the prompt editor in Settings, a
+// surface that exists only after a click, and a component registered a tick
+// later than the rest is indistinguishable from one registered with them.
+if (!import.meta.env.SSR) {
+  void import("@nuraly/lumenui/code-editor");
+}
+// Browser-only, for the same reason and by the same route: canvas carries
+// nr-code-editor (see this file's history and app/CLAUDE.md), so it reaches
+// codejar and its `const globalWindow = window` — guarding the code-editor
+// import alone changed nothing while canvas still pulled it in.
+//
+// The agent graph is a view you navigate to, so nothing on a first paint
+// needs it.
+if (!import.meta.env.SSR) {
+  void import("@nuraly/lumenui/canvas");
+}
 import "@nuraly/lumenui/chatbot";
