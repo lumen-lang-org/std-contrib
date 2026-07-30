@@ -7,7 +7,6 @@ import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import "./ui.js";
 import "./sidebar.js";
-import "./workspace-panel.js";
 import "./artifact-panel.js";
 import "./settings.js";
 import "./knowledge.js";
@@ -109,7 +108,7 @@ export class AgentConsole extends LitElement {
       /* The drawer toggle only exists where the drawer does. */
       .icon.nav { display: inline-grid; }
       /* The second rail stops sharing the width and covers instead. */
-      workspace-panel, artifact-panel {
+      artifact-panel {
         position: fixed; inset: 0 0 0 auto; z-index: 50;
         width: min(420px, 100vw); box-shadow: 0 0 32px -8px rgba(0,0,0,.28);
       }
@@ -137,7 +136,7 @@ export class AgentConsole extends LitElement {
       /* The model chip is the first thing to go: it names a choice you make
          rarely, and the picker beside it still says which agent is answering. */
       .chip { display: none; }
-      workspace-panel, artifact-panel { width: 100vw; }
+      artifact-panel { width: 100vw; }
       .cards { padding: 8px 12px 12px; }
       .card { max-width: 100%; }
     }
@@ -201,7 +200,11 @@ export class AgentConsole extends LitElement {
   // are 320px against a chat pane that is already the narrowest thing here,
   // and the files a conversation works from and the results it produced are
   // read one after the other, not side by side.
-  @state() private rail: "" | "workspace" | "artifacts" = "";
+  /* One rail now. It carries artifacts and the conversation's workspace
+     files in a single navigable tree; "artifacts" stays the internal name
+     (and the button's title) because four e2e specs and the artifact deep
+     links address it by that word. */
+  @state() private rail: "" | "artifacts" = "";
   @state() private settings = false;
   @state() private view: "chat" | "knowledge" | "canvas" = "chat";
   // Who the front door says is calling. Null where nothing authenticates, which
@@ -338,7 +341,7 @@ export class AgentConsole extends LitElement {
 
   // Clicking the rail that is already open closes it, which is what a pressed
   // toggle should do.
-  private show(which: "workspace" | "artifacts") {
+  private show(which: "artifacts") {
     if (this.rail === which) { this.rail = ""; this.railClosed = true; return; }
     this.rail = which;
   }
@@ -495,10 +498,8 @@ export class AgentConsole extends LitElement {
                   <option value=${a.id} ?selected=${a.id === this.agentId}>${a.agentName}</option>`)}
               </select>` : this.agentName()}
           </span>
-          <button class="icon" title="Workspace" aria-pressed=${this.rail === "workspace"}
-            @click=${() => this.show("workspace")}><nr-icon name="folder" size="small"></nr-icon></button>
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
-            @click=${() => this.show("artifacts")}><nr-icon name="file-text" size="small"></nr-icon></button>
+            @click=${() => this.show("artifacts")}><nr-icon name="folder" size="small"></nr-icon></button>
         </header>
         <main>
           <!-- The session is the controller. Messages are not passed in: the
@@ -532,8 +533,6 @@ export class AgentConsole extends LitElement {
         </div>`}`}
       </div>
 
-      ${this.rail === "workspace"
-        ? html`<workspace-panel .threadId=${this.threadId}></workspace-panel>` : ""}
       ${this.rail === "artifacts"
         ? html`<artifact-panel .threadId=${this.threadId}
             .ensureThread=${() => this.session.ensureThread()}></artifact-panel>` : ""}

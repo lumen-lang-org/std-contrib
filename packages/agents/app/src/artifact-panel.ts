@@ -22,6 +22,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import {
   ArtifactListing, ArtifactVersion, deleteArtifact, listArtifacts, previewUrl,
   readArtifactVersion, rotateArtifact, uploadFileArtifact,
+  WorkspaceFile, listFiles, readFile,
 } from "./api.js";
 import { DiffRow, diffCounts, diffLines } from "./diff.js";
 import * as live from "./live.js";
@@ -207,6 +208,25 @@ export class ArtifactPanel extends LitElement {
     .hljs-string { color: #2f8a4c; }
     .hljs-number, .hljs-literal { color: #a3512e; }
     .hljs-punctuation { color: var(--muted); }
+
+    /* --- the tree (Kimi's All files, in this palette) -------------------- */
+    .row { display: flex; align-items: center; gap: 12px; padding: 7px 10px;
+           border-radius: 10px; cursor: pointer; }
+    .row:hover { background: var(--bg-user); }
+    .tile { width: 38px; height: 38px; flex: none; display: grid; place-items: center;
+            border: 1px solid var(--border); border-radius: 11px;
+            color: var(--muted); background: var(--bg-card); }
+    .row .fbody { flex: 1; min-width: 0; }
+    .fname { font-size: 14px; color: var(--fg); overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+    .fmeta { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .chev { color: var(--muted); flex: none; }
+    .indent { margin-left: 26px; }
+    .sect { margin: 10px 16px 2px; font-size: 11.5px; text-transform: uppercase;
+            letter-spacing: 0.06em; color: var(--muted); }
+    .wsread { flex: 1; overflow: auto; margin: 8px; padding: 12px; font-size: 12.5px;
+              background: var(--bg-card); border: 1px solid var(--border);
+              border-radius: 8px; white-space: pre-wrap; }
   `;
 
   @property() threadId = "";
@@ -273,6 +293,16 @@ export class ArtifactPanel extends LitElement {
   }
 
   @state() private artifacts: ArtifactListing[] = [];
+  /* The conversation's workspace files, in the same rail. One panel, because
+     a person asking "what did this conversation produce" should not have to
+     know which of two buttons the answer is behind — Kimi's "All files" is
+     the model: one tree, folders first, sizes and kinds on the rows. */
+  @state() private wsFiles: WorkspaceFile[] = [];
+  @state() private wsOpen = "";
+  @state() private wsContent = "";
+  /* Folders the reader closed. Paths, not names: two folders may share a
+     name at different depths. Everything starts open, as Kimi does. */
+  @state() private folded = new Set<string>();
   // The artifact being read, and the version of it on screen. Two pieces of
   // state and not one: the frame is pinned to a version number, and the row
   // carries the token that number is addressed through.
@@ -357,8 +387,11 @@ export class ArtifactPanel extends LitElement {
   async refresh() {
     if (this.threadId === "") {
       this.artifacts = [];
+      this.wsFiles = [];
       return;
     }
+    // Both halves of the tree; neither may take the other down with it.
+    this.wsFiles = await listFiles(this.threadId).catch(() => [] as WorkspaceFile[]);
     const listed = await listArtifacts(this.threadId).catch(() => [] as ArtifactListing[]);
     this.sortInto(listed);
   }
@@ -393,9 +426,113 @@ export class ArtifactPanel extends LitElement {
   private close() {
     this.open = null;
     this.shown = null;
+    this.wsOpen = "";
     this.arming = "";
     this.problem = "";
     this.said = "";
+  }
+
+  private async showWs(name: string) {
+    const file = await readFile(this.threadId, name).catch(() => null);
+    if (file === null) { return; }
+    this.wsOpen = name;
+    this.wsContent = file.content;
+  }
+
+  // --- the tree ---------------------------------------------------------------
+  // Folders come from the artifact paths themselves: "site/css/main.css" is a
+  // file main.css inside css inside site. Nothing invents structure — a flat
+  // conversation renders as flat rows, which is also what Kimi does.
+
+  private static iconFor(kind: string, mime: string, name: string): string {
+    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+    if (kind === "image" || mime.startsWith("image/") || ["png","jpg","jpeg","gif","svg","webp"].includes(ext)) return "image";
+    if (["csv","tsv","parquet"].includes(ext) || mime === "text/csv") return "table";
+    if (kind === "html" || kind === "json" || kind === "code" || ["ts","js","py","sh","html","json","css"].includes(ext)) return "code";
+    if (kind === "markdown" || kind === "text" || mime.startsWith("text/")) return "file-text";
+    return "file";
+  }
+
+  /* Artifacts, as nested folders. A node owns the files directly in it and
+     the folders under it; rendering walks depth-first with indentation. */
+  private tree() {
+    type Node = { path: string; dirs: Map<string, Node>; files: ArtifactListing[] };
+    const root: Node = { path: "", dirs: new Map(), files: [] };
+    for (const a of this.artifacts) {
+      const parts = a.path.split("/").filter((p) => p !== "");
+      let at = root;
+      for (const dir of parts.slice(0, -1)) {
+        let next = at.dirs.get(dir);
+        if (next === undefined) {
+          next = { path: at.path + "/" + dir, dirs: new Map(), files: [] };
+          at.dirs.set(dir, next);
+        }
+        at = next;
+      }
+      at.files.push(a);
+    }
+    const fileRow = (a: ArtifactListing, depth: number) => {
+      const name = a.path.split("/").filter(Boolean).pop() ?? a.path;
+      return html`
+        <div class="row ${depth > 0 ? "indent" : ""}" style=${depth > 1 ? `margin-left:${depth * 26}px` : ""}
+          title=${a.path} @click=${() => this.show(a, a.version)}>
+          <span class="tile"><nr-icon name=${ArtifactPanel.iconFor(a.kind, a.mime, name)}></nr-icon></span>
+          <span class="fbody">
+            <div class="fname">${this.label(a)}</div>
+            <div class="fmeta">${a.kind} · ${a.version} version${a.version === 1 ? "" : "s"}</div>
+          </span>
+        </div>`;
+    };
+    const folderRow = (name: string, node: Node, depth: number): unknown => {
+      const closed = this.folded.has(node.path);
+      const count = node.files.length + node.dirs.size;
+      return html`
+        <div class="row ${depth > 0 ? "indent" : ""}" style=${depth > 1 ? `margin-left:${depth * 26}px` : ""}
+          @click=${() => this.toggleFold(node.path)}>
+          <span class="tile"><nr-icon name="folder"></nr-icon></span>
+          <span class="fbody">
+            <div class="fname">${name}</div>
+            <div class="fmeta">${count} item${count === 1 ? "" : "s"}</div>
+          </span>
+          <nr-icon class="chev" name=${closed ? "chevron-right" : "chevron-down"} size="small"></nr-icon>
+        </div>
+        ${closed ? "" : html`
+          ${[...node.dirs.entries()].map(([n, d]) => folderRow(n, d, depth + 1))}
+          ${node.files.map((f) => fileRow(f, depth + 1))}`}`;
+    };
+    return html`
+      ${[...root.dirs.entries()].map(([n, d]) => folderRow(n, d, 0))}
+      ${root.files.map((f) => fileRow(f, 0))}`;
+  }
+
+  /* The conversation's working files, as one more folder in the same tree —
+     "workspace", after the artifacts, closed by the same chevron. */
+  private workspaceRows() {
+    if (this.wsFiles.length === 0) { return ""; }
+    const closed = this.folded.has("/workspace");
+    return html`
+      <div class="row" @click=${() => this.toggleFold("/workspace")}>
+        <span class="tile"><nr-icon name="folder"></nr-icon></span>
+        <span class="fbody">
+          <div class="fname">workspace</div>
+          <div class="fmeta">${this.wsFiles.length} file${this.wsFiles.length === 1 ? "" : "s"} the agent works on</div>
+        </span>
+        <nr-icon class="chev" name=${closed ? "chevron-right" : "chevron-down"} size="small"></nr-icon>
+      </div>
+      ${closed ? "" : this.wsFiles.map((f) => html`
+        <div class="row indent" @click=${() => this.showWs(f.name)}>
+          <span class="tile"><nr-icon name=${ArtifactPanel.iconFor("", f.mime, f.name)}></nr-icon></span>
+          <span class="fbody">
+            <div class="fname">${f.name}</div>
+            <div class="fmeta">${f.mime} · ${f.origin}</div>
+          </span>
+        </div>`)}`;
+  }
+
+  private toggleFold(path: string) {
+    const next = new Set(this.folded);
+    if (next.has(path)) { next.delete(path); } else { next.add(path); }
+    this.folded = next;
   }
 
   // Open straight onto one landing's diff — what a chip in a chat card asks
@@ -752,11 +889,21 @@ export class ArtifactPanel extends LitElement {
   }
 
   render() {
+    if (this.wsOpen !== "") {
+      return html`
+        ${this.grip()}
+        <h3><span>${this.wsOpen}</span>
+          <nr-button size="small" title="Back to files" @click=${() => { this.wsOpen = ""; }}>
+            <nr-icon name="chevron-left" size="small"></nr-icon>
+          </nr-button>
+        </h3>
+        <pre class="wsread">${this.wsContent}</pre>`;
+    }
     if (this.open !== null) return this.viewing();
     return html`
       ${this.grip()}
       <h3>
-        <span>Artifacts</span>
+        <span>Files</span>
         <nr-button id="a-upload" size="small" title="Upload a file as an artifact"
           @click=${() => (this.renderRoot.querySelector("#a-file") as HTMLInputElement)?.click()}>
           <nr-icon name="upload" size="small"></nr-icon>
@@ -773,15 +920,10 @@ export class ArtifactPanel extends LitElement {
       ${this.said === "" ? "" : html`<div class="said">${this.said}</div>`}
       <div class="list">
         ${this.threadId === "" ? html`<div class="none">Open a conversation first.</div>` : ""}
-        ${this.threadId !== "" && this.artifacts.length === 0
+        ${this.threadId !== "" && this.artifacts.length === 0 && this.wsFiles.length === 0
           ? html`<div class="none">Nothing produced in this conversation yet.</div>` : ""}
-        ${this.artifacts.map((a) => html`
-          <div class="artifact" @click=${() => this.show(a, a.version)}>
-            <div class="name">${this.label(a)}</div>
-            <div class="meta">
-              ${a.kind} · ${a.version} version${a.version === 1 ? "" : "s"}
-            </div>
-          </div>`)}
+        ${this.tree()}
+        ${this.workspaceRows()}
       </div>
     `;
   }
