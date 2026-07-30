@@ -178,14 +178,10 @@ export function sseToolsToRegistry(url: string, headers: Map<string, string>, to
 // trusted chunk encoder used by sse.test.ts: the decoder is validated directly
 // against hand-written literals there, so feeding it encoder output exercises
 // the compose path, not the decoder itself.
+//
+// A chunked-transfer length prefix is the size in lowercase hex, which is what
+// `toString(radix)` produces — no leading zeros and no minimum width, exactly as
+// RFC 9112 asks.
 function sseToHex(n: int): string {
-  if (n == 0) { return "0"; }
-  let digits = "0123456789abcdef";
-  let out = "";
-  let v = n;
-  while (v > 0) {
-    out = digits.charAt(v % 16) + out;
-    v = v / 16;
-  }
-  return out;
+  return n.toString(16);
 }
