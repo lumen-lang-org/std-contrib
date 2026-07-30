@@ -14,28 +14,31 @@
 // it rather than by machinery.
 
 import { controller } from "../rest/controller.ts";
-import { Request, Reply, Mount, mountedRoutes, listen, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
 import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
-import { migrate } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, schemaPlan } from "./schema.ts";
+import { migrate, appliedHighWater } from "../plume/migrate.ts";
+import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, schemaPlan } from "./schema.ts";
 import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText } from "./provider.ts";
-import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
+import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText } from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { ThreadListing, ThreadTurnRow, listThreads, openThread, threadAgent, threadMessageRows, runInThread, threadPlan } from "./threads.ts";
+import { ThreadListing, ThreadTurnRow, listThreads, openThread, ownedThread, threadOwner, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThread, threadPlan } from "./threads.ts";
+import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
+import { ownerUsage, usageJson } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
-import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
+import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
+import { scriptEnvNameProblem } from "./run-script.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
-import { envPlan } from "./environments.ts";
+import { envPlan, envDockerUp } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
@@ -45,6 +48,7 @@ import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from 
 type ModelChange = { modelConfigId: string };
 type PromptChange = { promptId: string };
 type ServerLink = { serverId: string };
+type SkillLink = { skillId: string };
 type ChildLink = { childId: string };
 type KeyBody = { apiKey: string };
 type RunBody = { text: string };
@@ -61,6 +65,15 @@ type FilePull = { name: string, documentId: string };
 type DocumentUpload = { source: string, scope: string, body: string };
 type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number, enabled: bool };
 
+// Who is calling, as far as this process is willing to know — an empty list
+// unless a trusted proxy said otherwise, which is every deployment that has
+// not turned the gate on. owner.ts holds the whole of the contract; this is
+// the only line that reads it off a request, so that "did this route scope?"
+// is a question about one call and not about a header check copied sixteen
+// times.
+function callerTags(req: Request): string[] {
+  return tagsFromHeader(trustsProxyAuth(), header(req, "x-user"));
+}
 
 // Credentials, over the API. A key can be written and named; it can never be
 // read back. Anything that returns one is a leak waiting for a log line, and
@@ -268,6 +281,34 @@ class AgentApi {
     return ok(findById(this.db, this.full, param(req, "id")));
   }
 
+  // A skill on an agent is a link, exactly like a server: an INSERT the next
+  // run reads. Both sides are checked because a link to a skill that does not
+  // exist would sit invisible — the briefing joins through the skills table
+  // and would simply never list it.
+  @post("/:id/skills")
+  addSkill(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    let link: SkillLink = JSON.parse<SkillLink>(req.body);
+    if (!existsById(this.db, skillsMapping(), link.skillId)) {
+      return badRequest("no skill " + link.skillId);
+    }
+    executeWith(this.db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
+      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [param(req, "id"), link.skillId]);
+    return ok(findById(this.db, this.full, param(req, "id")));
+  }
+
+  @del("/:id/skills/:skillId")
+  removeSkill(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    executeWith(this.db, "DELETE FROM agent_skills WHERE agent_id = " + this.db.placeholder
+      + " AND skill_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "skillId")]);
+    return ok(findById(this.db, this.full, param(req, "id")));
+  }
+
   // What this agent may read. A grant is a fact, so granting twice is not an
   // error and does not duplicate the row.
   @get("/:id/scopes")
@@ -359,8 +400,12 @@ class AgentApi {
     let answered = runAgentTraced(this.db, param(req, "id"), body.text, this.master, tracer);
 
     // Logged either way: the runs an operator needs to read are mostly the
-    // ones that went wrong.
-    let runId = recordRun(this.db, param(req, "id"), body.text, answered);
+    // ones that went wrong. No thread asked, so the caller's own tag is the
+    // owner — there is no conversation to inherit one from.
+    let runId = recordRun(this.db, {
+      agentId: param(req, "id"), threadId: "", owner: owningTag(callerTags(req)),
+      question: body.text, run: answered,
+    });
 
     // The collector is told after the answer is in hand, and a collector that
     // is down or wrong does not cost the caller its answer -- it costs a
@@ -392,12 +437,16 @@ class AgentApi {
 
   // The agent's recent runs, newest first — the transcript side only. The
   // steps are behind /runs/:id, so a list view never pays for them.
+  //
+  // Scoped to the caller's own, in SQL. An agent is a shared row — everyone
+  // runs the same one — so an agent id is not a tenant boundary and this
+  // listing served every tenant's questions and answers to whoever asked.
   @get("/:id/runs")
   runs(req: Request): Reply {
     if (!existsById(this.db, this.flat, param(req, "id"))) {
       return notFound("agent " + param(req, "id"));
     }
-    return ok(runsOf(this.db, param(req, "id"), 50));
+    return ok(runsOf(this.db, param(req, "id"), callerTags(req), 50));
   }
 
   @del("/:id")
@@ -589,6 +638,183 @@ class ScriptImageApi {
       return notFound("script image " + param(req, "id"));
     }
     deleteWhere(this.db, scriptImagesMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    return noContent();
+  }
+}
+
+// The caps a skill is held to at the door. The description is a line in the
+// system prompt of every turn of every conversation its agent has, so one
+// bloated description taxes everything — 200 bytes, one line. The body and
+// each file arrive only on use, but a runaway one would lean on the tool
+// output cap every call, so 16 KB names the mistake earlier and better.
+export const SKILL_DESCRIPTION_MAX: int = 200;
+export const SKILL_MAX: int = 16384;
+
+// Why a skill row will not be written. The name is held to the environment
+// name rule because it becomes a container path segment — /skills/<name>/ —
+// and the file rule below keeps a path inside that directory.
+export function skillProblem(row: SkillRow): string {
+  if (row.skillName.trim() == "") { return "a skill needs a name — it is what use_skill is called with"; }
+  if (row.visibility != "private" && row.visibility != "public") {
+    return "visibility is 'private' or 'public' — nothing else";
+  }
+  if (row.featuredRank > 0 && row.visibility != "public") {
+    return "a featured skill must be public — featured is promotion, not access, and a featured private skill is a button most users cannot press";
+  }
+  if (row.featuredRank < 0) { return "featuredRank is 0 (not featured) or a positive position"; }
+  let named = scriptEnvNameProblem(row.skillName);
+  if (named != "") { return "a skill name becomes a container path: " + named; }
+  if (row.description.trim() == "") { return "a skill without a description cannot be chosen"; }
+  if (utf8Length(row.description) > SKILL_DESCRIPTION_MAX) {
+    return "a skill description is at most " + `${SKILL_DESCRIPTION_MAX}` + " bytes of UTF-8 — it is a line in every turn's briefing";
+  }
+  if (row.description.indexOf("\n") >= 0) { return "a skill description is one line"; }
+  if (row.body.trim() == "") { return "an empty skill is not an instruction"; }
+  if (utf8Length(row.body) > SKILL_MAX) {
+    return "a skill body is at most " + `${SKILL_MAX}` + " bytes of UTF-8; ship the bulk as files";
+  }
+  return "";
+}
+
+export function skillFileProblem(row: SkillFileRow): string {
+  if (row.path.trim() == "") { return "a skill file needs a name, such as enums.py"; }
+  if (row.path.indexOf("/") >= 0 || row.path.indexOf("..") >= 0) {
+    return "a skill file is a plain name inside its skill's directory — no slash, no dot-dot";
+  }
+  if (row.body == "") { return "an empty skill file carries nothing worth staging"; }
+  if (utf8Length(row.body) > SKILL_MAX) {
+    return "a skill file is at most " + `${SKILL_MAX}` + " bytes of UTF-8";
+  }
+  return "";
+}
+
+@controller("/skills")
+class SkillApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    // The chips row asks with ?featured=1: public, ranked, in rank order.
+    // Everything else (the settings tab) gets the whole list by name.
+    if (queryParam(req, "featured", "") == "1") {
+      let ranked: DbOrder[] = [asc("featured_rank")];
+      return ok(listOrdered(this.db, skillsMapping(),
+        "visibility = 'public' AND featured_rank > 0", [], ranked));
+    }
+    let keys: DbOrder[] = [asc("skill_name")];
+    return ok(listOrdered(this.db, skillsMapping(), "", [], keys));
+  }
+
+  // One row whole, body included — the edit form wants it. The full-agent
+  // view is the one place bodies are excluded, because it is read per run.
+  @get("/:id")
+  find(req: Request): Reply {
+    let held = findById(this.db, skillsMapping(), param(req, "id"));
+    if (held == "") { return notFound("skill " + param(req, "id")); }
+    return ok(held);
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let problem = createProblem(this.db, skillsMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
+    let row: SkillRow = JSON.parse<SkillRow>(req.body);
+    let named = skillProblem(row);
+    if (named != "") { return badRequest(named); }
+    let written = persist(this.db, skillsMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, skillsMapping(), jsonId(req.body)));
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
+    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
+      return notFound("skill " + param(req, "id"));
+    }
+    let row: SkillRow = JSON.parse<SkillRow>(req.body);
+    if (row.id != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    let named = skillProblem(row);
+    if (named != "") { return badRequest(named); }
+    let written = persist(this.db, skillsMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, skillsMapping(), param(req, "id")));
+  }
+
+  // Deleting a skill clears its links and files in the same route: there is
+  // no fallback for a dangling link the way a script image has a deployment
+  // default — it would just be a skill the console shows attached that the
+  // run never offers.
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
+      return notFound("skill " + param(req, "id"));
+    }
+    executeWith(this.db, "DELETE FROM agent_skills WHERE skill_id = " + this.db.placeholder, [param(req, "id")]);
+    deleteWhere(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    deleteWhere(this.db, skillsMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    return noContent();
+  }
+
+  // The files a skill ships. Listed with the skill, replaced one by one; a
+  // file's id is its own, so two skills can both ship an enums.py.
+  @get("/:id/files")
+  files(req: Request): Reply {
+    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
+      return notFound("skill " + param(req, "id"));
+    }
+    let keys: DbOrder[] = [asc("path")];
+    return ok(listOrdered(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [param(req, "id")], keys));
+  }
+
+  @post("/:id/files")
+  addFile(req: Request): Reply {
+    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
+      return notFound("skill " + param(req, "id"));
+    }
+    let problem = createProblem(this.db, skillFilesMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
+    let row: SkillFileRow = JSON.parse<SkillFileRow>(req.body);
+    if (row.skillId != param(req, "id")) {
+      return badRequest("the skillId in the body must match the path");
+    }
+    let named = skillFileProblem(row);
+    if (named != "") { return badRequest(named); }
+    let written = persist(this.db, skillFilesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, skillFilesMapping(), jsonId(req.body)));
+  }
+
+  @put("/:id/files/:fileId")
+  updateFile(req: Request): Reply {
+    if (!existsById(this.db, skillFilesMapping(), param(req, "fileId"))) {
+      return notFound("skill file " + param(req, "fileId"));
+    }
+    let row: SkillFileRow = JSON.parse<SkillFileRow>(req.body);
+    if (row.id != param(req, "fileId")) {
+      return badRequest("the id in the body must match the path");
+    }
+    if (row.skillId != param(req, "id")) {
+      return badRequest("the skillId in the body must match the path");
+    }
+    let named = skillFileProblem(row);
+    if (named != "") { return badRequest(named); }
+    let written = persist(this.db, skillFilesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, skillFilesMapping(), param(req, "fileId")));
+  }
+
+  @del("/:id/files/:fileId")
+  removeFile(req: Request): Reply {
+    if (!existsById(this.db, skillFilesMapping(), param(req, "fileId"))) {
+      return notFound("skill file " + param(req, "fileId"));
+    }
+    deleteWhere(this.db, skillFilesMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "fileId")]);
     return noContent();
   }
 }
@@ -954,7 +1180,11 @@ class ThreadApi {
   list(req: Request): Reply {
     let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
     let offset = parseInt(queryParam(req, "offset", "0")) ?? 0;
-    let rows = listThreads(this.db, limit, offset);
+    // No sweep here, and nowhere else on a request path: a read that destroys
+    // rows is, the moment threads have owners, one person's sidebar deleting
+    // somebody else's conversations. Where an operator asks for one it runs on
+    // a thread of its own; see `sweepLoop`.
+    let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset });
     let out = "[";
     let i: int = 0;
     while (i < rows.length) {
@@ -975,7 +1205,9 @@ class ThreadApi {
     if (!existsById(this.db, agentsMapping(), body.agentId)) {
       return badRequest("no agent " + body.agentId);
     }
-    let id = openThread(this.db, body.agentId, stamp());
+    // Stamped with the caller's own tag, never with the whole set it may read:
+    // a shared thread has one owner.
+    let id = openThread(this.db, { agentId: body.agentId, owner: owningTag(callerTags(req)), now: stamp() });
     if (id == "") { return badRequest("the thread could not be opened"); }
     return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(body.agentId) + "}");
   }
@@ -1000,7 +1232,7 @@ class ThreadApi {
   // case, not a mistake.
   @get("/:id/steps")
   steps(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     let asked = queryParam(req, "seq", "");
@@ -1032,7 +1264,9 @@ class ThreadApi {
   // Ask the thread. The reply is this turn's answer; the transcript is a GET.
   @post("/:id/messages")
   say(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    let tags = callerTags(req);
+    let agentId = ownedThread(this.db, param(req, "id"), tags);
+    if (agentId == "") {
       return notFound("thread " + param(req, "id"));
     }
     if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
@@ -1046,7 +1280,14 @@ class ThreadApi {
     // because the log is the audit trail of what the model actually said.
     // Extraction's notes fold in beside the run's own, so a refused fence is
     // read where an operator reads every other warning about the run.
-    let runId = recordRun(this.db, threadAgent(this.db, param(req, "id")), body.text, withNotes(run, answered.notes));
+    // The run is filed under the THREAD's owner, not the caller's tag: once
+    // sharing exists a guest may ask a question in somebody else's
+    // conversation, and the run belongs to the conversation.
+    let runId = recordRun(this.db, {
+      agentId: agentId, threadId: param(req, "id"),
+      owner: threadOwner(this.db, param(req, "id")),
+      question: body.text, run: withNotes(run, answered.notes),
+    });
 
     let traced = "";
     if (tracing(tracer) && run.spans.length > 0) {
@@ -1078,7 +1319,7 @@ class ThreadApi {
   // client maps cards by slot@version from `refs`, never by text order.
   @get("/:id")
   transcript(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     let said: ThreadTurnRow[] = threadMessageRows(this.db, param(req, "id"));
@@ -1149,6 +1390,12 @@ function refsJson(refs: WireRef[]): string {
 
 // The files a conversation is working on: uploaded by the user, written by
 // the model with its write_file tool, or pulled in from the corpus.
+//
+// Every route here opens with `ownedThread`, before it looks at a name or a
+// body. Three of them used to resolve the file straight out of
+// `workspace_files` by (thread, name) — correct about which row, silent about
+// whose — so a conversation id was the whole of the authorisation to read,
+// delete or publish somebody else's upload.
 @controller("/threads/:id/files")
 class WorkspaceApi {
   db: Db;
@@ -1161,7 +1408,7 @@ class WorkspaceApi {
 
   @get("/")
   list(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     let files = listFiles(this.db, param(req, "id"));
@@ -1183,7 +1430,7 @@ class WorkspaceApi {
   // is not pretended to work.
   @post("/")
   upload(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     if (req.body == "") { return badRequest("a body is required: {\"name\":\"notes.md\",\"content\":\"...\"}"); }
@@ -1195,6 +1442,9 @@ class WorkspaceApi {
 
   @get("/:name")
   read(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     let file = getFile(this.db, param(req, "id"), param(req, "name"));
     if (file.id == "") { return notFound("file " + param(req, "name")); }
     return ok("{\"name\":" + JSON.stringify(file.fileName)
@@ -1205,6 +1455,9 @@ class WorkspaceApi {
 
   @del("/:name")
   remove(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     if (getFile(this.db, param(req, "id"), param(req, "name")).id == "") {
       return notFound("file " + param(req, "name"));
     }
@@ -1216,11 +1469,11 @@ class WorkspaceApi {
   // agent can then read it whole, which retrieval never offers.
   @post("/pull")
   pull(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     if (this.db.name != "postgres") {
       return badRequest("the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
-    if (threadAgent(this.db, param(req, "id")) == "") {
-      return notFound("thread " + param(req, "id"));
     }
     let body: FilePull = JSON.parse<FilePull>(req.body);
     let document = findById(this.db, documentsMapping(), body.documentId);
@@ -1236,6 +1489,11 @@ class WorkspaceApi {
   // team knowledge, and the file's documentId is the audit trail.
   @post("/:name/promote")
   promote(req: Request): Reply {
+    // Ownership first, even before the dialect check: which database this runs
+    // on is not something a caller with no business here needs told.
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     if (this.db.name != "postgres") {
       return badRequest("the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
     }
@@ -1311,7 +1569,7 @@ class ArtifactApi {
 
   @get("/")
   list(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     let rows = listArtifacts(this.db, param(req, "id"));
@@ -1330,7 +1588,7 @@ class ArtifactApi {
   // knows which of two concurrent saves it won.
   @post("/")
   create(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     if (req.body == "") {
@@ -1366,7 +1624,7 @@ class ArtifactApi {
   // literal is written second — the parameter would shadow it.
   @get("/by-turn")
   byTurn(req: Request): Reply {
-    if (threadAgent(this.db, param(req, "id")) == "") {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
     let turn = queryParam(req, "turn", "");
@@ -1396,6 +1654,9 @@ class ArtifactApi {
 
   @get("/:slot")
   find(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
     if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
     return ok(artifactJson(artifact));
@@ -1406,6 +1667,9 @@ class ArtifactApi {
   // preview link.
   @get("/:slot/versions/:n")
   version(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
     if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
     let row = getVersion(this.db, artifact.id, parseInt(param(req, "n")) ?? 0);
@@ -1432,6 +1696,9 @@ class ArtifactApi {
   // intent. The versions log is append-only and takes an explicit INSERT.
   @post("/:slot/rotate")
   rotate(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
     if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
 
@@ -1484,6 +1751,9 @@ class ArtifactApi {
   // The artifact and every version it ever had. There is no undo.
   @del("/:slot")
   remove(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
     let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
     if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
     let problem = deleteArtifact(this.db, param(req, "id"), artifact.path);
@@ -1668,10 +1938,14 @@ function previewType(req: Request, mime: string): string {
 // Injected only into a CURRENT html body on the preview host. A pinned ?v= is
 // history and history does not reload; a sibling stylesheet is not a document;
 // off the preview host everything is text/plain and runs nothing anyway.
-function previewChrome(token: string, stamp: string): string {
+// `newest` and not `stamp`: `stamp()` is a function in this module, and a
+// parameter that shadows it resolved to the function under some compilations —
+// JSON.stringify of a function, concatenated into a string, and a type error
+// pointing at the return rather than at the name.
+function previewChrome(token: string, newest: string): string {
   return "\n<script>(function(){"
     + "var base='/preview/'+" + JSON.stringify(token) + ";"
-    + "var was=" + JSON.stringify(stamp) + ";"
+    + "var was=" + JSON.stringify(newest) + ";"
     + "setInterval(function(){fetch(base+'/__version',{cache:'no-store'})"
     + ".then(function(r){return r.text()})"
     + ".then(function(v){if(v!==was){location.reload()}})"
@@ -1763,6 +2037,13 @@ function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: str
 // link shared once grants read of every artifact in that conversation, not just
 // the one the link names. It is the price of relative URLs resolving the way an
 // author wrote them, and `rotate` is still the answer when a link gets out.
+//
+// Deliberately outside the owner guard, then — the one place in this file a
+// `/threads/:id/...` resolution is not what decides. A token is a capability:
+// whoever holds it reads the thread's artifacts, owner or not, which is the
+// whole point of handing a link to a reader who has no account. Said here
+// rather than left for someone to discover, because "the owner check covers
+// everything" would be false and this is where it is false.
 @controller("/preview")
 class PreviewApi {
   db: Db;
@@ -2050,12 +2331,130 @@ class RunApi {
     this.db = db;
   }
 
+  // Guarded by the run row's own owner, not by a join through the thread: a
+  // run may have no thread (`POST /agents/:id/run`), and this document is the
+  // whole conversation — question, answer, every tool call and result. The
+  // messages POST hands `runId` straight back to whoever asked, so an id alone
+  // was authorisation to read any tenant's transcript.
   @get("/:id")
   find(req: Request): Reply {
-    let document = findById(this.db, runsFull(this.db), param(req, "id"));
+    let document = ownedRun(this.db, param(req, "id"), callerTags(req));
     if (document == "") { return notFound("run " + param(req, "id")); }
     return ok(document);
   }
+}
+
+// Whether this process is worth sending a request to, and which build it is.
+//
+// The one route that answers without a bearer token (`bearerRefused` below)
+// and the one the gateway leaves public, because a probe that needs the
+// secret cannot tell "the engine is down" from "the secret is wrong" — and
+// those are different pages of the runbook.
+@controller("/healthz")
+class HealthApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  show(req: Request): Reply {
+    return ok(healthJson(this.db, stamp()));
+  }
+}
+
+// What a tenant has used, for whoever is doing the accounting.
+//
+// `?owner=` is a filter, never an escalation: a scoped caller may only ask
+// about a tag it holds, and asking about somebody else's is the same 404 a
+// thread that is not theirs gets. Unscoped — no proxy in front — any tag can
+// be asked about, which is the community edition's single-tenant reading of
+// the same route.
+@controller("/usage")
+class UsageApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  show(req: Request): Reply {
+    let tags = callerTags(req);
+    let want = queryParam(req, "owner", owningTag(tags));
+    if (!holdsOwner(tags, want)) { return notFound("owner " + want); }
+    return ok(usageJson(ownerUsage(this.db, want)));
+  }
+}
+
+// What this build calls itself.
+//
+// Written by hand because there is no build step to stamp a commit into: the
+// Dockerfile runs `lumen compile` and nothing else. It earns its place anyway
+// — the answer to "did the restart take" is this number changing, and an
+// operator staring at a hot binary that kept the old inode has no other way to
+// tell (README, the restart note).
+const API_VERSION: string = "0.2.0";
+
+// The health document. A free function, so the suite can ask it the same
+// question the probe does — the route is a method on a class and a Lumen
+// module cannot export one.
+//
+// Three facts, and no summary `ok` field. The process refuses to start on a
+// schema it could not migrate and refuses to start without a usable master
+// key, so a reply at all already means the two fatal things are fine; docker
+// being down degrades scripts and nothing else. A boolean over facts of
+// different weights would have to lie about one of them, and a prober can
+// alert on whichever of these it actually cares about.
+export function healthJson(db: Db, now: string): string {
+  return "{\"version\":" + JSON.stringify(API_VERSION)
+    + ",\"migration\":" + JSON.stringify(appliedHighWater(db))
+    + ",\"docker\":" + boolJson(envDockerUp(now)) + "}";
+}
+
+// Whether a request is turned away before it reaches any route.
+//
+// Off unless `AGENTS_API_TOKEN` is set, and off is what every community
+// deployment gets. When it is set this is defense in depth and nothing more:
+// the firewall is what isolates :8100, and this is what a missed firewall rule
+// or a security-group drift runs into next — because with the trust gate on,
+// reaching the port at all means choosing an identity with no forgery
+// required (GATEWAY.md, top risks).
+//
+// Compared whole rather than in constant time on purpose: the secret is a
+// fixed string shared with one proxy on the same host, and an attacker close
+// enough to time this reply is already inside the boundary the firewall draws.
+export function bearerRefused(configured: string, target: string, authorization: string): bool {
+  if (configured == "") { return false; }
+  if (publicPath(target)) { return false; }
+  return presentedToken(authorization) != configured;
+}
+
+// The routes the lock never covers. Just the probe: `/preview/:token` is a
+// capability and is checked by the gateway, and everything else is the API.
+function publicPath(target: string): bool {
+  let path = target;
+  let query = path.indexOf("?");
+  if (query >= 0) { path = path.substring(0, query); }
+  while (path.length > 1 && path.endsWith("/")) { path = path.substring(0, path.length - 1); }
+  return path == "/healthz";
+}
+
+// The token an Authorization header carries, or "".
+//
+// Its own function rather than rest's `bearerToken`, which takes a whole
+// Request: the lock runs before there is one — the router has not matched a
+// route yet, so nothing has parsed the params or the query.
+function presentedToken(authorization: string): string {
+  let prefix = "Bearer ";
+  if (authorization.length <= prefix.length) { return ""; }
+  if (authorization.substring(0, prefix.length).toLowerCase() != prefix.toLowerCase()) { return ""; }
+  return authorization.substring(prefix.length, authorization.length).trim();
+}
+
+function apiToken(): string {
+  return (process.env("AGENTS_API_TOKEN") ?? "").trim();
 }
 
 // Why a POST cannot be written.
@@ -2100,10 +2499,16 @@ export function modelProblem(m: ModelRow): string {
   if (m.kind != "chat" && m.kind != "embedding") {
     return "a model is chat or embedding, not \"" + m.kind + "\"";
   }
-  if (m.kind == "chat" && chatEndpoint(m.provider) == "") {
+  // Vertex has no well-known endpoint: the address carries the project and
+  // region, so the row must say it. Named before the generic refusals below,
+  // which would otherwise reject every vertex row however complete.
+  if (m.provider == "vertex" && m.baseUrl.trim() == "") {
+    return "a vertex model needs its base URL — https://<region>-aiplatform.googleapis.com/v1/projects/<project>/locations/<region>/endpoints/openapi";
+  }
+  if (m.kind == "chat" && m.baseUrl.trim() == "" && chatEndpoint(m.provider) == "") {
     return "no chat endpoint for provider \"" + m.provider + "\"";
   }
-  if (m.kind == "embedding" && embeddingEndpoint(m.provider) == "") {
+  if (m.kind == "embedding" && m.baseUrl.trim() == "" && embeddingEndpoint(m.provider) == "") {
     return "no embedding endpoint for provider \"" + m.provider + "\"";
   }
   if (m.kind == "embedding" && m.dimensions <= 0) {
@@ -2288,7 +2693,8 @@ function stepsJson(live: LiveStep[]): string {
       + ",\"args\":" + JSON.stringify(live[i].args)
       + ",\"running\":" + boolJson(live[i].endedAt == "")
       + ",\"ok\":" + boolJson(live[i].ok)
-      + ",\"millis\":" + `${stepMillis(live[i])}` + "}";
+      + ",\"millis\":" + `${stepMillis(live[i])}`
+      + ",\"result\":" + JSON.stringify(live[i].result) + "}";
     i = i + 1;
   }
   return out + "]";
@@ -2301,6 +2707,42 @@ function boolJson(v: bool): string {
 
 function stamp(): string {
   return `${Date.now()}`;
+}
+
+// The abandoned-thread sweep, on a thread of its own, and only where an
+// operator asked for one.
+//
+// Nothing in this engine has ever deleted a thread row. This does, so it is
+// off until `AGENTS_SWEEP_IDLE_MS` names an age, and then that same number is
+// how long it waits between passes — an operator who says "an hour" wants a
+// row an hour idle taken within about an hour, and a second knob to disagree
+// with the first buys nothing.
+//
+// It is a background thread rather than something on `GET /threads` because a
+// read must not delete rows: under scoping that is one person's sidebar
+// deleting another person's conversations (GATEWAY.md). A timer would be the
+// obvious home and does not work: once `listen` hands the event loop to the
+// HTTP server, no `setInterval` ever fires again (verified, not assumed). A
+// worker thread does work, with two conditions. Its function may not throw —
+// `Worker.run` takes `() => T` and the database is typed `error{LumenThrow}!T`
+// — hence the try around the whole body rather than in the caller. And it
+// opens its own connection: two threads taking turns on one handle interleave
+// on the wire.
+function sweepLoop(idleMs: int): int {
+  try {
+    let db = openDatabase();
+    while (true) {
+      // Before the wait, so a process that is OOM-recycled hourly still sweeps
+      // — with the wait first it never would.
+      try { sweepEmptyThreads(db, `${Date.now() - idleMs}`); }
+      catch (e) { console.error("thread sweep: " + e.message); }
+      process.sleep(idleMs);
+    }
+  } catch (e) {
+    // Only reachable from the connect: a box that cannot be swept still serves.
+    console.error("thread sweep: no connection of its own — " + e.message);
+  }
+  return 0;
 }
 
 function openDatabase(): Db {
@@ -2427,7 +2869,17 @@ function main(): void {
     return;
   }
 
-  // Fifteen controllers, handed over whole. Each one is read for its own
+  // Started after the migrations, so it never sweeps against a schema that is
+  // still being built — and started at all only where an operator named an age
+  // for `AGENTS_SWEEP_IDLE_MS`. Unset, no thread is started and no row is ever
+  // deleted, which is what every deployment has run so far.
+  let sweepIdle = sweepIdleMs(process.env("AGENTS_SWEEP_IDLE_MS") ?? "");
+  if (sweepIdle > 0) {
+    console.log(`sweeping threads that have been empty for ${sweepIdle}ms`);
+    Worker.run(() => sweepLoop(sweepIdle));
+  }
+
+  // Nineteen controllers, handed over whole. Each one is read for its own
   // `@controller` and its methods bound (specs 477/478), so there is no table
   // to walk here, no prefix to invent so that four of these classes can all
   // have a `list`, and no binding map to keep in step with the routes. What is
@@ -2443,6 +2895,7 @@ function main(): void {
     new ProviderApi(db, master),
     new RunApi(db),
     new ScriptImageApi(db),
+    new SkillApi(db),
     new ModelApi(db, master),
     new ConfigApi(db),
     new PromptApi(db),
@@ -2455,6 +2908,8 @@ function main(): void {
     new ServerApi(db, master),
     new ArtifactApi(db),
     new PreviewApi(db),
+    new HealthApi(db),
+    new UsageApi(db),
   ];
 
   let table = mountedRoutes(mounts);
@@ -2464,8 +2919,51 @@ function main(): void {
     i = i + 1;
   }
 
-  let problem = listen(8100, mounts);
+  let token = apiToken();
+  if (token != "") { console.log("bearer token required on every route but /healthz"); }
+  let problem = listenLocked(8100, mounts, token);
   if (problem != "") { console.error(problem); }
+}
+
+// `listen`, with the bearer lock in front of it.
+//
+// Written here rather than in `rest/server.ts` because it is this service's
+// policy and not the router's: the router serves any table for anyone, and a
+// generic `listen` that grew an optional token would be one deployment's
+// answer baked into a package four others use. What it costs is the eight
+// lines of `listen` copied — the mount check, the server, the reply shape.
+//
+// The refusal is answered before the router matches, so an unauthorised
+// caller learns nothing about which paths exist: every one of them is 401,
+// including the ones that are not there.
+function listenLocked(port: int, mounts: Mount[], token: string): string {
+  let problemText = mountProblem(mounts);
+  if (problemText != "") { return problemText; }
+
+  http.createServer(port, (req): HttpResponse => {
+    if (bearerRefused(token, req.path, req.headers.get("authorization") ?? "")) {
+      let shut = reply(401, "{\"error\":\"a bearer token is required\"}", "application/json");
+      // The header a 401 owes a client, so a script gets told what kind of
+      // credential to find rather than guessing from the sentence.
+      shut.headers.set("www-authenticate", "Bearer");
+      let refused: HttpResponse = { status: shut.status, body: shut.body, ok: true, headers: shut.headers };
+      return refused;
+    }
+    // A proxy that says it authenticated somebody, in a document with no
+    // readable `uuid`, has told this process nothing it can act on. Refusing is
+    // the only answer that is not a guess about whose data to serve — and the
+    // guess the code used to make was "" , the tenant holding every row written
+    // before the gateway existed (owner.ts).
+    if (identityUnreadable(trustsProxyAuth(), req.headers.get("x-user") ?? "")) {
+      let blank = reply(401, "{\"error\":\"the X-USER document names no uuid\"}", "application/json");
+      let unknown: HttpResponse = { status: blank.status, body: blank.body, ok: true, headers: blank.headers };
+      return unknown;
+    }
+    let answer = dispatchedMounted(mounts, req.method, req.path, req.body, req.headers);
+    let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
+    return out;
+  });
+  return "";
 }
 
 main();

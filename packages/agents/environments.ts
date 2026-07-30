@@ -138,6 +138,44 @@ function envContinuation(b: int): bool {
   return b >= 128 && b < 192;
 }
 
+// --- is the daemon there --------------------------------------------------------
+
+// How long an answer about the daemon is reused. The probe behind it is the
+// public half of `GET /healthz` — the one route the gateway leaves open — and
+// a route that spawns a process per request is a lever whoever finds it can
+// pull. Docker does not come and go inside five seconds.
+const ENV_DOCKER_ASK_EVERY_MS: int = 5000;
+
+let envDockerAskedAt: string = "";
+let envDockerAnswered: bool = false;
+
+// Whether the daemon answers, `now` being the caller's clock in milliseconds
+// as a digit string — the same stamp every other row in this file carries, so
+// there is no second notion of time to keep in step.
+//
+// `docker version` asking for the SERVER's version, not the client's: a client
+// binary that exists and a daemon that answers are different facts, and only
+// the second one lets a script run. `spawnSync` reports a binary it could not
+// run as a nonzero status rather than throwing, so a box with no docker at all
+// is an answer here too.
+export function envDockerUp(now: string): bool {
+  let fresh = envMinus(now, ENV_DOCKER_ASK_EVERY_MS);
+  if (envDockerAskedAt != "" && fresh != "" && !envStampLess(envDockerAskedAt, fresh)) {
+    return envDockerAnswered;
+  }
+  let asked = envDocker(["version", "--format", "{{.Server.Version}}"]);
+  envDockerAnswered = asked.status == 0;
+  envDockerAskedAt = now;
+  return envDockerAnswered;
+}
+
+// Forget the cached answer, so a test that swaps the fake docker underneath
+// sees the swap. Production never calls it — the cache is the point there.
+export function envDockerForget(): void {
+  envDockerAskedAt = "";
+  envDockerAnswered = false;
+}
+
 // --- naming ---------------------------------------------------------------------
 
 // The container a (thread, name) pair owns. Docker accepts
@@ -225,7 +263,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     // `sleep infinity` is the container's whole process: something for docker
     // to keep alive between runs, so `docker start` has a thing to start.
     // Scripts arrive later as execs, not as the entrypoint.
-    let made = envDocker(envRunArgs(container, e.image, e.network));
+    let made = envDocker(envRunArgs(container, e.threadId, e.image, e.network));
     if (made.status != 0) {
       return envRefused(envDockerProblem("create the environment", made));
     }
@@ -241,16 +279,29 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   let row = JSON.parse<EnvRow>(held);
   let created = false;
   let warmed = false;
-  if (row.status != "running") {
+  // Docker is asked, rather than the row believed. The row records what this
+  // package last did to the container, and a container can stop for reasons
+  // this package never sees: the OOM killer took one on a busy host, the
+  // daemon restarted, an operator ran `docker stop`. The row still said
+  // "running", so this branch was skipped and every exec that followed failed
+  // against a dead container — for the whole conversation, because nothing
+  // ever revisited the decision. An agent facing that reply cannot fix it
+  // either: it is inside a container that isn't running, and one of them
+  // spent all eight of its steps trying `docker start` from in there.
+  if (!envRunning(container)) {
     let started = envDocker(["start", container]);
     if (started.status == 0) {
       warmed = true;
     } else {
+      // Nothing to start, or something that refuses to. Either way the name
+      // is taken until it is removed: `docker run --name` fails on a name an
+      // exited container still holds, so the recreate below would fail too.
+      envDocker(["rm", "-f", container]);
       // The container is gone — pruned, or the host was rebuilt. The row is
       // the record and the workspace was only cache, so recreate from the
       // image the row remembers; `created` tells the caller to say the cache
       // was lost.
-      let remade = envDocker(envRunArgs(container, row.image, row.network != 0));
+      let remade = envDocker(envRunArgs(container, e.threadId, row.image, row.network != 0));
       if (remade.status != 0) {
         return envRefused(envDockerProblem("start the environment", remade));
       }
@@ -261,6 +312,17 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   envSave(db, row.threadId, row.name, row.image, row.network != 0, "running", row.createdAt, e.now);
   let back: EnvEnsured = { ok: true, container: container, created: created, warmed: warmed, problem: "" };
   return back;
+}
+
+// Whether the container is up right now, asked of docker.
+//
+// `docker inspect` prints the field and exits 0 for a container that exists in
+// any state, and fails for one that does not — so a missing container answers
+// false here and takes the recreate path, which is what it needs.
+function envRunning(container: string): bool {
+  let seen = envDocker(["inspect", "-f", "{{.State.Running}}", container]);
+  if (seen.status != 0) { return false; }
+  return envFirstLine(seen.stdout).trim() == "true";
 }
 
 // The whole row, written whole: `persist` is an upsert over every column, so
@@ -276,8 +338,19 @@ function envSave(db: Db, threadId: string, name: string, image: string, network:
 // The container, as an environment wants it: detached, named, `sleep infinity`
 // as the thing docker keeps alive between runs, and offline only when the
 // environment was made that way.
-function envRunArgs(container: string, image: string, network: bool): string[] {
+// The volume every environment of a conversation mounts at /workspace. One
+// volume, not a sync protocol: a file the office environment writes is the
+// same bytes the main environment reads, so "fresh in every env" is literal
+// and there is no staleness window to reason about. Same conversation, same
+// trust domain — the isolation between environments is about libraries, not
+// about hiding a conversation's own files from itself.
+export function envWorkspaceVolume(threadId: string): string {
+  return "agents-ws-" + envSafeBytes(threadId);
+}
+
+function envRunArgs(container: string, threadId: string, image: string, network: bool): string[] {
   let out: string[] = ["run", "-d", "--name", container];
+  out.push("-v"); out.push(envWorkspaceVolume(threadId) + ":/workspace");
   // The container is the boundary, so the boundary carries the resource caps:
   // the language field constrains nothing (a python script can shell out and
   // cd wherever it likes, deliberately), and without these a script owned the
@@ -307,7 +380,16 @@ function envRunArgs(container: string, image: string, network: bool): string[] {
   out.push("--cap-add"); out.push("SETUID");
   out.push("--cap-add"); out.push("SETGID");
   if (!network) { out.push("--network"); out.push("none"); }
-  out.push(image); out.push("sleep"); out.push("infinity");
+  // --entrypoint, not just a command. An image built to DO something — a
+  // validator, a linter, a converter — carries an ENTRYPOINT, and appending
+  // `sleep infinity` to it passes those words to that program instead of
+  // running sleep. The container then exits immediately and the environment
+  // is unusable, which is how nuralyio/docflow-validator failed. Overriding
+  // it makes any image an environment: the entrypoint's program is still
+  // there to be called by a script, it just is not what keeps the container
+  // alive.
+  out.push("--entrypoint"); out.push("sleep");
+  out.push(image); out.push("infinity");
   return out;
 }
 
@@ -361,6 +443,10 @@ export function envForget(db: Db, threadId: string): void {
     envDocker(["rm", "-f", envContainerName(rows[i].threadId, rows[i].name)]);
     i = i + 1;
   }
+  // The shared workspace goes with them. Artifacts are rows and survive;
+  // the volume was only ever cache, and a volume nothing mounts is the kind
+  // of leak nobody notices until df does.
+  envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
   deleteWhere(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId]);
 }
 

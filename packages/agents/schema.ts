@@ -125,6 +125,47 @@ export type ScriptImageRow = {
   enabled: bool,
 };
 
+// A named set of instructions an agent can load mid-run. The description is
+// the one line the model's briefing shows — it is how a skill is chosen — and
+// the body is what use_skill answers. Looked up by name at call time and read
+// fresh on every call, so editing a skill is an UPDATE and the next load sees
+// it: no versions, because nothing pins a skill the way an agent pins a
+// prompt id (SKILLS.md records the decision).
+export type SkillRow = {
+  id: string,
+  // The name the model sends to use_skill — and a container path segment,
+  // /skills/<name>/, so it is held to the environment-name charset at the
+  // API door.
+  skillName: string,
+  // One line, for choosing; never the doing.
+  description: string,
+  // The full instructions, returned whole.
+  body: string,
+  updatedAt: string,
+  // 'private' (an agent carries it by attachment) or 'public' (use_skill
+  // answers for every caller). Two axes with featuredRank, not one enum —
+  // "public but not promoted" must stay expressible.
+  visibility: string,
+  // Orders the console's capability chips; 0 is not featured. Featured
+  // implies public, enforced at the API door.
+  featuredRank: int,
+};
+
+// A file a skill ships — the scripts its body tells the model to run. Rows
+// like everything else here, materialised into the container at
+// /skills/<skill-name>/<path> fresh on every run, so an edit is live without
+// a restart. A body that only *describes* code makes the model retype it into
+// run_script, and retyping is the corruption channel this package already
+// distrusts.
+export type SkillFileRow = {
+  id: string,
+  skillId: string,
+  // A plain name (enums.py): no slash, no dot-dot — it joins a container
+  // path, and the guard lives at the API door.
+  path: string,
+  body: string,
+};
+
 // --- mappings ----------------------------------------------------------------
 
 // The shapes migrations 1, 4 and 5 create, frozen as they were when those
@@ -282,6 +323,50 @@ export function scriptImagesMapping(): DbRepository {
   return repository("script_images", "id", "id", fs);
 }
 
+// Migration 67's shape, frozen. A migration's SQL is checksummed at apply
+// time, so it must be built from what the table looked like THEN — building
+// it from the live mapping turns every later column into an edit of history
+// and the engine refuses to boot. threadsMappingV1 is the precedent.
+export function skillsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("skillName", "skill_name", "text"),
+    field("description", "description", "text"),
+    field("body", "body", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("skills", "id", "id", fs);
+}
+
+export function skillsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("skillName", "skill_name", "text"),
+    field("description", "description", "text"),
+    field("body", "body", "text"),
+    field("updatedAt", "updated_at", "text"),
+    // Who may use it, and what the console showcases — two axes, two
+    // columns, because a three-value enum breaks on "public but not
+    // promoted". 'private' is a skill an agent carries by attachment;
+    // 'public' answers use_skill for every caller. featuredRank orders the
+    // console's capability chips; 0 is not featured, and featured implies
+    // public — enforced where writes land, not here.
+    field("visibility", "visibility", "text"),
+    field("featuredRank", "featured_rank", "int"),
+  ];
+  return repository("skills", "id", "id", fs);
+}
+
+export function skillFilesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("skillId", "skill_id", "text"),
+    field("path", "path", "text"),
+    field("body", "body", "text"),
+  ];
+  return repository("skill_files", "id", "id", fs);
+}
+
 export function agentsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -337,6 +422,14 @@ export function agentsFull(db: Db): DbRepository {
       columns: "id, agent_name AS \"agentName\", "
         + boolColumn(db, "enabled") + " AS \"enabled\"",
     }),
+    hasManyThrough({
+      field: "skills", table: "skills", foreignColumn: "id",
+      linkTable: "agent_skills", linkLocalColumn: "agent_id", linkForeignColumn: "skill_id",
+      localColumn: "id",
+      // Name and description, never the body: the full view is for listing
+      // and running, and a body rides GET /skills/:id when someone edits.
+      columns: "id, skill_name AS \"skillName\", description",
+    }),
   ];
   return repositoryWith("agents", "id", "id", agentsMapping().fields, rs);
 }
@@ -372,6 +465,18 @@ export function schemaPlan(db: Db): Migration[] {
     migration("65", "curated script images", createTableSql(db, scriptImagesMapping())),
     migration("66", "an agent chooses its script image",
       "ALTER TABLE agents ADD COLUMN script_image_id " + db.textType + " NOT NULL DEFAULT ''"),
+    // Skills and what they ship. Three migrations because they are three
+    // facts: the skill, its files, and which agents carry it.
+    migration("67", "skills", createTableSql(db, skillsMappingV1())),
+    migration("68", "skill files", createTableSql(db, skillFilesMapping())),
+    migration("69", "agent to skill",
+      "CREATE TABLE IF NOT EXISTS agent_skills ("
+      + "agent_id " + db.textType + " NOT NULL, "
+      + "skill_id " + db.textType + " NOT NULL)"),
+    migration("77", "a skill has a visibility",
+      "ALTER TABLE skills ADD COLUMN visibility " + db.textType + " NOT NULL DEFAULT 'private'"),
+    migration("78", "featured skills order the capability chips",
+      "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),
     migration("61", "a model config can ask for thinking",
       "ALTER TABLE model_configs ADD COLUMN thinking " + db.textType + " NOT NULL DEFAULT ''"),
     migration("8", "provider credentials", createTableSql(db, credentialsMapping())),
