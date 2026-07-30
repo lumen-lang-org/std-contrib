@@ -82,7 +82,23 @@ export class ArtifactPanel extends LitElement {
     .none { padding: 16px; color: var(--muted); font-size: 13px; }
 
     .view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-    .head { display: flex; align-items: flex-start; gap: 8px; padding: 12px 12px 8px; }
+    .head { display: flex; align-items: flex-start; gap: 8px; padding: 12px 12px 8px;
+            position: relative; }
+    /* The kebab menu, anchored to the head. A backdrop rather than a document
+       listener: the panel lives in a shadow root, and a click anywhere should
+       close the menu without this code reaching outside its own tree. */
+    .menu-backdrop { position: fixed; inset: 0; z-index: 25; }
+    .kebab { position: absolute; right: 40px; top: 40px; z-index: 30; min-width: 176px;
+             background: var(--bg-card); border: 1px solid var(--border);
+             border-radius: 12px; padding: 4px;
+             box-shadow: 0 4px 12px rgba(0,0,0,.06), 0 10px 28px -8px rgba(0,0,0,.18); }
+    .kebab button { display: flex; align-items: center; gap: 10px; width: 100%;
+                    padding: 8px 12px; border: 0; background: none; cursor: pointer;
+                    font: inherit; font-size: 13.5px; color: var(--fg);
+                    border-radius: 8px; text-align: left; }
+    .kebab button:hover { background: var(--bg-user); }
+    .kebab button[disabled] { opacity: .45; cursor: default; }
+    .kebab button.danger { color: var(--danger, #a8321f); }
     .head .name { flex: 1; min-width: 0; font: 600 14px var(--display);
                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .head .meta { color: var(--muted); font-size: 11.5px; font-weight: 400;
@@ -312,6 +328,11 @@ export class ArtifactPanel extends LitElement {
   // somebody is holding, a history nothing else has — so each takes two
   // clicks. "" when neither is armed.
   @state() private arming = "";
+  /* The kebab, open or not. Armed actions live inside it, so it must survive
+     the first click of a two-click action: Delete shows "Delete all
+     versions?" in place, and closing the menu between the two clicks would
+     disarm by navigation, which is the arming rule working as intended. */
+  @state() private menuOpen = false;
   @state() private problem = "";
   @state() private said = "";
   // The diff of the shown version against the one before it, or null when
@@ -424,6 +445,7 @@ export class ArtifactPanel extends LitElement {
   }
 
   private close() {
+    this.menuOpen = false;
     this.open = null;
     this.shown = null;
     this.wsOpen = "";
@@ -797,11 +819,40 @@ export class ArtifactPanel extends LitElement {
             ${this.label(a)}
             <div class="meta">${a.path}</div>
           </div>
+          <nr-button id="a-diff" size="small"
+            ?disabled=${v === null || v.version < 2 || a.kind === "image" || a.kind === "file" || officeKind(a.path) !== null}
+            title=${this.diff === null
+              ? (v !== null && v.version >= 2
+                ? `What v${v.version} changed against v${v.version - 1}` : "A first version has nothing to differ from")
+              : "Back to the content"}
+            @click=${() => this.toggleDiff()}>
+            <nr-icon name="arrow-up-down" size="small"></nr-icon>
+          </nr-button>
+          <nr-button id="a-menu" size="small" title="More"
+            @click=${() => { this.menuOpen = !this.menuOpen; }}>
+            <nr-icon name="more-vertical" size="small"></nr-icon>
+          </nr-button>
           <nr-button id="a-close" size="small" title="Close the panel"
             @click=${() => { this.close(); this.dispatchEvent(new CustomEvent("close-rail")); }}>
             <nr-icon name="x" size="small"></nr-icon>
           </nr-button>
         </div>
+        ${!this.menuOpen ? "" : html`
+          <div class="menu-backdrop" @click=${() => { this.menuOpen = false; }}></div>
+          <div class="kebab">
+            <button id="a-copy" ?disabled=${v === null}
+              @click=${() => { void this.copy(); this.menuOpen = false; }}>
+              <nr-icon name="copy" size="small"></nr-icon>Copy</button>
+            <button id="a-expand" ?disabled=${v === null}
+              @click=${() => { this.expand(); this.menuOpen = false; }}>
+              <nr-icon name="external-link" size="small"></nr-icon>Open</button>
+            <button id="a-rotate" @click=${() => { void this.rotate(); }}>
+              <nr-icon name="refresh-cw" size="small"></nr-icon>
+              ${this.arming === "rotate" ? "Break links?" : "New link"}</button>
+            <button id="a-delete" class="danger" @click=${() => { void this.destroy(); }}>
+              <nr-icon name="trash-2" size="small"></nr-icon>
+              ${this.arming === "delete" ? "Delete all versions?" : "Delete"}</button>
+          </div>`}
 
         ${v === null ? html`<div class="loading">Loading…</div>`
           : this.diff !== null ? this.diffView()
@@ -844,34 +895,6 @@ export class ArtifactPanel extends LitElement {
             ${v.bytes} bytes · ${v.origin}${v.note === "" ? "" : html` · ${v.note}`}
           </div>`}
 
-        <!-- A labelled button takes its icon through iconLeft, which is the
-             component's own API and sizes the glyph to the button; an
-             icon-only one slots an nr-icon, because iconLeft with an empty
-             label leaves the space the label would have had. Names are looked
-             up in nr-icon's set, and one that is not in it is drawn as the
-             word. -->
-        <div class="actions">
-          <nr-button id="a-diff" size="small" iconLeft="arrow-up-down"
-            ?disabled=${v === null || v.version < 2 || a.kind === "image" || a.kind === "file" || officeKind(a.path) !== null}
-            title=${v !== null && v.version >= 2
-              ? `What v${v.version} changed against v${v.version - 1}`
-              : "A first version has nothing to differ from"}
-            @click=${() => this.toggleDiff()}>
-            ${this.diff === null ? "Diff" : "Content"}
-          </nr-button>
-          <nr-button id="a-copy" size="small" iconLeft="copy"
-            ?disabled=${v === null} @click=${() => this.copy()}>Copy</nr-button>
-          <nr-button id="a-expand" size="small" iconLeft="external-link"
-            ?disabled=${v === null} @click=${() => this.expand()}>Open</nr-button>
-          <nr-button id="a-rotate" size="small" iconLeft="refresh-cw"
-            @click=${() => this.rotate()}>
-            ${this.arming === "rotate" ? "Break links?" : "New link"}
-          </nr-button>
-          <nr-button id="a-delete" size="small" type="danger" iconLeft="trash-2"
-            @click=${() => this.destroy()}>
-            ${this.arming === "delete" ? "Delete all versions?" : "Delete"}
-          </nr-button>
-        </div>
 
         ${this.problem === "" ? "" : html`<div class="problem">${this.problem}</div>`}
         ${this.said === "" ? "" : html`<div class="said">${this.said}</div>`}
