@@ -14,17 +14,16 @@
 // it rather than by machinery.
 
 import { controller } from "../rest/controller.ts";
-import { Route, route } from "../rest/router.ts";
-import { Request, Reply, Handler, serve, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, listen, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
 import { DbOrder, DbRepository, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
-import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
+import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, schemaPlan } from "./schema.ts";
+import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
-import { chatEndpoint, embeddingEndpoint, complete, embedText, replyText } from "./provider.ts";
+import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
@@ -34,7 +33,9 @@ import { ThreadListing, ThreadTurnRow, listThreads, openThread, threadAgent, thr
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
-import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
+import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn } from "./artifacts.ts";
+import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
+import { envPlan } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
@@ -110,10 +111,9 @@ class ProviderApi {
 
   @del("/:provider/key")
   clearKey(req: Request): Reply {
-    if (!existsById(this.db, credentialsMapping(), "cred-" + param(req, "provider"))) {
+    if (!forgetCredential(this.db, param(req, "provider"))) {
       return notFound("no key for " + param(req, "provider"));
     }
-    deleteById(this.db, credentialsMapping(), "cred-" + param(req, "provider"));
     return noContent();
   }
 }
@@ -405,9 +405,7 @@ class AgentApi {
     if (!existsById(this.db, this.flat, param(req, "id"))) {
       return notFound("agent " + param(req, "id"));
     }
-    executeWith(this.db, "DELETE FROM agent_sub_agents WHERE parent_id = " + this.db.placeholder, [param(req, "id")]);
-    executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder, [param(req, "id")]);
-    deleteById(this.db, this.flat, param(req, "id"));
+    forgetAgent(this.db, param(req, "id"));
     return noContent();
   }
 }
@@ -463,6 +461,8 @@ class TraceApi {
     if (!knownBackend(backendOr(body.backend))) {
       return badRequest("unknown backend \"" + body.backend + "\"; this understands langfuse, otlp, phoenix, braintrust, langsmith and arize");
     }
+    let moved = traceDestinationProblem(this.db, body);
+    if (moved != "") { return badRequest(moved); }
     let row: TraceConfigRow = {
       id: "default",
       backend: backendOr(body.backend),
@@ -489,6 +489,18 @@ class TraceApi {
     if (stored != "") { return badRequest(stored); }
     return this.status(req);
   }
+
+  // Clearing the secret is how the collector's address is moved: writing a
+  // key is what authorises an address, so changing the address means writing
+  // the key again. Destructive on purpose — whoever moves the collector has to
+  // be able to supply the secret a second time.
+  @del("/key")
+  clearKey(req: Request): Reply {
+    if (!forgetCredential(this.db, "tracing")) {
+      return notFound("a tracing key");
+    }
+    return this.status(req);
+  }
 }
 
 // The catalog: models, model configs, prompts and MCP servers, over HTTP.
@@ -499,6 +511,87 @@ class TraceApi {
 // mappings; one class with the table in the path would put plume mappings
 // behind a string. Four small classes, sharing shape but not machinery, is
 // the least clever thing that works.
+
+// Why an image row will not be written. A label to pick it by, and an image
+// reference that is one word with no shell metacharacters — it becomes an
+// argv entry to docker, never a shell string, but a reference carrying a
+// space or a quote is a mistake worth naming at the door.
+export function scriptImageProblem(row: ScriptImageRow): string {
+  if (row.label.trim() == "") { return "an image needs a label to pick it by"; }
+  if (row.image.trim() == "") { return "an image needs a reference, such as agents-runtime:1"; }
+  let i: int = 0;
+  while (i < row.image.length) {
+    let c = row.image.charCodeAt(i);
+    if (c <= 32 || c == 34 || c == 39 || c == 96 || c == 36 || c == 59) {
+      return "an image reference is one word: \"" + row.image + "\" carries a space or a shell character";
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
+// The images an operator will run scripts in.
+//
+// Curated, and by an operator rather than by a model: run_script builds a
+// conversation's container from the agent's chosen row, and a model that
+// could name its own image could make this server pull anything off the
+// internet and execute it. So the set lives here, an agent points at one, and
+// nothing on the model's side of the wire names an image at all.
+@controller("/script-images")
+class ScriptImageApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    let keys: DbOrder[] = [{ column: "label" }];
+    return ok(listOrdered(this.db, scriptImagesMapping(), "", [], keys));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let problem = createProblem(this.db, scriptImagesMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
+    let row: ScriptImageRow = JSON.parse<ScriptImageRow>(req.body);
+    let named = scriptImageProblem(row);
+    if (named != "") { return badRequest(named); }
+    let written = persist(this.db, scriptImagesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, scriptImagesMapping(), jsonId(req.body)));
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
+    if (!existsById(this.db, scriptImagesMapping(), param(req, "id"))) {
+      return notFound("script image " + param(req, "id"));
+    }
+    let row: ScriptImageRow = JSON.parse<ScriptImageRow>(req.body);
+    if (row.id != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    let named = scriptImageProblem(row);
+    if (named != "") { return badRequest(named); }
+    let written = persist(this.db, scriptImagesMapping(), req.body);
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, scriptImagesMapping(), param(req, "id")));
+  }
+
+  // Removing an image leaves the agents that pointed at it alone: their
+  // environments fall back to the deployment default, which is a working
+  // image by definition. Rewriting other rows from a delete would be a
+  // surprise larger than the one it prevents.
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, scriptImagesMapping(), param(req, "id"))) {
+      return notFound("script image " + param(req, "id"));
+    }
+    deleteWhere(this.db, scriptImagesMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    return noContent();
+  }
+}
 
 @controller("/models")
 class ModelApi {
@@ -520,6 +613,8 @@ class ModelApi {
     let m: ModelRow = JSON.parse<ModelRow>(req.body);
     let wrong = modelProblem(m);
     if (wrong != "") { return badRequest(wrong); }
+    let moved = modelDestinationProblem(this.db, m);
+    if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, modelsMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, modelsMapping(), jsonId(req.body)));
@@ -561,7 +656,7 @@ class ModelApi {
         + ",\"error\":" + JSON.stringify(agrees ? "" : "the model returned a different width than this row declares") + "}");
     }
 
-    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" };
+    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" , thinking: "" };
     let said = complete(model, config, "Reply with the single word: ok", "ping", key);
     if (!said.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(said.error) + "}"); }
     // The provider's whole envelope is not an answer. replyText pulls the
@@ -584,6 +679,8 @@ class ModelApi {
     }
     let wrong = modelProblem(row);
     if (wrong != "") { return badRequest(wrong); }
+    let moved = modelDestinationProblem(this.db, row);
+    if (moved != "") { return badRequest(moved); }
 
     // At most one embedding model is enabled at a time. Enforced here rather
     // than asked of a caller: two enabled embedders is not a preference, it is
@@ -749,6 +846,8 @@ class ServerApi {
     if (body.transport != "http") {
       return badRequest("this speaks http; \"" + body.transport + "\" needs a subprocess it cannot spawn");
     }
+    let moved = serverDestinationProblem(this.db, body);
+    if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, mcpServersMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, mcpServersMapping(), jsonId(req.body)));
@@ -779,6 +878,10 @@ class ServerApi {
       + " WHERE id = " + placeholderAt(this.db, 3),
       [body.authKind, body.authHeader, param(req, "id")]);
     if (body.authKind == "none") {
+      // Switching a server to no auth used to leave the token in the store,
+      // where nothing ever read it again and nothing ever deleted it — until
+      // the kind was switched back, or the id was reused.
+      forgetCredential(this.db, "mcp:" + param(req, "id"));
       return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
     }
     let stored = storeCredential(this.db, { provider: "mcp:" + param(req, "id"),
@@ -804,6 +907,8 @@ class ServerApi {
       return badRequest("this speaks http; \"" + row.transport + "\" needs a subprocess it cannot spawn");
     }
     if (row.endpoint.trim() == "") { return badRequest("a server needs an endpoint"); }
+    let moved = serverDestinationProblem(this.db, row);
+    if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, mcpServersMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
@@ -814,8 +919,7 @@ class ServerApi {
     if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
       return notFound("server " + param(req, "id"));
     }
-    executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE server_id = " + this.db.placeholder, [param(req, "id")]);
-    deleteById(this.db, mcpServersMapping(), param(req, "id"));
+    forgetServer(this.db, param(req, "id"));
     return noContent();
   }
 }
@@ -876,6 +980,55 @@ class ThreadApi {
     return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(body.agentId) + "}");
   }
 
+  // What the run is doing right now.
+  //
+  // Polled while `POST /:id/messages` is still in flight, which is the only
+  // way to see inside a round: that request answers once, at the end. The
+  // answer is the round's dispatched calls, each either open — no `endedAt` —
+  // or closed with how long it took.
+  //
+  // Steps belong to a round, never to a thread at large: every row carries its
+  // `seq`, which is the same number an artifact of that round carries, so a
+  // card joins to the message that produced it exactly as an artifact card
+  // does.
+  //
+  // `?seq=` names a round. `?seq=all` is the whole transcript, for a console
+  // that has just reloaded and needs a card above every message that called
+  // something. Without either, the newest round — what a console watching the
+  // message it just sent wants. A thread that has never called a tool answers
+  // an empty list rather than a 404: having nothing to show is the ordinary
+  // case, not a mistake.
+  @get("/:id/steps")
+  steps(req: Request): Reply {
+    if (threadAgent(this.db, param(req, "id")) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let asked = queryParam(req, "seq", "");
+    let round = latestRound(this.db, param(req, "id"));
+    let live: LiveStep[] = [];
+    let thoughts: Thought[] = [];
+    if (asked == "all") {
+      // The whole transcript's worth, so a reloaded conversation draws a card
+      // above every message that called something, not only the last one.
+      // The reasoning comes with it: `round` is NONE here, so asking for one
+      // round's thoughts would answer none, and a reload would come back with
+      // the calls and none of the thinking.
+      round = TURN_SEQ_NONE;
+      live = stepsOfThread(this.db, param(req, "id"));
+      thoughts = thoughtsOfThread(this.db, param(req, "id"));
+    } else {
+      if (asked != "") { round = parseInt(asked, 10) ?? -1; }
+      if (round >= 0) {
+        live = stepsOfRound(this.db, param(req, "id"), round);
+        thoughts = thoughtsOfRound(this.db, param(req, "id"), round);
+      }
+    }
+    return ok("{\"seq\":" + `${round}`
+      + ",\"running\":" + boolJson(roundRunning(live))
+      + ",\"thoughts\":" + thoughtsJson(thoughts)
+      + ",\"steps\":" + stepsJson(live) + "}");
+  }
+
   // Ask the thread. The reply is this turn's answer; the transcript is a GET.
   @post("/:id/messages")
   say(req: Request): Reply {
@@ -909,6 +1062,8 @@ class ThreadApi {
       + ",\"refs\":" + refsJson(view.refs)
       + ",\"seq\":" + `${answered.baseSeq}`
       + ",\"toolCalls\":" + `${run.steps.length}`
+      + ",\"steps\":" + stepsJson(stepsOfRound(this.db, param(req, "id"), answered.baseSeq))
+      + ",\"thoughts\":" + thoughtsJson(thoughtsOfRound(this.db, param(req, "id"), answered.baseSeq))
       + ",\"inputTokens\":" + `${run.inputTokens}`
       + ",\"outputTokens\":" + `${run.outputTokens}`
       + ",\"traceId\":" + JSON.stringify(traced)
@@ -1444,9 +1599,24 @@ function previewCsp(req: Request): string {
   return "default-src 'none'"
     + "; script-src 'unsafe-inline' " + origin
     + "; style-src 'unsafe-inline' " + origin
-    + "; img-src data: " + origin
+    // Images may come from anywhere. This is the one relaxation of
+    // self-containment, and it is deliberate: a model asked for a picture
+    // from the web answered that it could not, and wrote a CSS cat instead —
+    // the restriction was producing worse pages, not safer ones. An <img> is
+    // a passive subresource: it cannot read the page, cannot reach /api, and
+    // the sandbox's opaque origin means it carries no cookie. What it does
+    // cost is a request to a third party carrying the reader's address, so
+    // the tool still teaches fetching-and-saving as the better habit —
+    // referrer-policy: no-referrer on every preview keeps the token out of
+    // that request either way. Scripts, styles and fonts stay local: those
+    // can read the document.
+    + "; img-src data: blob: https: http: " + origin
     + "; font-src data: " + origin
-    + "; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
+    // connect-src used to be 'none'. The live reload below polls a version
+    // stamp on this same origin, and that is the one connection a preview may
+    // make: the preview origin itself, nothing else.
+    + "; connect-src " + origin
+    + "; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
 }
 
 // The content type a preview answers with.
@@ -1490,6 +1660,72 @@ function previewType(req: Request, mime: string): string {
 // and not the artifact the token names. Every preview answer goes through here
 // so a sibling cannot end up with a weaker policy or its neighbour's type — a
 // stylesheet answered text/html is a script the sandbox would then run.
+// The chrome a live page carries: a poller that reloads when ANY artifact of
+// the conversation gains a version, and a click handler that keeps the base
+// route — an author writes <a href="/menu.html"> and the browser would leave
+// /preview/<token>/ for the host's own root, where nothing lives.
+//
+// Injected only into a CURRENT html body on the preview host. A pinned ?v= is
+// history and history does not reload; a sibling stylesheet is not a document;
+// off the preview host everything is text/plain and runs nothing anyway.
+function previewChrome(token: string, stamp: string): string {
+  return "\n<script>(function(){"
+    + "var base='/preview/'+" + JSON.stringify(token) + ";"
+    + "var was=" + JSON.stringify(stamp) + ";"
+    + "setInterval(function(){fetch(base+'/__version',{cache:'no-store'})"
+    + ".then(function(r){return r.text()})"
+    + ".then(function(v){if(v!==was){location.reload()}})"
+    + ".catch(function(){})},2000);"
+    + "document.addEventListener('click',function(e){"
+    + "var a=e.target&&e.target.closest?e.target.closest('a'):null;"
+    + "if(!a){return}var h=a.getAttribute('href');"
+    + "if(h&&h.charAt(0)==='/'&&h.indexOf('/preview/')!==0){e.preventDefault();location.href=base+h}"
+    + "},true);"
+    + "})()</script>";
+}
+
+// One value that moves when anything in the thread's artifact log moves. The
+// log is append-only and rows are never rewritten, so the row count IS the
+// stamp: any write anywhere in the conversation changes it.
+function previewStamp(db: Db, threadId: string): string {
+  let sql = "SELECT COUNT(*) FROM artifact_versions"
+    + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
+    + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
+  if (!db.query(sql, [threadId])) { return "0"; }
+  if (db.rows() == 0) { return "0"; }
+  return db.value(0, 0);
+}
+
+function previewIsHtml(mime: string): bool {
+  return mime.startsWith("text/html");
+}
+
+// An image artifact served as a page. The stored body is base64 text; raw
+// image bytes never ride a Reply (a Lumen string is UTF-8 and a PNG is not),
+// so the browser gets a page whose data: URI carries them — which the CSP
+// already allows (img-src data:). Off the preview host this is never called
+// and the base64 text is served as the text it is.
+function previewImagePage(artifact: ArtifactRow, b64: string): string {
+  return "<!doctype html><html><head><title>" + artifact.path + "</title></head>"
+    + "<body style=\"margin:0;display:grid;place-items:center;min-height:100vh;background:#181a1d\">"
+    + "<img alt=\"" + artifact.path + "\" style=\"max-width:100%;max-height:100vh\""
+    + " src=\"data:" + imageMediaType(artifact.path) + ";base64," + b64 + "\"></body></html>";
+}
+
+// The artifact, with its body as a page when it is an image on the preview
+// host: the wrapper is html, so the row it is served under says html too —
+// that is what previewType and the live chrome read.
+function previewPresentable(req: Request, artifact: ArtifactRow, body: string): ArtifactRow {
+  if (artifact.kind != "image" || !onPreviewHost(req)) { return artifact; }
+  let asPage: ArtifactRow = {
+    id: artifact.id, threadId: artifact.threadId, slot: artifact.slot,
+    path: artifact.path, title: artifact.title, kind: artifact.kind,
+    mime: "text/html; charset=utf-8", currentVersion: artifact.currentVersion,
+    previewToken: artifact.previewToken, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt,
+  };
+  return asPage;
+}
+
 function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
   let answer = reply(200, body, previewType(req, artifact.mime));
   answer.headers.set("content-security-policy", previewCsp(req));
@@ -1497,6 +1733,20 @@ function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: 
   answer.headers.set("referrer-policy", "no-referrer");
   answer.headers.set("cache-control", cache);
   return answer;
+}
+
+// previewReply, plus the live chrome when this body qualifies for it. An
+// image is wrapped into a page first, so it reloads like any other page.
+function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
+  let row = previewPresentable(req, artifact, body);
+  let served = body;
+  if (row.kind == "image" && row.mime.startsWith("text/html")) {
+    served = previewImagePage(row, body);
+  }
+  if (cache == "no-store" && previewIsHtml(row.mime) && onPreviewHost(req)) {
+    served = served + previewChrome(param(req, "token"), previewStamp(db, row.threadId));
+  }
+  return previewReply(req, row, served, cache);
 }
 
 // Artifacts as themselves, addressed by token.
@@ -1546,13 +1796,25 @@ class PreviewApi {
     if (artifact.id == "") { return notFound("artifact"); }
     let asked = parseInt(queryParam(req, "v", "")) ?? 0;
     if (asked < 1) {
-      let current = getVersion(this.db, artifact.id, artifact.currentVersion);
+      // Not the cached pointer: the newest row of the log itself, so the bare
+      // URL follows the artifact even when the pointer is a commit stale.
+      let newest = nextVersion(this.db, artifact.id) - 1;
+      let current = getVersion(this.db, artifact.id, newest);
+      if (current.id == "") { current = getVersion(this.db, artifact.id, artifact.currentVersion); }
       if (current.id == "") { return notFound("artifact"); }
-      return previewReply(req, artifact, current.body, "no-store");
+      return previewLiveReply(this.db, req, artifact, current.body, "no-store");
     }
     let row = getVersion(this.db, artifact.id, asked);
     if (row.id == "") { return notFound("artifact"); }
-    return previewReply(req, artifact, row.body, "private, max-age=31536000, immutable");
+    // Pinned history gets the image wrapper too — a version pill that opened
+    // onto a page of base64 would read as broken — but never the live chrome:
+    // a pinned version is immutable and immutable things do not reload.
+    let pinnedRow = previewPresentable(req, artifact, row.body);
+    let pinnedBody = row.body;
+    if (pinnedRow.kind == "image" && pinnedRow.mime.startsWith("text/html")) {
+      pinnedBody = previewImagePage(pinnedRow, row.body);
+    }
+    return previewReply(req, pinnedRow, pinnedBody, "private, max-age=31536000, immutable");
   }
 
   // Another artifact in the same thread, by path.
@@ -1585,12 +1847,27 @@ class PreviewApi {
   sibling(req: Request): Reply {
     let artifact = findByToken(this.db, param(req, "token"));
     if (artifact.id == "") { return notFound("artifact"); }
+    // The live-reload stamp. "__version" can never be an artifact path — an
+    // underscore is outside the segment charset — so the name is unclaimable
+    // and the check costs the sibling route nothing. The reply is a bare
+    // number with CORS open: a sandboxed preview has an opaque origin, and a
+    // fetch from one needs the header to read even its own host's answer. The
+    // number is a count of stored versions, which is nothing a token holder
+    // cannot already learn, and the token is still required to ask.
+    if (param(req, "path") == "__version") {
+      let stamp = reply(200, previewStamp(this.db, artifact.threadId), "text/plain; charset=utf-8");
+      stamp.headers.set("access-control-allow-origin", "*");
+      stamp.headers.set("cache-control", "no-store");
+      return stamp;
+    }
     let found = getArtifact(this.db, artifact.threadId, param(req, "path"));
     if (found.id == "") { return notFound("artifact"); }
     let row = getVersion(this.db, found.id, found.currentVersion);
     if (row.id == "") { return notFound("artifact"); }
     // `found`, not `artifact`: the type comes from the row whose body this is.
-    return previewReply(req, found, row.body, "no-store");
+    // Live like the main page, so a menu page navigated to keeps the reload
+    // and its own links keep the base.
+    return previewLiveReply(this.db, req, found, row.body, "no-store");
   }
 }
 
@@ -1817,7 +2094,7 @@ function agentNameProblem(name: string): string {
 // provider with no endpoint is accepted today and fails at the first run with
 // a blank URL; a model row naming no width is accepted and fails when the
 // corpus table is made, long after anyone connects the two.
-function modelProblem(m: ModelRow): string {
+export function modelProblem(m: ModelRow): string {
   if (m.label.trim() == "") { return "a model needs a label"; }
   if (m.apiName.trim() == "") { return "a model needs the provider's own name for it"; }
   if (m.kind != "chat" && m.kind != "embedding") {
@@ -1832,7 +2109,130 @@ function modelProblem(m: ModelRow): string {
   if (m.kind == "embedding" && m.dimensions <= 0) {
     return "an embedding model must say how wide its vectors are";
   }
+  // The one field here that decides where a key is sent, and the one this
+  // never read. A base URL that is not an address cannot be compared with the
+  // address the key was stored for, so it is refused where it is written
+  // rather than where it is used.
+  if (m.baseUrl.trim() != "" && destinationOf(m.baseUrl) == "") {
+    return "a base URL is an http or https address, like \"https://gateway.internal/v1\" — not \"" + m.baseUrl + "\"";
+  }
   return "";
+}
+
+// --- a secret's destination --------------------------------------------------
+//
+// See credentials.ts for why these exist. Three routes name a secret and a
+// destination in the same row, and only the secret is write-only; these are
+// the three, asked the same question in the same words.
+
+// Where a model row's calls actually land: its base URL when it has one, and
+// the provider's own endpoint when it does not.
+function modelDestination(m: ModelRow): string {
+  if (m.kind == "embedding") { return endpointFor(m, "embeddings"); }
+  return endpointFor(m, "chat/completions");
+}
+
+// Whether this model row may be written, given what is stored for its
+// provider.
+//
+// A model row names a key — through its provider — and a destination, through
+// its base URL, and only the first of those is write-only. `modelProblem`
+// checks the label, the api name, the kind and the width and has never looked
+// at `baseUrl`, so `PUT /models/:id {"baseUrl":"http://…"}` followed by `POST
+// /models/:id/test` sends `authorization: Bearer <the stored key>` wherever
+// you like. `/test` re-materialises the row with `enabled: true`, so a
+// disabled row is no protection either.
+//
+// A row that does not exist yet is treated as one pointing at the provider's
+// own endpoint: a fresh row naming someone else's host leaks precisely as much
+// as an edited one, and `POST /models` is the shorter way to write it.
+export function modelDestinationProblem(db: Db, row: ModelRow): string {
+  let held = findById(db, modelsMapping(), row.id);
+  let authorised: ModelRow = {
+    id: row.id, label: row.label, apiName: row.apiName, provider: row.provider,
+    kind: row.kind, dimensions: row.dimensions, baseUrl: "", enabled: row.enabled,
+  };
+  if (held != "") { authorised = JSON.parse<ModelRow>(held); }
+  let move: DestinationMove = {
+    subject: "model " + row.id,
+    secretName: "the " + row.provider + " key",
+    clearWith: "DELETE /providers/" + row.provider + "/key",
+    was: modelDestination(authorised),
+    now: modelDestination(row),
+    secretStored: hasCredential(db, row.provider),
+  };
+  return destinationProblem(move);
+}
+
+// Whether this server row may be written, given the token stored under its id.
+//
+// The token lives under "mcp:" + id and is not re-keyed when the endpoint
+// moves, so `PUT /servers/:id` followed by a plain `GET /servers/:id/tools`
+// delivers the bearer token to whatever address was just written. A server
+// with no row yet has no address on record, so any endpoint is a move — which
+// is what catches a recycled id whose predecessor's token is still stored.
+export function serverDestinationProblem(db: Db, row: McpServerRow): string {
+  let held = findById(db, mcpServersMapping(), row.id);
+  let was = "";
+  if (held != "") { was = JSON.parse<McpServerRow>(held).endpoint; }
+  let move: DestinationMove = {
+    subject: "server " + row.id,
+    secretName: "its token",
+    clearWith: "PUT /servers/" + row.id + "/auth with {\"authKind\":\"none\",\"authHeader\":\"\",\"token\":\"\"}",
+    was: was,
+    now: row.endpoint,
+    secretStored: hasCredential(db, "mcp:" + row.id),
+  };
+  return destinationProblem(move);
+}
+
+// Whether the collector may be moved, given the secret stored for it.
+//
+// `PUT /tracing` sets `endpoint` freely and the langfuse backend sends
+// `Authorization: Basic <public>:<secret>` to it.
+export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
+  let held = findById(db, traceConfigMapping(), "default");
+  let was = "";
+  if (held != "") { was = JSON.parse<TraceConfigRow>(held).endpoint; }
+  let move: DestinationMove = {
+    subject: "the trace collector",
+    secretName: "its secret key",
+    clearWith: "DELETE /tracing/key",
+    was: was,
+    now: row.endpoint,
+    secretStored: hasCredential(db, "tracing"),
+  };
+  return destinationProblem(move);
+}
+
+// --- forgetting a row, and everything hung off it ----------------------------
+
+// Delete a server, its token and its links.
+//
+// The token went unnoticed: `remove` deleted the row and the agent links and
+// left `mcp:<id>` in the credential store. Ids come out of the request body
+// and are short human strings, so recycling "s1" is ordinary — and the next
+// run sent the old server's secret to the new server's endpoint.
+export function forgetServer(db: Db, serverId: string): void {
+  executeWith(db, "DELETE FROM agent_mcp_servers WHERE server_id = " + db.placeholder, [serverId]);
+  deleteById(db, mcpServersMapping(), serverId);
+  forgetCredential(db, "mcp:" + serverId);
+}
+
+// Delete an agent, its grants, its retrieval row and its links — in both
+// directions.
+//
+// Neither `agent_scopes` nor `agent_retrieval` has a foreign key and neither
+// was ever cleaned, so recreating an id started the new agent already granted
+// its predecessor's corpus. `agent_sub_agents WHERE child_id` survived too,
+// silently re-attaching it to whoever used to delegate to it.
+export function forgetAgent(db: Db, agentId: string): void {
+  executeWith(db, "DELETE FROM agent_sub_agents WHERE parent_id = " + db.placeholder, [agentId]);
+  executeWith(db, "DELETE FROM agent_sub_agents WHERE child_id = " + db.placeholder, [agentId]);
+  executeWith(db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + db.placeholder, [agentId]);
+  executeWith(db, "DELETE FROM agent_scopes WHERE agent_id = " + db.placeholder, [agentId]);
+  deleteById(db, agentRetrievalMapping(), agentId);
+  deleteById(db, agentsMapping(), agentId);
 }
 
 // The document checks that used to happen inside the request, kept there now
@@ -1849,6 +2249,56 @@ function sourceProblem(source: string, body: string): string {
 
 // One clock for every row this API writes. Six routes wrote the four letters
 // "now" into a timestamp column, which reads as a value and sorts as garbage.
+// `true` or `false` for a JSON body built by hand.
+// The calls of one round, as the wire carries them.
+//
+// Written here rather than only behind GET /steps because a card belongs to
+// the message it describes: the answer carries its own calls, and so does each
+// turn of a reloaded transcript. Polling is for watching a round that is still
+// running; this is for the round that is over, and the two must not disagree.
+function thoughtsJson(thoughts: Thought[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < thoughts.length) {
+    if (i > 0) { out = out + ","; }
+    // `seq` for the same reason a step carries one: on a reload the client is
+    // handed every round at once and has to put each thought back above the
+    // message it belongs to.
+    out = out + "{\"seq\":" + `${thoughts[i].seq}`
+      + ",\"rotation\":" + `${thoughts[i].rotation}`
+      + ",\"depth\":" + `${thoughts[i].depth}`
+      + ",\"text\":" + JSON.stringify(thoughts[i].text) + "}";
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+function stepsJson(live: LiveStep[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < live.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + "{\"seq\":" + `${live[i].seq}`
+      + ",\"depth\":" + `${live[i].depth}`
+      + ",\"rotation\":" + `${live[i].rotation}`
+      + ",\"idx\":" + `${live[i].idx}`
+      + ",\"kind\":" + JSON.stringify(live[i].kind)
+      + ",\"name\":" + JSON.stringify(live[i].name)
+      + ",\"target\":" + JSON.stringify(live[i].target)
+      + ",\"args\":" + JSON.stringify(live[i].args)
+      + ",\"running\":" + boolJson(live[i].endedAt == "")
+      + ",\"ok\":" + boolJson(live[i].ok)
+      + ",\"millis\":" + `${stepMillis(live[i])}` + "}";
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+function boolJson(v: bool): string {
+  if (v) { return "true"; }
+  return "false";
+}
+
 function stamp(): string {
   return `${Date.now()}`;
 }
@@ -1864,15 +2314,17 @@ function openDatabase(): Db {
       password: process.env("AGENTS_PG_PASSWORD") ?? "",
     };
     connectDatabase(pg, server);
-    return migrated(pg);
+    return pg;
   }
   let db = sqlite();
   let cfg: DbConfig = { filename: process.env("AGENTS_DB_FILE") ?? "/tmp/agents_api.db" };
   connectDatabase(db, cfg);
-  return migrated(db);
+  return db;
 }
 
-function migrated(db: Db): Db {
+// Bring the schema up to date, and say why it could not be. "" means every
+// step this build knows about has run.
+export function migrationProblem(db: Db): string {
   // One plan, extended — not two plans. A second migrate() call would be
   // handed a plan that lacks the versions already recorded, and refuse.
   let plan = schemaPlan(db);
@@ -1897,9 +2349,28 @@ function migrated(db: Db): Db {
   let results = artifactPlan(db);
   let ar: int = 0;
   while (ar < results.length) { plan.push(results[ar]); ar = ar + 1; }
+  // What a run is doing while it is still doing it, so the console can show a
+  // tool running rather than a spinner with nothing behind it.
+  let live = stepPlan(db);
+  let lv: int = 0;
+  while (lv < live.length) { plan.push(live[lv]); lv = lv + 1; }
+  // Where a conversation's scripts run: one container per environment, the
+  // rows here as the record and the container's workspace as cache
+  // (RUN-SCRIPT.md).
+  let envs = envPlan(db);
+  let ev: int = 0;
+  while (ev < envs.length) { plan.push(envs[ev]); ev = ev + 1; }
   let ran = migrate(db, plan);
-  if (!ran.ok) { console.error(ran.error); }
-  return db;
+  if (ran.ok) { return ""; }
+  // Logged and carried on with, this served an API whose routes SELECT columns
+  // that do not exist: every one of them answers 500, at a distance from the
+  // one line that said why. The master key already refuses to start without
+  // being usable, for the same reason and with the same remedy — fix it and
+  // start again.
+  if (ran.failedVersion != "") {
+    return "the schema is not up to date: migration " + ran.failedVersion + " did not run — " + ran.error;
+  }
+  return "the schema is not up to date: " + ran.error;
 }
 
 
@@ -1919,8 +2390,8 @@ function seed(db: Db): void {
   persist(db, modelsMapping(), JSON.stringify(haiku));
   persist(db, modelsMapping(), JSON.stringify(embed));
   persist(db, modelsMapping(), JSON.stringify(embedSmall));
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}" };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}" };
+  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "" };
+  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "" };
   persist(db, modelConfigsMapping(db), JSON.stringify(careful));
   persist(db, modelConfigsMapping(db), JSON.stringify(quick));
   let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
@@ -1931,8 +2402,8 @@ function seed(db: Db): void {
   let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", authKind: "none", authHeader: "", enabled: true };
   persist(db, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(db, mcpServersMapping(), JSON.stringify(ghSrv));
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", isDefault: true, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
-  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p1", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", scriptImageId: "", isDefault: true, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
   persist(db, agentsMapping(), JSON.stringify(lead));
   persist(db, agentsMapping(), JSON.stringify(scout));
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a1','s1')");
@@ -1941,6 +2412,11 @@ function seed(db: Db): void {
 
 function main(): void {
   let db = openDatabase();
+  let schema = migrationProblem(db);
+  if (schema != "") {
+    console.error(schema);
+    return;
+  }
   seed(db);
   let master = masterKey();
   let keyProblem = masterKeyProblem(master);
@@ -1950,402 +2426,45 @@ function main(): void {
     console.error(keyProblem);
     return;
   }
-  let api = new AgentApi(db, master);
-  let providers = new ProviderApi(db, master);
-  let traces = new RunApi(db);
 
-  let bound = new Map<string, Handler>();
-  // Every binding catches, and the try is inside the lambda because that is
-  // the only place it works: spec 245 propagates a throw through direct calls,
-  // but a handler is reached through a function value, and the fixpoint pass
-  // cannot see through one — so a throw inside a handler lambda escapes any
-  // try in `serve` and kills the process.
+  // Fifteen controllers, handed over whole. Each one is read for its own
+  // `@controller` and its methods bound (specs 477/478), so there is no table
+  // to walk here, no prefix to invent so that four of these classes can all
+  // have a `list`, and no binding map to keep in step with the routes. What is
+  // written is what a reader needs: which controllers there are, and what each
+  // one is given.
   //
-  // It did. `JSON.parse<T>` throws when the body is missing a field the record
-  // declares, and one PUT with a partial body stopped the whole API for
-  // everyone. Twenty-one routes parse a body.
-  bound.set("list", (req: Request) => {
-    try { return api.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("find", (req: Request) => {
-    try { return api.find(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-    bound.set("update", (req: Request) => {
-    try { return api.update(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("create", (req: Request) => {
-    try { return api.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-      bound.set("addServer", (req: Request) => {
-    try { return api.addServer(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("removeServer", (req: Request) => {
-    try { return api.removeServer(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("addChild", (req: Request) => {
-    try { return api.addChild(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("removeChild", (req: Request) => {
-    try { return api.removeChild(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("run", (req: Request) => {
-    try { return api.run(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("scopes", (req: Request) => {
-    try { return api.scopes(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("grant", (req: Request) => {
-    try { return api.grant(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("revoke", (req: Request) => {
-    try { return api.revoke(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("setRetrieval", (req: Request) => {
-    try { return api.setRetrieval(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("runs", (req: Request) => {
-    try { return api.runs(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("remove", (req: Request) => {
-    try { return api.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
+  // The `try` that answers a throwing handler with a 400 lives inside `mount`,
+  // once, for all of them — including the one that used to take the process
+  // down: `JSON.parse<T>` throws when a PUT body omits a field the record
+  // declares, and twenty-one of these routes parse a body.
+  let mounts: Mount[] = [
+    new AgentApi(db, master),
+    new ProviderApi(db, master),
+    new RunApi(db),
+    new ScriptImageApi(db),
+    new ModelApi(db, master),
+    new ConfigApi(db),
+    new PromptApi(db),
+    new WorkspaceApi(db, master),
+    new ThreadApi(db, master),
+    new DocumentApi(db, master),
+    new ScopeApi(db),
+    new JobApi(db),
+    new TraceApi(db, master),
+    new ServerApi(db, master),
+    new ArtifactApi(db),
+    new PreviewApi(db),
+  ];
 
-  bound.set("plist", (req: Request) => {
-    try { return providers.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("pstatus", (req: Request) => {
-    try { return providers.status(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("psetKey", (req: Request) => {
-    try { return providers.setKey(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("pclearKey", (req: Request) => {
-    try { return providers.clearKey(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  bound.set("rfind", (req: Request) => {
-    try { return traces.find(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let workspace = new WorkspaceApi(db, master);
-  bound.set("wlist", (req: Request) => {
-    try { return workspace.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wupload", (req: Request) => {
-    try { return workspace.upload(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wread", (req: Request) => {
-    try { return workspace.read(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wremove", (req: Request) => {
-    try { return workspace.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wpull", (req: Request) => {
-    try { return workspace.pull(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("wpromote", (req: Request) => {
-    try { return workspace.promote(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let artifacts = new ArtifactApi(db);
-  bound.set("alist", (req: Request) => {
-    try { return artifacts.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("acreate", (req: Request) => {
-    try { return artifacts.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("abyTurn", (req: Request) => {
-    try { return artifacts.byTurn(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("afind", (req: Request) => {
-    try { return artifacts.find(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("aversion", (req: Request) => {
-    try { return artifacts.version(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("arotate", (req: Request) => {
-    try { return artifacts.rotate(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("aremove", (req: Request) => {
-    try { return artifacts.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  // The preview handlers share the artifact prefix, so their names come out
-  // "apreview" and "asibling" — the class is separate because the paths are,
-  // not because the numbering is. Neither name collides with ArtifactApi's
-  // list/create/find/version/rotate/remove, which is the only thing the shared
-  // prefix requires.
-  let preview = new PreviewApi(db);
-  bound.set("apreview", (req: Request) => {
-    try { return preview.preview(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("asibling", (req: Request) => {
-    try { return preview.sibling(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let threads = new ThreadApi(db, master);
-  bound.set("hlist", (req: Request) => {
-    try { return threads.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("hopen", (req: Request) => {
-    try { return threads.open(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("hsay", (req: Request) => {
-    try { return threads.say(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("htranscript", (req: Request) => {
-    try { return threads.transcript(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let documents = new DocumentApi(db, master);
-  bound.set("dlist", (req: Request) => {
-    try { return documents.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("dupload", (req: Request) => {
-    try { return documents.upload(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("dremove", (req: Request) => {
-    try { return documents.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let jobsApi = new JobApi(db);
-  bound.set("jlist", (req: Request) => {
-    try { return jobsApi.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let scopeApi = new ScopeApi(db);
-  bound.set("kstree", (req: Request) => {
-    try { return scopeApi.tree(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let tracingApi = new TraceApi(db, master);
-  bound.set("tstatus", (req: Request) => {
-    try { return tracingApi.status(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("tconfigure", (req: Request) => {
-    try { return tracingApi.configure(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("tsetKey", (req: Request) => {
-    try { return tracingApi.setKey(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let models = new ModelApi(db, master);
-  bound.set("mlist", (req: Request) => {
-    try { return models.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("mcreate", (req: Request) => {
-    try { return models.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("mupdate", (req: Request) => {
-    try { return models.update(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("mtest", (req: Request) => {
-    try { return models.test(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-    bound.set("mremove", (req: Request) => {
-    try { return models.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let configs = new ConfigApi(db);
-  bound.set("clist", (req: Request) => {
-    try { return configs.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("ccreate", (req: Request) => {
-    try { return configs.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("cremove", (req: Request) => {
-    try { return configs.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let prompts = new PromptApi(db);
-  bound.set("promptlist", (req: Request) => {
-    try { return prompts.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("promptcreate", (req: Request) => {
-    try { return prompts.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  let servers = new ServerApi(db, master);
-  bound.set("slist", (req: Request) => {
-    try { return servers.list(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("stools", (req: Request) => {
-    try { return servers.tools(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("screate", (req: Request) => {
-    try { return servers.create(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("supdate", (req: Request) => {
-    try { return servers.update(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-  bound.set("ssetAuth", (req: Request) => {
-    try { return servers.setAuth(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-    bound.set("sremove", (req: Request) => {
-    try { return servers.remove(req); }
-    catch (e) { return badRequest("the request could not be handled: " + e.message); }
-  });
-
-  // Three controllers, one table. The provider and run handlers are prefixed
-  // because a table is keyed by handler name and the classes share a `find`
-  // and a `list`.
-  let table: Route[] = [];
-  let a: int = 0;
-  while (a < controllerAgentApi.length) { table.push(controllerAgentApi[a]); a = a + 1; }
-  let p: int = 0;
-  while (p < controllerProviderApi.length) {
-    let r = controllerProviderApi[p];
-    table.push(route(r.method, r.pattern, "p" + r.handler));
-    p = p + 1;
-  }
-  let t: int = 0;
-  while (t < controllerRunApi.length) {
-    let r = controllerRunApi[t];
-    table.push(route(r.method, r.pattern, "r" + r.handler));
-    t = t + 1;
-  }
-  let m: int = 0;
-  while (m < controllerModelApi.length) {
-    let r = controllerModelApi[m];
-    table.push(route(r.method, r.pattern, "m" + r.handler));
-    m = m + 1;
-  }
-  let c: int = 0;
-  while (c < controllerConfigApi.length) {
-    let r = controllerConfigApi[c];
-    table.push(route(r.method, r.pattern, "c" + r.handler));
-    c = c + 1;
-  }
-  let pr: int = 0;
-  while (pr < controllerPromptApi.length) {
-    let r = controllerPromptApi[pr];
-    table.push(route(r.method, r.pattern, "prompt" + r.handler));
-    pr = pr + 1;
-  }
-  let wf: int = 0;
-  while (wf < controllerWorkspaceApi.length) {
-    let r = controllerWorkspaceApi[wf];
-    table.push(route(r.method, r.pattern, "w" + r.handler));
-    wf = wf + 1;
-  }
-  let th: int = 0;
-  while (th < controllerThreadApi.length) {
-    let r = controllerThreadApi[th];
-    table.push(route(r.method, r.pattern, "h" + r.handler));
-    th = th + 1;
-  }
-  let dc: int = 0;
-  while (dc < controllerDocumentApi.length) {
-    let r = controllerDocumentApi[dc];
-    table.push(route(r.method, r.pattern, "d" + r.handler));
-    dc = dc + 1;
-  }
-  let sc: int = 0;
-  while (sc < controllerScopeApi.length) {
-    let r = controllerScopeApi[sc];
-    table.push(route(r.method, r.pattern, "ks" + r.handler));
-    sc = sc + 1;
-  }
-  let jb: int = 0;
-  while (jb < controllerJobApi.length) {
-    let r = controllerJobApi[jb];
-    table.push(route(r.method, r.pattern, "j" + r.handler));
-    jb = jb + 1;
-  }
-  let tr: int = 0;
-  while (tr < controllerTraceApi.length) {
-    let r = controllerTraceApi[tr];
-    table.push(route(r.method, r.pattern, "t" + r.handler));
-    tr = tr + 1;
-  }
-  let sv: int = 0;
-  while (sv < controllerServerApi.length) {
-    let r = controllerServerApi[sv];
-    table.push(route(r.method, r.pattern, "s" + r.handler));
-    sv = sv + 1;
-  }
-  let ar: int = 0;
-  while (ar < controllerArtifactApi.length) {
-    let r = controllerArtifactApi[ar];
-    table.push(route(r.method, r.pattern, "a" + r.handler));
-    ar = ar + 1;
-  }
-  let pv: int = 0;
-  while (pv < controllerPreviewApi.length) {
-    let r = controllerPreviewApi[pv];
-    table.push(route(r.method, r.pattern, "a" + r.handler));
-    pv = pv + 1;
-  }
-
+  let table = mountedRoutes(mounts);
   let i: int = 0;
   while (i < table.length) {
     console.log("route  " + table[i].method + " " + table[i].pattern + " -> " + table[i].handler);
     i = i + 1;
   }
 
-  let problem = serve(8100, table, bound);
+  let problem = listen(8100, mounts);
   if (problem != "") { console.error(problem); }
 }
 

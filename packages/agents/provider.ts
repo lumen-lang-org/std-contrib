@@ -5,7 +5,7 @@
 // names no model.
 
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { JsonText, jsonRaw, jsonText, jsonList, jsonStringMember } from "./scan.ts";
+import { JsonText, jsonFind, jsonRaw, jsonText, jsonList, jsonStringMember, jsonComplete } from "./scan.ts";
 
 export type Completion = {
   ok: bool,
@@ -160,6 +160,23 @@ export function chatEndpoint(provider: string): string {
   if (provider == "anthropic") { return "https://api.anthropic.com/v1/messages"; }
   if (provider == "openai") { return "https://api.openai.com/v1/chat/completions"; }
   return "";
+}
+
+// The path a provider's chat endpoint hangs off a root.
+//
+// Behind a gateway this is the whole of the address, and the wire format
+// belongs to the provider rather than to the gateway: Anthropic speaks
+// `/messages` wherever it is hosted. Asking for `chat/completions` regardless —
+// which is what the one call site used to hardcode — 404s every Anthropic row
+// that has a baseUrl, and only the empty-baseUrl path ever worked.
+export function chatPath(provider: string): string {
+  if (provider == "anthropic") { return "messages"; }
+  return "chat/completions";
+}
+
+// The address a model row's completions are actually sent to.
+export function chatEndpointFor(model: ModelRow): string {
+  return endpointFor(model, chatPath(model.provider));
 }
 
 // Providers disagree about where the key goes and what the body is called, and
@@ -366,11 +383,45 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
   return out + "]";
 }
 
+// Asking the model to think, in whatever way its provider spells that.
+//
+// Nothing happens by default. Anthropic answers with a thinking block only when
+// the request enables one and gives it a token budget; OpenAI's reasoning
+// models take an effort instead. So the config carries text, and what the text
+// means is decided here, per provider, rather than by pretending the two are
+// the same knob.
+//
+// Anthropic also insists on a temperature of exactly 1 while thinking, and on a
+// budget below `max_tokens`. Both are enforced here rather than left for the
+// provider to refuse: a 400 at the first conversation is a bad way to learn it.
+export function thinkingJson(provider: string, config: ModelConfigRow): string {
+  if (config.thinking == "") { return ""; }
+  if (provider == "anthropic") {
+    let budget = parseInt(config.thinking, 10) ?? 0;
+    if (budget <= 0) { return ""; }
+    if (budget >= config.maxTokens) { budget = config.maxTokens - 1; }
+    if (budget <= 0) { return ""; }
+    return ",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":" + `${budget}` + "}";
+  }
+  // An effort, for the models that take one. A number here is not an effort and
+  // is not sent: a provider that receives one answers 400, and a config written
+  // for Anthropic should not quietly change what an OpenAI model does.
+  if (config.thinking == "low" || config.thinking == "medium" || config.thinking == "high") {
+    return ",\"reasoning_effort\":" + JSON.stringify(config.thinking);
+  }
+  return "";
+}
+
 function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[]): string {
+  let asked = thinkingJson(model.provider, config);
+  // Anthropic refuses any temperature but 1 while thinking is enabled.
+  let temperature = config.temperature;
+  if (asked != "" && model.provider == "anthropic") { temperature = 1; }
   let body = "{\"model\":" + JSON.stringify(model.apiName)
     + ",\"messages\":" + messagesJson(model.provider, systemPrompt, turns)
     + ",\"max_tokens\":" + `${config.maxTokens}`
-    + ",\"temperature\":" + `${config.temperature}`;
+    + ",\"temperature\":" + `${temperature}`
+    + asked;
   if (model.provider == "anthropic" && systemPrompt != "") {
     body = body + ",\"system\":" + JSON.stringify(systemPrompt);
   }
@@ -380,6 +431,38 @@ function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: stri
 }
 
 // --- what came back -----------------------------------------------------------
+
+// Why the model stopped writing, in the provider's own word, or "" when it did
+// not say.
+//
+// Two spellings and two homes: OpenAI and Mistral put `finish_reason` on the
+// choice, Anthropic puts `stop_reason` on the reply. Each is looked for under
+// its own provider only — finding the other's would report a finished reply as
+// a cut-off one.
+export function stopReasonOf(provider: string, body: string): string {
+  if (provider == "anthropic") { return jsonText(body, "stop_reason"); }
+  return jsonText(body, "finish_reason");
+}
+
+// The sentence to fail a round with when the model ran out of output space, or
+// "" when it did not.
+//
+// This is the only thing that says a reply was cut short. A reply truncated
+// mid-tool-call loses that call to `jsonComplete` and arrives with no calls at
+// all, which is indistinguishable from a model that has finished — so the
+// round stored the provider's raw JSON as the assistant's answer where
+// `content` was null, and stored the question with no answer at all where it
+// was "". A reply cut mid-*text* nothing noticed in any shape.
+//
+// Emptiness is not the test, then: the reason is. `max_tokens` is Anthropic's
+// word, `length` OpenAI's, `model_length` Mistral's.
+export function truncationProblem(provider: string, body: string, maxTokens: int): string {
+  let reason = stopReasonOf(provider, body);
+  if (reason != "length" && reason != "max_tokens" && reason != "model_length") { return ""; }
+  return "the model ran out of room before it finished this reply (it stopped on \"" + reason
+    + "\"), so nothing was kept: ask for less at a time, or raise this model config's max_tokens, currently "
+    + `${maxTokens}` + ".";
+}
 
 // The calls a reply asked for, in order. None is the ordinary case: it is how
 // a model says it has finished.
@@ -392,8 +475,19 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
     while (b < blocks.length) {
       if (jsonText(blocks[b], "type") == "tool_use") {
         let input = jsonRaw(blocks[b], "input");
-        if (input == "") { input = "{}"; }
-        out.push(toolCall(jsonText(blocks[b], "id"), jsonText(blocks[b], "name"), input));
+        // No `input` member at all is a tool that takes no arguments. An
+        // `input` that is there and reads as nothing is a value jsonValueAt
+        // refused to hand back half of — a different thing entirely, and
+        // turning it into "{}" is how write_artifact came to be called with
+        // an empty path.
+        if (input == "" && jsonFind(blocks[b], "input") < 0) { input = "{}"; }
+        // The same check the OpenAI branch below makes, and for the same
+        // reason: what is stored here is replayed to the provider verbatim,
+        // and a tool_use whose input is not one JSON object is refused —
+        // along with every later message in that conversation.
+        if (jsonComplete(input)) {
+          out.push(toolCall(jsonText(blocks[b], "id"), jsonText(blocks[b], "name"), input));
+        }
       }
       b = b + 1;
     }
@@ -412,7 +506,16 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
       let args = raw;
       if (raw.startsWith("\"")) { args = jsonText(fn, "arguments"); }
       if (args == "") { args = "{}"; }
-      out.push(toolCall(jsonText(calls[i], "id"), jsonText(fn, "name"), args));
+      // A call whose arguments do not close is a call the model did not
+      // finish writing — it ran out of output space partway through, which
+      // happens the moment a model is asked for a file bigger than its
+      // maxTokens. Dropping it here keeps the round consistent: the assistant
+      // turn announces exactly the calls that will be answered. Keeping it
+      // stored a turn whose own JSON could not be parsed back, and every
+      // later message in that conversation was refused by the provider.
+      if (jsonComplete(args)) {
+        out.push(toolCall(jsonText(calls[i], "id"), jsonText(fn, "name"), args));
+      }
     }
     i = i + 1;
   }
@@ -442,6 +545,36 @@ export function assistantText(provider: string, body: string): JsonText {
   return jsonStringMember(body, "content");
 }
 
+// What the model thought before it answered, when it says so.
+//
+// Three shapes, because three providers disagree: Anthropic puts a block of
+// `type: "thinking"` in `content`, and the OpenAI-compatible ones that expose
+// it at all put a `reasoning_content` (Mistral's magistral, DeepSeek) or a
+// `reasoning` string on the message. A provider that returns none — most of
+// them, most of the time — answers "", which is not a failure and is not
+// reported as one.
+//
+// Never parsed into a record: a reply carries keys nobody declared, and this is
+// read out of the same body the answer came from.
+export function assistantThinking(provider: string, body: string): string {
+  if (provider == "anthropic") {
+    let blocks = jsonList(jsonRaw(body, "content"));
+    let i: int = 0;
+    while (i < blocks.length) {
+      if (jsonText(blocks[i], "type") == "thinking") {
+        return jsonText(blocks[i], "thinking");
+      }
+      i = i + 1;
+    }
+    return "";
+  }
+  let reasoned = jsonStringMember(body, "reasoning_content");
+  if (reasoned.found && reasoned.text != "") { return reasoned.text; }
+  let plain = jsonStringMember(body, "reasoning");
+  if (plain.found) { return plain.text; }
+  return "";
+}
+
 // The assistant's text out of a provider's reply.
 //
 // Scanned rather than parsed: the reply carries usage counts, tool-call slots
@@ -453,6 +586,176 @@ export function replyText(provider: string, body: string): string {
   let found = assistantText(provider, body);
   if (!found.found) { return body; }
   return found.text;
+}
+
+
+// --- streaming ------------------------------------------------------------------------
+
+// A reply, fetched as it is written.
+//
+// The point is not speed: it is that a rotation's *thinking* is readable while
+// the model is still producing it, instead of arriving whole when the rotation
+// ends. Everything else about the run is unchanged, and that is deliberate —
+// the deltas are reassembled here into exactly the body the buffered path
+// returns, so `toolCallsFrom`, `assistantText`, `truncationProblem` and every
+// storage rule downstream see what they have always seen. Streaming is how the
+// reply is fetched, not a second shape for the rest of the package to learn.
+//
+// `onThinking` is called with the reasoning accumulated so far, each time it
+// grows. It must not throw: a throw does not cross a function value here, so it
+// would escape every `try` between this and the handler.
+export type Thinking = (soFar: string) => void;
+
+// One tool call, assembled from the fragments a stream delivers. OpenAI sends
+// `tool_calls[i]` in pieces — an id on one chunk, a name on the next, the
+// arguments a character at a time — keyed only by `index`.
+type CallFragment = {
+  index: int,
+  id: string,
+  name: string,
+  args: string,
+};
+
+function withFragment(frags: CallFragment[], index: int, id: string, name: string, args: string): CallFragment[] {
+  let out: CallFragment[] = [];
+  let found = false;
+  let i: int = 0;
+  while (i < frags.length) {
+    if (frags[i].index == index) {
+      found = true;
+      let merged: CallFragment = {
+        index: index,
+        id: frags[i].id + id,
+        name: frags[i].name + name,
+        args: frags[i].args + args,
+      };
+      out.push(merged);
+    } else {
+      out.push(frags[i]);
+    }
+    i = i + 1;
+  }
+  if (!found) {
+    let fresh: CallFragment = { index: index, id: id, name: name, args: args };
+    out.push(fresh);
+  }
+  return out;
+}
+
+// The assembled reply, in the shape the buffered path produces.
+function assembledBody(content: string, reasoning: string, frags: CallFragment[], finish: string): string {
+  let calls = "";
+  let i: int = 0;
+  while (i < frags.length) {
+    if (i > 0) { calls = calls + ","; }
+    calls = calls + "{\"id\":" + JSON.stringify(frags[i].id)
+      + ",\"type\":\"function\",\"function\":{\"name\":" + JSON.stringify(frags[i].name)
+      + ",\"arguments\":" + JSON.stringify(frags[i].args) + "}}";
+    i = i + 1;
+  }
+  let message = "{\"role\":\"assistant\",\"content\":" + JSON.stringify(content)
+    + ",\"reasoning_content\":" + JSON.stringify(reasoning);
+  if (frags.length > 0) { message = message + ",\"tool_calls\":[" + calls + "]"; }
+  return "{\"choices\":[{\"finish_reason\":" + JSON.stringify(finish)
+    + ",\"message\":" + message + "}}]}";
+}
+
+// The text after `data: ` on an SSE line, or "" for anything else — a comment,
+// a blank keep-alive, an event name.
+export function sseData(line: string): string {
+  if (!line.startsWith("data:")) { return ""; }
+  let rest = line.slice(5, line.length);
+  while (rest.startsWith(" ")) { rest = rest.slice(1, rest.length); }
+  return rest;
+}
+
+// One completion, streamed. Falls back to nothing: a caller that wants the
+// buffered path calls `completeTurns` instead.
+export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string, onThinking: Thinking): Completion {
+  let endpoint = chatEndpointFor(model);
+  if (endpoint == "") {
+    let nowhere: Completion = { ok: false, text: "", status: 0, error: "no chat endpoint for \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
+    return nowhere;
+  }
+  if (apiKey == "") {
+    let keyless: Completion = { ok: false, text: "", status: 0, error: "no API key for " + model.provider, inputTokens: 0, outputTokens: 0, counted: false };
+    return keyless;
+  }
+
+  let body = requestBody(model, config, systemPrompt, turns, tools);
+  // The one difference from the buffered request: ask for the stream.
+  let streamed = body.slice(0, body.length - 1) + ",\"stream\":true}";
+  let s = http.stream(endpoint, "POST", streamed, authHeaders(model.provider, apiKey));
+
+  let status = s.status();
+  if (status < 200 || status >= 300) {
+    let drained = "";
+    while (!s.done()) {
+      let line = s.readLine();
+      if (s.done()) { break; }
+      drained = drained + line;
+    }
+    s.close();
+    let refused: Completion = { ok: false, text: drained, status: status, error: "the provider refused the stream: " + `${status}`, inputTokens: 0, outputTokens: 0, counted: false };
+    return refused;
+  }
+
+  let content = "";
+  let reasoning = "";
+  let finish = "";
+  let frags: CallFragment[] = [];
+  let inTokens: int = 0;
+  let outTokens: int = 0;
+
+  while (!s.done()) {
+    let line = s.readLine();
+    if (s.done()) { break; }
+    let data = sseData(line);
+    if (data == "" || data == "[DONE]") { continue; }
+
+    let delta = jsonRaw(data, "delta");
+    if (delta != "") {
+      let piece = jsonText(delta, "content");
+      if (piece != "") { content = content + piece; }
+      let thought = jsonText(delta, "reasoning_content");
+      if (thought == "") { thought = jsonText(delta, "reasoning"); }
+      if (thought != "") {
+        reasoning = reasoning + thought;
+        // Told as it grows, so the console can draw it growing.
+        onThinking(reasoning);
+      }
+      let calls = jsonList(jsonRaw(delta, "tool_calls"));
+      let c: int = 0;
+      while (c < calls.length) {
+        // `jsonRaw`, not `jsonText`: the index is a number, and jsonText reads
+        // string members only — it answered "" for every fragment, so each one
+        // fell back to its position in *this* event's array, which is always 0
+        // when a provider sends one call per event. Three writes merged into a
+        // single call whose name was the three names concatenated and whose
+        // arguments were three documents spliced together; `jsonComplete` then
+        // dropped the lot and the round answered with nothing.
+        let at = parseInt(jsonRaw(calls[c], "index"), 10) ?? c;
+        let fn = jsonRaw(calls[c], "function");
+        frags = withFragment(frags, at, jsonText(calls[c], "id"),
+          jsonText(fn, "name"), jsonText(fn, "arguments"));
+        c = c + 1;
+      }
+    }
+    let reason = jsonText(data, "finish_reason");
+    if (reason != "") { finish = reason; }
+    let usage = jsonRaw(data, "usage");
+    if (usage != "") {
+      inTokens = parseInt(jsonText(usage, "prompt_tokens"), 10) ?? inTokens;
+      outTokens = parseInt(jsonText(usage, "completion_tokens"), 10) ?? outTokens;
+    }
+  }
+  s.close();
+
+  let whole: Completion = {
+    ok: true, text: assembledBody(content, reasoning, frags, finish), status: status,
+    error: "", inputTokens: inTokens, outputTokens: outTokens, counted: inTokens > 0,
+  };
+  return whole;
 }
 
 // One completion. Every value comes from the rows passed in; the key comes
@@ -467,7 +770,7 @@ export function complete(model: ModelRow, config: ModelConfigRow, systemPrompt: 
 // One completion over a whole context, with the tools the model may call.
 // `complete` above is this with one turn and no tools.
 export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string): Completion {
-  let endpoint = endpointFor(model, "chat/completions");
+  let endpoint = chatEndpointFor(model);
   if (endpoint == "") {
     let unknown: Completion = { ok: false, text: "", status: 0, error: "no endpoint for provider \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
     return unknown;

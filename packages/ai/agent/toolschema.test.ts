@@ -116,8 +116,56 @@ test("a schema pairs with a function to make a working tool", () => {
 
 // --- what it refuses -------------------------------------------------------
 
+// What a description has to look like to pair with a run body: `toolFrom` takes
+// `(input: string) => string`, so exactly one string parameter.
+function oneParamDescription(): FunctionDescription {
+  let params: ParamDescription[] = [
+    param("query", "string", [on("param", ["the phrase to look for"])]),
+  ];
+  let d: FunctionDescription = {
+    protocol: 1, kind: "function", name: "searchArchive",
+    args: ["search the archive for a phrase"],
+    file: "search.ts", line: 4, params: params, returns: "string",
+  };
+  return d;
+}
+
 test("a well-formed description reports no problem", () => {
-  expect(toolProblem(searchDescription()) == "");
+  expect(toolProblem(oneParamDescription()) == "");
+});
+
+test("a two-parameter function cannot become a tool, and says which one", () => {
+  // `toolFrom` pairs the schema with `(input: string) => string`. No
+  // two-parameter function can be that value, so a description of one is a
+  // schema that will never find a body — reported here rather than at the call
+  // site where the types quietly refuse.
+  let problem = toolProblem(searchDescription());
+  expect(problem.indexOf("searchArchive") >= 0);
+  expect(problem.indexOf("2 parameters") >= 0);
+  expect(problem.indexOf("one string parameter") >= 0);
+});
+
+test("a function with no parameters cannot become a tool either", () => {
+  let none: ParamDescription[] = [];
+  let d: FunctionDescription = {
+    protocol: 1, kind: "function", name: "now", args: ["the current time"],
+    file: "t.ts", line: 1, params: none, returns: "string",
+  };
+  expect(toolProblem(d).indexOf("0 parameters") >= 0);
+});
+
+test("a single parameter that is not a string is refused, naming its type", () => {
+  let params: ParamDescription[] = [
+    param("limit", "int", [on("param", ["how many results"])]),
+  ];
+  let d: FunctionDescription = {
+    protocol: 1, kind: "function", name: "topResults", args: ["the top results"],
+    file: "t.ts", line: 1, params: params, returns: "string",
+  };
+  let problem = toolProblem(d);
+  expect(problem.indexOf("\"limit\"") >= 0);
+  expect(problem.indexOf("int") >= 0);
+  expect(problem.indexOf("one string parameter") >= 0);
 });
 
 test("a protocol it does not know is refused", () => {

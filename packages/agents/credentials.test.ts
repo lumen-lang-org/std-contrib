@@ -7,7 +7,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, findById, execute, dropTable, countWhere } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { CredentialRow, credentialsMapping, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan } from "./schema.ts";
-import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
+import { DestinationMove, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationOf, destinationProblem } from "./credentials.ts";
 
 let database: Db = sqlite();
 
@@ -136,6 +136,84 @@ test("listing names providers and never envelopes", () => {
   expect(names.length == 2);
   expect(names.indexOf("mistral") >= 0);
   expect(names.indexOf("anthropic") >= 0);
+});
+
+// --- knowing a secret is there, and getting rid of it -------------------------
+
+test("a credential can be asked after without being opened", () => {
+  fresh();
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  expect(hasCredential(database, "mistral"));
+  expect(!hasCredential(database, "openai"));
+  // Deliberately not asking for the master key: a caller deciding whether a
+  // secret is at stake must not fail open when the key is wrong.
+  expect(hasCredential(database, "mistral"));
+});
+
+test("forgetting a credential says whether there was one", () => {
+  fresh();
+  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  expect(forgetCredential(database, "mistral"));
+  expect(credentialFor(database, "mistral", testKey()) == "");
+  expect(countWhere(database, credentialsMapping(), "", []) == 0);
+  // Twice is not an error, and is not a lie either.
+  expect(!forgetCredential(database, "mistral"));
+});
+
+// --- where a secret is allowed to go ------------------------------------------
+
+test("a destination is its origin, however the rest of the URL is written", () => {
+  expect(destinationOf("https://api.mistral.ai/v1/chat/completions") == "https://api.mistral.ai");
+  expect(destinationOf("HTTPS://API.Mistral.AI/v1") == "https://api.mistral.ai");
+  expect(destinationOf("http://127.0.0.1:11434/v1/embeddings") == "http://127.0.0.1:11434");
+  // A port is part of who receives this, so it is part of the answer.
+  expect(destinationOf("https://gw.internal:8443/v1") != destinationOf("https://gw.internal/v1"));
+  // User-info is not part of where this goes, and would otherwise make one
+  // host compare unequal with itself.
+  expect(destinationOf("https://user:pw@gw.internal/v1") == "https://gw.internal");
+});
+
+test("an address with no origin to read is no address", () => {
+  expect(destinationOf("") == "");
+  expect(destinationOf("api.mistral.ai") == "");
+  expect(destinationOf("file:///etc/passwd") == "");
+  expect(destinationOf("https://") == "");
+});
+
+function move(was: string, now: string, stored: bool): DestinationMove {
+  let m: DestinationMove = {
+    subject: "model m1",
+    secretName: "the mistral key",
+    clearWith: "DELETE /providers/mistral/key",
+    was: was,
+    now: now,
+    secretStored: stored,
+  };
+  return m;
+}
+
+test("a stored secret cannot be pointed at another host", () => {
+  let refused = destinationProblem(move("https://api.mistral.ai/v1", "http://attacker.example/v1", true));
+  expect(refused != "");
+  expect(refused.indexOf("attacker.example") >= 0);
+  // A refusal that does not say what to do next is a locked door with no sign.
+  expect(refused.indexOf("DELETE /providers/mistral/key") >= 0);
+});
+
+test("the same host by another path is not a move", () => {
+  expect(destinationProblem(move("https://api.mistral.ai/v1", "https://api.mistral.ai/v2/chat", true)) == "");
+});
+
+test("with nothing stored there is nothing to refuse", () => {
+  expect(destinationProblem(move("https://api.mistral.ai/v1", "http://attacker.example/v1", false)) == "");
+});
+
+test("an unreadable address on either side refuses rather than passes", () => {
+  // Fails closed twice: a new address this cannot parse is somewhere else, and
+  // an old one it cannot parse is not evidence that the new one is the same.
+  expect(destinationProblem(move("https://api.mistral.ai/v1", "notaurl", true)) != "");
+  expect(destinationProblem(move("", "https://api.mistral.ai/v1", true)) != "");
+  expect(destinationProblem(move("", "", true)) != "");
 });
 
 test("the suite leaves nothing behind", () => {

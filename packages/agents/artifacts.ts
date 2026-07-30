@@ -227,7 +227,7 @@ function pathProblem(path: string): string {
     i = i + 1;
   }
   if (kindOf(normal) == "") {
-    return "an artifact path ends in a known extension — .html, .svg, .md, .json, .txt or a source suffix — not \"" + normal + "\"";
+    return "an artifact path ends in a known extension — .html, .svg, .md, .json, .txt, .png or a source suffix — not \"" + normal + "\"";
   }
   return "";
 }
@@ -258,9 +258,15 @@ function segmentCharsOk(seg: string): bool {
 // title reaches the system prompt and a note reaches the run log — a newline
 // in either is a fresh line the reader parses as structure, not as the
 // artifact's name.
-function labelProblem(what: string, text: string, cap: int): string {
+// The cap is a byte count and the sentence says so: a string here is UTF-8
+// bytes, so a title written in Arabic is two bytes a letter and one written in
+// emoji is four. Reported as "characters" it is arithmetic the writer cannot
+// reproduce — they count 70 and are told that is 140.
+// Exported for the edit door (artifacts-edit.ts), which stores notes too and
+// must refuse them through the same gate.
+export function labelProblem(what: string, text: string, cap: int): string {
   if (text.length > cap) {
-    return "a " + what + " is at most " + `${cap}` + " characters; this one is " + `${text.length}`;
+    return "a " + what + " is at most " + `${cap}` + " bytes of UTF-8; this one is " + `${text.length}`;
   }
   let i: int = 0;
   while (i < text.length) {
@@ -311,6 +317,24 @@ export function kindOf(path: string): string {
     || ext == "py" || ext == "sql" || ext == "sh"
     || ext == "yaml" || ext == "yml" || ext == "toml") { return "code"; }
   if (ext == "txt" || ext == "csv" || ext == "log") { return "text"; }
+  // A raster image. The BODY of an image artifact is base64 text, never raw
+  // bytes: a Lumen string is UTF-8 and a PNG is not, so the bytes are encoded
+  // on the way in (the script reconcile does it; an upload must arrive
+  // already encoded) and decoded only inside a data: URI where a browser
+  // wants them. That keeps every storage rule — byte caps, JSON transport,
+  // the append-only log — working on text it can actually hold.
+  if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp") { return "image"; }
+  return "";
+}
+
+// The data-URI media type for an image artifact's path. Only meaningful for
+// kind "image"; the preview wrapper embeds the base64 body under this type.
+export function imageMediaType(path: string): string {
+  let ext = extensionOf(path);
+  if (ext == "png") { return "image/png"; }
+  if (ext == "jpg" || ext == "jpeg") { return "image/jpeg"; }
+  if (ext == "gif") { return "image/gif"; }
+  if (ext == "webp") { return "image/webp"; }
   return "";
 }
 
@@ -337,6 +361,11 @@ export function mimeOf(kind: string): string {
   // that sandbox, with connect-src 'none', a script has nothing to reach.
   if (kind == "css") { return "text/css; charset=utf-8"; }
   if (kind == "javascript") { return "text/javascript; charset=utf-8"; }
+  // An image artifact's stored body is base64 TEXT, and that is also what the
+  // wire carries — the preview route wraps it in a page with a data: URI
+  // rather than ever answering raw image bytes, so its mime here is the text
+  // it is, not the picture it encodes.
+  if (kind == "image") { return "text/plain; charset=utf-8"; }
   // Everything else is source, and source is text. Serving it as its own
   // language's type gains nothing and asks a browser to run something nobody
   // linked.
@@ -619,7 +648,9 @@ function maxSlot(db: Db, threadId: string): int {
 // append-only, so old bodies stay on disk and must stay under the budget too.
 // -1 when the log cannot be read, 0 for a thread with none: SUM over no rows
 // is NULL, which reads as empty text.
-function threadBytes(db: Db, threadId: string): int {
+// Exported for the edit door, which appends a version too and must stay
+// under the same budget.
+export function threadBytes(db: Db, threadId: string): int {
   let sql = "SELECT SUM(artifact_versions.bytes) FROM artifact_versions"
     + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
     + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
@@ -630,7 +661,9 @@ function threadBytes(db: Db, threadId: string): int {
   return parseInt(held) ?? -1;
 }
 
-function nextVersion(db: Db, artifactId: string): int {
+// Exported for the edit door: after a lost race its retry reads the log's
+// truth here rather than the pointer's cache, which can be one commit stale.
+export function nextVersion(db: Db, artifactId: string): int {
   let sql = "SELECT MAX(version) FROM artifact_versions WHERE artifact_id = " + placeholderAt(db, 1);
   if (!db.query(sql, [artifactId])) { return 0; }
   if (db.rows() == 0) { return 1; }
@@ -689,7 +722,10 @@ export function artifactBriefing(db: Db, threadId: string): string {
     i = i + 1;
   }
   if (rows.length > shown) {
-    out = out + "\n…and " + `${rows.length - shown}` + " more; list with read_artifact";
+    // "list with read_artifact" stood here once — a false affordance, since
+    // read_artifact lists nothing. search_artifacts is the tool that makes
+    // the sentence true.
+    out = out + "\n…and " + `${rows.length - shown}` + " more; search with search_artifacts";
   }
   // Directly under the list, because it is about the list: the one mistake a
   // model reliably makes here is a near-miss respelling of a path it can see.

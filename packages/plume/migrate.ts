@@ -17,7 +17,7 @@
 // assembled from anywhere — a directory read, a constant, a generated list.
 
 import { Db } from "./driver.ts";
-import { execute, safeIdentifier, placeholderAt, DbResult } from "./plume.ts";
+import { execute, safeIdentifier, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction, DbResult } from "./plume.ts";
 
 // One step. `version` orders it and identifies it; an empty version marks a
 // repeatable step, which re-runs whenever its SQL changes and always sorts
@@ -214,16 +214,16 @@ export type ParsedName = {
   version: string,
   description: string,
   valid: bool,
-  problem: string,
+  violation: string,
 };
 
 function parsedName(version: string, description: string): ParsedName {
-  let p: ParsedName = { version: version, description: description, valid: true, problem: "" };
+  let p: ParsedName = { version: version, description: description, valid: true, violation: "" };
   return p;
 }
 
-function unparsedName(fileName: string, problem: string): ParsedName {
-  let p: ParsedName = { version: "", description: "", valid: false, problem: "\"" + fileName + "\" " + problem };
+function unparsedName(fileName: string, why: string): ParsedName {
+  let p: ParsedName = { version: "", description: "", valid: false, violation: "\"" + fileName + "\" " + why };
   return p;
 }
 
@@ -269,7 +269,7 @@ export function parseMigrationName(fileName: string): ParsedName {
 }
 
 // The plan a directory describes. Files that do not follow the naming are
-// skipped here and reported by `migrationNameProblem`, so a stray README beside
+// skipped here and reported by `migrationNameViolation`, so a stray README beside
 // the SQL is not silently treated as a migration.
 export function migrationsFrom(files: SqlFile[]): Migration[] {
   let out: Migration[] = [];
@@ -287,12 +287,12 @@ export function migrationsFrom(files: SqlFile[]): Migration[] {
 // Why a directory does not describe a plan. A file that is not a migration is
 // an error rather than something to ignore: a migration that was meant to run
 // and was named wrongly would otherwise disappear without a word.
-export function migrationNameProblem(files: SqlFile[]): string {
+export function migrationNameViolation(files: SqlFile[]): string {
   if (files.length == 0) { return "no files to read migrations from"; }
   let i: int = 0;
   while (i < files.length) {
     let parsed = parseMigrationName(files[i].name);
-    if (!parsed.valid) { return parsed.problem; }
+    if (!parsed.valid) { return parsed.violation; }
     i = i + 1;
   }
   return planValid(migrationsFrom(files));
@@ -530,8 +530,8 @@ export function migrateAllowingOutOfOrder(db: Db, plan: Migration[]): MigrateRes
 }
 
 function migrateWith(db: Db, plan: Migration[], allowOutOfOrder: bool): MigrateResult {
-  let problem = validateMigrations(db, plan);
-  if (problem != "") { return migrateErr("", problem); }
+  let violation = validateMigrations(db, plan);
+  if (violation != "") { return migrateErr("", violation); }
 
   let order = planOrder(plan);
   let states = migrationInfo(db, plan);
@@ -548,17 +548,50 @@ function migrateWith(db: Db, plan: Migration[], allowOutOfOrder: bool): MigrateR
       return migrateErr(m.version, "migration " + m.version + " \"" + m.description
         + "\" is below one already applied; pass it through migrateAllowingOutOfOrder to accept that");
     }
+    // The statement and the row recording it go in together.
+    //
+    // They used to be two autocommitted round trips, and anything that landed
+    // between them — a crash, a lost connection, a kill — left the migration
+    // applied and still pending. It then re-ran on every boot, failing on the
+    // table it had already created, and neither repairChecksums nor
+    // forgetMigrations could get out of it: there was no row to repair and
+    // dropping the history did not undo the statement.
+    //
+    // PostgreSQL and SQLite both roll DDL back, so on those the pair is atomic
+    // and the failure is gone. MySQL commits implicitly at each DDL statement
+    // and cannot be made to do this by any means available here; the
+    // transaction is still opened, because a data migration on MySQL is
+    // covered by it and a schema one is no worse off than before.
+    //
+    // A step that cannot run inside a transaction at all — PostgreSQL's CREATE
+    // INDEX CONCURRENTLY is the one people meet — now fails with the
+    // database's own message instead of running unrecorded. Run it by hand and
+    // baseline it.
+    let opened = beginTransaction(db);
     let ran = execute(db, m.sql);
     if (!ran.ok) {
       // Nothing is recorded for a failed step, so a fixed migration re-runs
       // rather than needing a repair.
+      if (opened.ok) { rollbackTransaction(db); }
       return migrateErr(m.version, "migration " + stepLabel(m) + " failed: " + ran.error);
     }
     // A repeatable step that has run before is updated in place rather than
     // inserted again; anything else is new.
     let logged = writeHistory(db, m, rank, st.recorded);
     if (!logged.ok) {
+      if (opened.ok) {
+        rollbackTransaction(db);
+        return migrateErr(m.version, "migration " + stepLabel(m)
+          + " could not be recorded and was rolled back: " + logged.error);
+      }
       return migrateErr(m.version, "applied " + stepLabel(m) + " but could not record it: " + logged.error);
+    }
+    if (opened.ok) {
+      let committed = commitTransaction(db);
+      if (!committed.ok) {
+        return migrateErr(m.version, "applied " + stepLabel(m)
+          + " but could not commit it: " + committed.error);
+      }
     }
     rank = rank + 1;
     applied = applied + 1;
@@ -640,8 +673,8 @@ export function repairChecksums(db: Db, plan: Migration[]): DbResult {
 // Mark everything up to and including `version` as already applied, without
 // running it — for adopting plume on a database that already has a schema.
 export function baseline(db: Db, plan: Migration[], version: string): MigrateResult {
-  let problem = planValid(plan);
-  if (problem != "") { return migrateErr("", problem); }
+  let violation = planValid(plan);
+  if (violation != "") { return migrateErr("", violation); }
   if (!versionValid(version)) { return migrateErr(version, "baseline version \"" + version + "\" is not a dotted number"); }
   let created = createHistory(db);
   if (!created.ok) { return migrateErr(version, created.error); }
@@ -666,8 +699,17 @@ export function baseline(db: Db, plan: Migration[], version: string): MigrateRes
 
 // Whether a step with this version has run. The name rather than the version
 // identifies a repeatable one, so pass its description as the version.
+//
+// A repeatable step is stored with an empty version and its description, so
+// matching on `version` alone answered false for every one of them, whatever
+// was passed — and a guard written on it did its work again on every boot.
+// Both columns are searched, and the empty version is what keeps a versioned
+// step from answering for a repeatable one that shares its text.
 export function migrationApplied(db: Db, version: string): bool {
-  if (!db.query("SELECT 1 FROM " + historyTable() + " WHERE version = " + db.placeholder, [version])) {
+  let sql = "SELECT 1 FROM " + historyTable()
+    + " WHERE version = " + placeholderAt(db, 1)
+    + " OR (version = '' AND description = " + placeholderAt(db, 2) + ")";
+  if (!db.query(sql, [version, version])) {
     return false;
   }
   return db.rows() > 0;

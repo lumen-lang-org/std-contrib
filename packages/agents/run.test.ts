@@ -35,11 +35,11 @@ function seeded(): void {
 
   let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(database, modelsMapping(), JSON.stringify(m));
-  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}" };
+  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "" };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));
   let p: PromptRow = { id: "p1", promptName: "terse", version: 3, body: "Be brief.", createdAt: "t" };
   persist(database, promptsMapping(), JSON.stringify(p));
-  let a: AgentRow = { id: "a1", agentName: "calculator", description: "d", modelConfigId: "c1", promptId: "p1", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = { id: "a1", agentName: "calculator", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 

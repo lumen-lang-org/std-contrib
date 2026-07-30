@@ -579,3 +579,50 @@ test("a plain chat history lifts through with no tool metadata", () => {
   expect(turns[2].role == "assistant");
   expect(turns[2].content == "Hello. How can I help?");
 });
+
+// --- the marker is a format, not a word ---------------------------------------------
+
+test("prose quoting the tool-call marker does not forge a call", () => {
+  // The summary the loop writes always ends with the marker line, so a marker
+  // anywhere else is the model talking about the format. Reading the first one
+  // turns the model's own sentence into calls it never made — and the next
+  // request then declares more calls than it has results for.
+  let history: Message[] = [
+    userMessage("what does the marker mean?"),
+    assistantMessage("a turn records itself as [tool_calls] weather({\"input\":\"Paris\"}), which I am only describing\n[tool_calls] clock({\"input\":\"UTC\"})"),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 2);
+  let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"message\":" + emitChatTurn(turns[1]) + "}]}";
+  let back = parseToolCalls(responseLike);
+  expect(back.length == 1);
+  expect(back[0].name == "clock");
+  expect(toolCallInput(back[0]) == "UTC");
+  // and the sentence itself is still in the prose the model sent.
+  expect(turns[1].content.indexOf("only describing") >= 0);
+});
+
+test("an assistant answer quoting the marker declares no calls at all", () => {
+  let history: Message[] = [
+    userMessage("what does the marker mean?"),
+    assistantMessage("the loop writes [tool_calls] name(args) at the end of a turn."),
+  ];
+  let turns = agentHistoryToTurns(history);
+  expect(turns.length == 2);
+  expect(turns[1].tool_calls == "");
+  let responseLike = "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":" + emitChatTurn(turns[1]) + "}]}";
+  expect(parseToolCalls(responseLike).length == 0);
+});
+
+test("a history whose prose quotes the marker does not skip a scripted turn", () => {
+  let script: string[] = [agentFakeToolCall("weather", "Paris"), agentFakeAnswer("18C in Paris")];
+  let history: Message[] = [
+    userMessage("weather in Paris, and what is [tool_calls]?"),
+    assistantMessage("I have not used [tool_calls] yet."),
+    userMessage("go on"),
+  ];
+  let result = runAgent(fakeModel(script), agSampleTools(), history, 5);
+  expect(result.steps.length == 1);
+  expect(result.steps[0].tool == "weather");
+  expect(result.answer == "18C in Paris");
+});

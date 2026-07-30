@@ -84,13 +84,46 @@ export async function errorOf(res: { text(): Promise<string> }): Promise<string>
 // specs do not each have to know that a field is a component rather than an
 // element.
 export function field(root: Locator, id: string): Locator {
-  return root.locator(`#${id} input, #${id} textarea`).first();
+  return root.locator(`#${id} input, #${id} textarea, #${id} code.editor`).first();
+}
+
+// Typing into the prompt editor.
+//
+// It is a contenteditable with CodeJar behind it, and CodeJar only learns of
+// text that arrives as keystrokes. `fill()` sets the node's text without one,
+// so the highlighter never runs, the gutter stays at one line, and — the part
+// that matters — the form's draft never hears about the change, so Save stores
+// an empty prompt while the screen shows a full one.
+export async function typeInEditor(root: Locator, id: string, text: string) {
+  const el = root.locator(`#${id} code.editor`);
+  await el.click();
+  await el.press("ControlOrMeta+a");
+  await el.pressSequentially(text);
 }
 
 // A LumenUI select shows its value as text rather than as an <option>, so it
 // is read, not asked for `inputValue`.
 export function selectValue(root: Locator, id: string): Locator {
   return root.locator(`#${id}`);
+}
+
+// Choosing in a LumenUI select. There is no <select> to `selectOption`: the
+// trigger opens a listbox of divs, each carrying its value as `data-value`.
+export async function choose(root: Locator, id: string, value: string) {
+  await root.locator(`#${id} .wrapper`).click();
+  await root.locator(`#${id} .option[data-value="${value}"]`).click();
+}
+
+// A LumenUI checkbox copies its id onto the <input> it renders, so an id on
+// its own matches two elements. This is the control — the thing that clicks.
+export function toggle(root: Locator, id: string): Locator {
+  return root.locator(`input#${id}`);
+}
+
+// What a select offers, whether or not it is open — the listbox is in the DOM
+// either way, which is what makes this readable without a click.
+export function choices(root: Locator, id: string): Locator {
+  return root.locator(`#${id} .option`);
 }
 
 // The flat columns of an agent row, and nothing else.
@@ -131,4 +164,69 @@ export function modelRow(over: Partial<ModelFlat> & { id: string }): ModelFlat {
     kind: "chat", dimensions: 0, baseUrl: "", enabled: false,
     ...over,
   };
+}
+
+// Put a fresh conversation on the named agent. New conversations open against
+// the flagged default — the real model — so a spec that drives the double has
+// to say so, the same way a person picks an agent from the header.
+export async function pickAgent(page: Page, agentId: string) {
+  await shell(page).locator("header select").selectOption(agentId);
+}
+
+// --- the e2e fixtures --------------------------------------------------------
+//
+// The suites run against agents of their own — e2e-doubled and its child
+// e2e-helper, wired to the scripted model double — and never against anything
+// a person made. This grows them on a database that lacks them, idempotently:
+// every row is looked for before it is created, nothing that exists is
+// edited, and no default flag is ever touched. A provider key is written only
+// where none exists, because a key can never be read back and a fixture that
+// overwrites one cannot restore it.
+export const E2E_AGENT = "e2e-doubled";
+export const E2E_HELPER = "e2e-helper";
+
+type Req = Page["request"];
+
+async function rows(request: Req, path: string): Promise<Record<string, unknown>[]> {
+  return await request.get(path).then((r) => r.json()) as Record<string, unknown>[];
+}
+
+export async function ensureDoubled(request: Req): Promise<string> {
+  const agents = await rows(request, "/api/agents");
+  const held = agents.find((a) => a.agentName === E2E_AGENT);
+  if (held) return held.id as string;
+
+  if (!(await rows(request, "/api/models")).some((m) => m.id === "m-double")) {
+    await request.post("/api/models", { data: {
+      id: "m-double", label: "Double", apiName: "double-1", provider: "openai",
+      kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true,
+    } });
+  }
+  const providers = await request.get("/api/providers").then((r) => r.json()) as string[];
+  if (!providers.includes("openai")) {
+    await request.put("/api/providers/openai/key", { data: { apiKey: "e2e-double-not-a-real-key" } });
+  }
+  if (!(await rows(request, "/api/model-configs")).some((c) => c.id === "c-double")) {
+    await request.post("/api/model-configs", { data: {
+      id: "c-double", modelId: "m-double", temperature: 0, maxTokens: 1024, topP: 1,
+      extra: "{}", thinking: "",
+    } });
+  }
+  let prompt = (await rows(request, "/api/prompts")).find((p) => p.promptName === "e2e-double");
+  if (!prompt) {
+    prompt = await request.post("/api/prompts", { data: {
+      id: "", promptName: "e2e-double", version: 0,
+      body: "You are a test double. Answer as arranged.", createdAt: "",
+    } }).then((r) => r.json()) as Record<string, unknown>;
+  }
+
+  const mk = async (id: string, name: string, why: string) =>
+    await request.post("/api/agents", { data: {
+      id, agentName: name, description: why, modelConfigId: "c-double",
+      promptId: prompt!.id as string, isDefault: false, enabled: true, updatedAt: "now",
+    } });
+  await mk("a-double", E2E_AGENT, "e2e fixture: answers from the scripted model double; not for people");
+  await mk("a-helper", E2E_HELPER, "e2e fixture: sub-agent on the model double; not for people");
+  await request.post("/api/agents/a-double/sub-agents", { data: { childId: "a-helper" } });
+  return "a-double";
 }

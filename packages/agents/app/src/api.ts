@@ -1,6 +1,7 @@
-// The agents API, as typed calls. Everything goes through /api, which the
-// Vite proxy (dev) or nginx (compose) forwards to the Lumen server — one
-// origin everywhere, so CORS never comes up.
+// The agents API, as typed calls. Everything goes through /api, which
+// server/api-proxy.ts forwards to the Lumen server — the same proxy in
+// development and in the image, so there is one origin everywhere and CORS
+// never comes up.
 
 export type AgentRow = {
   id: string;
@@ -11,6 +12,18 @@ export type AgentRow = {
   enabled: boolean;
   // The agent a new conversation opens against. Exactly one.
   isDefault: boolean;
+  // Which curated image this agent's script containers are built from. "" is
+  // the deployment default. An id, never an image reference: the operator
+  // curates the list, so nothing the model says can name what gets pulled.
+  scriptImageId: string;
+};
+
+// An image an operator is willing to run scripts in.
+export type ScriptImageRow = {
+  id: string;
+  label: string;
+  image: string;
+  enabled: boolean;
 };
 
 export type ModelRow = {
@@ -46,6 +59,25 @@ export type PromptRow = {
   createdAt: string;
 };
 
+export type SkillRow = {
+  id: string;
+  skillName: string;
+  description: string;
+  // Mutable, unlike a prompt: a skill is looked up by name at call time, so
+  // an edit is live on the next use_skill with no version to point at.
+  body: string;
+  updatedAt: string;
+};
+
+export type SkillFileRow = {
+  id: string;
+  skillId: string;
+  // A plain name (enums.py); it lands at /skills/<skill-name>/<path> in the
+  // conversation's container on every run.
+  path: string;
+  body: string;
+};
+
 export type AgentFull = AgentRow & {
   // GET /agents answers the full view: the prompt and config resolved, and
   // the links an agent has. Editing sends only the flat columns back.
@@ -53,6 +85,8 @@ export type AgentFull = AgentRow & {
   config: ModelConfigRow | null;
   servers: ServerRow[];
   subAgents: { id: string; agentName: string; enabled: boolean }[];
+  // Name and description only — a body rides GET /skills/:id.
+  skills: { id: string; skillName: string; description: string }[];
 };
 
 export type Retrieval = {
@@ -171,6 +205,11 @@ export type SayReply = {
   refs: WireRef[];
   seq: number;
   toolCalls: number;
+  // The calls this round dispatched, arriving with the answer rather than
+  // through a second request. The poll is for watching a round that is still
+  // running; this is the round that is over, and they must agree.
+  steps: LiveStep[];
+  thoughts: Thought[];
   inputTokens: number;
   outputTokens: number;
   traceId: string;
@@ -179,12 +218,118 @@ export type SayReply = {
 
 const BASE = "/api";
 
+// What a refused request raises. The console answers 401 with an overlay of
+// its own (src/login-overlay.ts) rather than a navigation: leaving the page
+// meant the gateway had to serve another application's whole single-page
+// build under this hostname, and that proxying — its entry chunk, the modules
+// that chunk imports, its stylesheets, its loader routes — was the cause of
+// three separate outages in one day, none of them about signing in.
+//
+// An event, not a direct render, because `call` is used from every component
+// and must not know which one is holding the shell.
+export const SIGNED_OUT = "agents:signed-out";
+
+// A 401 is not an error to render — it means nobody is signed in, and the only
+// useful response is to go and sign in. Without this the console drew an empty
+// conversation list to a logged-out visitor: the product, apparently working,
+// apparently containing nothing. `returnTo` is a path, never a full URL, so a
+// crafted link cannot use this to bounce anyone off-site.
+let announced = false;
+function toLogin(): void {
+  // Once per page: several calls fail together on a cold load, and the shell
+  // needs one signal, not one per request in flight.
+  if (announced) { return; }
+  announced = true;
+  window.dispatchEvent(new CustomEvent(SIGNED_OUT));
+}
+
+// The signed-in caller, as the front door describes them. Shaped by the
+// gateway's X-USER, so it is the same identity the engine is handed.
+export type Me = {
+  uuid: string;
+  username: string;
+  email: string;
+  roles: string[];
+};
+
+// `null` means no front door — a community deployment, where there is no auth
+// at all and the operator is whoever reached the box. That is NOT the same as
+// a signed-in user holding no roles, and the two must not collapse: the first
+// should see every tool, the second should see none of the admin ones.
+// The identity the server already injected, if it did.
+//
+// LumenJS writes `req.nkAuth.user` into a `__nk_auth__` script tag and hydrates
+// `@lumenjs/auth`'s store from it before the first render — so in a deployment
+// that establishes identity server-side (all three of ours do, see
+// pages/_middleware.ts) the answer is on the page already and asking for it
+// over the network is a round trip that can only arrive late. Late is the whole
+// problem: the rail draws before it lands, and a `null` there means "community,
+// show everything".
+//
+// Read straight from the script tag rather than importing `@lumenjs/auth`: that
+// specifier is a dev-server alias onto the framework's runtime directory, not
+// something the package exports, so importing it works in dev and disappears in
+// a build. The tag is the contract either way.
+function injectedUser(): Me | null {
+  if (typeof document === "undefined") { return null; }
+  const tag = document.getElementById("__nk_auth__");
+  if (tag === null) { return null; }
+  try {
+    const u = JSON.parse(tag.textContent ?? "") as Partial<Me> & { sub?: string };
+    return {
+      // The framework's shape calls it `sub`; the gateway's calls it `uuid`.
+      uuid: u.uuid ?? u.sub ?? "",
+      username: u.username ?? u.email ?? "",
+      email: u.email ?? "",
+      roles: Array.isArray(u.roles) ? u.roles : [],
+    };
+  } catch { return null; }
+}
+
+export async function whoami(): Promise<Me | null> {
+  const injected = injectedUser();
+  if (injected !== null) { return injected; }
+
+  // Not through `call`: /whoami is the gateway's own route, not the engine's,
+  // so it does not live under the /api prefix.
+  const res = await fetch("/whoami", { headers: { accept: "application/json" } });
+  // 401 and "no such route" are opposite answers and must not collapse into
+  // one. A 401 means a front door exists and nobody is signed in — the caller
+  // is anonymous, holds no roles, and belongs at the login. Anything else that
+  // fails to answer means there is no front door at all, which is the
+  // community edition, where the operator is whoever reached the box and every
+  // tool is theirs. Returning `null` for both handed a logged-out visitor the
+  // community's answer, and `isAdmin(null)` is `true` — so the admin menu was
+  // offered for as long as it took the data calls to redirect. A race, and it
+  // was only ever won by accident.
+  if (res.status === 401) {
+    toLogin();
+    return { uuid: "", username: "", email: "", roles: [] };
+  }
+  if (!res.ok) { return null; }
+  const body = (await res.text()).trim();
+  if (body === "" || body === "null") { return null; }
+  try {
+    const me = JSON.parse(body) as Me;
+    return { ...me, roles: Array.isArray(me.roles) ? me.roles : [] };
+  } catch { return null; }
+}
+
+export const isAdmin = (me: Me | null): boolean =>
+  me === null ? true : me.roles.includes("admin");
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, {
     headers: { "content-type": "application/json" },
     ...init,
   });
   const body = await res.text();
+  if (res.status === 401) {
+    toLogin();
+    // The redirect is not instant, and every caller still awaits this. Throwing
+    // keeps a half-authenticated render from happening in the meantime.
+    throw new Error("not signed in");
+  }
   if (!res.ok) {
     // The API answers errors as {"error": "..."} — surface that sentence,
     // not a status code.
@@ -208,6 +353,14 @@ export const linkServer = (agentId: string, serverId: string) =>
   });
 export const unlinkServer = (agentId: string, serverId: string) =>
   call<unknown>(`/agents/${encodeURIComponent(agentId)}/servers/${encodeURIComponent(serverId)}`,
+    { method: "DELETE" });
+
+export const linkSkill = (agentId: string, skillId: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/skills`, {
+    method: "POST", body: JSON.stringify({ skillId }),
+  });
+export const unlinkSkill = (agentId: string, skillId: string) =>
+  call<unknown>(`/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`,
     { method: "DELETE" });
 
 export const linkChild = (agentId: string, childId: string) =>
@@ -235,6 +388,15 @@ export const setRetrieval = (agentId: string, r: Omit<Retrieval, "agentId">) =>
 
 export const deleteAgent = (id: string) =>
   call<unknown>(`/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const listScriptImages = () => call<ScriptImageRow[]>("/script-images");
+export const createScriptImage = (row: ScriptImageRow) =>
+  call<ScriptImageRow>("/script-images", { method: "POST", body: JSON.stringify(row) });
+export const updateScriptImage = (row: ScriptImageRow) =>
+  call<ScriptImageRow>(`/script-images/${encodeURIComponent(row.id)}`,
+    { method: "PUT", body: JSON.stringify(row) });
+export const deleteScriptImage = (id: string) =>
+  call<unknown>(`/script-images/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 export const deleteModel = (id: string) =>
   call<unknown>(`/models/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const deleteServer = (id: string) =>
@@ -260,6 +422,51 @@ export const openThread = (agentId: string) =>
   call<{ id: string }>("/threads", { method: "POST", body: JSON.stringify({ agentId }) });
 export const transcript = (id: string) =>
   call<TranscriptTurn[]>(`/threads/${encodeURIComponent(id)}`);
+// One dispatched call, as the API reports it while the round is still running.
+// `running` is the whole liveness signal; `millis` is -1 until it stops.
+export type LiveStep = {
+  seq: number;
+  // Which rotation of the model loop dispatched it. One message is not one
+  // exchange: the model calls tools, reads the results, and may call more
+  // before it answers, and each rotation asked for its own set.
+  rotation: number;
+  // How far down the delegation it was made: 0 is the agent you are talking to,
+  // 1 is a sub-agent it asked. The card indents by this, so a child's tools sit
+  // under the delegation that caused them.
+  depth: number;
+  idx: number;
+  // "tool" for anything dispatched by name, "agent" for a delegation.
+  kind: string;
+  name: string;
+  target: string;
+  args: string;
+  running: boolean;
+  ok: boolean;
+  millis: number;
+  // What the call answered, capped server-side. Empty while running and for
+  // rows written before the column existed.
+  result: string;
+};
+
+// What the model said it was thinking on one rotation, when it says at all.
+// Most providers never do, and a round with none is the ordinary case.
+// `seq` is the round it belongs to, for the same reason a step carries one: a
+// reload asks for every round at once and has to put each thought back above
+// the message that produced it.
+export type Thought = { seq: number; rotation: number; depth: number; text: string };
+
+export type RoundSteps = {
+  seq: number; running: boolean; steps: LiveStep[]; thoughts: Thought[];
+};
+
+// What the run is doing right now. Polled while POST /messages is outstanding —
+// that request answers once, at the end, so this is the only way to see inside
+// a round. `seq=all` is the whole transcript, for a console that has reloaded
+// and needs a card above every message that called something.
+export const threadSteps = (threadId: string, seq?: number | "all") =>
+  call<RoundSteps>(`/threads/${encodeURIComponent(threadId)}/steps`
+    + (seq === undefined ? "" : `?seq=${seq}`));
+
 export const say = (id: string, text: string) =>
   call<SayReply>(`/threads/${encodeURIComponent(id)}/messages`, {
     method: "POST",
@@ -315,6 +522,24 @@ export const createArtifact = (
 // A specific number, never "the latest". The listing already says which number
 // that is, and asking for it by name would let the body a panel renders and
 // the version it labels come from two different writes.
+// A person's file, read the way the store keeps it: text kinds as the text
+// itself, everything else as base64 — one rule shared by the panel's upload
+// button and the composer's attach, so a .xml lands identically from either.
+const TEXTUAL_UPLOAD = /\.(html?|svg|md|markdown|json|css|js|mjs|ts|tsx|jsx|py|sql|sh|yaml|yml|toml|txt|csv|log)$/i;
+
+export async function uploadFileArtifact(threadId: string, file: File): Promise<ArtifactWritten> {
+  const name = file.name.replace(/[^A-Za-z0-9.-]+/g, "-");
+  const content = TEXTUAL_UPLOAD.test(name)
+    ? await file.text()
+    : await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(",", 2)[1] ?? "");
+        r.onerror = () => rej(r.error);
+        r.readAsDataURL(file);
+      });
+  return createArtifact(threadId, { path: "/" + name, title: file.name, content, note: "uploaded from the console" });
+}
+
 export const readArtifactVersion = (threadId: string, slot: number, version: number) =>
   call<ArtifactVersion>(
     `/threads/${encodeURIComponent(threadId)}/artifacts/${slot}/versions/${version}`);
@@ -398,6 +623,33 @@ export const testModel = (id: string) =>
 export const listConfigs = () => call<ModelConfigRow[]>("/model-configs");
 export const createConfig = (row: ModelConfigRow) =>
   call<ModelConfigRow>("/model-configs", { method: "POST", body: JSON.stringify(row) });
+// There is no PUT: a config is created and repointed, never edited, because an
+// agent mid-conversation reads it every round. The API refuses to delete one an
+// agent still names.
+export const deleteConfig = (id: string) =>
+  call<unknown>(`/model-configs/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+export const listSkills = () => call<SkillRow[]>("/skills");
+// Skills are edited in place, unlike prompts: a skill is read fresh on every
+// use_skill, so the next load sees the edit and nothing pins an old body.
+export const createSkill = (row: SkillRow) =>
+  call<SkillRow>("/skills", { method: "POST", body: JSON.stringify(row) });
+export const updateSkill = (row: SkillRow) =>
+  call<SkillRow>(`/skills/${encodeURIComponent(row.id)}`,
+    { method: "PUT", body: JSON.stringify(row) });
+export const deleteSkill = (id: string) =>
+  call<unknown>(`/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const listSkillFiles = (skillId: string) =>
+  call<SkillFileRow[]>(`/skills/${encodeURIComponent(skillId)}/files`);
+export const createSkillFile = (row: SkillFileRow) =>
+  call<SkillFileRow>(`/skills/${encodeURIComponent(row.skillId)}/files`,
+    { method: "POST", body: JSON.stringify(row) });
+export const updateSkillFile = (row: SkillFileRow) =>
+  call<SkillFileRow>(`/skills/${encodeURIComponent(row.skillId)}/files/${encodeURIComponent(row.id)}`,
+    { method: "PUT", body: JSON.stringify(row) });
+export const deleteSkillFile = (skillId: string, fileId: string) =>
+  call<unknown>(`/skills/${encodeURIComponent(skillId)}/files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE" });
 
 export const listPrompts = () => call<PromptRow[]>("/prompts");
 // The server assigns the id and the version — a caller picking either is how
@@ -461,12 +713,17 @@ export const setAgentPrompt = (agentId: string, promptId: string) =>
 // config, servers and sub-agents nested — and spreading that back into a PUT
 // sends fields the record does not declare, which JSON.parse<AgentRow>
 // rejects outright.
+// The body carries every column of the row, because the server parses the
+// whole record and a missing member is a refused request, not a default —
+// "JSON.parse: invalid JSON (MissingField)" in the form's error line. The
+// first save through this call is what found scriptImageId absent here.
 export const updateAgent = (a: AgentRow) =>
   call<AgentRow>(`/agents/${encodeURIComponent(a.id)}`, {
     method: "PUT",
     body: JSON.stringify({
       id: a.id, agentName: a.agentName, description: a.description,
       modelConfigId: a.modelConfigId, promptId: a.promptId,
+      scriptImageId: a.scriptImageId ?? "",
       enabled: a.enabled, isDefault: a.isDefault, updatedAt: "now",
     }),
   });
@@ -476,6 +733,7 @@ export const createAgent = (a: AgentRow) =>
     body: JSON.stringify({
       id: a.id, agentName: a.agentName, description: a.description ?? "",
       modelConfigId: a.modelConfigId, promptId: a.promptId,
+      scriptImageId: a.scriptImageId ?? "", isDefault: a.isDefault ?? false,
       enabled: a.enabled, updatedAt: "now",
     }),
   });

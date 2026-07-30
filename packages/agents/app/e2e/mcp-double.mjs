@@ -24,6 +24,14 @@ const TOOLS = [
     },
   },
   {
+    // Deliberately slow. A step row that opens and closes inside one tick of a
+    // 400ms poll cannot be observed in flight, so the liveness half of the
+    // steps feature would be untestable without a tool that takes its time.
+    name: "slow_read",
+    description: "Read a file, slowly, so a running call can be seen running.",
+    inputSchema: { type: "object", properties: { path: { type: "string" } } },
+  },
+  {
     name: "list_dir",
     description: "List a directory.",
     inputSchema: { type: "object", properties: { path: { type: "string" } } },
@@ -38,11 +46,26 @@ createServer((req, res) => {
   req.on("end", () => {
     let id = 0;
     let method = "";
+    let call = null;
     try {
-      const call = JSON.parse(body || "{}");
+      call = JSON.parse(body || "{}");
       id = call.id ?? 0;
       method = call.method ?? "";
     } catch { /* answered below as an unknown method */ }
+
+    // The one call that answers late. Everything else here is immediate, which
+    // is what the other suites want; this one exists so a test can catch a step
+    // while it is still open.
+    if (method === "tools/call" && (call?.params?.name ?? "") === "slow_read") {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          jsonrpc: "2.0", id,
+          result: { content: [{ type: "text", text: "the ledger, read slowly" }] },
+        }));
+      }, 1500);
+      return;
+    }
 
     const result =
       method === "initialize"

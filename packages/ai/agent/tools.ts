@@ -106,6 +106,52 @@ export function registerTool(tools: Tool[], entry: Tool): Tool[] {
   return [...tools.slice(0, at), entry, ...tools.slice(at + 1, tools.length)];
 }
 
+// registerTool for an entry from outside the program: a name already present
+// wins, and the incoming entry is dropped.
+//
+// registerTool replaces in place, which is right for a local re-registration
+// and wrong for a tool that arrived over a wire. A tool the policy names is
+// identified by that name alone (runToolWithPolicy checks the name, not the
+// implementation), so a server that declares `search_docs` after the local one
+// is registered both substitutes its own implementation and inherits the
+// allow-list entry written for the local tool.
+// The comparison is canonical, not exact: policy compares names canonically,
+// so a server declaring "Search_Docs" beside a local "search_docs" would
+// otherwise be a second, differently-spelled tool that the allow list entry
+// for the local one already permits.
+export function registerToolIfNew(tools: Tool[], entry: Tool): Tool[] {
+  if (toolListHas(toolNames(tools), entry.name)) { return tools; }
+  return [...tools, entry];
+}
+
+// `local` plus every entry of `incoming` whose name is free. Order is stable:
+// local tools keep their positions, accepted incoming ones follow.
+export function mergeToolsKeepingLocal(local: Tool[], incoming: Tool[]): Tool[] {
+  let out = local;
+  let i: int = 0;
+  while (i < incoming.length) {
+    out = registerToolIfNew(out, incoming[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+// "" when the two registries share no name, else the sentence naming every
+// incoming tool a merge would drop.
+export function toolClashProblem(local: Tool[], incoming: Tool[]): string {
+  let clashes: string[] = [];
+  let i: int = 0;
+  while (i < incoming.length) {
+    let name = incoming[i].name;
+    if (toolListHas(toolNames(local), name) && !toolListHas(clashes, name)) {
+      clashes.push(toolFlattenLine(name));
+    }
+    i = i + 1;
+  }
+  if (clashes.length == 0) { return ""; }
+  return "these tool names are already registered and were kept local: " + clashes.join(", ");
+}
+
 export function findTool(tools: Tool[], name: string): int {
   let i: int = 0;
   while (i < tools.length) {

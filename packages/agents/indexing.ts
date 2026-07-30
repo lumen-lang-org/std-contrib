@@ -13,7 +13,7 @@
 // broker does not keep.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 // What a job is doing. A reader sees these words, so they are the words.

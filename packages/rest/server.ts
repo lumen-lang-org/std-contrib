@@ -1,20 +1,34 @@
-// Serving a route table: the glue between the router and the language's HTTP
+// Serving controllers: the glue between the router and the language's HTTP
 // server, and the JSON a REST API is made of.
 //
-//   let api = new AgentController(database);
-//   let handlers = new Map<string, Handler>();
-//   handlers.set("list", (req: Request) => { return api.list(req); });
-//   handlers.set("find", (req: Request) => { return api.find(req); });
+//   listen(8080, [new AgentController(db), new ModelController(db)]);
 //
-//   serve(8080, controllerAgentController, handlers);
+// That is the whole call site. No route table is walked, no handler-name
+// prefix is invented so two controllers can both have a `list`, and no binding
+// map is written out — `mount` says all of it once, generically, using what the
+// compiler knows about the class (spec 477):
 //
-// The binding is written out because the decorator cannot call a method: there
-// is no reflection here and there will not be. What that buys is that `serve`
-// checks the table against the bindings before it listens, so a route with no
-// handler is a startup failure naming the route rather than a 500 a user
-// finds.
+//   Class.nameOf(c)                    "AgentController"
+//   Class.decorator(c, "controller")   the Route[] @controller left behind
+//   Class.invoke(c, handler, req)      c.list(req), chosen by the string
+//
+// There is still no reflection in the binary: all three are resolved while
+// compiling and rewritten in place, and `Class.invoke` becomes a chain of
+// direct method calls. That is what lets `mount` hold the one `try` that
+// guards every handler of every controller — a direct call propagates a throw
+// (spec 245/247), which a call through a function value does not.
+//
+// The word `mount` is absent from that call site because a class instance where
+// a named record is expected goes through the one generic `f<T>(c: T): R` the
+// program declares, which is `mount` (spec 478). Writing it out still compiles
+// and means the same thing.
+//
+// The older three-argument form below (`serve(port, table, handlers)`) still
+// works and is unchanged; a program that wrote its own bindings keeps them. It
+// is the right answer only for a table that was not derived from a class, since
+// there is then no class for `Class.*` to know anything about.
 
-import { Route, Match, match, allowedMethods, tableProblem } from "./router.ts";
+import { Route, Match, match, route, allowedMethods, tableProblem } from "./router.ts";
 
 // What a handler is given. The path parameters and query are already parsed;
 // the body and headers are the request's own.
@@ -191,9 +205,10 @@ export function dispatch(table: Route[], handlers: Map<string, Handler>, method:
 //
 // A wrapper taking a Handler and returning a guarded one is the obvious fix
 // and does not compile — the backend rejects a returned closure that calls a
-// captured parameter. So a handler that parses a body must hold its own try,
-// inside its own lambda, which is where it works. The agents API does that at
-// every binding.
+// captured parameter. So a handler bound here that parses a body must hold its
+// own try, inside its own lambda, which is where it works, and one left out is
+// still fatal. That is the trap `mount` exists to close: a controller reached
+// through `Class.invoke` needs none of this, because the call is direct.
 //
 // The status is 400: a request the router could not make sense of is the
 // request's fault. A handler failing for its own reasons should return
@@ -220,6 +235,155 @@ export function serve(port: int, table: Route[], handlers: Map<string, Handler>)
   // long-running agent reply would want; a REST table does not.
   http.createServer(port, (req): HttpResponse => {
     let answer = dispatched(table, handlers, req.method, req.path, req.body, req.headers);
+    let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
+    return out;
+  });
+  return "";
+}
+
+// --- controllers -------------------------------------------------------------
+
+// One mounted controller: its class name, the routes its `@controller` left
+// behind, and the one way in. `call` is a closure over the instance holding the
+// `try` that guards every one of its handlers, so nothing outside this file
+// ever reaches a handler unguarded.
+export type Mount = {
+  controller: string,
+  routes: Route[],
+  call: (handler: string, req: Request) => Reply,
+};
+
+// Mount a `@controller` class. Said once, generically, for every controller
+// there will ever be.
+//
+// The `try` is the point. `Class.invoke` lowers to direct method calls, so a
+// handler that throws — `JSON.parse<T>` on a body missing a field is the usual
+// way — comes back as a throw and is answered 400. Before this, a `try` here
+// could not have worked: a handler arrived as a function value, and spec 245's
+// fixpoint pass cannot see through one, so the throw killed the process.
+export function mount<T>(c: T): Mount {
+  let m: Mount = {
+    controller: Class.nameOf(c),
+    routes: Class.decorator(c, "controller"),
+    call: (handler: string, req: Request) => {
+      try { return Class.invoke(c, handler, req); }
+      catch (e) {
+        let bad: Reply = badRequest("the request could not be handled: " + e.message);
+        return bad;
+      }
+    },
+  };
+  return m;
+}
+
+// Every route, with its handler qualified by the controller it came from —
+// `AgentApi.list`, never a prefix a program chose. For logging and for the
+// message `mountProblem` gives; dispatch never uses it, because each mount is
+// matched against its own routes and there is no shared keyspace to collide in.
+export function mountedRoutes(mounts: Mount[]): Route[] {
+  let out: Route[] = [];
+  let i: int = 0;
+  while (i < mounts.length) {
+    let j: int = 0;
+    while (j < mounts[i].routes.length) {
+      let r = mounts[i].routes[j];
+      out.push(route(r.method, r.pattern, mounts[i].controller + "." + r.handler));
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+// Why a set of mounts will not serve. A route with no handler is no longer one
+// of the answers: the routes come from the decorator, which read them off the
+// class's own methods, and the dispatch comes from the same class, so the two
+// cannot disagree. What is left is a table that is malformed on its own terms,
+// and two controllers claiming one path — which is silent otherwise, since the
+// first mount would simply win.
+export function mountProblem(mounts: Mount[]): string {
+  let i: int = 0;
+  while (i < mounts.length) {
+    let structural = tableProblem(mounts[i].routes);
+    if (structural != "") { return mounts[i].controller + ": " + structural; }
+    i = i + 1;
+  }
+  let seen = new Map<string, string>();
+  let all = mountedRoutes(mounts);
+  let k: int = 0;
+  while (k < all.length) {
+    let key = all[k].method + " " + all[k].pattern;
+    let owner = seen.get(key) ?? "";
+    if (owner != "") {
+      return owner + " and " + all[k].handler + " both serve " + key;
+    }
+    seen.set(key, all[k].handler);
+    k = k + 1;
+  }
+  return "";
+}
+
+// One request, answered from the mounted controllers. Separate from `listen` so
+// a test can exercise every route without a socket.
+export function dispatchMounted(mounts: Mount[], method: string, target: string, body: string, headers: Map<string, string>): Reply {
+  let pathSeen = false;
+  let i: int = 0;
+  while (i < mounts.length) {
+    let m = match(mounts[i].routes, method, target);
+    if (m.found) {
+      let req: Request = {
+        method: method.toUpperCase(),
+        path: target,
+        body: body,
+        headers: headers,
+        params: m.params,
+        query: m.query,
+      };
+      return mounts[i].call(m.handler, req);
+    }
+    if (m.pathMatched) { pathSeen = true; }
+    i = i + 1;
+  }
+  if (pathSeen) {
+    // The resource exists, just not that way — the same distinction the
+    // table-based dispatch draws, collected across every mount.
+    let answer = problem(405, method.toUpperCase() + " is not allowed here");
+    let allowed: string[] = [];
+    let j: int = 0;
+    while (j < mounts.length) {
+      let each = allowedMethods(mounts[j].routes, target);
+      let n: int = 0;
+      while (n < each.length) {
+        if (allowed.indexOf(each[n]) < 0) { allowed.push(each[n]); }
+        n = n + 1;
+      }
+      j = j + 1;
+    }
+    answer.headers.set("allow", allowed.join(", "));
+    return answer;
+  }
+  return notFound(target);
+}
+
+// Routing that answers instead of dying. A handler's own throw is already
+// caught inside its mount; this catches a throw on the way to one — matching
+// the path, reading the query — which is a direct call and so does propagate.
+export function dispatchedMounted(mounts: Mount[], method: string, target: string, body: string, headers: Map<string, string>): Reply {
+  try {
+    return dispatchMounted(mounts, method, target, body, headers);
+  } catch (e) {
+    return badRequest("the request could not be handled: " + e.message);
+  }
+}
+
+// Serve the mounted controllers on `port`. Returns a description of what went
+// wrong, or an empty string if it never returns at all.
+export function listen(port: int, mounts: Mount[]): string {
+  let problemText = mountProblem(mounts);
+  if (problemText != "") { return problemText; }
+
+  http.createServer(port, (req): HttpResponse => {
+    let answer = dispatchedMounted(mounts, req.method, req.path, req.body, req.headers);
     let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
     return out;
   });

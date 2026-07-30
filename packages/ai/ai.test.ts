@@ -1,6 +1,6 @@
 // Tests for ai.
 
-import { addDocs, addVector, agentChatTurns, agentStep, agentSystemPrompt, agentTrace, aiResult, appendMessage, applySummary, assistant, assistantTemplate, authHeaders, budgetMemory, chatPromptContent, chatPromptRole, chatRequest, cosine, defaultModelOptions, defineTool, deleteDoc, distance, docMetadata, document, dot, embeddingBody, embeddingBodyBatch, estimateTokens, fakeAnswer, fakeModel, fakeToolCall, filterDocs, findTool, finishReason, firstFencedBlock, firstJsonObject, formatContext, hasTool, hasToolCalls, hashEmbedding, historyChars, keywordRetrieve, keywordScore, loadHistory, mcpAsTool, mcpAsTools, mcpCallBody, mcpConnectBody, mcpErrorMessage, mcpIsError, mcpListToolsBody, mcpParseTools, mcpReplyId, mcpRequestBody, mcpResultField, missingVariables, mistralAgent, mistralAuthHeaders, mistralChatBody, mistralChatBodyWithStops, mistralToolBody, modelOptions, norm, normalize, openAIAgent, openAIChatBody, openAIChatBodyWithStops, openAIToolBody, parseChoice, parseEmbedding, parseEmbeddingBatch, parseHistory, parseLines, parseMcpResult, parseMistralContent, parseMistralError, parseMistralResult, parseMistralTokenUsage, parseMistralToolCalls, parseOpenAIContent, parseOpenAIError, parseOpenAIResult, parseOpenAITokenUsage, parseStringList, parseText, partialTemplate, providerChatBody, providerError, queryTerms, ragMessages, ragPrompt, recall, registerTool, remember, renderChatPrompt, renderTemplate, retrieve, retryPrompt, runAgent, runAgentWithPolicy, runTool, runToolGuarded, saveHistory, search, searchVector, serializeHistory, serializeToolDefs, serializeToolDefsMistral, splitDocuments, splitParagraphs, splitText, splitTextRecursive, storeSize, summaryPrompt, system, systemTemplate, toolCall, toolCallArg, toolCalls, toolDescriptions, toolInput, toolMessage, toolNames, toolRegistry, transcript, typedJsonInput, unusedVariables, user, userTemplate, vectorRetrieve, vectorStore, windowMemory, withDocMetadata } from "./ai.ts";
+import { addDocs, addVector, agentChatTurns, agentStep, agentSystemPrompt, agentTrace, aiResult, appendMessage, applySummary, assistant, assistantTemplate, authHeaders, budgetMemory, chatPromptContent, chatPromptRole, chatRequest, cosine, defaultModelOptions, defineTool, deleteDoc, distance, docMetadata, document, dot, embeddingBody, embeddingBodyBatch, estimateTokens, fakeAnswer, fakeModel, fakeToolCall, filterDocs, findTool, finishReason, firstFencedBlock, firstJsonObject, formatContext, hasTool, hasToolCalls, hashEmbedding, historyChars, keywordRetrieve, keywordScore, loadHistory, mcpAsTool, mcpAsTools, mcpCallBody, mcpConnectBody, mcpErrorMessage, mcpIsError, mcpListToolsBody, mcpParseTools, mcpReplyId, mcpRequestBody, mcpResultField, missingVariables, mistralAgent, mistralAuthHeaders, mistralChatBody, mistralChatBodyWithStops, mistralToolBody, modelOptions, norm, normalize, openAIAgent, openAIChatBody, openAIChatBodyWithStops, openAIToolBody, parseChoice, parseEmbedding, parseEmbeddingBatch, parseHistory, parseLines, parseMcpResult, parseMistralContent, parseMistralError, parseMistralFinishReason, parseMistralResult, parseMistralTokenUsage, parseMistralToolCalls, parseOpenAIContent, parseOpenAIError, parseOpenAIFinishReason, parseOpenAIResult, parseOpenAITokenUsage, parseStringList, parseText, partialTemplate, providerChatBody, providerError, queryTerms, ragMessages, ragPrompt, recall, registerTool, remember, renderChatPrompt, renderTemplate, retrieve, retryPrompt, runAgent, runAgentWithPolicy, runTool, runToolGuarded, saveHistory, search, searchVector, serializeHistory, serializeToolDefs, serializeToolDefsMistral, splitDocuments, splitParagraphs, splitText, splitTextRecursive, storeSize, streamResult, summaryPrompt, system, systemTemplate, toolCall, toolCallArg, toolCalls, toolDescriptions, toolInput, toolMessage, toolNames, toolRegistry, transcript, typedJsonInput, unusedVariables, user, userTemplate, vectorRetrieve, vectorStore, windowMemory, withDocMetadata } from "./ai.ts";
 
 test("message helpers", () => {
   let s = system("You are concise.");
@@ -201,6 +201,41 @@ test("parse openai token usage", () => {
   expect(usage.prompt_tokens == 10);
   expect(usage.completion_tokens == 4);
   expect(usage.total_tokens == 14);
+});
+
+// The fixture above is hand-trimmed. A live gpt-4o-mini reply carries `usage`,
+// `service_tier`, `system_fingerprint`, `logprobs`, `message.refusal` and
+// `message.annotations` besides, and every OpenAI-shaped surface in this
+// package — chatOpenAI, chat(cfg), any OpenAI-compatible endpoint reached
+// through baseUrl, summarizer(cfg) — reads its answer through this one
+// function.
+const LIVE_OPENAI_BODY = "{\"id\":\"chatcmpl-BqX\",\"object\":\"chat.completion\",\"created\":1753000000,\"model\":\"gpt-4o-mini-2024-07-18\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"lumen ok\",\"refusal\":null,\"annotations\":[]},\"logprobs\":null,\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":18,\"completion_tokens\":3,\"total_tokens\":21},\"service_tier\":\"default\",\"system_fingerprint\":\"fp_34a54ae93c\"}";
+
+test("a live reply reads through the barrel", () => {
+  expect(parseOpenAIContent(LIVE_OPENAI_BODY) == "lumen ok");
+  let r = parseOpenAIResult(200, true, LIVE_OPENAI_BODY);
+  expect(r.ok);
+  expect(r.content == "lumen ok");
+  let u = parseOpenAITokenUsage(LIVE_OPENAI_BODY);
+  expect(u.total_tokens == 21);
+});
+
+test("a truncated answer is reportable", () => {
+  // Result has no finish-reason field, so the reason is read from the body.
+  expect(parseOpenAIFinishReason(LIVE_OPENAI_BODY) == "length");
+  expect(parseMistralFinishReason("{\"choices\":[{\"index\":0,\"message\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}") == "stop");
+});
+
+test("a stream that never terminated is not a success through the barrel", () => {
+  let cut = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n";
+  let r = streamResult(200, cut);
+  expect(!r.ok);
+  expect(r.content == "Hello");
+  let whole = cut + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\ndata: [DONE]\n";
+  let done = streamResult(200, whole);
+  expect(done.ok);
+  expect(done.content == "Hello");
+  expect(done.raw.includes("finish_reason"));
 });
 
 test("malformed response returns empty content", () => {

@@ -138,6 +138,19 @@ export function toolProblem(d: FunctionDescription): string {
   if (d.returns != "string") {
     return d.name + " returns " + d.returns + ", and a tool returns a string";
   }
+  // `toolFrom` pairs the schema with a `(input: string) => string` body, so a
+  // description of any other shape yields a schema no function can complete.
+  // Checked here rather than left to the call site, where the mismatch surfaces
+  // as a type error about a lambda rather than as a fact about the decorated
+  // function.
+  if (d.params.length != 1) {
+    return d.name + " takes " + `${d.params.length}`
+      + " parameters, and a tool's function takes one string parameter";
+  }
+  if (d.params[0].type != "string") {
+    return "the parameter \"" + d.params[0].name + "\" of " + d.name + " is " + d.params[0].type
+      + ", and a tool's function takes one string parameter";
+  }
   let i: int = 0;
   while (i < d.params.length) {
     if (paramArg(d.params[i], "param", 0) == "") {

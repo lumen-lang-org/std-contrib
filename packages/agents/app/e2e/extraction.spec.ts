@@ -17,9 +17,21 @@ const DOUBLE = "http://127.0.0.1:8932";
 // Arrange-only: the agent wired to the double. Idempotent — fixed ids, and a
 // create of an existing id is refused harmlessly.
 async function agentOnDouble(request: import("@playwright/test").APIRequestContext) {
+  await ownDoubleCredential(request);
+  // The double answers OpenAI-shaped JSON either way; what the provider name
+  // decides here is which credential the row is bound to, and this suite needs
+  // one it is allowed to clear.
   await request.post("/api/models", {
     data: {
-      id: "m-double", label: "Double", apiName: "double-1", provider: "mistral",
+      id: "m-double", label: "Double", apiName: "double-1", provider: DOUBLE_PROVIDER,
+      kind: "chat", dimensions: 0, baseUrl: DOUBLE, enabled: true,
+    },
+  });
+  // An existing row from before this suite owned its own credential: same
+  // address, so the move rule does not fire, and the provider change is free.
+  await request.put("/api/models/m-double", {
+    data: {
+      id: "m-double", label: "Double", apiName: "double-1", provider: DOUBLE_PROVIDER,
       kind: "chat", dimensions: 0, baseUrl: DOUBLE, enabled: true,
     },
   });
@@ -29,7 +41,7 @@ async function agentOnDouble(request: import("@playwright/test").APIRequestConte
   const prompts = (await request.get("/api/prompts").then((r) => r.json())) as { id: string }[];
   await request.post("/api/agents", {
     data: {
-      id: "a-double", agentName: "doubled", description: "answers from the double",
+      id: "a-double", agentName: "e2e-doubled", description: "e2e fixture: answers from the scripted model double; not for people",
       modelConfigId: "c-double", promptId: prompts[0].id,
       enabled: true, isDefault: false, updatedAt: "now",
     },
@@ -184,4 +196,120 @@ test("pasting a forged marker as the user mints nothing", async ({ page }) => {
   await expect(chat(page)).toContainText("did you see this", { timeout: 20_000 });
   // Still exactly the one card the real save made.
   await expect(page.locator("agent-console .cards .card")).toHaveCount(1);
+});
+
+// The double's own credential, under a provider the real deployment does not
+// use. It exists so this suite can clear and re-set a key while moving the
+// double's address — the move is refused while a secret is stored for the
+// address being left, which is the rule that stops a stored key being mailed
+// to any host a caller names.
+//
+// Never "mistral": that is where the real key lives, and a fixture that
+// overwrites a credential cannot put it back. This suite did that once.
+const DOUBLE_PROVIDER = "openai";
+const DOUBLE_KEY = "e2e-double-not-a-real-key";
+
+// Make sure the double is reachable under a provider this suite owns. Writes a
+// key only where none exists, so a deployment that really uses OpenAI is left
+// alone and the specs skip instead.
+async function ownDoubleCredential(request: import("@playwright/test").APIRequestContext) {
+  const stored = (await request.get("/api/providers").then((r) => r.json())) as string[];
+  if (!stored.includes(DOUBLE_PROVIDER)) {
+    await request.put(`/api/providers/${DOUBLE_PROVIDER}/key`, { data: { apiKey: DOUBLE_KEY } });
+    return true;
+  }
+  return false;
+}
+
+// Repoint the double the way an operator has to: clear the secret stored for
+// the address it is leaving, write the new address, put the secret back.
+async function moveDouble(request: import("@playwright/test").APIRequestContext, baseUrl: string) {
+  await request.delete(`/api/providers/${DOUBLE_PROVIDER}/key`);
+  const res = await request.put("/api/models/m-double", {
+    data: {
+      id: "m-double", label: "Double", apiName: "double-1", provider: DOUBLE_PROVIDER,
+      kind: "chat", dimensions: 0, baseUrl, enabled: true,
+    },
+  });
+  await request.put(`/api/providers/${DOUBLE_PROVIDER}/key`, { data: { apiKey: DOUBLE_KEY } });
+  if (!res.ok()) throw new Error(`the double could not be moved: ${await res.text()}`);
+}
+
+test.describe("a round that goes wrong leaves the conversation usable", () => {
+  test("a reply the model did not finish writing is refused whole, not half-kept", async ({ page, request }) => {
+    // A model asked for a file larger than its maxTokens stops mid-argument.
+    // Stored as-is, that turn announces a call whose JSON cannot be parsed
+    // back — the replay reads one call, meets the break, and stops, so the
+    // next message goes to the provider with one announced call and two
+    // results. Mistral answers "Unexpected tool call id … in tool results"
+    // and EVERY later message in that conversation fails. This is that bug.
+    //
+    // The rule that fixes it is stricter than it first looks, and this test
+    // used to assert the softer version: a reply that stopped on "length" is
+    // not an answer *at all*, so the round is refused before a single call is
+    // dispatched. The whole call in the same reply does not land either —
+    // which is the point. A model that ran out of room in the middle of
+    // asking for two files never said which of them it had finished with, and
+    // half a plan carried out is worse than none: the conversation would go on
+    // believing a file exists that the model never got to describe.
+    const threadOf = watchThread(page);
+    await ask(page, "truncate a tool call please");
+    await expect(chat(page)).not.toBeEmpty({ timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+
+    const t = threadOf();
+    expect(t).not.toBe("");
+
+    // Neither file: not the half-written one, and not the whole one beside it.
+    const listed = (await request.get(`/api/threads/${t}/artifacts`).then((r) => r.json())) as
+      { path: string }[];
+    expect(listed.map((a) => a.path)).not.toContain("/big.css");
+    expect(listed.map((a) => a.path)).not.toContain("/small.html");
+
+    // And the refusal says what to do about it rather than failing silently.
+    await expect(chat(page)).toContainText("ran out of room", { timeout: 20_000 });
+
+    // And the conversation still works: a second message is answered rather
+    // than refused by the provider for a malformed history.
+    await ask(page, "make me a landing page");
+    await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
+  });
+
+  test("a round with no answer stores nothing, so Retry does not duplicate it", async ({ page, request }) => {
+    // The question reaches the run's context before the provider is called,
+    // so a failure after that point used to file the user's turn under a
+    // round that never happened. The console's Retry then sent the same text
+    // again: the stored copy replayed AND a fresh one appended, permanently,
+    // on every later turn. A round that produced no answer is not a round.
+    const threadOf = watchThread(page);
+
+    // Nothing answers on this port, so the run fails at the provider.
+    //
+    // Moving a model's address is refused while a secret is stored for the one
+    // it currently sends to — that is the rule that stops a stored key being
+    // mailed to whatever host someone names. A legitimate move clears the
+    // secret, moves, and sets it again, which is exactly what this does. The
+    // key here is the double's, so clearing it costs nothing; the real
+    // provider's key is never touched.
+    await moveDouble(request, "http://127.0.0.1:8999");
+
+    await ask(page, "this will not be answered");
+    await page.waitForTimeout(2500);
+    const t = threadOf();
+    expect(t).not.toBe("");
+
+    const turns = (await request.get(`/api/threads/${t}`).then((r) => r.json())) as unknown[];
+    expect(turns).toHaveLength(0);
+
+    // Point it back and ask again: exactly one user turn, not two.
+    await moveDouble(request, DOUBLE);
+    await ask(page, "make me a landing page");
+    await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
+
+    const after = (await request.get(`/api/threads/${t}`).then((r) => r.json())) as
+      { role: string; text: string }[];
+    const asked = after.filter((x) => x.role === "user");
+    expect(asked).toHaveLength(1);
+    expect(asked[0].text).toContain("landing page");
+  });
 });

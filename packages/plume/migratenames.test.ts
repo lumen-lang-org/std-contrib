@@ -7,7 +7,7 @@
 //
 //   cd packages/plume && lumen test migratenames.test.ts
 
-import { SqlFile, ParsedName, Migration, parseMigrationName, migrationsFrom, migrationNameProblem, planOrder } from "./migrate.ts";
+import { SqlFile, ParsedName, Migration, parseMigrationName, migrationsFrom, migrationNameViolation, planOrder } from "./migrate.ts";
 
 function sqlFile(fileName: string, body: string): SqlFile {
   let f: SqlFile = { name: fileName, text: body };
@@ -59,19 +59,19 @@ test("the extension is dropped, whatever it is", () => {
 
 test("a name that is not a migration says why", () => {
   expect(!parseMigrationName("README.md").valid);
-  expect(parseMigrationName("README.md").problem.indexOf("no __ separating") >= 0);
+  expect(parseMigrationName("README.md").violation.indexOf("no __ separating") >= 0);
 
   expect(!parseMigrationName("V1__.sql").valid);
-  expect(parseMigrationName("V1__.sql").problem.indexOf("nothing after") >= 0);
+  expect(parseMigrationName("V1__.sql").violation.indexOf("nothing after") >= 0);
 
   expect(!parseMigrationName("X1__nope.sql").valid);
-  expect(parseMigrationName("X1__nope.sql").problem.indexOf("neither a version number") >= 0);
+  expect(parseMigrationName("X1__nope.sql").violation.indexOf("neither a version number") >= 0);
 
   expect(!parseMigrationName("Vabc__nope.sql").valid);
-  expect(parseMigrationName("Vabc__nope.sql").problem.indexOf("neither a version number") >= 0);
+  expect(parseMigrationName("Vabc__nope.sql").violation.indexOf("neither a version number") >= 0);
 
   // The problem names the file, so a directory listing points at the culprit.
-  expect(parseMigrationName("README.md").problem.indexOf("README.md") >= 0);
+  expect(parseMigrationName("README.md").violation.indexOf("README.md") >= 0);
 });
 
 test("a directory becomes a plan", () => {
@@ -120,16 +120,16 @@ test("a file that is not a migration is reported, not ignored", () => {
   expect(migrationsFrom(files).length == 1);
   // ...and saying so is the point: a migration named wrongly would otherwise
   // disappear without a word.
-  expect(migrationNameProblem(files).indexOf("notes.txt") >= 0);
+  expect(migrationNameViolation(files).indexOf("notes.txt") >= 0);
 });
 
 test("a directory that describes a good plan reports no problem", () => {
-  expect(migrationNameProblem(directory()) == "");
+  expect(migrationNameViolation(directory()) == "");
 });
 
 test("an empty directory is a problem, since a plan was expected", () => {
   let none: SqlFile[] = [];
-  expect(migrationNameProblem(none).indexOf("no files") >= 0);
+  expect(migrationNameViolation(none).indexOf("no files") >= 0);
 });
 
 test("two files claiming the same version are refused", () => {
@@ -137,5 +137,5 @@ test("two files claiming the same version are refused", () => {
     sqlFile("V1__create_teams.sql", "SELECT 1"),
     sqlFile("V1__create_agents.sql", "SELECT 1"),
   ];
-  expect(migrationNameProblem(files).indexOf("appears twice") >= 0);
+  expect(migrationNameViolation(files).indexOf("appears twice") >= 0);
 });

@@ -47,6 +47,11 @@ export type ModelConfigRow = {
   maxTokens: int,
   topP: number,
   extra: string,
+  // How hard to think before answering, when the provider can be told. Empty is
+  // "as it normally would". A token budget for Anthropic, an effort — low,
+  // medium or high — for the reasoning models that take one; `thinkingJson`
+  // decides what the text means, per provider.
+  thinking: string,
 };
 
 // A prompt, versioned. A row is never edited: a change writes a new version and
@@ -98,7 +103,26 @@ export type AgentRow = {
   enabled: bool,
   // The agent a new conversation opens against.
   isDefault: bool,
+  // Which curated image this agent's script environments are built from. ""
+  // means the deployment default. An id into script_images and never an image
+  // reference: a model that could name its own image could make the server
+  // pull anything off the internet and run it, which is the one thing an
+  // operator curating a list is for.
+  scriptImageId: string,
   updatedAt: string,
+};
+
+// An image an operator is willing to run scripts in. A row rather than a
+// setting because a deployment has more than one kind of work — a data
+// container and a web toolchain are different images — and because the set
+// belongs to whoever runs the server, not to whoever is talking to it.
+export type ScriptImageRow = {
+  id: string,
+  // What it is called where somebody picks it.
+  label: string,
+  // The reference docker is handed: agents-runtime:1, ghcr.io/x/y@sha256:...
+  image: string,
+  enabled: bool,
 };
 
 // --- mappings ----------------------------------------------------------------
@@ -165,6 +189,29 @@ export function modelsMapping(): DbRepository {
 
 // Takes the connection for the same reason agentsFull does: its relation
 // projects a bool, and SQLite and MySQL store those as 0 and 1.
+// The shape migration 2 recorded, frozen.
+//
+// Adding a field to the live mapping above would rewrite this statement, and a
+// migration's text is checksummed: every database that has already run it would
+// refuse the whole plan, while a fresh one migrated happily and CI stayed
+// green. Migrations 1, 4 and 5 already carry a frozen copy for the same reason;
+// this one was still generated from the live mapping when `thinking` was added,
+// which is exactly the moment the hazard fires.
+//
+// It takes no `db` because it has no relation to widen: `createTableSql` reads
+// fields only.
+function modelConfigsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("modelId", "model_id", "text"),
+    field("temperature", "temperature", "float8"),
+    field("maxTokens", "max_tokens", "int"),
+    field("topP", "top_p", "float8"),
+    field("extra", "extra", "text"),
+  ];
+  return repository("model_configs", "id", "id", fs);
+}
+
 export function modelConfigsMapping(db: Db): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -173,6 +220,11 @@ export function modelConfigsMapping(db: Db): DbRepository {
     field("maxTokens", "max_tokens", "int"),
     field("topP", "top_p", "float8"),
     field("extra", "extra", "text"),
+    // How hard the model should think before it answers, when it can. Empty is
+    // the default: think as the provider normally would. What a non-empty value
+    // means is the provider's business — a token budget for Anthropic, an
+    // effort for OpenAI's reasoning models — so it is text, not a number.
+    field("thinking", "thinking", "text"),
   ];
   let rs: DbRelation[] = [
     hasOne({ field: "model", table: "models", localColumn: "model_id", foreignColumn: "id", columns: "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\"" }),
@@ -219,6 +271,16 @@ export function credentialsMapping(): DbRepository {
   return repository({ table: "provider_credentials", idField: "id", idColumn: "id", fields: fs });
 }
 
+export function scriptImagesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("image", "image", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("script_images", "id", "id", fs);
+}
+
 export function agentsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -227,6 +289,9 @@ export function agentsMapping(): DbRepository {
     field("modelConfigId", "model_config_id", "text"),
     field("promptId", "prompt_id", "text"),
     field("enabled", "enabled", "bool"),
+    // Added after migration 5 shipped, so it arrives as an ALTER at 66 and
+    // agentsMappingV1 below keeps generating the original CREATE.
+    field("scriptImageId", "script_image_id", "text"),
     // The agent a new conversation opens against. Without it the console took
     // whichever sorted first by name, which is how a blank name became the
     // default for everyone.
@@ -251,7 +316,7 @@ export function agentsMapping(): DbRepository {
 export function agentsFull(db: Db): DbRepository {
   let rs: DbRelation[] = [
     hasOne({ field: "prompt", table: "prompts", localColumn: "prompt_id", foreignColumn: "id", columns: "id, prompt_name AS \"promptName\", version, body" }),
-    hasOne({ field: "config", table: "model_configs", localColumn: "model_config_id", foreignColumn: "id", columns: "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra" }),
+    hasOne({ field: "config", table: "model_configs", localColumn: "model_config_id", foreignColumn: "id", columns: "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking" }),
     hasManyThrough({
       field: "servers", table: "mcp_servers", foreignColumn: "id",
       linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
@@ -284,7 +349,7 @@ export function agentsFull(db: Db): DbRepository {
 export function schemaPlan(db: Db): Migration[] {
   let plan: Migration[] = [
     migration("1", "models", createTableSql(db, modelsMappingV1())),
-    migration("2", "model configs", createTableSql(db, modelConfigsMapping(db))),
+    migration("2", "model configs", createTableSql(db, modelConfigsMappingV1())),
     migration("3", "prompts", createTableSql(db, promptsMapping())),
     migration("4", "mcp servers", createTableSql(db, mcpServersMappingV1())),
     migration("5", "agents", createTableSql(db, agentsMappingV1())),
@@ -298,6 +363,14 @@ export function schemaPlan(db: Db): Migration[] {
       + "child_id " + db.textType + " NOT NULL)"),
     // One prompt name has many versions, and a lookup by name is the common
     // read, so it is worth an index rather than a scan.
+    // The images an operator will run scripts in, and the agent's choice among
+    // them. Two migrations because they are two facts: the table is new, the
+    // column is an ALTER on a table whose CREATE was checksummed long ago.
+    migration("65", "curated script images", createTableSql(db, scriptImagesMapping())),
+    migration("66", "an agent chooses its script image",
+      "ALTER TABLE agents ADD COLUMN script_image_id " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("61", "a model config can ask for thinking",
+      "ALTER TABLE model_configs ADD COLUMN thinking " + db.textType + " NOT NULL DEFAULT ''"),
     migration("8", "provider credentials", createTableSql(db, credentialsMapping())),
     migration("9", "prompts by name",
       "CREATE INDEX IF NOT EXISTS prompts_by_name ON prompts (prompt_name)"),

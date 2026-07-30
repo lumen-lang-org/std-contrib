@@ -9,7 +9,7 @@
 // by something that speaks HTTP.
 
 import { McpServerRow } from "./schema.ts";
-import { jsonRaw, jsonText, jsonList } from "./scan.ts";
+import { jsonBlank, jsonValueAt, jsonRaw, jsonText, jsonList, jsonUnescape } from "./scan.ts";
 
 // A tool as its server describes it. `schema` is the tool's own JSON Schema,
 // kept as text: it is written by whoever wrote the tool, no record type can
@@ -25,6 +25,65 @@ export type McpCall = {
   text: string,
   error: string,
 };
+
+// The raw text of one of the envelope's own members, or "" when it has none.
+//
+// Top level only, which is the whole reason it is not `jsonRaw`: that searches
+// at any depth and takes the first match, and everything below the envelope
+// belongs to the tool. A tool that returns `{"error":"not found"}` as its
+// answer has answered.
+function envelopeMember(document: string, key: string): string {
+  let i: int = 0;
+  while (i < document.length && jsonBlank(document.charAt(i))) { i = i + 1; }
+  if (i >= document.length || document.charAt(i) != "{") { return ""; }
+  i = i + 1;
+  while (i < document.length) {
+    while (i < document.length) {
+      let ch = document.charAt(i);
+      if (!jsonBlank(ch) && ch != ",") { break; }
+      i = i + 1;
+    }
+    if (i >= document.length || document.charAt(i) == "}") { return ""; }
+    if (document.charAt(i) != "\"") { return ""; }
+    let name = jsonValueAt(document, i);
+    if (name.length < 2) { return ""; }
+    i = i + name.length;
+    while (i < document.length && jsonBlank(document.charAt(i))) { i = i + 1; }
+    if (i >= document.length || document.charAt(i) != ":") { return ""; }
+    i = i + 1;
+    let value = jsonValueAt(document, i);
+    if (value == "") { return ""; }
+    if (jsonUnescape(name.slice(1, name.length - 1)) == key) { return value; }
+    i = i + value.length;
+  }
+  return "";
+}
+
+// Whether a JSON-RPC reply carries an error, and what it says.
+export type RpcFailure = {
+  failed: bool,
+  message: string,
+};
+
+// Whether the server refused the call.
+//
+// The envelope's own `error`, absent or null meaning success — which is what
+// the protocol says and was not what this asked. It asked whether the text of
+// the reply contained `"error"` anywhere, so a server that writes
+// `"error":null` beside a perfectly good result — legal, and common enough to
+// be the default in more than one MCP framework — had every tool it offers
+// reported broken, and the raw envelope was handed to the model as the tool's
+// answer.
+export function rpcFailure(document: string): RpcFailure {
+  let none: RpcFailure = { failed: false, message: "" };
+  let raw = envelopeMember(document, "error");
+  if (raw == "" || raw == "null") { return none; }
+  let said = jsonText(raw, "message");
+  let sentence = "the server refused the call";
+  if (said != "") { sentence = sentence + ": " + said; }
+  let refused: RpcFailure = { failed: true, message: sentence };
+  return refused;
+}
 
 // JSON-RPC over HTTP. The id is supplied by the caller rather than counted
 // here, because a record cannot hold a counter and a global would be shared
@@ -56,8 +115,9 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
     let bad: McpCall = { ok: false, text: res.body, error: "HTTP " + `${res.status}` };
     return bad;
   }
-  if (res.body.indexOf("\"error\"") >= 0) {
-    let rpcErr: McpCall = { ok: false, text: res.body, error: "the server refused the call" };
+  let refused = rpcFailure(res.body);
+  if (refused.failed) {
+    let rpcErr: McpCall = { ok: false, text: res.body, error: refused.message };
     return rpcErr;
   }
   let good: McpCall = { ok: true, text: res.body, error: "" };

@@ -556,6 +556,7 @@ export class AgentCanvas extends LitElement {
         id: this.draft.id,
         agentName: this.draft.agentName,
         description: this.draft.description,
+        scriptImageId: this.draft.scriptImageId,
         modelConfigId: this.draft.modelConfigId,
         promptId: this.draft.promptId,
         enabled: this.draft.enabled,
