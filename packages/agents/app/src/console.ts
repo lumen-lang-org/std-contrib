@@ -332,12 +332,12 @@ export class AgentConsole extends LitElement {
   // reopens after being closed is not helping, it is nagging.
   private railClosed = false;
 
-  // A conversation that has artifacts opens with them showing. Only when
-  // nothing else is showing: a workspace rail somebody chose stays.
-  private followArtifacts() {
-    if (this.turnRefs.length === 0 || this.rail !== "" || this.railClosed) return;
-    this.rail = "artifacts";
-  }
+  // Nothing opens the rail but the person. It used to open itself for any
+  // conversation with artifacts, which on a desktop read as helpful and on a
+  // phone WAS the screen: the panel covers the conversation below 1024px, so
+  // arriving at a conversation meant arriving at its file list instead, with
+  // the conversation invisible behind it. The artifact cards under the
+  // composer already say there is something to open.
 
   // Clicking the rail that is already open closes it, which is what a pressed
   // toggle should do.
@@ -370,9 +370,6 @@ export class AgentConsole extends LitElement {
   private async refreshRefs() {
     this.turnRefs = this.threadId === "" ? []
       : await artifactsByTurn(this.threadId).catch(() => this.turnRefs);
-    // A turn that produced the conversation's first artifact opens the rail
-    // for it — the same follow a thread click does.
-    this.followArtifacts();
   }
 
   // The cards to draw, in the order the conversation earned them. Each message
