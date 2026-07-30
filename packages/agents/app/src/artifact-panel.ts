@@ -529,6 +529,16 @@ export class ArtifactPanel extends LitElement {
         </div>`)}`;
   }
 
+  /* Called by the console when a message's card is clicked: the path the
+     message saved, at the version it saved. Public on purpose — it is the
+     panel's addressable surface, same as showDiff. */
+  async showPath(path: string, version: number): Promise<void> {
+    if (this.artifacts.length === 0) { await this.refresh(); }
+    const a = this.artifacts.find((x) => x.path === path);
+    if (a === undefined) { return; }
+    await this.show(a, version > 0 ? version : a.version);
+  }
+
   private toggleFold(path: string) {
     const next = new Set(this.folded);
     if (next.has(path)) { next.delete(path); } else { next.add(path); }

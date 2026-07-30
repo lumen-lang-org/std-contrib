@@ -451,15 +451,27 @@ export class AgentConsole extends LitElement {
   // instead the click bubbles (composed) and is read off its data attributes.
   private async chipClick(e: Event) {
     const path = e.composedPath() as HTMLElement[];
-    const chip = path.find((el) => el?.getAttribute?.("data-diff-path"));
-    if (!chip) return;
+    const diff = path.find((el) => el?.getAttribute?.("data-diff-path"));
+    const card = path.find((el) => el?.getAttribute?.("data-open-path"));
+    if (!diff && !card) return;
     this.rail = "artifacts";
     this.railClosed = false;
     await this.updateComplete;
     const panel = this.renderRoot.querySelector("artifact-panel") as
-      (HTMLElement & { showDiff?: (p: string, v: number) => Promise<void> }) | null;
-    await panel?.showDiff?.(chip.getAttribute("data-diff-path") ?? "",
-      Number(chip.getAttribute("data-diff-version") ?? "0"));
+      (HTMLElement & {
+        showDiff?: (p: string, v: number) => Promise<void>;
+        showPath?: (p: string, v: number) => Promise<void>;
+      }) | null;
+    if (diff) {
+      await panel?.showDiff?.(diff.getAttribute("data-diff-path") ?? "",
+        Number(diff.getAttribute("data-diff-version") ?? "0"));
+      return;
+    }
+    // A card on a message opens the artifact it names, at the version the
+    // message saved — not the newest, because the message is a record of what
+    // it did, and clicking it should show that.
+    await panel?.showPath?.(card!.getAttribute("data-open-path") ?? "",
+      Number(card!.getAttribute("data-open-version") ?? "0"));
   }
 
   render() {
