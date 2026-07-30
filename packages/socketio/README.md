@@ -73,6 +73,7 @@ CONNECT has happened — and the websocket package's server calls back per
 *message*, with nowhere to keep any of it. So the loop that owns a connection
 is written here, over websocket's framing rather than its server.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -87,3 +88,4 @@ python3 siocheck.py            # the real client, from a page serving their CDN 
 the script says which. Two harness traps cost time here and are worth knowing:
 a page with a Content-Security-Policy blocks the connection, and `about:blank`
 has an opaque origin that Chromium refuses to dial from.
+<!-- /website:skip -->

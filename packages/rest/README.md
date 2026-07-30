@@ -113,6 +113,7 @@ case-insensitive, since the server lowercases what it receives — and
 replies. An error is a JSON document, because a client parsing the body should
 not have to guess whether it got JSON or a sentence.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -125,6 +126,7 @@ lumen test server.test.ts       # 16 — dispatch, refusals, bindings
 None of them binds a port. `dispatch` is split from `serve` precisely so every
 route, refusal and binding failure is a function call — a test that has to bind
 a port is a test that gets skipped.
+<!-- /website:skip -->
 
 ## Dependency inversion
 
