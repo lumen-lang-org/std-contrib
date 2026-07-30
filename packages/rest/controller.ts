@@ -3,10 +3,10 @@
 //
 //   @controller("/agents")
 //   class AgentController {
-//     @get("/")        list(req: Request): Response { ... }
-//     @get("/:id")     find(req: Request): Response { ... }
-//     @post("/")       create(req: Request): Response { ... }
-//     @delete("/:id")  remove(req: Request): Response { ... }
+//     @get("/")     list(req: Request): Reply { ... }
+//     @get("/:id")  find(req: Request): Reply { ... }
+//     @post("/")    create(req: Request): Reply { ... }
+//     @del("/:id")  remove(req: Request): Reply { ... }
 //   }
 //
 // The compiler runs `controller` while compiling and leaves the table behind
@@ -19,11 +19,18 @@
 //     { method: "DELETE", pattern: "/agents/:id", handler: "remove" },
 //   ];
 //
-// What it cannot do is call the methods. There is no reflection here and there
-// will not be — the product is a native binary with no runtime type
-// information — so the program binds each name to its method once, and `serve`
-// refuses to start if a route has no binding. A missing handler is a startup
-// failure naming the route, not a 500 discovered by a user.
+// What it cannot do is call the methods. A decorator's value travels back as
+// JSON, and JSON cannot carry a function, so a `Route` names its handler rather
+// than holding one.
+//
+// Closing that gap used to be the program's job: bind each name to its method
+// by hand and let `serve` refuse to start if a route had no binding. It is now
+// `mount`'s, in server.ts, which reads this constant back off the class through
+// `Class.decorator` and calls the methods through `Class.invoke` (spec 477).
+// There is still no reflection and there will not be — the product is a native
+// binary with no runtime type information — but both of those are resolved
+// while compiling, so a route and its handler now come from the same class and
+// cannot disagree. The hand-bound path still works; see `serve`.
 
 import { Route, route } from "./router.ts";
 

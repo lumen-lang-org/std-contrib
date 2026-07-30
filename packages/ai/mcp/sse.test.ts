@@ -116,6 +116,48 @@ test("end to end: an interleaved notification is skipped for the id-1 answer", (
   expect(res.content == "line one\nline two");
 });
 
+test("a string id in an SSE stream still identifies the answer", () => {
+  // JSON-RPC 2.0 allows a string id; a decimal scan of the raw text stops at
+  // the opening quote and reads 0, so the real answer is passed over and
+  // whatever trailed it is handed back instead.
+  let answer = "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"content\":["
+    + "{\"type\":\"text\",\"text\":\"18C in Paris\"}]}}";
+  let trailing = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}";
+  let body = "event: message\ndata: " + answer + "\n\n"
+    + "event: message\ndata: " + trailing + "\n\n";
+  let res = sseParseResult(body);
+  expect(res.ok);
+  expect(res.content == "18C in Paris");
+});
+
+test("a tools/list answered with a string id is not thrown away", () => {
+  let listing = "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"tools\":["
+    + "{\"name\":\"echo\",\"description\":\"Echo.\",\"inputSchema\":{\"type\":\"object\"}}]}}";
+  let trailing = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}";
+  let body = "event: message\ndata: " + listing + "\n\n"
+    + "event: message\ndata: " + trailing + "\n\n";
+  let tools = sseParseTools(body);
+  expect(tools.length == 1);
+  expect(tools[0].name == "echo");
+});
+
+test("an SSE reply carrying no answer at all is a failure", () => {
+  let note = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"progress\",\"params\":{}}\n\n";
+  let res = sseParseResult(note);
+  expect(!res.ok);
+  expect(res.error != "");
+  // an empty stream, which is what a rejected request leaves behind.
+  expect(!sseParseResult("").ok);
+});
+
+test("an SSE tool call sends the arguments the server's schema declares", () => {
+  let tools = sseParseTools(sseToolsListJson());
+  expect(tools[0].name == "weather");
+  let args = mcpBuildArguments(tools[0].schema, "Paris");
+  expect(args == "{\"city\":\"Paris\"}");
+  expect(args.indexOf("\"input\"") < 0);
+});
+
 test("a tools/list discovered over SSE adapts into runnable AiTools", () => {
   let tools = sseParseTools(sseChunkify("data: " + sseToolsListJson() + "\n\n"));
   let headers = new Map<string, string>();

@@ -8,7 +8,7 @@
 //
 // Override the connection with PLUME_TEST_CONNINFO.
 
-import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
+import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, persistViolation, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember, projectionValid, floatSqlType, boolSqlType } from "./plume.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { postgres, postgresConnection, postgresVersion } from "./postgres.ts";
 
@@ -185,6 +185,43 @@ test("many records persist in one statement", () => {
   expect(persistMany(database, repo, "[]").ok);
 });
 
+test("a document with nothing in it is refused rather than written as nulls", () => {
+  // The only guard was `json == ""`, so "{}" and "[]" reached the database,
+  // json_to_record turned them into a row of nulls, and persist reported that
+  // it had worked. A table plume created is saved by its NOT NULL columns —
+  // the table below is not, which is what a migration-built schema ordinarily
+  // looks like, and it is the documented production path.
+  connectDatabase(database, testConfig());
+  let repo = agentRepo();
+  dropTable(database, repo);
+  expect(execute(database, "CREATE TABLE plume_test_agents (id text UNIQUE, agent_name text, max_steps int, temperature float8)").ok);
+
+  let none = persist(database, repo, "{}");
+  expect(!none.ok);
+  expect(none.error.indexOf("no fields") >= 0);
+  expect(!persist(database, repo, "  {  }  ").ok);
+  expect(!persist(database, repo, "[]").ok);
+  expect(!persist(database, repo, "[" + agentJson("a1", "researcher", 5, 0.2) + "]").ok);
+  expect(!persist(database, repo, "").ok);
+  expect(!persist(database, repo, "   ").ok);
+  // Nothing of any of that reached the table.
+  expect(countWhere(database, repo, "", []) == 0);
+
+  // A real document still goes in.
+  expect(persist(database, repo, agentJson("a1", "researcher", 5, 0.2)).ok);
+  expect(countWhere(database, repo, "", []) == 1);
+  dropTable(database, repo);
+});
+
+test("what is wrong with a document is a sentence, or nothing", () => {
+  expect(persistViolation("{\"id\":\"a1\"}") == "");
+  expect(persistViolation("") != "");
+  expect(persistViolation("{}") != "");
+  expect(persistViolation("[]") != "");
+  expect(persistViolation("[{\"id\":\"a1\"}]") != "");
+  expect(persistViolation("null") != "");
+});
+
 test("text containing a quote is data, not syntax", () => {
   let repo = fresh();
   let nasty = "it's a test'); DROP TABLE plume_test_agents; --";
@@ -298,6 +335,94 @@ test("a select list with an unbalanced quote or paren is refused", () => {
   expect(listProjected(database, repo, "agent_name AS \"a", "", []) == "[]");
 });
 
+test("a projected list parses as an array of DTOs", () => {
+  // The documented use of listProjected is JSON.parse<DTO[]>, and it aggregated
+  // the whole result into one row which was then wrapped in an array of its
+  // own: every driver answered [[{"id":"a1"},{"id":"a2"},{"id":"a3"}]], which
+  // JSON.parse refuses. The suite missed it because every assertion around it
+  // read the string with indexOf and none of them parsed.
+  let repo = seeded();
+  let json = listProjected(database, repo, "id AS \"id\", agent_name AS \"agentName\"", "", []);
+  let rows: AgentSummary[] = JSON.parse<AgentSummary[]>(json);
+  expect(rows.length == 3);
+  expect(rows[0].id != "");
+  expect(rows[0].agentName != "");
+  expect(rows[2].agentName != "");
+});
+
+test("a projected list matching nothing parses as an empty array", () => {
+  // The same wrapping made an empty result "[[]]" rather than "[]".
+  let repo = seeded();
+  let json = listProjected(database, repo, "id AS \"id\", agent_name AS \"agentName\"",
+    "agent_name = " + placeholderAt(database, 1), ["nobody"]);
+  expect(json == "[]");
+  let rows: AgentSummary[] = JSON.parse<AgentSummary[]>(json);
+  expect(rows.length == 0);
+});
+
+test("an unquoted mixed-case alias is refused, because the databases disagree about it", () => {
+  // `agent_name AS agentName` keys the document "agentName" on a pairs driver,
+  // which builds the keys itself, and "agentname" on PostgreSQL, which folds
+  // an unquoted identifier — so the same DTO parses in development and is
+  // refused in production for an unknown field and a missing one at once.
+  let repo = seeded();
+  expect(!projectionValid("id AS \"id\", agent_name AS agentName"));
+  expect(listProjected(database, repo, "id AS \"id\", agent_name AS agentName", "", []) == "[]");
+  expect(findProjected(database, repo, "id AS \"id\", agent_name AS agentName", "a1") == "");
+  // An unaliased column carrying the same problem is refused for the same reason.
+  expect(!projectionValid("id, agentName"));
+  // Quoted, a mixed-case key means the same thing everywhere.
+  expect(projectionValid("id AS \"id\", agent_name AS \"agentName\""));
+  expect(listProjected(database, repo, "id AS \"id\", agent_name AS \"agentName\"", "", []).indexOf("agentName") >= 0);
+  // All lower case needs no quotes: nothing folds it.
+  expect(projectionValid("agent_name AS name"));
+  expect(listProjected(database, repo, "agent_name AS name", "", []).indexOf("\"name\"") >= 0);
+  // And the table is untouched, so nothing ran.
+  expect(countWhere(database, repo, "", []) == 3);
+});
+
+test("a type spelled in the database's own vocabulary is still a float or a bool", () => {
+  // dialectType passes a name it does not know through untouched, which is how
+  // a column is declared in the database's own words — and jsonValue compared
+  // that result against db.floatType, so it knew "float8" and missed "double
+  // precision". On SQLite that silently truncated 1234567890.123456 to fifteen
+  // digits, and "boolean" came back as 1 where "bool" came back as true.
+  expect(floatSqlType(database, "float8"));
+  expect(floatSqlType(database, "double precision"));
+  expect(floatSqlType(database, "DOUBLE PRECISION"));
+  expect(floatSqlType(database, " double precision "));
+  expect(floatSqlType(database, "double"));
+  expect(floatSqlType(database, "real"));
+  expect(!floatSqlType(database, "text"));
+  expect(!floatSqlType(database, "int"));
+  expect(!floatSqlType(database, "timestamptz"));
+  expect(boolSqlType("bool"));
+  expect(boolSqlType("boolean"));
+  expect(boolSqlType("BOOLEAN"));
+  expect(!boolSqlType("text"));
+  expect(!boolSqlType("int"));
+});
+
+test("a double declared in the database's own words keeps every digit", () => {
+  // The same mapping as the round-trip test, with the type spelled the way the
+  // database spells it rather than the portable way.
+  connectDatabase(database, testConfig());
+  let fields: DbField[] = [
+    field("id", "id", "text"),
+    field("agentName", "agent_name", "text"),
+    field("maxSteps", "max_steps", "int"),
+    field("temperature", "temperature", "double precision"),
+  ];
+  let repo = repository("plume_test_agents", "id", "id", fields);
+  dropTable(database, repo);
+  createTable(database, repo);
+  let precise = 1234567890.123456;
+  expect(persist(database, repo, agentJson("a1", "researcher", 5, precise)).ok);
+  let back: Agent = JSON.parse<Agent>(findById(database, repo, "a1"));
+  expect(back.temperature == precise);
+  dropTable(database, repo);
+});
+
 test("picking narrows a document in memory", () => {
   let full = agentJson("a1", "researcher", 5, 0.2);
   let keys: string[] = ["id", "agentName"];
@@ -328,6 +453,41 @@ test("a member reads whole values of every kind", () => {
 test("a nested key of the same name is not mistaken for a top-level one", () => {
   let doc = "{\"inner\":{\"id\":\"wrong\"},\"id\":\"right\"}";
   expect(jsonMember(doc, "id") == "\"right\"");
+});
+
+test("a space before the colon is still a member", () => {
+  // The marker was `"key":` matched byte for byte, so `{"id" : "a1"}` — which
+  // JSON.parse<T> accepts without complaint — never matched, and pickFields
+  // returned "{}" for a document carrying every field it was asked for.
+  let doc = "{\"id\" : \"a1\", \"agentName\"\t:\t\"researcher\", \"maxSteps\"\n:\n5, \"temperature\" : 0.2}";
+  expect(jsonMember(doc, "id") == "\"a1\"");
+  expect(jsonMember(doc, "agentName") == "\"researcher\"");
+  expect(jsonMember(doc, "maxSteps") == "5");
+  expect(jsonMember(doc, "temperature") == "0.2");
+  expect(jsonMember(doc, "absent") == "");
+
+  let keys: string[] = ["id", "agentName"];
+  let dto: AgentSummary = JSON.parse<AgentSummary>(pickFields(doc, keys));
+  expect(dto.id == "a1");
+  expect(dto.agentName == "researcher");
+});
+
+test("a key without a colon after it is a value, not a member", () => {
+  // The colon is what makes a string a key, and skipping the whitespace before
+  // it must not amount to no longer requiring it.
+  let doc = "{\"note\":\"id\",\"id\":\"right\"}";
+  expect(jsonMember(doc, "id") == "\"right\"");
+});
+
+test("an array document has no top-level members", () => {
+  // A member belongs to an object. An array's elements sit one level further
+  // in, so a key read off one of them would be the first row's, silently.
+  let doc = "[{\"id\":\"a1\"},{\"id\":\"a2\"}]";
+  expect(jsonMember(doc, "id") == "");
+  let keys: string[] = ["id"];
+  expect(pickFields(doc, keys) == "{}");
+  // Which persist then refuses rather than writing as a row of nulls.
+  expect(persistViolation(pickFields(doc, keys)) != "");
 });
 
 // --- deleting ----------------------------------------------------------------------------------

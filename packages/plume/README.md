@@ -448,7 +448,7 @@ building and it still runs. Nothing requires `embedDir`, though:
 `migrationsFrom` takes any list of names and contents.
 
 A file that is not a migration — a `README.md` beside the SQL — is left out of
-the plan and reported by `migrationNameProblem`. It is not silently skipped: a
+the plan and reported by `migrationNameViolation`. It is not silently skipped: a
 migration named wrongly would otherwise never run and never be missed.
 
 Everything after the name is still checked. Ordering is by version, so `10`
@@ -519,7 +519,7 @@ support to run, and `entity_live.test.ts` checks that the generated mapping is
 identical to the hand-written one and that every operation works against it.
 
 Still nothing is inferred: a field without `@column` is not mapped, a class
-without `@id` has no key and `entityProblem` says so. The one exception is a
+without `@id` has no key and `entityViolation` says so. The one exception is a
 `@column("id")` with no type, which falls back to the declared type — the
 column type can always be stated outright.
 

@@ -92,6 +92,110 @@ export function credentialFor(db: Db, provider: string, key: string): string {
   return crypto.decrypt(row.envelope, key);
 }
 
+// Whether a provider has a credential at all, without opening it. Asked by
+// callers deciding whether a secret is at stake, which is a different question
+// from what the secret is.
+export function hasCredential(db: Db, provider: string): bool {
+  return existsById(db, credentialsMapping(), credentialId(provider));
+}
+
+// Delete a credential. True when there was one to delete.
+//
+// Its own function because the row id is this file's business: five callers
+// spelling "cred-" + provider is five places to get wrong, and one of them
+// deleting the wrong row leaves a secret behind rather than reporting
+// anything.
+export function forgetCredential(db: Db, provider: string): bool {
+  if (!existsById(db, credentialsMapping(), credentialId(provider))) { return false; }
+  return deleteById(db, credentialsMapping(), credentialId(provider)).ok;
+}
+
+// --- where a secret is allowed to go -----------------------------------------
+//
+// A key here can be written and never read back, and that invariant is only
+// worth as much as the address the key is sent to. Every secret in this
+// package is used by a call whose destination is a column — a model's base
+// URL, a server's endpoint, the collector's address — and a column is writable
+// by anyone who can write a row. Repoint the column, press the button that
+// uses the key, and the key arrives at an address of your choosing: written
+// once, read back forever.
+//
+// So the address is authorised the same moment the secret is: writing a key is
+// what says where it may go. Moving the address afterwards is refused while a
+// secret is stored, and the refusal names the request that clears it. Clearing
+// is destructive — whoever moves the address has to be able to supply the
+// secret again — which is what makes this fail closed: an attacker with write
+// access can destroy a credential, and cannot read one.
+
+// The origin of a URL — scheme, host and port, lower-cased — or "" when there
+// is none to read.
+//
+// The origin rather than the whole URL, because it is the origin that decides
+// who receives the bytes. A path is ours to choose; a host is not.
+export function destinationOf(url: string): string {
+  let text = url.trim();
+  let mark = text.indexOf("://");
+  if (mark < 0) { return ""; }
+  let scheme = text.slice(0, mark).toLowerCase();
+  if (scheme != "http" && scheme != "https") { return ""; }
+  let rest = text.slice(mark + 3, text.length);
+  let cut = rest.length;
+  let slash = rest.indexOf("/");
+  if (slash >= 0 && slash < cut) { cut = slash; }
+  let question = rest.indexOf("?");
+  if (question >= 0 && question < cut) { cut = question; }
+  let fragment = rest.indexOf("#");
+  if (fragment >= 0 && fragment < cut) { cut = fragment; }
+  let authority = rest.slice(0, cut).toLowerCase();
+  // A user-info half is not part of where this goes, and leaving it in would
+  // make two spellings of one host compare unequal — which here means an
+  // ordinary edit reads as a move and a move reads as an ordinary edit.
+  let at = authority.lastIndexOf("@");
+  if (at >= 0) { authority = authority.slice(at + 1, authority.length); }
+  if (authority == "") { return ""; }
+  return scheme + "://" + authority;
+}
+
+// A stored secret about to be pointed somewhere else.
+export type DestinationMove = {
+  // What is moving, as a reader knows it: "model m1", "server s1".
+  subject: string,
+  // What the secret is called, and the request that clears it. The refusal is
+  // a sentence someone has to act on, so it names the next thing to do.
+  secretName: string,
+  clearWith: string,
+  // Where the secret goes today, and where this request would send it. Full
+  // URLs; only their origins are compared.
+  was: string,
+  now: string,
+  // Whether there is anything to protect. No secret, no refusal — this is a
+  // rule about secrets, not about addresses.
+  secretStored: bool,
+};
+
+// How an origin reads in a sentence when there is nothing to read.
+function namedDestination(origin: string): string {
+  if (origin == "") { return "an address this cannot read"; }
+  return origin;
+}
+
+// Why a destination may not be changed, or "" when it may.
+//
+// Fails closed twice over: an address that cannot be parsed is treated as a
+// different one, so a malformed URL refuses rather than passes, and a subject
+// with no address on record refuses rather than assuming the new one is where
+// the secret was always going.
+export function destinationProblem(move: DestinationMove): string {
+  if (!move.secretStored) { return ""; }
+  let from = destinationOf(move.was);
+  let to = destinationOf(move.now);
+  if (from != "" && from == to) { return ""; }
+  return move.subject + " sends to " + namedDestination(from) + ", and "
+    + move.secretName + " was stored for that address; pointing it at "
+    + namedDestination(to) + " would send the secret there too. Clear the secret first with "
+    + move.clearWith + ", then set it again once the address is right.";
+}
+
 // Which providers have a credential stored. Names only — nothing here returns
 // an envelope, so a listing endpoint cannot leak one by accident.
 export function providersWithCredentials(db: Db): string[] {

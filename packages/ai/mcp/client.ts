@@ -2,7 +2,7 @@
 // carries one request object, the reply body carries one result-or-error object.
 // Every call here is a synchronous http.request round trip.
 
-import { makeTool } from "../agent/tools.ts";
+import { makeTool, mergeToolsKeepingLocal } from "../agent/tools.ts";
 
 export type McpTool = {
   name: string,
@@ -40,6 +40,11 @@ function mcNoItems(): int[] {
   return empty;
 }
 
+function mcNoStrings(): string[] {
+  let empty: string[] = [];
+  return empty;
+}
+
 // a record literal with an `ok: bool` + `error: string` pair cannot be returned
 // directly, so both constructors bind an annotated local first.
 function mcpResultOk(content: string): McpResult {
@@ -51,11 +56,15 @@ function mcpResultOk(content: string): McpResult {
   return r;
 }
 
+// a failure always carries a sentence: the empty message is what turns a tool
+// step into the output "error: " with nothing after it.
 function mcpResultErr(message: string): McpResult {
+  let text = message.trim();
+  if (text == "") { text = "the MCP server reported a failure with no message"; }
   let r: McpResult = {
     ok: false,
     content: "",
-    error: message,
+    error: text,
   };
   return r;
 }
@@ -279,6 +288,105 @@ export function mcIntField(src: string, objectAt: int, key: string): int {
   return out;
 }
 
+// decimal text to an int; anything else reads as 0. the digits must run to the
+// end, so "7" parses and "7abc" does not.
+function mcParseInt(text: string): int {
+  let body = text.trim();
+  if (body.length == 0) { return 0; }
+  let i: int = 0;
+  let neg: bool = false;
+  if (body.charAt(0) == "-") { neg = true; i = 1; }
+  if (i >= body.length) { return 0; }
+  let out: int = 0;
+  while (i < body.length) {
+    let code = body.charAt(i).charCodeAt(0);
+    if (code < "0".charCodeAt(0) || code > "9".charCodeAt(0)) { return 0; }
+    out = out * 10 + (code - "0".charCodeAt(0));
+    i = i + 1;
+  }
+  if (neg) { return -out; }
+  return out;
+}
+
+function mcIsNumberText(text: string): bool {
+  let body = text.trim();
+  if (body.length == 0) { return false; }
+  let i: int = 0;
+  if (body.charAt(0) == "-") { i = 1; }
+  let digits: int = 0;
+  let dots: int = 0;
+  while (i < body.length) {
+    let c = body.charAt(i);
+    if (c == ".") {
+      dots = dots + 1;
+      if (dots > 1) { return false; }
+    } else {
+      let code = c.charCodeAt(0);
+      if (code < "0".charCodeAt(0) || code > "9".charCodeAt(0)) { return false; }
+      digits = digits + 1;
+    }
+    i = i + 1;
+  }
+  return digits > 0;
+}
+
+// boolean field. absent, null, or any non-`true` value reads as false, so
+// `"isError":true` is the only spelling that turns a result into a failure.
+export function mcBoolField(src: string, objectAt: int, key: string): bool {
+  let at = mcFieldValue(src, objectAt, key);
+  if (at < 0) { return false; }
+  return mcValueText(src, at) == "true";
+}
+
+// the keys of the object at `objectAt`, in source order. a malformed object
+// yields an empty list, same as an object with no keys.
+export function mcObjectKeys(src: string, objectAt: int): string[] {
+  if (objectAt < 0) { return mcNoStrings(); }
+  let i = mcSkipWhitespace(src, objectAt);
+  if (i >= src.length || src.charAt(i) != "{") { return mcNoStrings(); }
+  i = mcSkipWhitespace(src, i + 1);
+  let out: string[] = [];
+  if (i < src.length && src.charAt(i) == "}") { return out; }
+  while (i < src.length) {
+    let name = mcReadString(src, i);
+    if (name.next < 0) { return mcNoStrings(); }
+    let colon = mcSkipWhitespace(src, name.next);
+    if (colon >= src.length || src.charAt(colon) != ":") { return mcNoStrings(); }
+    let valueAt = mcSkipWhitespace(src, colon + 1);
+    out.push(name.value);
+    let after = mcSkipValue(src, valueAt);
+    if (after < 0) { return mcNoStrings(); }
+    let next = mcSkipWhitespace(src, after);
+    if (next >= src.length) { return mcNoStrings(); }
+    if (src.charAt(next) == "}") { return out; }
+    if (src.charAt(next) != ",") { return mcNoStrings(); }
+    i = mcSkipWhitespace(src, next + 1);
+  }
+  return mcNoStrings();
+}
+
+function mcHasString(list: string[], value: string): bool {
+  for (const item of list) {
+    if (item == value) { return true; }
+  }
+  return false;
+}
+
+// one flattened line of a body, for an error a person has to read. an HTML
+// error page and a JSON-RPC frame both survive this legibly.
+function mcPreview(raw: string): string {
+  let text = raw.trim();
+  let out = "";
+  let i: int = 0;
+  while (i < text.length && i < 160) {
+    let c = text.charAt(i);
+    if (c == "\n" || c == "\r" || c == "\t") { out = out + " "; } else { out = out + c; }
+    i = i + 1;
+  }
+  if (text.length > 160) { out = out + "..."; }
+  return out;
+}
+
 // --- JSON-RPC framing -------------------------------------------------------
 
 // `params` is a raw JSON object string embedded verbatim (e.g. "{}"); the
@@ -296,13 +404,39 @@ export function mcpResultField(raw: string): string {
   return mcValueText(raw, at);
 }
 
+// the standard JSON-RPC codes, so an error object carrying only a code still
+// reads as a sentence rather than as a number.
+function mcpErrorCodeName(code: int): string {
+  if (code == -32700) { return "parse error"; }
+  if (code == -32600) { return "invalid request"; }
+  if (code == -32601) { return "method not found"; }
+  if (code == -32602) { return "invalid arguments"; }
+  if (code == -32603) { return "internal error"; }
+  return "";
+}
+
 // handles both the spec's object form (`"error":{"message":"..."}`) and the
-// string form some servers emit (`"error":"database offline"`).
+// string form some servers emit (`"error":"database offline"`). an error object
+// with no `message` falls back to its `code`: a bare `{"code":-32602}` has to
+// reach the model as something other than the empty string, or an expired token
+// and a refused argument both read as "the tool returned nothing".
 export function mcpErrorMessage(raw: string): string {
   let at = mcFieldValue(raw, 0, "error");
   if (at < 0) { return ""; }
   if (raw.charAt(at) == "\"") { return mcValueText(raw, at); }
-  return mcStringField(raw, at, "message");
+  let message = mcStringField(raw, at, "message");
+  if (message != "") { return message; }
+  if (mcFieldValue(raw, at, "code") >= 0) {
+    let code = mcIntField(raw, at, "code");
+    let named = mcpErrorCodeName(code);
+    if (named != "") { return "JSON-RPC error " + `${code}` + " (" + named + ")"; }
+    return "JSON-RPC error " + `${code}`;
+  }
+  let text = mcValueText(raw, at);
+  if (text != "" && text != "null" && text != "false" && text != "0") {
+    return "MCP error: " + text;
+  }
+  return "";
 }
 
 export function mcpIsError(raw: string): bool {
@@ -314,8 +448,27 @@ export function mcpIsError(raw: string): bool {
   return text != "" && text != "null" && text != "false" && text != "0";
 }
 
+// the reply's `id` as text. JSON-RPC 2.0 allows a string id and several MCP
+// servers send one, so `"id":"7"` and `"id":7` both have to read as `7` here;
+// a decimal scan of the raw source stops at the opening quote and reads 0,
+// which makes every reply from such a server look like somebody else's.
+export function mcpResponseIdText(raw: string): string {
+  let at = mcFieldValue(raw, 0, "id");
+  if (at < 0) { return ""; }
+  return mcValueText(raw, at).trim();
+}
+
 export function mcpResponseId(raw: string): int {
-  return mcIntField(raw, 0, "id");
+  return mcParseInt(mcpResponseIdText(raw));
+}
+
+// whether this reply answers the request that carried `expected`. a missing id
+// (a notification) and a non-numeric string id (a server-initiated request)
+// both fail to match rather than matching id 0.
+export function mcpIdMatches(raw: string, expected: int): bool {
+  let text = mcpResponseIdText(raw);
+  if (text == "") { return false; }
+  return text == `${expected}`;
 }
 
 // --- Request builders -------------------------------------------------------
@@ -339,6 +492,121 @@ export function mcpCallToolRequest(id: int, name: string, argumentsJson: string)
   let params = "{\"name\":" + JSON.stringify(name)
     + ",\"arguments\":" + args + "}";
   return mcpRequest(id, "tools/call", params);
+}
+
+// --- Arguments from the server's own inputSchema ----------------------------
+
+// whether `text` is one complete JSON object with nothing after it.
+function mcIsJsonObject(text: string): bool {
+  if (text.length == 0 || text.charAt(0) != "{") { return false; }
+  let end = mcSkipContainer(text, 0);
+  if (end < 0) { return false; }
+  return mcSkipWhitespace(text, end) == text.length;
+}
+
+// whether `text` is one complete JSON value with nothing after it.
+function mcIsJsonValue(text: string): bool {
+  if (text.length == 0) { return false; }
+  let end = mcSkipValue(text, 0);
+  if (end < 0) { return false; }
+  return mcSkipWhitespace(text, end) == text.length;
+}
+
+// the declared type of one property, e.g. "string" / "number"; "" when the
+// schema does not say.
+function mcSchemaPropType(schema: string, name: string): string {
+  let propsAt = mcFieldValue(schema, 0, "properties");
+  if (propsAt < 0) { return ""; }
+  let at = mcFieldValue(schema, propsAt, name);
+  if (at < 0) { return ""; }
+  return mcStringField(schema, at, "type");
+}
+
+// the schema's parameter names, required ones first and then the rest, so a
+// single input string fills what the server insists on before what it merely
+// accepts.
+export function mcpSchemaFields(schema: string): string[] {
+  let out: string[] = [];
+  let requiredItems = mcArrayItems(schema, mcFieldValue(schema, 0, "required"));
+  let i: int = 0;
+  while (i < requiredItems.length) {
+    let name = mcReadString(schema, requiredItems[i]);
+    if (name.next >= 0 && name.value != "" && !mcHasString(out, name.value)) {
+      out.push(name.value);
+    }
+    i = i + 1;
+  }
+  let keys = mcObjectKeys(schema, mcFieldValue(schema, 0, "properties"));
+  let k: int = 0;
+  while (k < keys.length) {
+    if (!mcHasString(out, keys[k])) { out.push(keys[k]); }
+    k = k + 1;
+  }
+  return out;
+}
+
+// one argument value, JSON-encoded the way the schema declares it: a field
+// typed number/integer/boolean is emitted unquoted, because a server validates
+// `arguments` against its own inputSchema and rejects `{"a":"2"}` for a number.
+function mcArgValue(schema: string, name: string, raw: string): string {
+  let declared = mcSchemaPropType(schema, name);
+  let text = raw.trim();
+  if ((declared == "number" || declared == "integer") && mcIsNumberText(text)) { return text; }
+  if (declared == "boolean" && (text == "true" || text == "false")) { return text; }
+  if ((declared == "array" || declared == "object") && mcIsJsonValue(text)) { return text; }
+  return JSON.stringify(raw);
+}
+
+// a comma-separated input split and trimmed, so "2, 3" can fill add(a, b).
+function mcSplitArgs(input: string): string[] {
+  let parts = input.split(",");
+  let out: string[] = [];
+  let i: int = 0;
+  while (i < parts.length) {
+    out.push(parts[i].trim());
+    i = i + 1;
+  }
+  return out;
+}
+
+// Build the `arguments` object of a tools/call from the server's own
+// inputSchema and the one string a Lumen tool body is handed.
+//
+// Hardcoding `{"input": <string>}` here is what makes every call to a real
+// server fail with -32602: the server validates `arguments` against the
+// inputSchema it advertised, and no schema in the wild declares a property
+// called `input`. So:
+//
+//   - an input that is already a complete JSON object is passed through
+//     untouched, which is how a model calls a multi-parameter tool;
+//   - one parameter takes the whole string;
+//   - several parameters split the string on commas when the counts line up,
+//     which is how "2, 3" reaches add(a, b);
+//   - a schema declaring no properties at all keeps the old
+//     `{"input": <string>}` shape for a non-empty input, and "{}" for none.
+export function mcpBuildArguments(schema: string, input: string): string {
+  let text = input.trim();
+  if (mcIsJsonObject(text)) { return text; }
+  let fields = mcpSchemaFields(schema);
+  if (fields.length == 0) {
+    if (text == "") { return "{}"; }
+    return "{\"input\":" + JSON.stringify(input) + "}";
+  }
+  if (fields.length == 1) {
+    return "{" + JSON.stringify(fields[0]) + ":" + mcArgValue(schema, fields[0], input) + "}";
+  }
+  let parts = mcSplitArgs(input);
+  if (parts.length != fields.length) {
+    return "{" + JSON.stringify(fields[0]) + ":" + mcArgValue(schema, fields[0], input) + "}";
+  }
+  let out = "{";
+  let i: int = 0;
+  while (i < fields.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + JSON.stringify(fields[i]) + ":" + mcArgValue(schema, fields[i], parts[i]);
+    i = i + 1;
+  }
+  return out + "}";
 }
 
 // --- Response parsers -------------------------------------------------------
@@ -371,22 +639,63 @@ export function parseMcpTools(raw: string): McpTool[] {
   return out;
 }
 
-// every text part in result.content[] joined into one string. an error body
-// comes back ok:false; never throws — garbage yields ok:true, empty content.
-export function parseMcpToolResult(raw: string): McpResult {
-  if (mcpIsError(raw)) {
-    return mcpResultErr(mcpErrorMessage(raw));
+// one content part rendered as text. MCP parts are typed: text, image, audio,
+// and embedded resource. Reading only `text` drops the other three without a
+// trace, so the model is told an image came back rather than being handed the
+// empty string.
+function mcpContentPart(raw: string, at: int): string {
+  let kind = mcStringField(raw, at, "type");
+  if (kind == "" || kind == "text") { return mcStringField(raw, at, "text"); }
+  if (kind == "image" || kind == "audio") {
+    let mime = mcStringField(raw, at, "mimeType");
+    if (mime == "") { mime = "unknown format"; }
+    return "[" + kind + " (" + mime + ") not shown]";
   }
+  if (kind == "resource") {
+    let resourceAt = mcFieldValue(raw, at, "resource");
+    let embedded = mcStringField(raw, resourceAt, "text");
+    if (embedded != "") { return embedded; }
+    let uri = mcStringField(raw, resourceAt, "uri");
+    if (uri == "") { uri = "no uri"; }
+    return "[resource " + uri + " not shown]";
+  }
+  let uri = mcStringField(raw, at, "uri");
+  if (uri != "") { return "[" + kind + " " + uri + " not shown]"; }
+  return "[" + kind + " content not shown]";
+}
+
+function mcpContentText(raw: string, resultAt: int): string {
+  let items = mcArrayItems(raw, mcFieldValue(raw, resultAt, "content"));
   let text = "";
+  let i: int = 0;
+  while (i < items.length) {
+    text = text + mcpContentPart(raw, items[i]);
+    i = i + 1;
+  }
+  return text;
+}
+
+// every content part in result.content[] joined into one string.
+//
+// Three ways a call fails, all of which used to read as an empty success:
+//   - a JSON-RPC `error` object (an expired token, a refused argument);
+//   - `result.isError`, which is how MCP reports a tool that ran and failed
+//     ("permission denied") rather than a protocol fault;
+//   - a body that is neither — an HTML error page, a JSON-RPC batch reply, a
+//     bare `{"jsonrpc":"2.0","id":1}`, an empty body.
+// Never throws: every one of them comes back as ok:false with a sentence.
+export function parseMcpToolResult(raw: string): McpResult {
+  if (raw.trim() == "") { return mcpResultErr("no reply from the MCP server"); }
+  if (mcpIsError(raw)) { return mcpResultErr(mcpErrorMessage(raw)); }
   let resultAt = mcFieldValue(raw, 0, "result");
-  if (resultAt >= 0) {
-    let contentAt = mcFieldValue(raw, resultAt, "content");
-    let items = mcArrayItems(raw, contentAt);
-    let i: int = 0;
-    while (i < items.length) {
-      text = text + mcStringField(raw, items[i], "text");
-      i = i + 1;
-    }
+  if (resultAt < 0) {
+    return mcpResultErr("the MCP server sent neither a result nor an error: " + mcPreview(raw));
+  }
+  let text = mcpContentText(raw, resultAt);
+  if (mcBoolField(raw, resultAt, "isError")) {
+    let why = text.trim();
+    if (why == "") { why = "the tool reported a failure with no message"; }
+    return mcpResultErr(why);
   }
   return mcpResultOk(text);
 }
@@ -399,31 +708,64 @@ function mcpHeaders(headers: Map<string, string>): Map<string, string> {
   return headers;
 }
 
+// "" when the transport carried the reply, else the sentence a user reads. An
+// MCP server answers an expired token with 401 and a body that is not JSON-RPC
+// at all; handing that body to the JSON-RPC parser reads it as "the tool
+// returned nothing", so the status is checked before the body is believed.
+export function mcpHttpProblem(status: int, body: string): string {
+  if (status >= 200 && status < 300) { return ""; }
+  if (status == 0) { return "no answer from the MCP server"; }
+  let why = "the MCP server answered HTTP " + `${status}`;
+  let detail = mcpErrorMessage(body);
+  if (detail != "") { return why + ": " + detail; }
+  let preview = mcPreview(body);
+  if (preview != "") { return why + ": " + preview; }
+  return why;
+}
+
 export function mcpInitialize(url: string, headers: Map<string, string>): string {
   const res = http.request(url, "POST", mcpInitializeRequest(), mcpHeaders(headers));
   return res.body;
 }
 
+// a transport failure yields an empty list, the same as a server with no tools:
+// the return type has no room for the reason. mcpListToolsProblem reports it.
 export function mcpListTools(url: string, headers: Map<string, string>): McpTool[] {
   const res = http.request(url, "POST", mcpListToolsRequest(1), mcpHeaders(headers));
+  if (mcpHttpProblem(res.status, res.body) != "") { return mcNoTools(); }
   return parseMcpTools(res.body);
+}
+
+// "" when the server listed its tools, else why it did not. A caller that has
+// to tell "this server has no tools" from "this token expired" asks this.
+export function mcpListToolsProblem(url: string, headers: Map<string, string>): string {
+  const res = http.request(url, "POST", mcpListToolsRequest(1), mcpHeaders(headers));
+  let problem = mcpHttpProblem(res.status, res.body);
+  if (problem != "") { return problem; }
+  if (mcpIsError(res.body)) { return mcpErrorMessage(res.body); }
+  if (mcFieldValue(res.body, 0, "result") < 0) {
+    return "the MCP server sent neither a result nor an error: " + mcPreview(res.body);
+  }
+  return "";
 }
 
 export function mcpCallTool(url: string, headers: Map<string, string>, name: string, argumentsJson: string): McpResult {
   const res = http.request(url, "POST", mcpCallToolRequest(1, name, argumentsJson), mcpHeaders(headers));
+  let problem = mcpHttpProblem(res.status, res.body);
+  if (problem != "") { return mcpResultErr(problem); }
   return parseMcpToolResult(res.body);
 }
 
 // --- Adapter into a first-class Tool --------------------------------------
 
-// run wraps its single string input as {"input": <input>} — this package's
-// one-string-arg tool convention — and never throws: neither http.request nor
+// run turns its single string input into the arguments object the server's own
+// inputSchema describes, and never throws: neither http.request nor
 // parseMcpToolResult throws, so trouble comes back as text.
 export function mcpToolToLumen(url: string, headers: Map<string, string>, entry: McpTool): Tool {
   let toolName = entry.name;
+  let toolSchema = entry.schema;
   return makeTool(entry.name, entry.description, entry.schema, (input: string) => {
-    let args = "{\"input\":" + JSON.stringify(input) + "}";
-    let result = mcpCallTool(url, headers, toolName, args);
+    let result = mcpCallTool(url, headers, toolName, mcpBuildArguments(toolSchema, input));
     if (result.ok) { return result.content; }
     return "error: " + result.error;
   });
@@ -437,4 +779,14 @@ export function mcpToolsToRegistry(url: string, headers: Map<string, string>, to
     i = i + 1;
   }
   return out;
+}
+
+// Add a server's tools to a registry without letting them displace a local
+// tool of the same name. registerTool replaces in place, so the obvious loop
+// hands a server that declares `search_docs` the local name — and the policy
+// allow list is checked by name, so `["search_docs"]` then permits the
+// substitute. Local wins here; `toolClashProblem(local, mcpToolsToRegistry(...))`
+// names the server tools a merge drops.
+export function mcpRegisterTools(local: Tool[], url: string, headers: Map<string, string>, tools: McpTool[]): Tool[] {
+  return mergeToolsKeepingLocal(local, mcpToolsToRegistry(url, headers, tools));
 }

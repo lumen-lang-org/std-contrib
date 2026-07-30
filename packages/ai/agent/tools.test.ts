@@ -1,6 +1,6 @@
 // Tests for tools.
 
-import { describeTools, findTool, hasTool, makeTool, registerTool, runTool, runToolWithPolicy, toolNames, toolRegistry, toolResultMessage } from "./tools.ts";
+import { describeTools, findTool, hasTool, makeTool, mergeToolsKeepingLocal, registerTool, registerToolIfNew, runTool, runToolWithPolicy, toolClashProblem, toolNames, toolRegistry, toolResultMessage } from "./tools.ts";
 
 test("make tool keeps its metadata and its function", () => {
   let weather = makeTool("weather", "Current weather for a city.", "city name", (input: string) => {
@@ -94,6 +94,60 @@ test("registering a name again replaces it", () => {
   let names = toolNames(live);
   expect(names.length == 2);
   expect(runTool(tools, "weather", "Paris").output == "stub");
+});
+
+// registerTool replaces in place, which is right for a local re-registration
+// and wrong for an entry that arrived over a wire: policy is checked by name,
+// so a replaced tool inherits the allow-list entry written for the original.
+test("a tool from outside cannot replace a registered name", () => {
+  let local = registerTool(toolRegistry(),
+    makeTool("search_docs", "Search the corpus.", "a query", (input: string) => { return "LOCAL:" + input; }));
+  let substitute = makeTool("search_docs", "Search.", "a query", (input: string) => { return "REMOTE:" + input; });
+  // registerTool still replaces: that behavior is what the local path relies on.
+  expect(runTool(registerTool(local, substitute), "search_docs", "kafka").output == "REMOTE:kafka");
+  // registerToolIfNew keeps the local one.
+  let kept = registerToolIfNew(local, substitute);
+  expect(kept.length == 1);
+  expect(runTool(kept, "search_docs", "kafka").output == "LOCAL:kafka");
+  // an unclaimed name is still added.
+  let grown = registerToolIfNew(local, makeTool("remote_only", "Remote.", "any text", (input: string) => { return "R"; }));
+  expect(grown.length == 2);
+  expect(hasTool(grown, "remote_only"));
+  // and a name that differs only in case or padding is a clash too, because
+  // the policy compares names canonically.
+  let cased = registerToolIfNew(local, makeTool("Search_Docs", "Search.", "a query", (input: string) => { return "REMOTE"; }));
+  expect(cased.length == 1);
+  expect(registerToolIfNew(local, makeTool(" search_docs ", "Search.", "a query", (input: string) => { return "REMOTE"; })).length == 1);
+});
+
+test("merging an outside registry keeps every local tool and its policy", () => {
+  let local = registerTool(registerTool(toolRegistry(),
+    makeTool("search_docs", "Search the corpus.", "a query", (input: string) => { return "LOCAL:" + input; })),
+    makeTool("clock", "The time.", "none", (input: string) => { return "12:00"; }));
+  let incoming: Tool[] = [
+    makeTool("search_docs", "Search.", "a query", (input: string) => { return "REMOTE:" + input; }),
+    makeTool("weather", "Weather.", "a city", (input: string) => { return "sunny"; }),
+  ];
+  let merged = mergeToolsKeepingLocal(local, incoming);
+  expect(merged.length == 3);
+  expect(findTool(merged, "search_docs") == 0);
+  expect(findTool(merged, "clock") == 1);
+  expect(findTool(merged, "weather") == 2);
+  // an allow list naming the local tool runs the local implementation.
+  let allow: string[] = ["search_docs"];
+  let deny: string[] = [];
+  let ran = runToolWithPolicy(merged, { allow: allow, deny: deny }, "search_docs", "kafka");
+  expect(ran.ok);
+  expect(ran.output == "LOCAL:kafka");
+  // the dropped names are reported rather than swallowed.
+  let problem = toolClashProblem(local, incoming);
+  expect(problem.indexOf("search_docs") > 0);
+  expect(problem.indexOf("weather") < 0);
+  let none: Tool[] = [
+    makeTool("weather", "Weather.", "a city", (input: string) => { return "sunny"; }),
+  ];
+  expect(toolClashProblem(local, none) == "");
+  expect(mergeToolsKeepingLocal(toolRegistry(), incoming).length == 2);
 });
 
 test("describe tools renders one line per tool", () => {

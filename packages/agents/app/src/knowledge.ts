@@ -252,11 +252,12 @@ export class KnowledgePage extends LitElement {
           <tr><th>Name</th><th>Status</th><th>Chunks</th><th>Size</th><th></th></tr>
           ${this.parentOf(this.scope) === "" ? "" : html`<tr class="folder"
             @click=${() => this.pick(this.parentOf(this.scope))}>
-            <td colspan="5" class="note">↩ ${this.parentOf(this.scope)}</td>
+            <td colspan="5" class="note">
+              <nr-icon name="arrow-up" size="small"></nr-icon> ${this.parentOf(this.scope)}</td>
           </tr>`}
           ${this.childrenOf(this.scope).map((n) => html`<tr class="folder"
             @click=${() => this.pick(n.path)}>
-            <td>📁 ${n.name}</td>
+            <td><nr-icon name="folder" size="small"></nr-icon> ${n.name}</td>
             <td class="note">—</td>
             <td class="note">—</td>
             <td class="note">${n.total} ${n.total === 1 ? "document" : "documents"}</td>

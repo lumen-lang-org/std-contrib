@@ -20,7 +20,7 @@
 import { Db, DbConfig } from "../driver.ts";
 import { sqlite } from "../sqlite.ts";
 import { DbField, DbRepository, field, repository, connectDatabase, closeDatabase, persist, findById, countWhere } from "../plume.ts";
-import { Migration, SqlFile, migrationsFrom, migrationNameProblem, migrate, migrationInfo, forgetMigrations } from "../migrate.ts";
+import { Migration, SqlFile, migrationsFrom, migrationNameViolation, migrate, migrationInfo, forgetMigrations } from "../migrate.ts";
 
 let database: Db = sqlite();
 
@@ -64,9 +64,9 @@ function main(): void {
 
   // A file that is not a migration is an error, not something to skip
   // quietly: one named wrongly would otherwise never run and never be missed.
-  let problem = migrationNameProblem(sqlDirectory());
-  if (problem != "") {
-    console.error("the migration directory is not a plan: " + problem);
+  let violation = migrationNameViolation(sqlDirectory());
+  if (violation != "") {
+    console.error("the migration directory is not a plan: " + violation);
     return;
   }
 
