@@ -17,17 +17,25 @@
 // The package's single `@nuraly/lumenui/bundle` would sidestep the whole
 // question and was tried first: it imports `hls.js`, which the package
 // declares as a dependency of no kind, so it cannot resolve.
-import "@nuraly/lumenui/canvas/bundle";
-import "@nuraly/lumenui/dropdown/bundle";
-import "@nuraly/lumenui/modal/bundle";
+import "@nuraly/lumenui/canvas";
+import "@nuraly/lumenui/dropdown";
+import "@nuraly/lumenui/modal";
 // Neither of these is in the canvas bundle, and neither collides with it.
-import "@nuraly/lumenui/checkbox/bundle";
-import "@nuraly/lumenui/textarea/bundle";
+import "@nuraly/lumenui/checkbox";
+import "@nuraly/lumenui/textarea";
 // A surface to work on, as opposed to nr-modal's question to answer. Settings
 // is the former: it is a place you go, not a thing you confirm.
-import "@nuraly/lumenui/overlay/bundle";
+import "@nuraly/lumenui/overlay";
 // nr-code-editor — the prompt editor — is deliberately *not* imported here.
 // The canvas bundle already carries it, and importing its own bundle as well
 // threw `define("nr-code-editor") has already been used` before the console
 // had drawn anything at all. Widening the list above is how this file breaks;
 // grep a bundle for the tag before adding it.
+
+import "@nuraly/lumenui/chatbot";
+import "@nuraly/lumenui/input";
+import "@nuraly/lumenui/button";
+import "@nuraly/lumenui/icon";
+import "@nuraly/lumenui/select";
+import "@nuraly/lumenui/popconfirm";
+import "@nuraly/lumenui/code-editor";
