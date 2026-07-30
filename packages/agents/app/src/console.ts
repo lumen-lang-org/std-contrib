@@ -40,7 +40,14 @@ export class AgentConsole extends LitElement {
     .scrim { display: none; }
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     header { display: flex; align-items: center; gap: 10px; padding: 10px 18px;
-             border-bottom: 1px solid var(--border); background: var(--bg); }
+             border-bottom: 1px solid var(--border); background: var(--bg);
+             /* Pinned. The chat pane is the thing meant to scroll, but on a
+                phone the document itself can scroll when content overflows,
+                and the bar carrying the drawer toggle and the conversation
+                title is the one thing that must not leave with it. sticky
+                rather than fixed, so it costs nothing when the document is
+                not the scroller. */
+             position: sticky; top: 0; z-index: 40; }
     .title { font: 600 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; flex: 1; }
     .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px;
