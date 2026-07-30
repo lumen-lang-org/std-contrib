@@ -29,7 +29,7 @@ type AgentRow = { id: string, agentName: string, maxSteps: int, teamId: string }
 
 function teamsRepo(): DbRepository {
   let fs: DbField[] = [ field("id", "id", "text"), field("teamName", "team_name", "text") ];
-  return repository("mf_teams", "id", "id", fs);
+  return repository({ table: "mf_teams", idField: "id", idColumn: "id", fields: fs });
 }
 
 function agentsRepo(): DbRepository {
@@ -39,7 +39,7 @@ function agentsRepo(): DbRepository {
     field("maxSteps", "max_steps", "int"),
     field("teamId", "team_id", "text"),
   ];
-  return repository("mf_agents", "id", "id", fs);
+  return repository({ table: "mf_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The plan is the directory. `embedDir` reads it while compiling, and the

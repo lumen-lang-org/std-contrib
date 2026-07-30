@@ -50,7 +50,7 @@ export function indexJobsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("index_jobs", "id", "id", fs);
+  return repository({ table: "index_jobs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function indexingPlan(db: Db): Migration[] {

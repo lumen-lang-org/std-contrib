@@ -10,7 +10,7 @@
 //   cd packages/agents && lumen test schema.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, hasManyThrough, createTableSql, dialectType, boolColumn } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasOne, hasMany, hasManyThrough, createTableSql, dialectType, boolColumn } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 // --- rows --------------------------------------------------------------------
@@ -118,7 +118,7 @@ function modelsMappingV1(): DbRepository {
     field("dimensions", "dimensions", "int"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("models", "id", "id", fs);
+  return repository({ table: "models", idField: "id", idColumn: "id", fields: fs });
 }
 
 function mcpServersMappingV1(): DbRepository {
@@ -129,7 +129,7 @@ function mcpServersMappingV1(): DbRepository {
     field("endpoint", "endpoint", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("mcp_servers", "id", "id", fs);
+  return repository({ table: "mcp_servers", idField: "id", idColumn: "id", fields: fs });
 }
 
 function agentsMappingV1(): DbRepository {
@@ -142,7 +142,7 @@ function agentsMappingV1(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("agents", "id", "id", fs);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function modelsMapping(): DbRepository {
@@ -160,7 +160,7 @@ export function modelsMapping(): DbRepository {
     field("baseUrl", "base_url", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("models", "id", "id", fs);
+  return repository({ table: "models", idField: "id", idColumn: "id", fields: fs });
 }
 
 // Takes the connection for the same reason agentsFull does: its relation
@@ -175,10 +175,9 @@ export function modelConfigsMapping(db: Db): DbRepository {
     field("extra", "extra", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne("model", "models", "model_id", "id",
-           "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\""),
+    hasOne({ field: "model", table: "models", localColumn: "model_id", foreignColumn: "id", columns: "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\"" }),
   ];
-  return repositoryWith("model_configs", "id", "id", fs, rs);
+  return repository({ table: "model_configs", idField: "id", idColumn: "id", fields: fs, relations: rs });
 }
 
 export function promptsMapping(): DbRepository {
@@ -189,7 +188,7 @@ export function promptsMapping(): DbRepository {
     field("body", "body", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("prompts", "id", "id", fs);
+  return repository({ table: "prompts", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function mcpServersMapping(): DbRepository {
@@ -206,7 +205,7 @@ export function mcpServersMapping(): DbRepository {
     field("authHeader", "auth_header", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("mcp_servers", "id", "id", fs);
+  return repository({ table: "mcp_servers", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The agent as a flat row, for writing.
@@ -217,7 +216,7 @@ export function credentialsMapping(): DbRepository {
     field("envelope", "envelope", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("provider_credentials", "id", "id", fs);
+  return repository({ table: "provider_credentials", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function agentsMapping(): DbRepository {
@@ -234,7 +233,7 @@ export function agentsMapping(): DbRepository {
     field("isDefault", "is_default", "bool"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("agents", "id", "id", fs);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The agent as everything needed to run it, in one read.
@@ -251,10 +250,8 @@ export function agentsMapping(): DbRepository {
 // SQLite and MySQL store 0 and 1 where the record declares a bool.
 export function agentsFull(db: Db): DbRepository {
   let rs: DbRelation[] = [
-    hasOne("prompt", "prompts", "prompt_id", "id",
-           "id, prompt_name AS \"promptName\", version, body"),
-    hasOne("config", "model_configs", "model_config_id", "id",
-           "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra"),
+    hasOne({ field: "prompt", table: "prompts", localColumn: "prompt_id", foreignColumn: "id", columns: "id, prompt_name AS \"promptName\", version, body" }),
+    hasOne({ field: "config", table: "model_configs", localColumn: "model_config_id", foreignColumn: "id", columns: "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra" }),
     hasManyThrough({
       field: "servers", table: "mcp_servers", foreignColumn: "id",
       linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
@@ -273,7 +270,7 @@ export function agentsFull(db: Db): DbRepository {
         + boolColumn(db, "enabled") + " AS \"enabled\"",
     }),
   ];
-  return repositoryWith("agents", "id", "id", agentsMapping().fields, rs);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: agentsMapping().fields, relations: rs });
 }
 
 // --- the schema --------------------------------------------------------------

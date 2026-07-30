@@ -56,7 +56,7 @@ export function threadsMapping(): DbRepository {
     field("agentId", "agent_id", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("threads", "id", "id", fs);
+  return repository({ table: "threads", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function threadTurnsMapping(): DbRepository {
@@ -70,7 +70,7 @@ export function threadTurnsMapping(): DbRepository {
     field("callId", "call_id", "text"),
     field("toolName", "tool_name", "text"),
   ];
-  return repository("thread_turns", "id", "id", fs);
+  return repository({ table: "thread_turns", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function threadPlan(db: Db): Migration[] {
@@ -154,7 +154,7 @@ export type ThreadListing = {
 export function listThreads(db: Db, limit: int, offset: int): ThreadListing[] {
   let out: ThreadListing[] = [];
   let newest: DbOrder[] = [desc("created_at")];
-  let page = pageOrdered(db, threadsMapping(), "", [], newest, limit, offset);
+  let page = pageOrdered(db, threadsMapping(), { order: newest, limit: limit, offset: offset });
   if (page == "" || page == "[]") { return out; }
   let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(page);
   let i: int = 0;
@@ -184,7 +184,7 @@ export function threadAgent(db: Db, threadId: string): string {
 export function threadTurns(db: Db, threadId: string): Turn[] {
   let out: Turn[] = [];
   let keys: DbOrder[] = [asc("seq")];
-  let listed = listOrdered(db, threadTurnsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
   let i: int = 0;
@@ -482,7 +482,7 @@ export function threadMessages(db: Db, threadId: string): Turn[] {
 export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {
   let out: ThreadTurnRow[] = [];
   let keys: DbOrder[] = [asc("seq")];
-  let listed = listOrdered(db, threadTurnsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
   let i: int = 0;

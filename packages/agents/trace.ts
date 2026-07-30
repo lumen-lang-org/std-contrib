@@ -51,7 +51,7 @@ export function traceConfigMapping(): DbRepository {
     field("environment", "environment", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("trace_config", "id", "id", fs);
+  return repository({ table: "trace_config", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The mapping as migration 14 wrote it.
@@ -74,7 +74,7 @@ function traceConfigMappingV1(): DbRepository {
     field("environment", "environment", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("trace_config", "id", "id", fs);
+  return repository({ table: "trace_config", idField: "id", idColumn: "id", fields: fs });
 }
 
 // Appended to the same plan as everything else; a second migrate() call would

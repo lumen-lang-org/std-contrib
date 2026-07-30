@@ -17,7 +17,7 @@ function agentsMapping(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("store_agents", "id", "id", fs);
+  return repository({ table: "store_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 function agentJson(id: string, agentName: string, maxSteps: int): string {
@@ -67,8 +67,8 @@ test("a filter still takes its parameters", () => {
 test("ordering comes through too", () => {
   let agents = seeded();
   let keys: DbOrder[] = [asc("max_steps")];
-  expect(agents.listOrdered("", [], keys).indexOf("writer") < agents.listOrdered("", [], keys).indexOf("researcher"));
-  expect(agents.pageOrdered("", [], keys, 1, 0).indexOf("writer") >= 0);
+  expect(agents.listOrdered({ order: keys }).indexOf("writer") < agents.listOrdered({ order: keys }).indexOf("researcher"));
+  expect(agents.pageOrdered({ order: keys, limit: 1, offset: 0 }).indexOf("writer") >= 0);
 });
 
 test("writing through a store", () => {
@@ -83,7 +83,7 @@ test("writing through a store", () => {
 
 test("two stores over one connection stay separate", () => {
   let agents = seeded();
-  let others = store(database, repository("store_others", "id", "id", agentsMapping().fields));
+  let others = store(database, repository({ table: "store_others", idField: "id", idColumn: "id", fields: agentsMapping().fields }));
   others.dropTable();
   others.createTable();
   others.persist(agentJson("b1", "other", 1));

@@ -51,7 +51,7 @@ export function workspaceFilesMapping(): DbRepository {
     field("documentId", "document_id", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("workspace_files", "id", "id", fs);
+  return repository({ table: "workspace_files", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function workspacePlan(db: Db): Migration[] {
@@ -148,7 +148,7 @@ export function getFile(db: Db, threadId: string, fileName: string): WorkspaceFi
 export function listFiles(db: Db, threadId: string): WorkspaceFileRow[] {
   let none: WorkspaceFileRow[] = [];
   let keys: DbOrder[] = [asc("file_name")];
-  let listed = listOrdered(db, workspaceFilesMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let listed = listOrdered(db, workspaceFilesMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<WorkspaceFileRow[]>(listed);
 }

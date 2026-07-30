@@ -136,9 +136,9 @@ class AgentApi {
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("agent_name")];
     if (queryParam(req, "enabled", "") == "true") {
-      return ok(listOrdered(this.db, this.full, "enabled = " + this.db.placeholder, ["1"], keys));
+      return ok(listOrdered(this.db, this.full, { where: "enabled = " + this.db.placeholder, args: ["1"], order: keys }));
     }
-    return ok(listOrdered(this.db, this.full, "", [], keys));
+    return ok(listOrdered(this.db, this.full, { order: keys }));
   }
 
   // The whole agent: its prompt, its model config, its servers, its children.
@@ -510,7 +510,7 @@ class ModelApi {
   @get("/")
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("label")];
-    return ok(listOrdered(this.db, modelsMapping(), "", [], keys));
+    return ok(listOrdered(this.db, modelsMapping(), { order: keys }));
   }
 
   @post("/")
@@ -620,7 +620,7 @@ class ConfigApi {
   @get("/")
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("id")];
-    return ok(listOrdered(this.db, modelConfigsMapping(this.db), "", [], keys));
+    return ok(listOrdered(this.db, modelConfigsMapping(this.db), { order: keys }));
   }
 
   @post("/")
@@ -660,10 +660,10 @@ class PromptApi {
     let name = queryParam(req, "name", "");
     if (name == "") {
       let keys: DbOrder[] = [asc("prompt_name"), asc("version")];
-      return ok(listOrdered(this.db, promptsMapping(), "", [], keys));
+      return ok(listOrdered(this.db, promptsMapping(), { order: keys }));
     }
     let newest: DbOrder[] = [desc("version")];
-    return ok(listOrdered(this.db, promptsMapping(), "prompt_name = " + this.db.placeholder, [name], newest));
+    return ok(listOrdered(this.db, promptsMapping(), { where: "prompt_name = " + this.db.placeholder, args: [name], order: newest }));
   }
 
   // A prompt row is never edited, so the only write is a new version. Both
@@ -706,7 +706,7 @@ class ServerApi {
   @get("/")
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("server_name")];
-    return ok(listOrdered(this.db, mcpServersMapping(), "", [], keys));
+    return ok(listOrdered(this.db, mcpServersMapping(), { order: keys }));
   }
 
   // What this server offers, asked of the server itself.
@@ -823,7 +823,7 @@ class ServerApi {
 // The highest version a prompt name has, 0 when it has none.
 function maxVersion(db: Db, name: string): int {
   let newest: DbOrder[] = [desc("version")];
-  let page = pageOrdered(db, promptsMapping(), "prompt_name = " + db.placeholder, [name], newest, 1, 0);
+  let page = pageOrdered(db, promptsMapping(), { where: "prompt_name = " + db.placeholder, args: [name], order: newest, limit: 1, offset: 0 });
   if (page == "" || page == "[]") { return 0; }
   let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);
   if (rows.length == 0) { return 0; }

@@ -29,7 +29,7 @@ function agentsRepo(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("conc_agents", "id", "id", fs);
+  return repository({ table: "conc_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 function openDatabase(): Db {
@@ -70,7 +70,7 @@ function main(): void {
     if (id == "") {
       let keys: DbOrder[] = [asc("id")];
       let empty: string[] = [];
-      return reply(200, agents.listOrdered("", empty, keys));
+      return reply(200, agents.listOrdered({ args: empty, order: keys }));
     }
     let document = agents.findById(id);
     if (document == "") { return reply(404, "{\"error\":\"no agent " + id + "\"}"); }

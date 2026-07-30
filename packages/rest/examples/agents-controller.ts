@@ -22,7 +22,7 @@ function agentsRepo(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("ctl_agents", "id", "id", fs);
+  return repository({ table: "ctl_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 // The controller. Each method answers one method and path; the class's own
@@ -46,8 +46,8 @@ class AgentController {
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("agent_name")];
     let ceiling = queryParam(req, "maxSteps", "");
-    if (ceiling == "") { return ok(this.agents.listOrdered("", [], keys)); }
-    return ok(this.agents.listOrdered("max_steps <= " + this.agents.db.placeholder, [ceiling], keys));
+    if (ceiling == "") { return ok(this.agents.listOrdered({ order: keys })); }
+    return ok(this.agents.listOrdered({ where: "max_steps <= " + this.agents.db.placeholder, args: [ceiling], order: keys }));
   }
 
   @get("/:id")
