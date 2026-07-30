@@ -46,7 +46,19 @@ export { socket } from "../server/sockets.js";
 // The import is `console.js` directly. src/main.ts was the Vite entry and held
 // exactly this one line; phase 5 deleted it rather than keep a second door
 // into the same module.
-import "../src/console.js";
+// Guarded, and the reason is measured, not defensive. A static import here
+// drags the console's whole module graph — LumenUI, lit, the markdown
+// renderer — through Vite's SSR runner on every render of this route: 1.4s to
+// first byte, against 0.2s for /c/<id>, which guards the same import and
+// server-renders MORE (20 hydration markers to this route's 18).
+//
+// Nothing is lost by not loading it here. The components a page renders are
+// registered through the layout, and @lit-labs/ssr renders the custom element
+// tags either way; what the guard removes is Node evaluating a browser
+// application to produce markup it does not need.
+if (!import.meta.env.SSR) {
+  void import("../src/console.js");
+}
 
 export class PageIndex extends LitElement {
   // This page keeps its shadow root, and the reason is worth writing down

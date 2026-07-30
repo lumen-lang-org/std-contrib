@@ -467,7 +467,11 @@ export class ChatSession {
     // three places to forget. The mutation is in place: the object identity
     // has to hold, or nr-chatbot re-renders the whole transcript on every
     // poll (see the note above `state`).
-    this.state.suggestions = this.state.messages.length === 0 ? SUGGESTIONS : EMPTY_SUGGESTIONS;
+    // Off entirely for now, and at the source rather than by a CSS hide: what
+    // is not in the state is not in the DOM, on the server or the client, so
+    // there is nothing to flash before a rule catches it. Restore by putting
+    // the messages.length === 0 ? SUGGESTIONS : ... ternary back.
+    this.state.suggestions = EMPTY_SUGGESTIONS;
     return this.state;
   }
 

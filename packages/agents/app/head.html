@@ -1,0 +1,141 @@
+<!-- Everything index.html held in <head> that is not the title and not the
+     preview origin. LumenJS reads this file verbatim into the document head,
+     which is where the token sheet belongs: `:root` custom properties are a
+     document-level thing and a layout renders into a shadow root, where
+     `:root` means nothing.
+
+     The preview-origin <meta> is the other document-level thing, and it is
+     NOT here — it became layout config in pages/_layout.ts so a deployment
+     can set it without editing a file baked into the image. -->
+<style>
+  /* One vocabulary for the whole console, held at the root.
+     The Kimi reading (KIMI-DESIGN.md): text and fills are BLACK AT AN
+     OPACITY, not a grey ramp — every level stays legible on any surface,
+     and hover/active are steps of the same ink rather than new colours.
+     The ground is warm (#fbfaf9), the content sheet is white, and the two
+     separate by that delta — borders barely exist. */
+  :root {
+    --bg: #FFFFFF;          /* the content sheet */
+    --bg-rail: #FBFAF9;     /* the warm ground: sidebar, panels, nav */
+    --bg-card: #FFFFFF;
+    --bg-sunken: rgba(0,0,0,.045);  /* Kimi Fills-F2: hover washes, chips */
+    --bg-user: rgba(0,0,0,.045);
+    --fill-1: rgba(0,0,0,.03);      /* the lightest wash */
+    --fg: rgba(0,0,0,.9);
+    --muted: rgba(0,0,0,.45);
+    --faint: rgba(0,0,0,.3);        /* placeholders, quaternary ink */
+    --border: rgba(0,0,0,.09);
+    /* The action colour is ink, not a hue.
+       Borrowing another product's indigo and magenta would have made this
+       console look like that product — the layout patterns are worth taking,
+       the identity is not. It also frees every hue for the graph, where
+       colour carries meaning: a node is orange because it is the entry
+       agent, violet because it is a server. An accent competing with those
+       would be read as one of them.
+       So a primary action is a filled ink button, and the only saturated
+       colour in the chrome is the focus ring. */
+    --accent: #17171A;
+    --accent-hover: #000000;
+    --accent-fg: #FFFFFF;
+    /* Focus is the one place a hue is louder than ink: it has to be found
+       instantly, and it must not read as "primary". */
+    --focus: #2563EB;
+    /* The brand mark — the logo dot and the account avatar. Ink too, so
+       nothing in the chrome competes with the graph. */
+    --brand: #17171A;
+    --danger: #B3261E;
+    --ok: #157F4D;
+    --display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html, body { height: 100%; margin: 0; }
+  /* `html body`, not `body`, and the extra specificity is load-bearing.
+     LumenJS writes its own <style> block into the shell AFTER this file
+     (dev-server/index-html.ts), and that block sets `body { font-family:
+     system-ui, -apple-system, sans-serif }`. A later rule of equal
+     specificity wins, so a plain `body { font: ... }` here would keep its
+     size and line-height and silently lose "Segoe UI" and Roboto — a
+     different typeface on Windows and Android, and identical to index.html
+     only on the machines we happen to develop on. One extra element
+     selector settles it. */
+  html body {
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* New under LumenJS, and the only rules here that index.html did not have.
+     The console is no longer a direct child of <body>: the framework mounts
+     <nk-app> → #nk-router-outlet → <layout-root> → <page-index> above it.
+
+     Each link in that chain carries the height, because `height: 100%` only
+     resolves through ancestors that have one. `display: contents` looks like
+     the tidier answer — no boxes at all — and it is wrong: an element with
+     no box gives the console nothing to resolve 100% against, the shell
+     falls back to content height, and the sidebar stops reaching the bottom
+     of the window while the chat column still fills it. That is visible in a
+     screenshot and was caught in one during the phase 1 spike.
+
+     All four are ordinary light-DOM elements — a shadow host is styled from
+     the document like anything else — so this is one rule, not four :host
+     blocks scattered across the layout and the page.
+
+     index.html's fifth link, `agent-console { display: flex; height: 100% }`,
+     is deliberately absent: the console now sits inside page-index's shadow
+     root where a document rule cannot reach it, and console.ts's own
+     `:host { display: flex; height: 100% }` has always said the same thing
+     from the inside. The old rule was already redundant; here it would also
+     be inert, which is worse than absent. */
+  nk-app, #nk-router-outlet, layout-root, page-index { display: block; height: 100%; }
+
+  /* The router gives the outlet `tabindex="-1"` and focuses it after every
+     navigation, so screen-reader and keyboard users land in the new page.
+     Chromium answers that with its default focus ring, and the outlet spans
+     the viewport — so the ring is a 1px dark rectangle around the whole
+     console, drawn on first paint before anyone has pressed a key.
+     Suppressed only for the outlet, which is a programmatic focus target and
+     not a control anybody tabs to; every real control keeps its ring. */
+  #nk-router-outlet:focus { outline: none; }
+
+  /* --- the shell, before anything hydrates -------------------------------
+     Server rendering emits a declarative shadow root, styles included, only
+     for the components it actually rendered — on a conversation that is
+     agent-console, nr-chatbot and the icons. The console's own children (the
+     rail, the header, the panels) arrive as bare tags and stay unstyled until
+     the browser loads their module and upgrades them. That gap is the restyle
+     you can see.
+
+     Loading those modules on the server would close it and costs far too much:
+     it is what made this route take 1.4s to first byte against 0.2s with the
+     import guarded. So the shape is stated here instead. These rules are
+     duplicated from the components' own `:host` blocks deliberately — they are
+     the skeleton, not the design, and each one is a box the eye can see move
+     if it is missing. Detail still arrives with the component; nothing shifts
+     when it does.
+
+     Keep this list short. Anything that does not change the position or the
+     colour of a box belongs in the component that owns it. */
+  agent-console { display: flex; height: 100%; }
+  console-sidebar {
+    width: 264px; flex: none;
+    display: flex; flex-direction: column;
+    background: var(--bg-rail); border-right: 1px solid var(--border);
+  }
+  /* The drawer breakpoint, restated for the same reason: below it the rail is
+     off-canvas, and a rail that paints in-flow and then jumps out is worse
+     than one that was never there. */
+  @media (max-width: 1024px) {
+    console-sidebar {
+      position: fixed; inset: 0 auto 0 0; z-index: 60;
+      transform: translateX(-100%);
+    }
+    agent-console[nav] console-sidebar { transform: none; }
+  }
+  /* Unupgraded custom elements are inline by default, so the composer and the
+     panels collapse to a text-line's height before hydration and then snap to
+     size. Naming them as blocks costs nothing and stops the snap. */
+  nr-chatbot, workspace-panel, artifact-panel, knowledge-page, agent-canvas {
+    display: block;
+  }
+
+</style>
