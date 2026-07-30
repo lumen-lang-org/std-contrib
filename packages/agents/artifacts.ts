@@ -20,7 +20,7 @@
 // enforce it.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { normalScope } from "./knowledge.ts";
 
@@ -674,7 +674,7 @@ export function artifactBriefing(db: Db, threadId: string): string {
   // the ones a revision must land on, and the ones past the cap are the ones
   // least likely to be meant. Slot breaks ties so two writes in one stamp
   // still list in a stable order.
-  let keys: DbOrder[] = [desc("updated_at"), desc("slot")];
+  let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }, { column: "slot", direction: "desc" }];
   let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return ""; }
   let rows = JSON.parse<ArtifactRow[]>(listed);
@@ -708,7 +708,7 @@ export function artifactBriefing(db: Db, threadId: string): string {
 // when something is renamed.
 export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let none: ArtifactRow[] = [];
-  let keys: DbOrder[] = [asc("slot")];
+  let keys: DbOrder[] = [{ column: "slot" }];
   let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<ArtifactRow[]>(listed);

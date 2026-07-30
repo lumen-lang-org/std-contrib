@@ -5,7 +5,7 @@
 
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { DbOrder, asc, connectDatabase, persist, findById, listOrdered, countWhere, execute, dropTable } from "../plume/plume.ts";
+import { DbOrder, connectDatabase, persist, findById, listOrdered, countWhere, execute, dropTable } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, schemaPlan } from "./schema.ts";
 
@@ -186,7 +186,7 @@ test("listing agents does not multiply them by their relations", () => {
   seeded();
   // a1 has two servers and one sub-agent; a join would repeat it.
   expect(countWhere(database, agentsFull(database), "", []) == 2);
-  let keys: DbOrder[] = [asc("agent_name")];
+  let keys: DbOrder[] = [{ column: "agent_name" }];
   let json = listOrdered(database, agentsFull(database), { order: keys });
   expect(json.indexOf("lead") == json.lastIndexOf("lead") - 0 || json.indexOf("lead") >= 0);
   expect(json.indexOf("scout") >= 0);

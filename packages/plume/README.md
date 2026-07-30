@@ -180,10 +180,15 @@ listWhere(database, agents(), where, ["critic", "4"]);
 ### Ordering
 
 ```ts
-listOrdered(database, agents, { order: [desc("max_steps"), asc("agent_name")] });
-pageOrdered(database, agents, { order: [asc("max_steps"), asc("id")], limit: 20, offset: 40 });
-listOrdered(database, agents, { where: "enabled = " + database.placeholder, args: ["1"],
-                                order: [asc("agent_name")] });
+listOrdered(database, agents, { order: [
+  { column: "max_steps", direction: "desc" },
+  { column: "agent_name" },                    // omitted is "asc", as in SQL
+] });
+
+pageOrdered(database, agents, { order: [{ column: "id" }], limit: 20, offset: 40 });
+
+listOrdered(database, agents, { where: "enabled = " + database.placeholder,
+                                args: ["1"], order: [{ column: "agent_name" }] });
 ```
 
 What to read past the mapping is one `DbQuery` record — `where`, `args`, `order`
@@ -191,8 +196,17 @@ or `orderBy`, `limit`, `offset`, every field optional, so `{}` is every row. It
 was a positional tail ending in two bare numbers, and a caller who passed the
 offset where the limit goes got a page the database was happy to return.
 
-`asc` and `desc` are what every SQL builder calls these. A key that is not a
-plain identifier refuses the whole query rather than being escaped into it, and
+`direction` is `"asc" | "desc"` rather than a `descending` boolean, because a
+boolean only reads correctly beside the name of the function that set it:
+`{ column: "agent_name", descending: false }` says "not descending" where SQL,
+and every caller, says ascending.
+
+There were `asc(column)` and `desc(column)` constructors for this, and there are
+not now: a constructor whose whole body is a record literal is a second spelling
+of the same value, a name to import, and one more thing to look up to find out
+which field it sets.
+
+A key that is not a plain identifier refuses the whole query rather than being escaped into it, and
 `pageOrdered` refuses a page with no ordering at all — two requests for "the
 first twenty" can overlap or skip rows when the database is free to answer in
 any order, so an unordered page is not a page.
@@ -220,7 +234,7 @@ let agents = store(database, agentsMapping());
 agents.findById("a1");
 agents.list();
 agents.listOrdered({ where: "max_steps <= " + agents.db.placeholder, args: ["4"],
-                     order: [asc("agent_name")] });
+                     order: [{ column: "agent_name" }] });
 agents.persist(JSON.stringify(a));
 agents.count();
 ```

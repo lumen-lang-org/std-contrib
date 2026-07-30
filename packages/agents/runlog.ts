@@ -15,7 +15,7 @@
 // joins both.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasMany, boolColumn, desc, persist, pageOrdered, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasMany, boolColumn, persist, pageOrdered, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { AgentRun } from "./run.ts";
 
@@ -153,6 +153,6 @@ export function recordRun(db: Db, agentId: string, question: string, run: AgentR
 // second query away by id, which is the point: a list view never pays for
 // them.
 export function runsOf(db: Db, agentId: string, limit: int): string {
-  let keys: DbOrder[] = [desc("created_at")];
+  let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
   return pageOrdered(db, runsMapping(), { where: "agent_id = " + db.placeholder, args: [agentId], order: keys, limit: limit, offset: 0 });
 }

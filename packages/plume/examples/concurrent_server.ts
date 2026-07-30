@@ -20,7 +20,7 @@
 
 import { Db, DbConfig } from "../driver.ts";
 import { sqlite } from "../sqlite.ts";
-import { DbField, DbRepository, DbOrder, field, repository, connectDatabase, asc } from "../plume.ts";
+import { DbField, DbRepository, DbOrder, field, repository, connectDatabase } from "../plume.ts";
 import { Store, store } from "../store.ts";
 
 function agentsRepo(): DbRepository {
@@ -68,7 +68,7 @@ function main(): void {
       return reply(201, req.body);
     }
     if (id == "") {
-      let keys: DbOrder[] = [asc("id")];
+      let keys: DbOrder[] = [{ column: "id" }];
       let empty: string[] = [];
       return reply(200, agents.listOrdered({ args: empty, order: keys }));
     }

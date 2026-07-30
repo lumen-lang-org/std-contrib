@@ -11,7 +11,7 @@ import { Route, route, routes } from "../router.ts";
 import { Request, Reply, Handler, serve, ok, created, noContent, notFound, badRequest, param, queryParam } from "../server.ts";
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
-import { DbField, DbRepository, field, repository, connectDatabase, asc, DbOrder } from "../../plume/plume.ts";
+import { DbField, DbRepository, field, repository, connectDatabase, DbOrder } from "../../plume/plume.ts";
 import { Store, store } from "../../plume/store.ts";
 
 type AgentRow = { id: string, agentName: string, maxSteps: int };
@@ -44,7 +44,7 @@ class AgentController {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("agent_name")];
+    let keys: DbOrder[] = [{ column: "agent_name" }];
     let ceiling = queryParam(req, "maxSteps", "");
     if (ceiling == "") { return ok(this.agents.listOrdered({ order: keys })); }
     return ok(this.agents.listOrdered({ where: "max_steps <= " + this.agents.db.placeholder, args: [ceiling], order: keys }));

@@ -19,7 +19,7 @@ import { Request, Reply, Handler, serve, reply, ok, created, accepted, noContent
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
+import { DbOrder, DbRepository, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, credentialsMapping, schemaPlan } from "./schema.ts";
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "./credentials.ts";
@@ -134,7 +134,7 @@ class AgentApi {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("agent_name")];
+    let keys: DbOrder[] = [{ column: "agent_name" }];
     if (queryParam(req, "enabled", "") == "true") {
       return ok(listOrdered(this.db, this.full, { where: "enabled = " + this.db.placeholder, args: ["1"], order: keys }));
     }
@@ -509,7 +509,7 @@ class ModelApi {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("label")];
+    let keys: DbOrder[] = [{ column: "label" }];
     return ok(listOrdered(this.db, modelsMapping(), { order: keys }));
   }
 
@@ -619,7 +619,7 @@ class ConfigApi {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("id")];
+    let keys: DbOrder[] = [{ column: "id" }];
     return ok(listOrdered(this.db, modelConfigsMapping(this.db), { order: keys }));
   }
 
@@ -659,10 +659,10 @@ class PromptApi {
   list(req: Request): Reply {
     let name = queryParam(req, "name", "");
     if (name == "") {
-      let keys: DbOrder[] = [asc("prompt_name"), asc("version")];
+      let keys: DbOrder[] = [{ column: "prompt_name" }, { column: "version" }];
       return ok(listOrdered(this.db, promptsMapping(), { order: keys }));
     }
-    let newest: DbOrder[] = [desc("version")];
+    let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
     return ok(listOrdered(this.db, promptsMapping(), { where: "prompt_name = " + this.db.placeholder, args: [name], order: newest }));
   }
 
@@ -705,7 +705,7 @@ class ServerApi {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("server_name")];
+    let keys: DbOrder[] = [{ column: "server_name" }];
     return ok(listOrdered(this.db, mcpServersMapping(), { order: keys }));
   }
 
@@ -822,7 +822,7 @@ class ServerApi {
 
 // The highest version a prompt name has, 0 when it has none.
 function maxVersion(db: Db, name: string): int {
-  let newest: DbOrder[] = [desc("version")];
+  let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
   let page = pageOrdered(db, promptsMapping(), { where: "prompt_name = " + db.placeholder, args: [name], order: newest, limit: 1, offset: 0 });
   if (page == "" || page == "[]") { return 0; }
   let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);

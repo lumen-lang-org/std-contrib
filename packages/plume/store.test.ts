@@ -5,7 +5,7 @@
 import { Db, DbConfig } from "./driver.ts";
 import { sqlite } from "./sqlite.ts";
 import { Store, store } from "./store.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, connectDatabase } from "./plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, connectDatabase } from "./plume.ts";
 
 let database: Db = sqlite();
 
@@ -66,7 +66,7 @@ test("a filter still takes its parameters", () => {
 
 test("ordering comes through too", () => {
   let agents = seeded();
-  let keys: DbOrder[] = [asc("max_steps")];
+  let keys: DbOrder[] = [{ column: "max_steps" }];
   expect(agents.listOrdered({ order: keys }).indexOf("writer") < agents.listOrdered({ order: keys }).indexOf("researcher"));
   expect(agents.pageOrdered({ order: keys, limit: 1, offset: 0 }).indexOf("writer") >= 0);
 });
