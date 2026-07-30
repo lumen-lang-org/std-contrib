@@ -15,7 +15,7 @@
 import { Db } from "../plume/driver.ts";
 import { credentialFor } from "./credentials.ts";
 import { listWhere, placeholderAt } from "../plume/plume.ts";
-import { AgentRow, McpServerRow, agentsMapping, mcpServersMapping } from "./schema.ts";
+import { AgentRow, McpServerRow, SkillRow, SkillFileRow, agentsMapping, mcpServersMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape } from "./scan.ts";
@@ -25,7 +25,7 @@ import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
 import { wireView } from "./artifacts-fence.ts";
-import { SCRIPT_OUTPUT_MAX, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptRun } from "./run-script.ts";
+import { SCRIPT_OUTPUT_MAX, SCRIPT_RUN_DIR, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptRun } from "./run-script.ts";
 
 // One tool, and which server answers it.
 export type MountedTool = {
@@ -305,6 +305,18 @@ export function artifactTools(): ToolSpec[] {
     "Save something the user is meant to look at — a page, a diagram, a document, a data file — as an artifact of this conversation. "
     + "Writing a path that already exists appends a new version instead of replacing the old one, and the reply names the slot and version number, "
     + "which is how you refer to what you just saved when you answer. "
+    // The pointer used to run one way: edit_artifact ends by naming this tool
+    // for a rewrite, and this tool named neither of the other two. A model
+    // reads the list in order, meets the whole-file tool first, and takes it —
+    // one deleted two invented fields from a 16KB docflow by re-emitting the
+    // whole file, and the reply hit the model's own output ceiling mid-JSON,
+    // so the turn was refused and nothing was saved. Both halves of that are
+    // named here because both were paid: reading the file whole to find the
+    // line, then sending it whole to change it.
+    + "Changing part of a file that is already here is edit_artifact's work, not this tool's: send the changed text alone, "
+    + "and search_artifacts finds the line to send without reading the file. "
+    + "Keep this tool for a path that does not exist yet, or a rewrite that replaces most of what is there — "
+    + "a body sent whole costs its own size out of one reply's room, and a file large enough cannot be sent that way at all. "
     + "A path-carrying code fence in your reply (```html path=/index.html) can create a new inert file the same way, but only this tool can update an existing path or write a script or stylesheet; when a reply names one path through both, this tool wins. "
     + SELF_CONTAINED,
     "{\"type\":\"object\",\"properties\":{"
@@ -315,7 +327,9 @@ export function artifactTools(): ToolSpec[] {
     + "\"required\":[\"path\",\"title\",\"content\"]}"));
   out.push(toolSpec("read_artifact",
     "Read the current version of one of this conversation's artifacts, whole. "
-    + "Artifacts are self-contained — no remote scripts, styles or fonts — so what comes back is all of it, with nothing left to fetch.",
+    + "Artifacts are self-contained — no remote scripts, styles or fonts — so what comes back is all of it, with nothing left to fetch. "
+    + "Whole is the cost as well as the promise: when you want one line — to check a value, or to have the exact text "
+    + "edit_artifact needs as old — search_artifacts returns it with its line number and leaves the rest unread.",
     "{\"type\":\"object\",\"properties\":{"
     + "\"path\":{\"type\":\"string\",\"description\":\"The path the artifact was saved under.\"}},"
     + "\"required\":[\"path\"]}"));
@@ -397,7 +411,7 @@ export type ArtifactToolCall = {
 // files rather than about the shape, and is worth widening the day workspace.ts
 // is open for another reason.
 export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult {
-  let not: FileToolResult = { handled: false, ok: false, text: "" };
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
   // An artifact is addressed within a conversation, so a bare run has none.
   // The loop does not offer these tools without a thread; this catches a model
   // that invented the name from its own training rather than from the list.
@@ -425,7 +439,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       // The refusal in the storage's own words — every one of them names what
       // was wrong with the path or the body, which is what the model needs to
       // try again rather than give up.
-      let refused: FileToolResult = { handled: true, ok: false, text: written.problem };
+      let refused: FileToolResult = { handled: true, ok: false, text: written.problem, line: 0, changed: "" };
       return refused;
     }
     // Both numbers, because the sentence the model writes next has to point at
@@ -435,7 +449,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       handled: true, ok: true,
       text: "Saved " + path + " as artifact " + `${written.slot}` + ", version " + `${written.version}`
         + " (" + `${utf8Length(content)}` + " bytes). Refer to it as artifact " + `${written.slot}`
-        + ", version " + `${written.version}` + ".",
+        + ", version " + `${written.version}` + ".", line: 0, changed: ""
     };
     return wrote;
   }
@@ -446,7 +460,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
     if (artifact.id == "") {
       let missing: FileToolResult = {
         handled: true, ok: false,
-        text: "There is no artifact at " + path + " in this conversation.",
+        text: "There is no artifact at " + path + " in this conversation.", line: 0, changed: ""
       };
       return missing;
     }
@@ -459,11 +473,11 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       let broken: FileToolResult = {
         handled: true, ok: false,
         text: "Artifact " + path + " points at version " + `${artifact.currentVersion}`
-          + ", which is not in its history.",
+          + ", which is not in its history.", line: 0, changed: ""
       };
       return broken;
     }
-    let read: FileToolResult = { handled: true, ok: true, text: current.body };
+    let read: FileToolResult = { handled: true, ok: true, text: current.body, line: 0, changed: "" };
     return read;
   }
 
@@ -474,20 +488,20 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
     if (jsonFind(call.args, "query") < 0) {
       let unnamed: FileToolResult = {
         handled: true, ok: false,
-        text: "search_artifacts needs a member named \"query\" — the exact text to look for.",
+        text: "search_artifacts needs a member named \"query\" — the exact text to look for.", line: 0, changed: ""
       };
       return unnamed;
     }
     let found = searchArtifacts(db, call.threadId, jsonText(call.args, "query"));
     if (!found.ok) {
-      let refused: FileToolResult = { handled: true, ok: false, text: found.problem };
+      let refused: FileToolResult = { handled: true, ok: false, text: found.problem, line: 0, changed: "" };
       return refused;
     }
     // Every quoted line below is an artifact body, and an artifact body is
     // untrusted — wireView keeps a marker planted in one from arriving in
     // model context as a reference the model never earned.
     let answered: FileToolResult = {
-      handled: true, ok: true, text: wireView(searchAnswer(found)).text,
+      handled: true, ok: true, text: wireView(searchAnswer(found)).text, line: 0, changed: ""
     };
     return answered;
   }
@@ -498,21 +512,21 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
     if (jsonFind(call.args, "path") < 0) {
       let unnamed: FileToolResult = {
         handled: true, ok: false,
-        text: "edit_artifact needs a member named \"path\" — the path the artifact was saved under.",
+        text: "edit_artifact needs a member named \"path\" — the path the artifact was saved under.", line: 0, changed: ""
       };
       return unnamed;
     }
     if (jsonFind(call.args, "old") < 0) {
       let unnamed: FileToolResult = {
         handled: true, ok: false,
-        text: "edit_artifact needs a member named \"old\" — the exact text to replace.",
+        text: "edit_artifact needs a member named \"old\" — the exact text to replace.", line: 0, changed: ""
       };
       return unnamed;
     }
     if (jsonFind(call.args, "new") < 0) {
       let unnamed: FileToolResult = {
         handled: true, ok: false,
-        text: "edit_artifact needs a member named \"new\" — the replacement, which may be empty to delete old.",
+        text: "edit_artifact needs a member named \"new\" — the replacement, which may be empty to delete old.", line: 0, changed: ""
       };
       return unnamed;
     }
@@ -530,7 +544,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
     if (!edited.ok) {
       // The refusal may quote body lines — numbered multi-match snippets —
       // so it passes through the same neutralisation the success echo does.
-      let refused: FileToolResult = { handled: true, ok: false, text: wireView(edited.problem).text };
+      let refused: FileToolResult = { handled: true, ok: false, text: wireView(edited.problem).text, line: 0, changed: "" };
       return refused;
     }
     let changed: FileToolResult = {
@@ -538,6 +552,9 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       text: wireView("Edited " + normalScope(jsonText(call.args, "path")) + ": artifact " + `${edited.slot}`
         + " is now version " + `${edited.version}` + " (" + `${edited.bytes}` + " bytes)."
         + " Changed at line " + `${edited.line}` + ":\n" + edited.context).text,
+      // The one answer that carries a line: where the edit landed, so the
+      // step row can say it and the card can number its snippets.
+      line: edited.line, changed: ""
     };
     return changed;
   }
@@ -592,8 +609,10 @@ export function scriptTool(): ToolSpec {
     + "outside its run directory — installed packages, caches, scratch files — is still there on the next call. That "
     + "state is cache, not record; when the environment had to be recreated the reply says so, and only artifacts "
     + "survive for certain. The environment has the network, and HOME is /workspace and persists: pip install and npm install work, and what one run installs the next run finds. "
-    + "Name in paths every artifact the script reads or rewrites; each is copied into a fresh run directory at its own "
-    + "relative path (the artifact /report.md is the file report.md), the script runs there as a non-root user, and "
+    + "Name in paths every artifact the script reads or rewrites; each is copied into the run directory " + SCRIPT_RUN_DIR
+    + " at its own path under it — the artifact /report.md is the file " + SCRIPT_RUN_DIR + "/report.md, and that "
+    + "directory is also where the script starts, so report.md alone finds it. Nowhere else holds a copy: not the "
+    + "artifact path, not /tmp, not /workspace. The directory is made fresh for every run, the script runs there, and "
     + "afterwards each file is compared back: unchanged bytes save nothing, changed bytes become the artifact's next "
     + "version under write_artifact's rules, a file created beyond paths is saved only when mayCreate is true, and "
     + "nothing is ever deleted — a file the script removed is reported and every stored version stays. "
@@ -611,7 +630,7 @@ export function scriptTool(): ToolSpec {
     "{\"type\":\"object\",\"properties\":{"
     + "\"language\":{\"type\":\"string\",\"description\":\"What runs the script: python, node or sh.\"},"
     + "\"source\":{\"type\":\"string\",\"description\":\"The whole program. It runs with the run directory as its "
-    + "working directory; read and write the materialised files by their relative paths, and print what you want to read back.\"},"
+    + "working directory (" + SCRIPT_RUN_DIR + "); read and write the materialised files by their relative paths, and print what you want to read back.\"},"
     + "\"paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"The artifact paths the script "
     + "works on, named one by one, such as /report.md. A path that is not an artifact of this conversation refuses the "
     + "whole call before anything runs. An empty list is an install-only run: nothing is materialised and only "
@@ -636,27 +655,27 @@ export function scriptTools(): ToolSpec[] {
 // — stdout and stderr are the output of a model-written program, exactly as
 // untrusted as an artifact body.
 export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
-  let not: FileToolResult = { handled: false, ok: false, text: "" };
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
   if (call.threadId == "" || call.name != "run_script") { return not; }
 
   if (jsonFind(call.args, "language") < 0) {
     let unnamed: FileToolResult = {
       handled: true, ok: false,
-      text: "run_script needs a member named \"language\" — python, node or sh.",
+      text: "run_script needs a member named \"language\" — python, node or sh.", line: 0, changed: ""
     };
     return unnamed;
   }
   if (jsonFind(call.args, "source") < 0) {
     let unnamed: FileToolResult = {
       handled: true, ok: false,
-      text: "run_script needs a member named \"source\" — the whole program to run.",
+      text: "run_script needs a member named \"source\" — the whole program to run.", line: 0, changed: ""
     };
     return unnamed;
   }
   if (jsonFind(call.args, "paths") < 0) {
     let unnamed: FileToolResult = {
       handled: true, ok: false,
-      text: "run_script needs a member named \"paths\" — the artifact paths the script works on, as an array of strings.",
+      text: "run_script needs a member named \"paths\" — the artifact paths the script works on, as an array of strings.", line: 0, changed: ""
     };
     return unnamed;
   }
@@ -667,7 +686,7 @@ export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
     if (!entries[p].startsWith("\"")) {
       let bad: FileToolResult = {
         handled: true, ok: false,
-        text: "every entry in run_script's paths must be a string naming an artifact path.",
+        text: "every entry in run_script's paths must be a string naming an artifact path.", line: 0, changed: ""
       };
       return bad;
     }
@@ -692,9 +711,36 @@ export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let ran = scriptRun(db, asked);
   let answered: FileToolResult = {
     handled: true, ok: ran.ok,
-    text: wireView(scriptRunAnswer(ran, envName == "" ? "main" : envName)).text,
+    text: wireView(scriptRunAnswer(ran, envName == "" ? "main" : envName)).text, line: 0,
+    // What the reconcile landed — changed versions and created files alike —
+    // so the step row can say a file moved and the card can open its diff.
+    changed: scriptChangedJson(ran),
   };
   return answered;
+}
+
+// The reconcile's landings as compact JSON: [{"path":"/x","version":2}, ...].
+// Created files ride along — a first version diffs against nothing, but the
+// chip still names what the run produced.
+function scriptChangedJson(ran: ScriptRan): string {
+  if (ran.changed.length == 0 && ran.created.length == 0) { return ""; }
+  let out = "[";
+  let first = true;
+  let i: int = 0;
+  while (i < ran.changed.length) {
+    if (!first) { out = out + ","; }
+    out = out + "{\"path\":" + JSON.stringify(ran.changed[i].path) + ",\"version\":" + `${ran.changed[i].version}` + "}";
+    first = false;
+    i = i + 1;
+  }
+  i = 0;
+  while (i < ran.created.length) {
+    if (!first) { out = out + ","; }
+    out = out + "{\"path\":" + JSON.stringify(ran.created[i].path) + ",\"version\":" + `${ran.created[i].version}` + "}";
+    first = false;
+    i = i + 1;
+  }
+  return out + "]";
 }
 
 // The run's whole story as one reply: what happened, what the script printed,
@@ -755,5 +801,186 @@ function scriptPathList(list: string[]): string {
     out = out + list[i];
     i = i + 1;
   }
+  return out;
+}
+
+// --- skills -------------------------------------------------------------------
+//
+// A skill is instructions the agent loads when the task calls for them. The
+// briefing lists each one as a name and a one-line description; use_skill
+// answers with the body. Pay-per-use context: the description is always
+// present and costs a line, the body costs nothing until a task matches.
+// SKILLS.md is the design; the doctrine in one sentence is that an invariant
+// that prevents a lie belongs in the prompt, and a recipe that produces an
+// answer belongs in a skill.
+
+// The skills an agent carries, by name, stably ordered for the briefing.
+export function agentSkills(db: Db, agentId: string): SkillRow[] {
+  // Attachment, or the public tier: a public skill answers use_skill for
+  // every agent without a link row, which is what makes Docs/Sheets/Slides
+  // deployment-wide instead of per-agent configuration.
+  let where = "id IN (SELECT skill_id FROM agent_skills WHERE agent_id = " + placeholderAt(db, 1) + ")"
+    + " OR visibility = 'public'";
+  let document = listWhere(db, skillsMapping(), where, [agentId]);
+  if (document == "" || document == "[]") {
+    let none: SkillRow[] = [];
+    return none;
+  }
+  let rows = JSON.parse<SkillRow[]>(document);
+  // Ordered by name here rather than in SQL: listWhere takes no order, and a
+  // briefing that reshuffles between turns reads as a different list. Arrays
+  // are immutable, so this is a selection sort that builds the ordered list
+  // rather than swapping in place — n is briefing-sized, never large.
+  let out: SkillRow[] = [];
+  let taken: bool[] = [];
+  let t: int = 0;
+  while (t < rows.length) { taken.push(false); t = t + 1; }
+  let picked: int = 0;
+  while (picked < rows.length) {
+    let at: int = -1;
+    let i: int = 0;
+    while (i < rows.length) {
+      if (!taken[i] && (at < 0 || rows[i].skillName < rows[at].skillName)) { at = i; }
+      i = i + 1;
+    }
+    out.push(rows[at]);
+    taken = [...taken.slice(0, at), true, ...taken.slice(at + 1)];
+    picked = picked + 1;
+  }
+  return out;
+}
+
+// The files one skill ships, for the answer's listing and for the staging
+// run-script does.
+export function skillFiles(db: Db, skillId: string): SkillFileRow[] {
+  let document = listWhere(db, skillFilesMapping(), "skill_id = " + placeholderAt(db, 1), [skillId]);
+  if (document == "" || document == "[]") {
+    let none: SkillFileRow[] = [];
+    return none;
+  }
+  return JSON.parse<SkillFileRow[]>(document);
+}
+
+// The one skill tool. Offered only when the agent has skills — an agent with
+// none is told nothing, absent rather than offered-and-failing, for the same
+// reason scriptTools() vanishes without docker: a tool that can only refuse
+// teaches the model a name it will keep trying.
+export function skillTools(db: Db, agentId: string): ToolSpec[] {
+  let none: ToolSpec[] = [];
+  if (agentId == "") { return none; }
+  if (agentSkills(db, agentId).length == 0) { return none; }
+  let out: ToolSpec[] = [];
+  out.push(toolSpec("use_skill",
+    "Load the full instructions for one of your skills. Your briefing lists each skill as a name and a "
+    + "one-line description; the line is for choosing, and this call is how you read the rest. When a task "
+    + "matches a skill's line, load it before taking the first step the skill would govern — instructions "
+    + "read mid-task cannot un-make a choice already made — and follow what comes back ahead of your own "
+    + "habits for that task: the skill exists because the plain approach was tried and found wanting. "
+    + "The body does not change between your calls, so load a skill once and keep working from what it "
+    + "said. A skill may ship files into your run environment; the body says where they are and how to run "
+    + "them — run them rather than retyping their code. A name your briefing does not list is refused; "
+    + "nothing is guessed or fuzzily matched.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"name\":{\"type\":\"string\",\"description\":\"The skill to load, exactly as your briefing lists it — "
+    + "character for character, including capitalization.\"}},"
+    + "\"required\":[\"name\"]}"));
+  return out;
+}
+
+// Skills are agent-scoped, not thread-scoped: a bare run with no thread still
+// answers, so the record carries the agent and nothing else. Its own record
+// rather than ArtifactToolCall, which bails on an empty threadId.
+export type SkillToolCall = {
+  agentId: string,
+  name: string,
+  args: string,
+};
+
+export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
+  if (call.name != "use_skill") { return not; }
+  if (call.agentId == "") { return not; }
+
+  // Presence-checked before anything else, the search_artifacts idiom: a
+  // refusal must name the member that was absent, not complain about "".
+  if (jsonFind(call.args, "name") < 0) {
+    let unnamed: FileToolResult = {
+      handled: true, ok: false,
+      text: "use_skill needs a member named \"name\" — the skill to load, exactly as your briefing lists it.", line: 0, changed: ""
+    };
+    return unnamed;
+  }
+  let asked = jsonText(call.args, "name");
+
+  // A fresh read every call — the live-rows promise: an operator's edit is
+  // what the very next load answers with.
+  let rows = agentSkills(db, call.agentId);
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].skillName == asked) {
+      let text = rows[i].body;
+      let files = skillFiles(db, rows[i].id);
+      if (files.length > 0) {
+        // Named at the end, after the instructions that reference them, so
+        // the model reads the procedure before the inventory.
+        let listed = "";
+        let f: int = 0;
+        while (f < files.length) {
+          if (f > 0) { listed = listed + ", "; }
+          listed = listed + files[f].path;
+          f = f + 1;
+        }
+        text = text + "\n\nThis skill ships files under /skills/" + rows[i].skillName + "/: "
+          + listed + " — run them rather than retyping them.";
+      }
+      // The body is operator-written configuration, the same trust class as
+      // the prompt itself — no wireView, nothing wrapped around it.
+      let answered: FileToolResult = { handled: true, ok: true, text: text, line: 0, changed: "" };
+      return answered;
+    }
+    i = i + 1;
+  }
+
+  // The refusal names what exists, so the model's next call can be right.
+  let names = "";
+  i = 0;
+  while (i < rows.length) {
+    if (i > 0) { names = names + ", "; }
+    names = names + rows[i].skillName;
+    i = i + 1;
+  }
+  let missing: FileToolResult = {
+    handled: true, ok: false,
+    text: "There is no skill named \"" + asked + "\". This agent has: " + names + " — use one of those names exactly.", line: 0, changed: ""
+  };
+  return missing;
+}
+
+// How many skills the briefing lists in full. Past the cap the rest appear as
+// names only — every skill stays loadable, and no affordance is promised that
+// does not exist (the artifact overflow lesson).
+export const SKILL_BRIEFING_LINES: int = 50;
+
+export function skillBriefing(db: Db, agentId: string): string {
+  let rows = agentSkills(db, agentId);
+  if (rows.length == 0) { return ""; }
+  let shown = rows.length < SKILL_BRIEFING_LINES ? rows.length : SKILL_BRIEFING_LINES;
+  let out = "You have these skills — named instructions you can load with use_skill:";
+  let i: int = 0;
+  while (i < shown) {
+    out = out + "\n- " + rows[i].skillName + ": " + rows[i].description;
+    i = i + 1;
+  }
+  if (rows.length > shown) {
+    let names = "";
+    let n: int = shown;
+    while (n < rows.length) {
+      if (n > shown) { names = names + ", "; }
+      names = names + rows[n].skillName;
+      n = n + 1;
+    }
+    out = out + "\n…and also, one line each was too many: " + names + " — use_skill loads any of them.";
+  }
+  out = out + "\nEach line is for choosing, not for doing: when a task matches one, load the skill before starting the work.";
   return out;
 }

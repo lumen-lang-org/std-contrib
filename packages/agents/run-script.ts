@@ -36,11 +36,11 @@
 //   cd packages/agents && lumen test run-script.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { executeWith, findById, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
-import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
+import { executeWith, findById, listWhere, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
 import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { normalScope } from "./knowledge.ts";
-import { AgentRow, ScriptImageRow, agentsMapping, scriptImagesMapping } from "./schema.ts";
+import { AgentRow, ScriptImageRow, SkillRow, SkillFileRow, agentsMapping, scriptImagesMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 
 // One materialised path: which version the run directory holds, or why it
 // holds nothing. The list of these IS the snapshot reconcile compares against
@@ -154,7 +154,7 @@ function placeFile(dir: string, path: string, body: string): string {
   let parent = dir + path.slice(0, cut);
   try {
     fs.mkdirSync(parent, true);
-    if (kindOf(path) == "image") {
+    if (binaryKind(kindOf(path))) {
       // The stored body is base64; the script wants the real bytes. Decoded
       // through sh only because base64 -d reads stdin — the paths here are
       // the run dir (ours) and an artifact path (whose charset has no quote
@@ -420,7 +420,7 @@ function sizeOf(path: string): int {
 // spawnSync — an argv vector, no shell — because the runtime has no byte
 // array to hold the raw form in.
 function readBack(artifactPath: string, path: string): ScriptRead {
-  if (kindOf(artifactPath) == "image") {
+  if (binaryKind(kindOf(artifactPath))) {
     let enc = child_process.spawnSync("base64", ["-w0", path]);
     if (enc.status != 0) {
       let bad: ScriptRead = { ok: false, body: "" };
@@ -681,6 +681,23 @@ export function scriptImage(): string {
 // A disabled or missing row falls back to the default rather than refusing —
 // an operator retiring an image should not break every conversation that
 // pointed at it, and the fallback is a working image by definition.
+// A named environment picks its image by name: "office" runs in the curated
+// row whose label lowercases to "office". The list stays the operator's —
+// a name with no enabled row refuses rather than falling back, because the
+// fallback would be a skill silently running without the libraries its
+// briefing promised. "main" keeps the agent's own image, which is the whole
+// pre-environment behaviour unchanged.
+export function scriptImageForEnv(db: Db, agentId: string, envName: string): string {
+  if (envName == "" || envName == "main") { return scriptImageFor(db, agentId); }
+  let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].label.toLowerCase() == envName && rows[i].image != "") { return rows[i].image; }
+    i = i + 1;
+  }
+  return "";
+}
+
 export function scriptImageFor(db: Db, agentId: string): string {
   if (agentId == "") { return scriptImage(); }
   let held = findById(db, agentsMapping(), agentId);
@@ -716,6 +733,25 @@ const SCRIPT_UID: string = "0:0";
 
 // Seconds between timeout's TERM and its KILL, for a script that ignores TERM.
 const SCRIPT_KILL_GRACE: string = "5";
+
+// Where a run's artifacts are, inside the container. One known path, named in
+// the tool's own description, and the script's working directory besides.
+//
+// It used to be /tmp/lumen-run-<id>, unguessable by construction, which was
+// fine while the only thing that had to find it was this package. It is not
+// fine for the model: an agent handed an uploaded docflow spent every step it
+// had guessing where the file was — the artifact path, /tmp, /workspace, /app,
+// a made-up /artifacts/1/1 — and one small model, unable to find the file it
+// was asked to repair, wrote a plausible docflow of its own instead and
+// validated that. A path a model can be told once and rely on is worth more
+// than a path no collision can reach.
+//
+// Fixed is safe here because RUN-SCRIPT.md already forbids the collision: one
+// script at a time per environment, and no two conversations share a
+// container. The directory is still made fresh for every run — the guarantee
+// that matters is that it holds this run's artifacts and nothing stale, not
+// that its name is unique.
+export const SCRIPT_RUN_DIR: string = "/artifacts";
 
 // The note every version a run appends carries.
 const SCRIPT_NOTE: string = "run_script";
@@ -1035,7 +1071,12 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // script installs into it, and an installer with nowhere to fetch from is
   // decoration. Creation-time only — the row records it, a script cannot
   // flip it.
-  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: scriptImageFor(db, run.agentId), network: true, now: run.now };
+  let image = scriptImageForEnv(db, run.agentId, envName);
+  if (image == "" && envName != "main") {
+    return scriptBail(container, stage,
+      "no curated image is labelled '" + envName + "' — environments are named after the operator's script images, and this deployment does not offer that one");
+  }
+  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: image, network: true, now: run.now };
   let ensured = envEnsure(db, ensure);
   if (!ensured.ok) { return scriptBail(container, stage, ensured.problem); }
   let recreated = known && ensured.created;
@@ -1043,8 +1084,13 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // The staged directory becomes the run directory inside the container, and
   // the script lands beside it — never inside, or the reconcile's walk would
   // meet it as a file the run "created".
-  let runDir = "/tmp/lumen-run-" + id;
+  let runDir = SCRIPT_RUN_DIR;
   let jobAt = "/tmp/lumen-job-" + id + "." + ext;
+  // A run that crashed hard enough to skip its cleanup would otherwise leave
+  // its files here, and `docker cp` into an existing directory nests rather
+  // than replaces — /artifacts/files. Cleared first, so the directory a script
+  // meets holds this run's artifacts and nothing else.
+  scriptDocker(["exec", container, "rm", "-rf", runDir]);
   let placed = scriptDocker(["cp", stage + "/files", container + ":" + runDir]);
   if (placed.status != 0) {
     return scriptDone(container, stage, runDir, jobAt,
@@ -1055,6 +1101,38 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     return scriptDone(container, stage, runDir, jobAt,
       scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("place the script", carried)));
   }
+
+  // The agent's skill files, at /skills/<skill-name>/<path> — the path each
+  // skill's body promises. Staged fresh on every run, the artifact staleness
+  // rule: an edit to a skill file is what the very next run executes, and a
+  // script that scribbled over /skills damaged one run, not the environment.
+  // Outside the run directory on purpose, so the reconcile's walk never meets
+  // a skill file as something the run "created".
+  let skillSet = scriptSkillRows(db, run.agentId);
+  if (skillSet.length > 0) {
+    let stagedSkills = scriptHostDir(stage + "/skills");
+    if (stagedSkills != "") { return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, stagedSkills)); }
+    let k: int = 0;
+    while (k < skillSet.length) {
+      let files = scriptSkillFiles(db, skillSet[k].id);
+      let f: int = 0;
+      while (f < files.length) {
+        let dirMade = scriptHostDir(stage + "/skills/" + skillSet[k].skillName);
+        if (dirMade != "") { return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, dirMade)); }
+        let put = scriptHostFile(stage + "/skills/" + skillSet[k].skillName + "/" + files[f].path, files[f].body);
+        if (put != "") { return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, put)); }
+        f = f + 1;
+      }
+      k = k + 1;
+    }
+    scriptDocker(["exec", container, "rm", "-rf", "/skills"]);
+    let placedSkills = scriptDocker(["cp", stage + "/skills", container + ":/skills"]);
+    if (placedSkills.status != 0) {
+      return scriptDone(container, stage, runDir, jobAt,
+        scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("place the skill files", placedSkills)));
+    }
+  }
+
   // docker cp leaves root ownership; the script runs unprivileged and must be
   // able to write its own run directory.
   let owned = scriptDocker(["exec", container, "chown", "-R", SCRIPT_UID, runDir]);
@@ -1155,6 +1233,25 @@ function scriptDigits(text: string): string {
 }
 
 // The host-side fs, each try beside its calls for the lambda rule above.
+// The skill rows and files this run stages. Local readers rather than the
+// ones in tools.ts, which imports this file — the queries are two lines each,
+// and a cycle costs more than the repetition.
+function scriptSkillRows(db: Db, agentId: string): SkillRow[] {
+  // A run without an agent has no skills to stage — and the guard is what
+  // keeps a bare scriptRun off tables its caller never migrated.
+  if (agentId == "") { let none: SkillRow[] = []; return none; }
+  let where = "id IN (SELECT skill_id FROM agent_skills WHERE agent_id = " + placeholderAt(db, 1) + ")";
+  let document = listWhere(db, skillsMapping(), where, [agentId]);
+  if (document == "" || document == "[]") { let none: SkillRow[] = []; return none; }
+  return JSON.parse<SkillRow[]>(document);
+}
+
+function scriptSkillFiles(db: Db, skillId: string): SkillFileRow[] {
+  let document = listWhere(db, skillFilesMapping(), "skill_id = " + placeholderAt(db, 1), [skillId]);
+  if (document == "" || document == "[]") { let none: SkillFileRow[] = []; return none; }
+  return JSON.parse<SkillFileRow[]>(document);
+}
+
 function scriptHostDir(dir: string): string {
   try {
     fs.mkdirSync(dir, true);
