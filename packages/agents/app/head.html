@@ -48,7 +48,13 @@
     --display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
-  html, body { height: 100%; margin: 0; }
+  /* dvh, not vh or a bare 100%: on iOS Safari the visual viewport is shorter
+     than the layout viewport by the height of the bottom toolbar, so a shell
+     sized to 100% put its composer underneath that toolbar — you could type
+     into it and not see what you typed. `dvh` is the unit that tracks the
+     bar coming and going; the percentage stays as the fallback for anything
+     that does not know it. */
+  html, body { height: 100%; height: 100dvh; margin: 0; }
   /* `html body`, not `body`, and the extra specificity is load-bearing.
      LumenJS writes its own <style> block into the shell AFTER this file
      (dev-server/index-html.ts), and that block sets `body { font-family:
