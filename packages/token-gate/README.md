@@ -94,8 +94,10 @@ chmod +x hook/tkg-hook.sh
 # then merge hook/settings.snippet.json into .claude/settings.json
 ```
 
+<!-- website:skip -->
 ## Tests
 
 ```sh
 lumen test packages/token-gate/token-gate.ts
 ```
+<!-- /website:skip -->

@@ -111,12 +111,14 @@ answers and none of them belong in a mapper. `close()` releases the slot.
 
 ## Building
 
+The drivers link C shims, built by this package's `build.sh`. Each shim is
+optional; a missing library is a skipped shim rather than a failed build.
+
+<!-- website:skip -->
 ```sh
 sh packages/plume/build.sh
 ```
-
-Each shim is optional; a missing library is a skipped shim rather than a failed
-build.
+<!-- /website:skip -->
 
 ```sh
 apt install libpq-dev libsqlite3-dev libmariadb-dev   # Debian, Ubuntu
@@ -454,6 +456,7 @@ column type can always be stated outright.
 `entity_live.test.ts` checks that the generated mapping is identical to the
 hand-written one and that every operation works against it.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -501,3 +504,4 @@ that names them, not to the working directory.
 
 Every suite runs against a real server. None of these claims survive a mock:
 the database is half of the mapper.
+<!-- /website:skip -->

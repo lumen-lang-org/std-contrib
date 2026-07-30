@@ -89,6 +89,60 @@
       "version": "0.1.0",
       "summary": "Codebase symbol index (cidx): map/find/refs/search/rank, persistent cache, 8 languages \u2014 AI navigation, no vector DB.",
       "path": "packages/code-index"
+    },
+    {
+      "name": "plume",
+      "version": "0.1.0",
+      "summary": "Typed data-mapper and migration tool over PostgreSQL, SQLite and MySQL via FFI: explicit field/column mapping, projections, relations, checksummed migrations, transactions.",
+      "path": "packages/plume"
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.0",
+      "summary": "OpenTelemetry traces for AI runs over OTLP/HTTP: spans, generations, tools, token usage \u2014 six backends, Langfuse-compatible.",
+      "path": "packages/tracing"
+    },
+    {
+      "name": "pgvector",
+      "version": "0.1.0",
+      "summary": "Persistent vector store on PostgreSQL + pgvector via FFI: upsert, cosine search, distance bounds.",
+      "path": "packages/pgvector"
+    },
+    {
+      "name": "pdf",
+      "version": "0.1.0",
+      "summary": "PDF text and metadata via Poppler: layout mode, page ranges, document info.",
+      "path": "packages/pdf"
+    },
+    {
+      "name": "rest",
+      "version": "0.1.0",
+      "summary": "Router and HTTP server: decorated controllers, a route table checked at startup, JSON replies.",
+      "path": "packages/rest"
+    },
+    {
+      "name": "websocket",
+      "version": "0.1.0",
+      "summary": "RFC 6455 websockets: handshake, frames, server and client \u2014 a browser connects, exchanges and closes clean.",
+      "path": "packages/websocket"
+    },
+    {
+      "name": "socketio",
+      "version": "0.1.0",
+      "summary": "A socket.io server the official browser client connects to: Engine.IO and Socket.IO framing over websocket.",
+      "path": "packages/socketio"
+    },
+    {
+      "name": "sse",
+      "version": "0.1.0",
+      "summary": "Server-sent events: one-way push over an HTTP response that never ends, with resumption.",
+      "path": "packages/sse"
+    },
+    {
+      "name": "agents",
+      "version": "0.1.0",
+      "summary": "Agents, prompts, models, MCP links and sub-agents as database rows \u2014 run, evaluated and reconfigured over HTTP without a restart.",
+      "path": "packages/agents"
     }
   ]
 }
