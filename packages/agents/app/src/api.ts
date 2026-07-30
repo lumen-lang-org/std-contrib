@@ -59,10 +59,31 @@ export type PromptRow = {
   createdAt: string;
 };
 
+export type TemplateRow = {
+  id: string;
+  label: string;
+  description: string;
+  // Which capability page shows it: doc, sheet, deck, page.
+  kind: string;
+  // The skill the page pins when a conversation starts from this template.
+  skillName: string;
+  featuredRank: number;
+};
+
+export const featuredSkills = () => call<SkillRow[]>("/skills?featured=1");
+export const templatesOfKind = (kind: string) =>
+  call<TemplateRow[]>(`/templates?kind=${encodeURIComponent(kind)}`);
+export const startFromTemplate = (threadId: string, templateId: string) =>
+  call<{ template: string; skillName: string; wrote: string[]; refused: string[] }>(
+    `/threads/${encodeURIComponent(threadId)}/artifacts/from-template`,
+    { method: "POST", body: JSON.stringify({ templateId }) });
+
 export type SkillRow = {
   id: string;
   skillName: string;
   description: string;
+  visibility?: string;
+  featuredRank?: number;
   // Mutable, unlike a prompt: a skill is looked up by name at call time, so
   // an edit is live on the next use_skill with no version to point at.
   body: string;

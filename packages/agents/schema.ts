@@ -367,6 +367,64 @@ export function skillFilesMapping(): DbRepository {
   return repository("skill_files", "id", "id", fs);
 }
 
+// A starting point a conversation can be opened from — Kimi's "featured
+// cases". A template is its files; the row is the label on the card.
+//
+// Deliberately not a skill: a skill is instructions for doing, a template is
+// artifacts to begin from. They compose — the Docs page offers make-doc and
+// the document templates together — but a template with a briefing in it
+// would be a skill nobody could attach, and a skill that shipped starting
+// documents would stage them into every run.
+export type TemplateRow = {
+  id: string,
+  label: string,
+  // One line on the card.
+  description: string,
+  // Which capability page shows it: "doc", "sheet", "deck", "page".
+  kind: string,
+  // The skill the page pins when this template starts a conversation, by
+  // name — empty for a template that needs no particular instructions.
+  skillName: string,
+  // Same two axes as skills: who may use it, and where it ranks on the page.
+  visibility: string,
+  featuredRank: int,
+};
+
+export function templatesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("description", "description", "text"),
+    field("kind", "kind", "text"),
+    field("skillName", "skill_name", "text"),
+    field("visibility", "visibility", "text"),
+    field("featuredRank", "featured_rank", "int"),
+  ];
+  return repository("templates", "id", "id", fs);
+}
+
+// The artifacts a template lays down, copied in as version 1 when a
+// conversation starts from it. Paths are artifact paths, so a template with
+// site/index.html and site/css/main.css arrives as folders in the Files rail.
+export type TemplateFileRow = {
+  id: string,
+  templateId: string,
+  path: string,
+  title: string,
+  body: string,
+};
+
+export function templateFilesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("templateId", "template_id", "text"),
+    field("path", "path", "text"),
+    field("title", "title", "text"),
+    field("body", "body", "text"),
+  ];
+  return repository("template_files", "id", "id", fs);
+}
+
 export function agentsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -475,6 +533,8 @@ export function schemaPlan(db: Db): Migration[] {
       + "skill_id " + db.textType + " NOT NULL)"),
     migration("77", "a skill has a visibility",
       "ALTER TABLE skills ADD COLUMN visibility " + db.textType + " NOT NULL DEFAULT 'private'"),
+    migration("79", "templates", createTableSql(db, templatesMapping())),
+    migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),
     migration("61", "a model config can ask for thinking",
