@@ -922,6 +922,13 @@ export class ArtifactPanel extends LitElement {
             @click=${() => this.refresh()}>
             <nr-icon name="refresh-cw" size="small"></nr-icon>
           </nr-button>`}
+        <!-- The list can put the rail away too — on a phone it covers the
+             conversation, and before this the only way out was the header
+             toggle hidden behind it. -->
+        <nr-button id="a-close-list" size="small" title="Close the panel"
+          @click=${() => this.dispatchEvent(new CustomEvent("close-rail"))}>
+          <nr-icon name="x" size="small"></nr-icon>
+        </nr-button>
       </h3>
       ${this.problem === "" ? "" : html`<div class="problem">${this.problem}</div>`}
       ${this.said === "" ? "" : html`<div class="said">${this.said}</div>`}
