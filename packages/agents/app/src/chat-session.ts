@@ -21,7 +21,7 @@
 // shape rather than a gap. When this console grows file upload or a stop
 // button, they get added here deliberately.
 
-import { LiveStep, RoundSteps, Thought, WireRef, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
+import { LiveStep, RoundSteps, Thought, TurnArtifactRef, WireRef, artifactsByTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import * as live from "./live.js";
 import { diffLines } from "./diff.js";
@@ -191,6 +191,30 @@ function skillFields(args: string): { name: string } | null {
     if (typeof p.name !== "string" || p.name === "") return null;
     return { name: p.name };
   } catch { return null; }
+}
+
+/* The turn's saves, as cards on the message itself — the same shape as the
+   attach cards beside the composer, so a file the model wrote reads like a
+   file a person handed over. Inline styles for the same reason every card in
+   here carries them: this markup lands inside nr-chatbot's shadow root, where
+   the console's stylesheets cannot reach.
+   Clickable through the same delegated path as the diff chips: the click
+   bubbles composed out of the shadow root and the console reads the data
+   attributes off it (chipClick). */
+export function refCards(refs: WireRef[]): string {
+  if (!refs || refs.length === 0) return "";
+  const cards = refs.map((r) => {
+    const name = r.path.split("/").filter((p) => p !== "").pop() ?? r.path;
+    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "file";
+    return `<span data-open-path="${escapeHtml(r.path)}" data-open-version="${r.version}"` +
+      ` style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;` +
+      `padding:8px 14px;border:1px solid rgba(0,0,0,.13);border-radius:14px;background:#fff;` +
+      `cursor:pointer;max-width:260px">` +
+      `<span style="font-weight:600;font-size:13.5px;color:rgba(0,0,0,.85);max-width:230px;` +
+      `overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(name)}</span>` +
+      `<span style="font-size:11.5px;color:rgba(0,0,0,.45)">${ext} · v${r.version}</span></span>`;
+  }).join("");
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${cards}</div>`;
 }
 
 export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
@@ -585,10 +609,18 @@ export class ChatSession {
       // the transcript, where it can be read, rather than in an error toast.
       // The card and the answer are one message, so they cannot drift apart or
       // be read as belonging to different turns.
+      let saved: WireRef[] = reply.refs ?? [];
+      if (saved.length === 0 && reply.seq >= 0) {
+        const rows = await artifactsByTurn(this.threadId).catch(() => [] as TurnArtifactRef[]);
+        saved = rows.filter((r) => r.turnSeq === reply.seq)
+          .map((r) => ({ slot: r.slot, version: r.version, path: r.path }));
+      }
       this.replaceLive({
         id: reply.runId,
         sender: "bot",
-        text: stepsCard(this.live, this.thoughts) + renderMarkdown(escapeHtml(reply.ok ? reply.text : reply.error)),
+        text: stepsCard(this.live, this.thoughts)
+          + renderMarkdown(escapeHtml(reply.ok ? reply.text : reply.error))
+          + refCards(saved),
         refs: reply.refs,
         error: !reply.ok,
       }, liveId);
@@ -750,11 +782,12 @@ export class ChatSession {
     // a live-only ornament: it is what the answer above it was made of, and a
     // reload that dropped it left the conversation claiming work it no longer
     // showed. Asked in parallel — the transcript does not depend on the steps.
-    const [turns, past] = await Promise.all([
+    const [turns, past, byTurn] = await Promise.all([
       transcript(threadId),
       threadSteps(threadId, "all").catch(() => ({ steps: [], thoughts: [] } as Pick<RoundSteps, "steps" | "thoughts">)),
+      artifactsByTurn(threadId).catch(() => [] as TurnArtifactRef[]),
     ]);
-    this.apply(turns, past);
+    this.apply(turns, past, byTurn);
   }
 
   /** The transcript, joined and rendered — everything `open` does with what it
@@ -769,6 +802,12 @@ export class ChatSession {
   apply(
     turns: TranscriptTurn[],
     past: Pick<RoundSteps, "steps" | "thoughts">,
+    /* The by-turn join, because the transcript's own refs arrive empty from
+       the engine while the join is filled — verified against a live save:
+       turn refs [], by-turn carrying the row. A card is drawn from whichever
+       source has it. Optional so the SSR loader, which fetches two things,
+       keeps working; the client re-applies with all three. */
+    byTurn: TurnArtifactRef[] = [],
   ): void {
 
     // A round's rows carry the seq of the turn that *opened* it — the question —
@@ -786,6 +825,7 @@ export class ChatSession {
     for (const s of past.steps) round(s.seq).steps.push(s);
     for (const t of past.thoughts) round(t.seq).thoughts.push(t);
     const pending = [...rounds.keys()].sort((a, b) => a - b);
+    const refsPending = [...byTurn].sort((a, b) => a.turnSeq - b.turnSeq);
     this.doneSeq = pending.length > 0 ? pending[pending.length - 1] : -1;
     this.renderedSeq = turns.length > 0 ? Math.max(...turns.map((t) => t.seq)) : -1;
 
@@ -798,10 +838,20 @@ export class ChatSession {
         const thoughts = mine.flatMap((s) => rounds.get(s)!.thoughts);
         card = stepsCard(steps, thoughts);
       }
+      let saved: WireRef[] = t.refs ?? [];
+      if (t.role !== "user" && saved.length === 0) {
+        const mine: WireRef[] = [];
+        while (refsPending.length > 0 && refsPending[0].turnSeq < t.seq) {
+          const r = refsPending.shift() as TurnArtifactRef;
+          mine.push({ slot: r.slot, version: r.version, path: r.path });
+        }
+        saved = mine;
+      }
       return {
         id: `t${i}`,
         sender: t.role === "user" ? "user" : "bot" as const,
-        text: t.role === "user" ? escapeHtml(t.text) : card + renderMarkdown(escapeHtml(t.text)),
+        text: t.role === "user" ? escapeHtml(t.text)
+          : card + renderMarkdown(escapeHtml(t.text)) + refCards(saved),
         refs: t.refs,
         timestamp: new Date().toISOString(),
       };
