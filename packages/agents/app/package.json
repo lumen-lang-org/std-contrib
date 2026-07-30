@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@nuraly/lumenjs": "file:vendor/nuraly-lumenjs-0.16.3-codejar.tgz",
-    "@nuraly/lumenui": "file:vendor/nuraly-lumenui-0.16.3-ssr-chatbot.tgz",
+    "@nuraly/lumenui": "file:vendor/nuraly-lumenui-0.16.3-served-look.tgz",
     "better-sqlite3": "^12.11.1",
     "docx-preview": "^0.4.0",
     "lit": "^3.2.0",

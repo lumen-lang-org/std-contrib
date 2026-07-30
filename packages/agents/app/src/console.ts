@@ -20,93 +20,6 @@ import {
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
 
-// Handed to nr-chatbot's shadow root, where these elements live. The pair
-// min-width:0 and max-width:100% is what lets a bubble's content be narrower
-// than the unbreakable line it holds; overflow-wrap breaks the line itself,
-// for the proto type names in an answer, which have no space to break at.
-const BOUNDED_MESSAGE = `
-  .message__content { min-width: 0; max-width: 100%; }
-  .message__content pre, .message__content code { overflow-wrap: anywhere; }
-  /* hljs token colours for the script cards. The spans are minted in
-     chat-session; the shadow boundary is why the colours live here. */
-  .hljs-keyword { color: #7c3aed; }
-  .hljs-string { color: #2f8a4c; }
-  .hljs-number, .hljs-literal { color: #a3512e; }
-  .hljs-comment { color: #8a8f98; font-style: italic; }
-  .hljs-built_in, .hljs-title { color: #1d4ed8; }
-  .hljs-params { color: inherit; }
-
-  /* --- the Kimi composer (KIMI-DESIGN.md) ---------------------------------
-     The hero surface: 24px radius, the page's only bordered card, and a
-     soft double shadow instead of a heavy edge. Its bottom strip carries the
-     configuration; the text sits above it. */
-  .input-container {
-    border-radius: 24px !important;
-    border: 1px solid rgba(0,0,0,.17) !important;
-    box-shadow: 0 4px 12px rgba(0,0,0,.03), 0 5px 16px -4px rgba(0,0,0,.07) !important;
-    padding: 6px 8px 6px 20px !important;
-    background: #fff !important;
-    transition: border-color .15s cubic-bezier(.23,1,.32,1),
-                box-shadow .15s cubic-bezier(.23,1,.32,1);
-  }
-  .input-container:focus-within {
-    border-color: rgba(0,0,0,.28) !important;
-    box-shadow: 0 4px 14px rgba(0,0,0,.05), 0 6px 20px -4px rgba(0,0,0,.09) !important;
-  }
-  /* 16/24 body text, placeholder in quaternary ink — Kimi's own ramp. */
-  .input-box__input { font-size: 16px !important; line-height: 24px !important; }
-  .input-box__input:empty:before { color: rgba(0,0,0,.3) !important; }
-  /* The action strip on the card's bottom edge. */
-  .action-buttons-row { padding: 2px 4px 2px 0 !important; }
-
-  /* Suggestion pills: full-round, hairline, ink on hover — not buttons. */
-  .suggestion {
-    border-radius: 999px !important;
-    border: 1px solid rgba(0,0,0,.13) !important;
-    background: #fff !important;
-    padding: 7px 16px !important;
-    font-size: 13.5px !important;
-    color: rgba(0,0,0,.75) !important;
-    box-shadow: none !important;
-    transition: background-color .15s cubic-bezier(.23,1,.32,1),
-                border-color .15s cubic-bezier(.23,1,.32,1),
-                color .15s cubic-bezier(.23,1,.32,1);
-  }
-  .suggestion:hover {
-    background: rgba(0,0,0,.04) !important;
-    border-color: rgba(0,0,0,.22) !important;
-    color: rgba(0,0,0,.9) !important;
-  }
-  .suggestion-container { gap: 8px !important; padding-top: 18px !important; }
-
-  /* The brand line above the composer: big, tight, ink. */
-  .empty-state__content, .empty-state h1, .empty-state h2 {
-    font-size: 40px !important; line-height: 1.1 !important; font-weight: 700 !important;
-    letter-spacing: -0.02em !important; color: rgba(0,0,0,.9) !important; margin: 0 !important;
-  }
-  /* The whole home block sits at the upper third rather than dead centre —
-     the page's centre of gravity, which is where the eye starts. */
-  .chat-container--boxed .chatbot-boxed-area { justify-content: flex-start !important;
-     padding-top: 16vh !important; }
-
-  /* A message column that matches the composer's, so the conversation and
-     the thing you type into it share one measure. */
-  .messages { padding: 8px 4px !important; }
-
-  /* Suggestions are the empty state's prompt, not a toolbar. nr-chatbot keeps
-     its own copy of the controller's state, so emptying the array in
-     getState() does not reach it — but this sheet is inside its shadow root
-     and :host is the element the console owns. Hiding beats fighting the
-     component for ownership of its own render.
-
-     No backticks in this comment, and that is not style: this whole block is
-     a template literal, so one would close it and the rest of the file would
-     be parsed as TypeScript.
-
-     On a phone they took a third of the screen between the message you had
-     just sent and the answer arriving. */
-  :host(.talking) .suggestion-container { display: none !important; }
-`;
 
 /* The conversation the address names, or "". One function, because the shape
    of the URL is the sort of thing that otherwise gets half-changed: this used
@@ -201,6 +114,18 @@ export class AgentConsole extends LitElement {
        420px panel beside nothing is just a narrower page with a gap. */
     @media (max-width: 640px) {
       header { padding: 8px 12px; gap: 6px; }
+      /* The home group centres on a phone rather than hanging from a fixed
+         16vh. That padding is measured against a desktop window, where it puts
+         the wordmark at the eye's starting point; on a tall narrow screen it
+         pins everything to the top third and leaves half the display empty
+         below the composer — which is what a first load looks like on a phone.
+         Centring keeps the same relationship between wordmark and composer at
+         any height. */
+      nr-chatbot::part(chatbot-boxed-area),
+      nr-chatbot .chatbot-boxed-area {
+        justify-content: center !important;
+        padding-top: 0 !important;
+      }
       .title { font-size: 15px; }
       /* The model chip is the first thing to go: it names a choice you make
          rarely, and the picker beside it still says which agent is answering. */
@@ -505,16 +430,13 @@ export class AgentConsole extends LitElement {
   // the answer's type names with it. Nothing in this file could reach it: the
   // element lives in that component's shadow root, so the rule is handed to
   // the root itself — settings.ts dresses nr-code-editor the same way.
-  protected updated() {
-    for (const el of this.renderRoot.querySelectorAll("nr-chatbot")) {
-      const root = el.shadowRoot as (ShadowRoot & { bounded?: boolean }) | null;
-      if (root === null || root.bounded === true) continue;
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(BOUNDED_MESSAGE);
-      root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
-      root.bounded = true;
-    }
-  }
+  // The stylesheet this used to adopt into nr-chatbot's shadow root moved
+  // into the component's own static styles (nuraly-ui chatbot.style.ts, "the
+  // served look"). Adopted sheets exist only after hydration, so every rule
+  // in it was false on the server-rendered first paint — the composer painted
+  // square and the empty state jumped into place. Static styles are
+  // serialized into the declarative shadow root, so the same rules are now
+  // true from the first frame, and there is nothing left to inject here.
 
   // A chip inside a tool card names a version a script landed; clicking it
   // opens the panel on that file's diff. The card is markup inside
