@@ -17,25 +17,30 @@
 // The package's single `@nuraly/lumenui/bundle` would sidestep the whole
 // question and was tried first: it imports `hls.js`, which the package
 // declares as a dependency of no kind, so it cannot resolve.
-import "@nuraly/lumenui/canvas";
-import "@nuraly/lumenui/dropdown";
-import "@nuraly/lumenui/modal";
-// Neither of these is in the canvas bundle, and neither collides with it.
+
+// Order is load-bearing now, in a way it was not with the bundles.
+//
+// Each `<component>/bundle.js` inlined everything it depended on, so any one
+// import registered a whole subtree and the sequence never mattered — what
+// mattered was that two bundles must not both inline the same tag, which is
+// the double-define trap this file used to be about.
+//
+// The per-component entries inline nothing. They declare `requiredComponents`
+// and check them, so a composite imported before its parts throws "Required
+// component nr-icon is not registered" during module load — and a throw there
+// blanks the whole console, not the one component. So: primitives first,
+// composites after, and nothing here reordered casually.
+import "@nuraly/lumenui/icon";
+import "@nuraly/lumenui/button";
+import "@nuraly/lumenui/input";
 import "@nuraly/lumenui/checkbox";
 import "@nuraly/lumenui/textarea";
-// A surface to work on, as opposed to nr-modal's question to answer. Settings
-// is the former: it is a place you go, not a thing you confirm.
+import "@nuraly/lumenui/dropdown";
+import "@nuraly/lumenui/modal";
 import "@nuraly/lumenui/overlay";
-// nr-code-editor — the prompt editor — is deliberately *not* imported here.
-// The canvas bundle already carries it, and importing its own bundle as well
-// threw `define("nr-code-editor") has already been used` before the console
-// had drawn anything at all. Widening the list above is how this file breaks;
-// grep a bundle for the tag before adding it.
-
-import "@nuraly/lumenui/chatbot";
-import "@nuraly/lumenui/input";
-import "@nuraly/lumenui/button";
-import "@nuraly/lumenui/icon";
+// Composites: each of these needs some of the above already registered.
 import "@nuraly/lumenui/select";
 import "@nuraly/lumenui/popconfirm";
 import "@nuraly/lumenui/code-editor";
+import "@nuraly/lumenui/canvas";
+import "@nuraly/lumenui/chatbot";
