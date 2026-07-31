@@ -384,6 +384,33 @@ export class ArtifactPanel extends LitElement {
   // after the template put the empty host in the DOM.
   private officeShown = "";
 
+  // Documents already drawn, kept whole and detached between openings.
+  //
+  // Re-rendering a document that has not changed is pure waste, and closing
+  // the panel used to throw the render away: reopening the same file paid for
+  // the fetch, the PDF and every page again, and landed the reader back at the
+  // top of a document they had scrolled halfway through.
+  //
+  // What is stored is the rendered NODES, not markup — moving a canvas between
+  // parents keeps its pixels, where cloning it would give back blank
+  // rectangles (the same fact office-view.ts's thumbnail rail is built around).
+  // So a reopen re-parents what was already drawn.
+  //
+  // Keyed by slot:version, which is why this needs no invalidation: a version
+  // is append-only, so a key names bytes that cannot change. A new version is
+  // a new key and draws itself; the old one stays valid for the version strip.
+  private officeDrawn = new Map<string, { pages: HTMLElement[]; scrollTop: number }>();
+
+  // Where the reader was in the document that is on screen now. Read before
+  // the host is given up, because after that the scroller is gone.
+  private keepOfficeScroll() {
+    if (this.officeShown === "") return;
+    const held = this.officeDrawn.get(this.officeShown);
+    if (held === undefined) return;
+    const doc = this.renderRoot.querySelector<HTMLElement>("#office-host .office-doc");
+    if (doc !== null) held.scrollTop = doc.scrollTop;
+  }
+
   private async drawOffice() {
     const a = this.open;
     const v = this.shown;
@@ -392,7 +419,19 @@ export class ArtifactPanel extends LitElement {
     const host = this.renderRoot.querySelector<HTMLElement>("#office-host");
     if (kind === null || host === null) { this.officeShown = ""; return; }
     const key = `${a.slot}:${v.version}`;
-    if (this.officeShown === key) return;
+    if (this.officeShown === key && host.childElementCount > 0) return;
+
+    // Drawn before: put it back rather than build it again. The nodes are the
+    // same ones, so the rail's listeners and the page canvases come with them.
+    const held = this.officeDrawn.get(key);
+    if (held !== undefined) {
+      this.officeShown = key;
+      host.replaceChildren(...held.pages);
+      const doc = host.querySelector<HTMLElement>(".office-doc");
+      if (doc !== null) doc.scrollTop = held.scrollTop;
+      return;
+    }
+
     this.officeShown = key;
     try {
       // The version is pinned rather than left to the server: the panel
@@ -400,6 +439,7 @@ export class ArtifactPanel extends LitElement {
       // race a save and could answer with a page the reader is not looking at.
       await renderOffice(host, kind, v.content,
         { threadId: this.threadId, slot: a.slot, version: v.version });
+      this.officeDrawn.set(key, { pages: Array.from(host.children) as HTMLElement[], scrollTop: 0 });
     } catch (e) {
       this.officeShown = "";
       this.problem = (e as Error).message;
@@ -450,6 +490,45 @@ export class ArtifactPanel extends LitElement {
     this.wsFiles = await listFiles(this.threadId).catch(() => [] as WorkspaceFile[]);
     const listed = await listArtifacts(this.threadId).catch(() => [] as ArtifactListing[]);
     this.sortInto(listed);
+    this.warmOffice(listed);
+  }
+
+  // How many documents to convert ahead of being asked for. A conversation can
+  // hold dozens; converting all of them would spend the box's CPU on files
+  // nobody opens. The newest few are what a reader reaches for.
+  private static readonly WARM_MAX = 3;
+
+  // Ask the server to convert the newest office documents before anyone opens
+  // one, so the first open is a cache hit instead of a two-second wait.
+  //
+  // Fire-and-forget on purpose: nothing here is awaited, no state is set, and
+  // every failure is swallowed. A warm that does not happen costs a reader the
+  // conversion they would have paid for anyway — it must never be able to make
+  // the rail late, or surface an error about a file nobody asked to see.
+  //
+  // Safe to call on every refresh, including the 4-second poller: the server
+  // caches by artifact:version forever, so a repeat is a row lookup. Only the
+  // first call for a given version does work.
+  // Versions already asked for, so a warm happens once each and not once per
+  // poll. `refresh` runs on a 4-second timer; without this the panel asked the
+  // server to convert the same document every four seconds for as long as the
+  // conversation stayed open. Every repeat was a cache hit rather than a
+  // conversion, so it showed up as nothing at all — just a request per
+  // document per tick, from every open tab, forever.
+  private warmed = new Set<string>();
+
+  private warmOffice(listed: ArtifactListing[]) {
+    const docs = listed.filter((a) => officeKind(a.path) !== null).slice(0, ArtifactPanel.WARM_MAX);
+    for (const a of docs) {
+      const version = a.version;
+      if (version < 1) continue;
+      const key = `${a.slot}:${version}`;
+      if (this.warmed.has(key)) continue;
+      this.warmed.add(key);
+      void import("./api.js")
+        .then((api) => api.officePdf(this.threadId, a.slot, version))
+        .catch(() => { });
+    }
   }
 
   // A listing that arrived rather than one that was asked for. Everything
@@ -480,6 +559,10 @@ export class ArtifactPanel extends LitElement {
   }
 
   private close() {
+    // Where the reader was, kept before the host goes. Closing is the common
+    // way to leave a document and the one that used to lose the most: the
+    // panel came back at the top of the file every time.
+    this.keepOfficeScroll();
     this.menuOpen = false;
     this.open = null;
     this.shown = null;
@@ -613,24 +696,57 @@ export class ArtifactPanel extends LitElement {
     await this.show(a, version);
   }
 
+  // Version bodies already fetched, by slot:version.
+  //
+  // Same key and the same reason as officeDrawn above: a version is
+  // append-only, so this can never go stale and never needs clearing. What it
+  // buys is that reopening a file the reader just closed does not go back to
+  // the network for bytes that cannot have changed.
+  private bodies = new Map<string, ArtifactVersion>();
+
   private async show(artifact: ArtifactListing, version: number) {
+    // Already on screen: do nothing at all.
+    //
+    // Not an optimisation — a correctness fix. Every path below resets
+    // something, and reopening the file that is already open therefore threw
+    // away the render, the scroll position and the diff/content toggle, then
+    // rebuilt them identically. Reopening should be a no-op, and now is.
+    if (this.open !== null && this.open.slot === artifact.slot
+      && this.shown !== null && this.shown.version === version) {
+      return;
+    }
+    // Leaving a document: remember where the reader was in it first.
+    this.keepOfficeScroll();
     // A fresh open from the list compares against v1 by default; showDiff
     // sets its own base first and show honours whatever is there.
     if (this.open === null || this.open.slot !== artifact.slot) {
       if (this.diffBase === 0) this.diffBase = 1;
     }
     this.open = artifact;
-    this.shown = null;
     this.arming = "";
     this.problem = "";
     this.said = "";
     this.diff = null;
     this.hunkAt = -1;
-    try {
-      this.shown = await readArtifactVersion(this.threadId, artifact.slot, version);
-    } catch (e) {
-      this.problem = (e as Error).message;
-      return;
+
+    const key = `${artifact.slot}:${version}`;
+    const held = this.bodies.get(key);
+    if (held !== undefined) {
+      // Straight to the body: no null in between, so the panel never blanks
+      // and Lit keeps the office host it already has.
+      this.shown = held;
+    } else {
+      // Only a body nobody has fetched clears the panel first, because only
+      // then is there a wait worth showing.
+      this.shown = null;
+      try {
+        const row = await readArtifactVersion(this.threadId, artifact.slot, version);
+        this.bodies.set(key, row);
+        this.shown = row;
+      } catch (e) {
+        this.problem = (e as Error).message;
+        return;
+      }
     }
     // Diff first, content on the toggle: a version past the first is an edit,
     // and the first question about an edit is what it changed. Three

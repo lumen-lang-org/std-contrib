@@ -40,8 +40,84 @@ const CAPS: Record<string, { label: string; icon: string; kind: string }> = {
   "make-deck": { label: "Slides", icon: "image", kind: "deck" },
 };
 const capLabel = (name: string) => CAPS[name]?.label ?? name;
-const capIcon = (name: string) => CAPS[name]?.icon ?? "book-open";
+// The fallback for a skill this table does not know, and it has to be a name
+// the icon set actually has. `book-open` was not one: nr-icon draws the NAME
+// when it has no glyph for it, so every unmapped skill rendered the literal
+// word "book-open" where its icon belongs — in the capability row and in the
+// composer's + menu, which is exactly where a new skill first appears.
+// `tool` is in the set (checked against icon-paths.js, 150 names) and is the
+// honest generic: a skill is a thing the agent can use.
+const capIcon = (name: string) => CAPS[name]?.icon ?? "tool";
 const capKind = (name: string) => CAPS[name]?.kind ?? "";
+
+/* Take the heavy click ring off LumenUI's controls.
+ *
+ * Its buttons draw `outline: 0.25rem solid #7c3aed` on focus — a 4px violet
+ * square. On the composer's `+` that lands as a box bigger than the button:
+ * clicking it opens the menu, focus returns to the button when the menu
+ * closes, `:focus-visible` matches that programmatic return, and the ring
+ * stays. It is the loudest mark on the page and it is telling the person who
+ * just clicked where they clicked.
+ *
+ * Removed on the LumenUI components rather than softened, which is a real
+ * trade and is recorded here rather than left to be discovered. `:focus-visible`
+ * is how a keyboard user knows where they are, and these components no longer
+ * say. What made softening insufficient: the ring is not only drawn on a
+ * genuine tab — closing the `+` menu returns focus to the button
+ * programmatically, `:focus-visible` matches that, and a 2px ring sat there
+ * after every use of the menu just as the 4px one had.
+ *
+ * The console's OWN controls keep theirs — sidebar.ts and settings.ts still
+ * carry `:focus-visible { outline: 2px solid var(--focus) }`, and this sheet is
+ * only handed to component shadow roots — so tabbing through the shell is still
+ * followable. If the whole interface should lose it, that is those two rules,
+ * and it should be a decision rather than a side effect of this one.
+ *
+ * Handed to each component's shadow root because that is where the rule lives
+ * — a stylesheet out here cannot reach inside one. The walk is deep for the
+ * same reason: nr-button appears inside nr-chatbot, inside artifact-panel,
+ * inside settings, each behind its own root. `dressed` latches per root so a
+ * re-render does not keep stacking sheets. */
+const FOCUS_RING = `
+  :host(:focus), :host(:focus-visible), :host(:focus-within),
+  button:focus, button:focus-visible, button:focus-within,
+  a:focus, a:focus-visible,
+  [tabindex]:focus, [tabindex]:focus-visible,
+  input:focus, input:focus-visible,
+  select:focus, select:focus-visible,
+  textarea:focus, textarea:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  /* The other half of the mark, and the easier one to miss: as well as the
+     outline, these controls repaint their 1px border violet on focus
+     (#7c3aed, hardcoded in the component — no custom property to set). At
+     rest the composer's plus is a near-white rgb(239,243,244); focused it went
+     violet and stayed that way after the menu closed. Held at the console's
+     own --border instead, which inherits across the shadow boundary the way
+     every custom property does, so it follows the theme rather than pinning a
+     second grey. */
+  button:focus, button:focus-visible, button:focus-within,
+  input:focus, input:focus-visible,
+  select:focus, select:focus-visible,
+  textarea:focus, textarea:focus-visible {
+    border-color: var(--border, #eff3f4) !important;
+  }
+`;
+
+function softenFocusRings(root: ParentNode) {
+  for (const el of root.querySelectorAll("*")) {
+    const sr = (el as Element).shadowRoot as (ShadowRoot & { dressed?: boolean }) | null;
+    if (sr === null) continue;
+    if (sr.dressed !== true) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(FOCUS_RING);
+      sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, sheet];
+      sr.dressed = true;
+    }
+    softenFocusRings(sr);
+  }
+}
 
 @customElement("agent-console")
 export class AgentConsole extends LitElement {
@@ -364,6 +440,28 @@ export class AgentConsole extends LitElement {
     if (this.unlisten !== null) { this.unlisten(); this.unlisten = null; }
   }
 
+  // Take the click ring off the composer's own buttons.
+  //
+  // nr-chatbot draws a 4px violet square around its `+` and send buttons on
+  // `:focus-within`, which fires on a MOUSE click and then stays — so clicking
+  // the plus leaves a heavy box around it until something else takes focus.
+  // It is the loudest thing on the page and it means nothing to the person who
+  // just clicked, because they know where they clicked.
+  //
+  // `:focus-within` is what makes it wrong, not the outline: it cannot tell a
+  // pointer from a keyboard. So the rule is replaced rather than deleted —
+  // `:focus-visible` keeps a ring for anyone tabbing through, which is who the
+  // indicator was for. Removing it outright would make the composer
+  // unnavigable without a mouse.
+  //
+  // Handed to the shadow root because that is where the rule lives; a
+  // stylesheet here cannot reach inside a component. Same mechanism, and the
+  // same `dressed` latch against re-adding it on every render, as
+  // settings.ts's markdown-token sheet — see the comment there.
+  protected updated() {
+    softenFocusRings(this.renderRoot);
+  }
+
   private unlisten: (() => void) | null = null;
 
   /* The open conversation, in the address bar.
@@ -527,7 +625,7 @@ export class AgentConsole extends LitElement {
   private attachMenu() {
     let items = [{ id: "upload-file", label: "Add files", icon: "paperclip" }];
     for (const c of this.capabilities) {
-      items = [...items, { id: "skill:" + c.skillName, label: c.skillName, icon: "book-open" }];
+      items = [...items, { id: "skill:" + c.skillName, label: c.skillName, icon: capIcon(c.skillName) }];
     }
     return items;
   }
