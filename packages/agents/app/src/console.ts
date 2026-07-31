@@ -124,7 +124,12 @@ export class AgentConsole extends LitElement {
       /* The second rail stops sharing the width and covers instead. */
       artifact-panel {
         position: fixed; inset: 0 0 0 auto; z-index: 50;
-        width: min(420px, 100vw); box-shadow: 0 0 32px -8px rgba(0,0,0,.28);
+        /* Full width, not min(420px, 100vw). Below this breakpoint the panel
+           already covers the conversation, so a 420px panel on a 440px phone
+           leaves a 20px sliver of a conversation nobody can read next to a
+           document squeezed into 420px — the worst of both. A document is
+           what you came to look at; give it the screen. */
+        width: 100vw; box-shadow: 0 0 32px -8px rgba(0,0,0,.28);
       }
     }
     @media (min-width: 1025px) { .icon.nav { display: none; } }

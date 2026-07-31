@@ -295,7 +295,16 @@ export class ArtifactPanel extends LitElement {
   }
 
   protected willUpdate() {
-    this.style.width = `${this.panelWidth}px`;
+    // The dragged width is a desktop affordance. Below the breakpoint the
+    // panel is the screen — the stylesheet says 100vw — and an inline width
+    // beats a stylesheet, so writing one here left a 309px panel on a 440px
+    // phone and starved the document host to 149px, which is what made a
+    // page render three words wide. Nothing inline under 1024; the CSS wins.
+    if (window.innerWidth > 1024) {
+      this.style.width = `${this.panelWidth}px`;
+    } else {
+      this.style.removeProperty("width");
+    }
     this.classList.toggle("resizing", this.resizing);
   }
 
