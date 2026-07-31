@@ -776,6 +776,19 @@ class TemplateApi {
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, templateFilesMapping(), param(req, "fileId")));
   }
+
+  // A template's files are editable, so they are removable — a seed that
+  // replaces what a template ships needs to retire what it shipped before,
+  // and without this the old file rides along forever, laid down beside its
+  // replacement every time somebody starts from the template.
+  @del("/:id/files/:fileId")
+  removeFile(req: Request): Reply {
+    if (!existsById(this.db, templateFilesMapping(), param(req, "fileId"))) {
+      return notFound("template file " + param(req, "fileId"));
+    }
+    deleteById(this.db, templateFilesMapping(), param(req, "fileId"));
+    return noContent();
+  }
 }
 
 @controller("/skills")

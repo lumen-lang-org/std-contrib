@@ -37,8 +37,36 @@ def call(path, method="GET", body=None):
 # libraries live in one image and not the other, and it names the /artifacts
 # prefix because that is where the run's reconcile looks — a document written
 # anywhere else is a file in a container nobody will ever see again.
-def brief(what, env_lib, module, out_dir, spec, closing):
+# Two paths, and the briefing has to make the choice obvious, because getting
+# it wrong is silent: building beside a template produces a correct-looking
+# document that threw away the styles, the tables and the formulas the person
+# picked the template for.
+def brief(what, env_lib, module, out_dir, spec, closing, edit_call):
     return f"""Write {what} the reader can download.
+
+FIRST: look at this conversation's files. If a template is already here — a
+{out_dir.strip('/').rstrip('s')} file you did not write — the person started from
+it and wants THAT document filled in, not a new one beside it.
+
+To fill it, name it in `paths` so the run materialises it, then edit it where
+it lands and save it back to the same path. The run appends a version to the
+document they chose:
+
+run_script({{
+  language: "python",
+  environment: "office",
+  paths: ["<the template's path>"],
+  mayCreate: false,
+  source: <the script below>,
+}})
+
+import sys; sys.path.insert(0, "/skills/{module}")
+{edit_call}
+
+Placeholders are <ANGLED>. Leave any you genuinely cannot answer — an
+unanswered placeholder should look unanswered, not become a blank line.
+
+OTHERWISE, with no template in the conversation, write one from nothing:
 
 Run this in the office environment — it has {env_lib}; main does not.
 One call does everything:
@@ -67,6 +95,7 @@ SKILLS = [
     {
         "name": "make-doc",
         "file": "build_doc.py",
+        "also": "edit_doc.py",
         "rank": 1,
         "description": "Write a Word document (.docx) from titled sections of paragraphs and bullets",
         "body": brief(
@@ -80,11 +109,16 @@ SKILLS = [
   ],
 }""",
             "Headings carry the structure; do not fake them with bold paragraphs.",
+            edit_call="""from edit_doc import fill
+fill("/artifacts/<the template's path>",
+     {"<TITLE>": "...", "<PERIOD>": "...", "<item>": "..."},
+     {"What happened": ["extra bullet", "..."]})""",
         ),
     },
     {
         "name": "make-sheet",
         "file": "build_sheet.py",
+        "also": "edit_sheet.py",
         "rank": 2,
         "description": "Write a spreadsheet (.xlsx) from named sheets of columns and rows",
         "body": brief(
@@ -96,11 +130,16 @@ SKILLS = [
   ],
 }""",
             "Numbers go in as numbers, not strings, or the reader's own formulas will not add.",
+            edit_call="""from edit_sheet import fill
+# Only the columns a person fills — a row that reaches into the variance
+# column overwrites the formula it was there to use.
+fill("/artifacts/<the template's path>", [["<item>", 0, 0], ...])""",
         ),
     },
     {
         "name": "make-deck",
         "file": "build_deck.py",
+        "also": "edit_deck.py",
         "rank": 3,
         "description": "Write a presentation (.pptx) from a title and bulleted slides",
         "body": brief(
@@ -114,6 +153,10 @@ SKILLS = [
   ],
 }""",
             "One idea per slide, at most five bullets — a slide is a prompt for a speaker, not a page of prose.",
+            edit_call="""from edit_deck import fill
+fill("/artifacts/<the template's path>",
+     {"<COMPANY>": "...", "<the one sentence>": "..."},
+     {"Problem": ["...", "..."]})""",
         ),
     },
 ]
@@ -135,12 +178,15 @@ def main():
         status, out = call("/skills/" + sid, "PUT", row) if exists else call("/skills", "POST", row)
         print(f"{s['name']:12} skill {status}", "" if status < 400 else out[:120])
 
-        body = open(os.path.join(HERE, s["file"])).read()
-        frow = {"id": sid + "-builder", "skillId": sid, "path": s["file"], "body": body}
-        status, out = call(f"/skills/{sid}/files/{frow['id']}", "PUT", frow)
-        if status == 404:
-            status, out = call(f"/skills/{sid}/files", "POST", frow)
-        print(f"{s['name']:12} file  {status}", "" if status < 400 else out[:120])
+        # Both builders: one writes a document from nothing, one fills the
+        # one already in the conversation. The briefing chooses between them.
+        for suffix, name in [("builder", s["file"]), ("editor", s["also"])]:
+            body = open(os.path.join(HERE, name)).read()
+            frow = {"id": f"{sid}-{suffix}", "skillId": sid, "path": name, "body": body}
+            status, out = call(f"/skills/{sid}/files/{frow['id']}", "PUT", frow)
+            if status == 404:
+                status, out = call(f"/skills/{sid}/files", "POST", frow)
+            print(f"{s['name']:12} {name:15} {status}", "" if status < 400 else out[:120])
 
     print("featured now:", call("/skills?featured=1")[1][:120])
 
