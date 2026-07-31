@@ -61,6 +61,47 @@ function skeleton(host: HTMLElement): { nav: HTMLElement; doc: HTMLElement } {
 // the page, not a picture of one.
 const THUMB_W = 92;
 
+/* Fit a rendered page to the column by scaling it, never by resizing it.
+ *
+ * docx-preview lays a page out at its true size — 816px for Letter, 794 for
+ * A4 — with the document's own margins and fonts. Making that fit by setting
+ * width:auto is what turned an A4 page into a 317px column of system-ui: the
+ * layout was recomputed at the wrong size instead of the right one being
+ * shown smaller. Scaling keeps every measurement the document asked for and
+ * changes only how big it appears.
+ *
+ * The scaled page still occupies its unscaled box in flow, so the height is
+ * corrected too — otherwise every page leaves the whitespace of a full-size
+ * one beneath it. Re-run on resize because the column's width is what the
+ * scale is computed against. */
+function fitPages(host: HTMLElement, pages: HTMLElement[]): void {
+  const apply = () => {
+    // The padding the host already has; the page must not sit under it.
+    const room = host.clientWidth - 20;
+    for (const page of pages) {
+      page.style.transform = "";
+      page.style.height = "";
+      const natural = page.offsetWidth;
+      if (natural <= 0) { continue; }
+      // Never enlarge: a page smaller than the column stays its own size,
+      // because a document rendered bigger than it was written is a lie about
+      // its typography, and the reader can zoom.
+      const scale = Math.min(1, room / natural);
+      if (scale >= 1) { continue; }
+      page.style.transform = `scale(${scale})`;
+      page.style.height = `${page.offsetHeight * scale}px`;
+    }
+  };
+  apply();
+  // Fonts land after the first layout and change the page's height; a second
+  // pass once they have is the difference between a gap under the page and
+  // none.
+  if ((document as unknown as { fonts?: { ready: Promise<unknown> } }).fonts) {
+    void (document as unknown as { fonts: { ready: Promise<unknown> } }).fonts.ready.then(apply);
+  }
+  new ResizeObserver(apply).observe(host);
+}
+
 function railOver(nav: HTMLElement, doc: HTMLElement, items: HTMLElement[], word: string, portHeight: number): void {
   items.forEach((item, i) => {
     const b = document.createElement("button");
@@ -141,7 +182,9 @@ export async function renderOffice(host: HTMLElement, kind: "docx" | "xlsx" | "p
     // One rail entry per rendered page: docx-preview lays each page out as a
     // <section class="docx">, and scrolling a section into view IS the
     // navigation — there is no page state beyond where the reader looks.
-    railOver(nav, doc, Array.from(doc.querySelectorAll<HTMLElement>("section.docx")), "Page", 130);
+    const pages = Array.from(doc.querySelectorAll<HTMLElement>("section.docx"));
+    railOver(nav, doc, pages, "Page", 130);
+    fitPages(doc, pages);
     return;
   }
   if (kind === "pptx") {
