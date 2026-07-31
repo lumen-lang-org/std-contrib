@@ -1240,7 +1240,14 @@ function scriptSkillRows(db: Db, agentId: string): SkillRow[] {
   // A run without an agent has no skills to stage — and the guard is what
   // keeps a bare scriptRun off tables its caller never migrated.
   if (agentId == "") { let none: SkillRow[] = []; return none; }
-  let where = "id IN (SELECT skill_id FROM agent_skills WHERE agent_id = " + placeholderAt(db, 1) + ")";
+  // Attachment or the public tier — the same rule use_skill resolves by
+  // (tools.ts). Staging that only knew about attachments was how a public
+  // skill answered use_skill with a briefing that told the model to import
+  // /skills/<name>/edit_doc.py, and then the run met an empty directory:
+  // "No module named 'edit_doc'". A skill the model can load is a skill whose
+  // files must be there.
+  let where = "id IN (SELECT skill_id FROM agent_skills WHERE agent_id = " + placeholderAt(db, 1) + ")"
+    + " OR visibility = 'public'";
   let document = listWhere(db, skillsMapping(), where, [agentId]);
   if (document == "" || document == "[]") { let none: SkillRow[] = []; return none; }
   return JSON.parse<SkillRow[]>(document);

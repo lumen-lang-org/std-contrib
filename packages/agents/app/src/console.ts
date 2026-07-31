@@ -569,13 +569,25 @@ export class AgentConsole extends LitElement {
   private async startWith(t: TemplateRow): Promise<void> {
     const id = await this.session.ensureThread();
     if (id === "") { return; }
-    await startFromTemplate(id, t.id).catch(() => null);
+    // The endpoint reports what it actually laid down; the message names
+    // those paths rather than a file the template is assumed to ship. It
+    // used to say "/brief.md", and when the briefs were retired the agent
+    // answered, correctly, that it could not find one.
+    const laid = await startFromTemplate(id, t.id).catch(() => null);
     this.pinned = "";
     this.starts = [];
     await this.open(id);
+    const files = laid?.wrote ?? [];
+    if (files.length === 0) {
+      await this.session.sendMessage(
+        `Start a ${t.label} for me — use your ${t.skillName} skill.`);
+      return;
+    }
     await this.session.sendMessage(
-      `Start from the ${t.label} template — /brief.md is in this conversation's files. `
-      + `Read it, ask me for anything it leaves blank, then use your ${t.skillName} skill to build it.`);
+      `I started from the ${t.label} template: ${files.join(", ")} ${files.length === 1 ? "is" : "are"} `
+      + `already in this conversation's files. Use your ${t.skillName} skill to FILL that document in place — `
+      + `materialise it, replace its placeholders, save it back to the same path. `
+      + `Ask me for anything you need before you start.`);
   }
 
   private async chipClick(e: Event) {
