@@ -169,10 +169,27 @@ export class ArtifactPanel extends LitElement {
     .office .thumb-tag { position: absolute; right: 3px; bottom: 3px; background: #111c;
               color: #fff; font: 10px/1 var(--sans, sans-serif); padding: 2px 5px; border-radius: 6px; }
     .office .office-doc { flex: 1; min-width: 0; overflow: auto; padding: 10px; }
+    /* A page of a converted document. The canvas inside already carries its
+       own width and height — pdf.js was told the column's width and drew to
+       it — so there is nothing to scale here and nothing to override. That is
+       the whole difference from the rules below: those exist to undo what an
+       in-browser renderer decided, and a converted page needs no undoing. */
+    .office .office-doc .pdf-page { margin: 0 auto 12px; width: fit-content; max-width: 100%;
+              background: #fff; box-shadow: 0 1px 3px #00000014, 0 0 0 1px #e5e5e3; }
+    /* max-width is the guard, and it is load-bearing rather than defensive: a
+       canvas carries the width it was rendered at, so any disagreement between
+       the width the column had when pdf.js was asked and the width it has now
+       shows up as a page hanging off the right edge, clipped. It did — slides
+       rendered at 240px into 174px of column. The re-render in office-view.ts
+       restores the resolution; this keeps the page inside the panel meanwhile,
+       and at every intermediate width while someone drags the panel edge. */
+    .office .office-doc .pdf-page canvas { display: block; max-width: 100%; height: auto; }
     /* docx-preview lays pages out at the document's own paper width; in a
        side panel that clips. Fluid pages keep every word readable at any
        panel width — page boundaries stay (the rail still navigates them),
-       only the paper metaphor relaxes. */
+       only the paper metaphor relaxes.
+       Everything from here down is the fallback renderers' — reached only on
+       a machine with no converter. See office-view.ts. */
     .office .office-doc .docx-wrapper { background: none !important; padding: 0 !important; }
     /* A page is left as docx-preview computed it: its real width, its own
        margins, its own fonts. All three used to be overridden — width:auto
@@ -378,7 +395,11 @@ export class ArtifactPanel extends LitElement {
     if (this.officeShown === key) return;
     this.officeShown = key;
     try {
-      await renderOffice(host, kind, v.content);
+      // The version is pinned rather than left to the server: the panel
+      // already knows which one it is showing, and an unpinned request would
+      // race a save and could answer with a page the reader is not looking at.
+      await renderOffice(host, kind, v.content,
+        { threadId: this.threadId, slot: a.slot, version: v.version });
     } catch (e) {
       this.officeShown = "";
       this.problem = (e as Error).message;

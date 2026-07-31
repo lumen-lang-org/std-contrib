@@ -37,6 +37,7 @@ import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mi
 // name in this file, and an artifact's type is on its row anyway.
 import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
 import { scriptEnvNameProblem } from "./run-script.ts";
+import { OfficeRenderAsk, officeRender } from "./office-render.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
 import { envPlan, envDockerUp } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
@@ -1834,6 +1835,62 @@ class ArtifactApi {
       + ",\"note\":" + JSON.stringify(row.note)
       + ",\"createdAt\":" + JSON.stringify(row.createdAt)
       + ",\"content\":" + JSON.stringify(row.body) + "}");
+  }
+
+  // One office document as a PDF, base64, converted by the platform.
+  //
+  // The console draws .docx and .pptx from this rather than laying them out
+  // itself: LibreOffice is the engine those formats were written against, and
+  // a JavaScript re-implementation of one can be close but never right. See
+  // office-render.ts for what runs and how it is contained.
+  //
+  // Base64 rather than the PDF's own bytes, and that is not a preference: a
+  // Lumen string is UTF-8 and a PDF is not, so binary cannot ride a Reply at
+  // all. It is the same boundary every binary artifact already crosses — the
+  // store holds text, the viewer holds bytes — and the browser decodes it
+  // where pdf.js wants an array.
+  //
+  // `?v=` pins a version and no `v` means the current one, matching the
+  // preview route's rule. A pinned answer is immutable and says so; the
+  // unpinned one is not cached at the edge because it follows the artifact.
+  // The conversion underneath is cached either way, forever, because its key
+  // is a version that can never be rewritten.
+  //
+  // A conversion is seconds of CPU in a container, so this is deliberately
+  // behind the owner guard like every other route on this controller — the
+  // token-addressed preview host does not offer it. Somewhere that hands out
+  // a capability URL should not also hand out an unauthenticated way to make
+  // the box run LibreOffice.
+  @get("/:slot/pdf")
+  pdf(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+    let asked = parseInt(queryParam(req, "v", "")) ?? 0;
+    let version = asked > 0 ? asked : artifact.currentVersion;
+    let row = getVersion(this.db, artifact.id, version);
+    if (row.id == "") { return notFound("version " + `${version}`); }
+
+    let ask: OfficeRenderAsk = {
+      artifactId: artifact.id, version: version,
+      path: artifact.path, body: row.body, now: stamp(),
+    };
+    let made = officeRender(this.db, ask);
+    // A refusal is a sentence a reader can act on — "is the image built",
+    // "this document may be corrupt" — so it is answered as one rather than
+    // as a 500 the console would render as a blank panel.
+    if (!made.ok) { return badRequest(made.problem); }
+    let out = ok("{\"slot\":" + `${artifact.slot}`
+      + ",\"path\":" + JSON.stringify(artifact.path)
+      + ",\"version\":" + `${version}`
+      + ",\"cached\":" + (made.cached ? "true" : "false")
+      + ",\"pdf\":" + JSON.stringify(made.body) + "}");
+    if (asked > 0) {
+      out.headers.set("cache-control", "private, max-age=31536000, immutable");
+    }
+    return out;
   }
 
   // Mint a new preview token, so every link handed out so far stops resolving.

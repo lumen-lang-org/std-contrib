@@ -13,14 +13,15 @@
   "dependencies": {
     "@nuraly/lumenjs": "file:vendor/nuraly-lumenjs-0.16.3-codejar.tgz",
     "@nuraly/lumenui": "file:vendor/nuraly-lumenui-0.16.3-attach-menu.tgz",
+    "@nuralyui/common": "file:vendor/nuralyui-common-0.1.5.tgz",
     "better-sqlite3": "^12.11.1",
     "docx-preview": "^0.4.0",
     "lit": "^3.2.0",
+    "pdfjs-dist": "^4.10.38",
     "pptx-preview": "^1.0.7",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
-    "xlsx": "^0.18.5",
-    "@nuralyui/common": "file:vendor/nuralyui-common-0.1.5.tgz"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
