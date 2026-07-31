@@ -174,13 +174,18 @@ export class ArtifactPanel extends LitElement {
        panel width — page boundaries stay (the rail still navigates them),
        only the paper metaphor relaxes. */
     .office .office-doc .docx-wrapper { background: none !important; padding: 0 !important; }
-    /* A page keeps paper's proportion however little it says: width from
-       the column, height at least A4's ratio of it, growing only when the
-       text needs more. Short pages read as pages, not as strips. */
-    .office .office-doc .docx-wrapper > section.docx { width: auto !important; min-height: 0 !important;
-              aspect-ratio: 210 / 297; height: auto;
-              padding: 28px 32px !important; margin-bottom: 12px;
+    /* A page is left as docx-preview computed it: its real width, its own
+       margins, its own fonts. All three used to be overridden — width:auto
+       took the column's width, a padding replaced the document's margins, and
+       aspect-ratio forced A4's shape onto whatever came out. That rendered at
+       317px in system-ui and read three words to a line: not a page, a column
+       of text wearing a page's border.
+       Fitting is scaling, not squashing — the trick the thumbnail rail
+       already uses, applied by fitPages() once the render lands. */
+    .office .office-doc .docx-wrapper > section.docx {
+              transform-origin: top left; margin: 0 auto 12px;
               background: #fff; box-shadow: 0 1px 3px #00000014, 0 0 0 1px #e5e5e3; }
+    .office .office-doc .docx-wrapper { display: flex; flex-direction: column; align-items: center; }
     /* Slides keep their aspect but never exceed the column. */
     .office .office-doc .pptx-preview-wrapper { width: 100% !important; background: none !important; }
     .office .office-doc .pptx-preview-slide-wrapper { max-width: 100%; background: #fff;
