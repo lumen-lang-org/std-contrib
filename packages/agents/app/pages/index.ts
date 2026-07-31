@@ -60,6 +60,34 @@ if (!import.meta.env.SSR) {
   void import("../src/console.js");
 }
 
+// The production server's half of that import, and the reason it is a loader
+// on a page that loads no data.
+//
+// The paragraph above is right that the guard costs a DEV server nothing it
+// needs — but it is wrong about production, and the difference had never been
+// measured. @lit-labs/ssr renders a custom element's tag either way; what it
+// cannot do is render that element's CONTENTS without its definition. On a
+// dev server the definition happens to be there anyway, because Vite
+// evaluates this module's dynamic imports once per server start while hunting
+// for component loaders. In a production build nothing does that, so this
+// route answered an 8.5KB shell with zero shadow roots — the hero, the
+// sidebar and the composer all painting only after the bundle arrived, which
+// is the flicker SSR was adopted to remove.
+//
+// So: import it on a production server, and await it, because rendering must
+// not start before the elements are defined. A top-level `await` fails the
+// build (not in the configured target) and an un-awaited `import()` races the
+// render, so the await has to live somewhere the framework already waits —
+// and a loader is the only such place. This one loads nothing and says so by
+// returning an empty object; its whole purpose is the line above the return.
+//
+// The condition is a compile-time constant, so a dev build keeps none of it
+// and the 1.4s measured above stays paid only where it was measured.
+export async function loader(): Promise<Record<string, never>> {
+  if (import.meta.env.PROD) { await import("../src/console.js"); }
+  return {};
+}
+
 export class PageIndex extends LitElement {
   // This page keeps its shadow root, and the reason is worth writing down
   // because the obvious change is wrong.

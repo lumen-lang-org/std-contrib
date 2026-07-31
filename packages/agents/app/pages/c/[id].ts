@@ -32,6 +32,42 @@ import { deliver, setEmit } from "../../src/live.js";
 // it belongs beside the proxy it shares an engine address with.
 export { socket } from "../../server/sockets.js";
 
+// The console: always in the browser, and on the server only in a production
+// build. Three cases, and the middle one is the whole reason this is not a
+// plain import.
+//
+// In the BROWSER it is loaded and not awaited — the page is already painted
+// from server markup and this is what gives it behaviour.
+//
+// On a DEV SERVER it is deliberately absent. A static import here makes Vite
+// pull the console's entire module graph — LumenUI, lit, the markdown
+// renderer — through its SSR runner on every single render: measured at 2.0s
+// to first byte against 0.33s with this guard. That is a dev-server cost and
+// nothing else; the transform is on-demand and uncached.
+//
+// On a PRODUCTION SERVER it is imported, and awaited, because that is what
+// server-renders the console at all. Without it @lit-labs/ssr has no
+// definitions to render and the route answers a 9KB shell with two shadow
+// roots and no transcript — a client-rendered SPA wearing SSR's clothes.
+// With it: 24 shadow roots, 190KB of real DOM, the same bytes dev produces,
+// for 45ms of TTFB. The server bundle is pre-built, so none of the dev cost
+// above applies.
+//
+// The production-server half is NOT here — it is the first line of `loader`
+// below, and it has to be. Rendering must not begin before the custom
+// elements are defined, so the import has to be awaited; a top-level `await`
+// fails the build ("Top-level await is not available in the configured target
+// environment"), and an un-awaited `import()` races the render and answers
+// the empty shell on the first request of a cold process. `loader` is already
+// async and already awaited by the framework before it renders, which makes
+// it the one place that ordering is guaranteed.
+//
+// Historical note, because the comment this replaces said otherwise: the
+// guard was once unconditional to keep highlight.js and codejar out of Node,
+// where they reach `module is not defined` and `const globalWindow = window`.
+// That is now handled at the source, inside src/ui.ts, which guards
+// `code-editor` and `canvas` individually. Verified by building with this
+// import unguarded — it renders in Node with no error.
 if (!import.meta.env.SSR) {
   import("../../src/console.js");
 }
@@ -78,6 +114,18 @@ type LoaderArgs = {
 };
 
 export async function loader({ params, headers, user }: LoaderArgs): Promise<Preloaded> {
+  // Define the console's custom elements before anything renders. See the note
+  // above the browser-side import at the top of this file: this is the only
+  // point where "loaded" is guaranteed to precede "rendered", and without it
+  // @lit-labs/ssr has no definitions and answers a 9KB shell with no
+  // transcript — SSR in name only.
+  //
+  // Production only, and the condition is a compile-time constant so the dev
+  // bundle keeps none of this. On a dev server the same import costs 2.0s of
+  // TTFB against 0.33s without, because Vite transforms the whole graph per
+  // render; in a pre-built server bundle it costs 45ms once, then nothing —
+  // `import()` caches, so every later request is a resolved promise.
+  if (import.meta.env.PROD) { await import("../../src/console.js"); }
   const id = params?.id ?? "";
   const empty = { id, turns: [], past: { steps: [], thoughts: [] } };
   if (id === "") { return empty; }
