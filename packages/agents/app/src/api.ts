@@ -524,6 +524,25 @@ export const uploadFile = (threadId: string, name: string, content: string) =>
 export const listArtifacts = (threadId: string) =>
   call<ArtifactListing[]>(`/threads/${encodeURIComponent(threadId)}/artifacts`);
 
+// One office document as a PDF, converted by the platform.
+//
+// `pdf` is base64, because binary cannot ride the engine's JSON — the same
+// boundary an office artifact's own body already crosses. `cached` says
+// whether a container ran for this call, which is only worth knowing when
+// something is slow.
+export type OfficePdf = {
+  slot: number; path: string; version: number; cached: boolean; pdf: string;
+};
+
+// A version is immutable, so this answer is too: the conversion behind it is
+// cached forever on the server and never has to be asked for twice for the
+// same slot@version. Always pin the version rather than letting the server
+// pick the current one — the panel already knows which version it is showing,
+// and an unpinned request would race a save.
+export const officePdf = (threadId: string, slot: number, version: number) =>
+  call<OfficePdf>(
+    `/threads/${encodeURIComponent(threadId)}/artifacts/${slot}/pdf?v=${version}`);
+
 // One row per version a model round produced — the join a chat renders its
 // cards from. Console uploads never appear: no round made them. Like a
 // transcript ref this carries no previewToken; a card that needs the token

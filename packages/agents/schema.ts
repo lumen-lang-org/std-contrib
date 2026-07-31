@@ -425,6 +425,39 @@ export function templateFilesMapping(): DbRepository {
   return repository("template_files", "id", "id", fs);
 }
 
+// One office document, converted to PDF once.
+//
+// The id is `<artifactId>:<version>` — derived, never random — and that is
+// the whole cache design. An artifact version is append-only and immutable,
+// so the bytes this row was made from can never change underneath it: there
+// is no invalidation, no staleness window, and no need to store a hash of the
+// input to compare against. A row here is true forever or absent.
+//
+// The body is base64 like every other binary body in this package: the store
+// holds text, a viewer holds bytes, and the boundary between them is the same
+// one `binaryKind` draws for images and office files themselves.
+//
+// Rows are derived data. Losing this table costs conversions, never work — it
+// can be truncated at any time and the next reader rebuilds what they open.
+export type OfficeRenderRow = {
+  id: string,
+  artifactId: string,
+  version: int,
+  body: string,
+  createdAt: string,
+};
+
+export function officeRendersMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("artifactId", "artifact_id", "text"),
+    field("version", "version", "int"),
+    field("body", "body", "text"),
+    field("createdAt", "created_at", "text"),
+  ];
+  return repository("office_renders", "id", "id", fs);
+}
+
 export function agentsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -537,6 +570,10 @@ export function schemaPlan(db: Db): Migration[] {
     migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),
+    // Converted office documents. Derived data with an immutable key, so this
+    // table is a cache in the strict sense: dropping it loses nothing.
+    migration("81", "office documents converted to pdf",
+      createTableSql(db, officeRendersMapping())),
     migration("61", "a model config can ask for thinking",
       "ALTER TABLE model_configs ADD COLUMN thinking " + db.textType + " NOT NULL DEFAULT ''"),
     migration("8", "provider credentials", createTableSql(db, credentialsMapping())),
