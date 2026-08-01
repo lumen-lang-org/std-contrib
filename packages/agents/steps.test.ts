@@ -11,7 +11,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
-import { LiveStep, StepStart, ARGS_PREVIEW, EDIT_KEEP, rotations, stepPlan, stepId, argsPreview, stepArgs, beginStep, endStep, stepsOfRound, stepsOfThread, roundRunning, stepMillis, forgetRound, forgetSteps } from "./steps.ts";
+import { LiveStep, StepStart, StepClose, ARGS_PREVIEW, EDIT_KEEP, RESULT_PREVIEW, rotations, stepPlan, stepId, argsPreview, resultPreview, stepArgs, beginStep, endStep, endStepAt, stepsOfRound, stepsOfThread, roundRunning, stepMillis, forgetRound, forgetSteps } from "./steps.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
 
 let database: Db = sqlite();
@@ -62,6 +62,35 @@ test("closing a call keeps it as one row rather than adding a second", () => {
   expect(live[0].ok);
   expect(stepMillis(live[0]) == 350);
   expect(!roundRunning(live));
+});
+
+test("a failed close keeps what the call answered, capped and uncut through a character", () => {
+  // The row used to close with nothing but ok=false, and diagnosing a failed
+  // script meant re-running it by hand. The reply's head is the diagnosis.
+  fresh();
+  let dispatched = call("t1", 4, 0, "run_script", "{\"language\":\"python\"}", "1000");
+  beginStep(database, dispatched);
+  let long = "no .json inputs found ";
+  while (long.length <= RESULT_PREVIEW) { long = long + "eé"; }
+  let close: StepClose = { ok: false, endedAt: "1350", millis: 350, line: 0, changed: "", result: long };
+  endStepAt(database, dispatched, close);
+
+  let live = stepsOfRound(database, "t1", 4);
+  expect(live.length == 1);
+  expect(!live[0].ok);
+  expect(live[0].result.length <= RESULT_PREVIEW);
+  expect(live[0].result.slice(0, 22) == "no .json inputs found ");
+  // The cap cut through the two-byte e-acute or it didn't; a parse proves it.
+  let echoed: string = JSON.parse<string>(JSON.stringify(live[0].result));
+  expect(echoed == live[0].result);
+
+  // The plain close (no line, no changed, no reply) still writes the column,
+  // as empty — `persist` is an upsert over every column.
+  let fine = call("t1", 4, 1, "read_artifact", "{}", "1400");
+  beginStep(database, fine);
+  endStep(database, fine, true, "1500", 100);
+  let both = stepsOfRound(database, "t1", 4);
+  expect(both[1].result == "");
 });
 
 test("a round that is still working says so while one of its calls is open", () => {

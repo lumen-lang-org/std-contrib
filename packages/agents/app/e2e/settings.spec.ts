@@ -7,12 +7,12 @@
 
 import { expect, test } from "@playwright/test";
 import {
-  agentRow, choices, choose, field, modelRow, errorOf, openSettings, openTab, settings, shell,
-  toggle, typeInEditor,
+  agentRow, choices, choose, field, modelRow, errorOf, open, openSettings, openTab, ready, settings,
+  shell, toggle, typeInEditor,
 } from "./console.js";
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await open(page);
   await expect(shell(page)).toBeVisible();
   await openSettings(page);
 });
@@ -110,6 +110,7 @@ test("enabling a second embedder from its form turns the first one off", async (
   });
 
   await page.reload();
+  await ready(page);
   await openSettings(page);
   await openTab(page, "Models");
   await settings(page).locator("tr", { hasText: label }).locator('button[title^="Edit"]').click();
@@ -340,32 +341,70 @@ test("the models form asks for dimensions only when the kind needs them", async 
 test("saving tracing keeps the service name and environment it was given", async ({ page }) => {
   // These were constants in the form, so opening the tab and pressing Save
   // refiled a staging deployment's traces under "production".
-  await page.request.put("/api/tracing", {
-    data: {
-      id: "default", backend: "otlp", endpoint: "http://127.0.0.1:4318/v1/traces",
-      publicKey: "", serviceName: "e2e-service", environment: "staging", enabled: false,
-    },
+  //
+  // The arrangement changes the two fields under test and nothing else. It
+  // used to name a backend and an endpoint of its own, which the API refuses
+  // — correctly — on a deployment whose collector secret was stored for a
+  // different address: "pointing it at http://… would send the secret there
+  // too". The refusal went unread because nothing checked the response, so the
+  // failure surfaced ten lines later as a form full of placeholders. Moving a
+  // real deployment's endpoint is also exactly the fixture CLAUDE.md forbids:
+  // a secret cannot be read back, so a test that displaces one cannot put it
+  // back.
+  //
+  // Read whole, written by name. `GET /tracing` answers a *status* document —
+  // it carries `configured`, `active` and `secretStored`, which are things the
+  // server worked out and not things it stores — and `PUT` parses the stored
+  // row, which refuses a field it does not know. Spreading the reply back into
+  // the request therefore 400s with "invalid JSON (UnknownField)", and the
+  // arrangement this test rests on silently did not happen. So the five fields
+  // that round-trip are named, once, here.
+  type TraceConfig = {
+    backend: string; endpoint: string; publicKey: string;
+    serviceName: string; environment: string; enabled: boolean;
+  };
+  const status = (await page.request.get("/api/tracing").then((r) => r.json())) as TraceConfig;
+  const before: TraceConfig = {
+    backend: status.backend, endpoint: status.endpoint, publicKey: status.publicKey,
+    serviceName: status.serviceName, environment: status.environment, enabled: status.enabled,
+  };
+  const arranged = await page.request.put("/api/tracing", {
+    data: { ...before, id: "default", serviceName: "e2e-service", environment: "staging" },
   });
-  // Settings reads the row when it mounts, and beforeEach already opened it —
-  // so the change above has to be made visible by opening it again.
-  await page.reload();
-  await openSettings(page);
-  await openTab(page, "Tracing");
-  await expect(field(settings(page), "t-service")).toHaveValue("e2e-service");
-  await expect(field(settings(page), "t-env")).toHaveValue("staging");
+  expect(arranged.ok()).toBeTruthy();
 
-  await settings(page).locator("button", { hasText: "Save" }).click();
-  const after = (await page.request.get("/api/tracing").then((r) => r.json())) as
-    { serviceName: string; environment: string };
-  expect(after.serviceName).toBe("e2e-service");
-  expect(after.environment).toBe("staging");
+  try {
+    // Settings reads the row when it mounts, and beforeEach already opened it —
+    // so the change above has to be made visible by opening it again.
+    await page.reload();
+    await ready(page);
+    await openSettings(page);
+    await openTab(page, "Tracing");
+    await expect(field(settings(page), "t-service")).toHaveValue("e2e-service");
+    await expect(field(settings(page), "t-env")).toHaveValue("staging");
+
+    await settings(page).locator("button", { hasText: "Save" }).click();
+    const after = (await page.request.get("/api/tracing").then((r) => r.json())) as
+      { serviceName: string; environment: string };
+    expect(after.serviceName).toBe("e2e-service");
+    expect(after.environment).toBe("staging");
+  } finally {
+    // The two names go back whether the assertions held or not: a shared
+    // deployment's traces should not be filed under "staging" because a test
+    // ran, and least of all because one failed.
+    await page.request.put("/api/tracing", { data: { ...before, id: "default" } });
+  }
 });
 
 test("every provider the console offers is one the code can reach", async ({ page }) => {
   await openTab(page, "Providers");
   await settings(page).locator('button[data-new="key"]').click();
   const offered = await choices(settings(page), "k-provider").allTextContents();
-  expect(offered.map((s) => s.trim()).sort()).toEqual(["anthropic", "mistral", "openai"]);
+  // "vertex" joined the list when the server learned to mint OAuth tokens from
+  // a service-account JSON; it is here because provider.ts can reach it, which
+  // is the whole point of the test — the form may not offer a name the code
+  // has no branch for.
+  expect(offered.map((s) => s.trim()).sort()).toEqual(["anthropic", "mistral", "openai", "vertex"]);
 });
 
 
@@ -504,4 +543,79 @@ test("testing a model says what the provider actually answered", async ({ page }
   const out = (await res.json()) as { ok: boolean; reply?: string; error?: string };
   // Either it answered or it said why — never a bare failure with no reason.
   if (out.ok) { expect(out.reply).toBeTruthy(); } else { expect(out.error).toBeTruthy(); }
+});
+
+// --- the model menu, and the router behind its automatic entry -------------------------
+//
+// The router editor had no coverage at all until the day "Auto" was found not to
+// route. That defect was in the engine, not here, and the tab was one of the
+// surfaces that made it invisible: this page read the row back correctly and drew
+// exactly what the operator had typed, so every check a person could make from
+// the console said the feature was configured. These do not test routing — that
+// is `e2e/agents/router_live.py`, which is the only thing that can. They test
+// that what the tab draws is the row, and that a router which could not decide
+// anything cannot be saved from here.
+
+test("the menu tab lists the routers behind it, counted", async ({ page }) => {
+  await openTab(page, "Model menu");
+  const listed = (await page.request.get("/api/model-routers").then((r) => r.json())) as
+    { id: string }[];
+  const group = settings(page).locator(".group", { hasText: "Routers" });
+  await expect(group).toBeVisible();
+  await expect(group).toContainText(String(listed.length));
+});
+
+test("the router form draws every candidate the row holds, in the row's order", async ({ page }) => {
+  const routers = (await page.request.get("/api/model-routers").then((r) => r.json())) as
+    { id: string; label: string; routerConfigId: string; fallbackConfigId: string;
+      candidates: { key: string; configId: string; when: string }[] }[];
+  test.skip(routers.length === 0, "no router configured");
+  const r = routers[0];
+
+  await openTab(page, "Model menu");
+  // By id and not by label: two routers called "Auto" and "Auto (e2e)" both
+  // answer a hasText of "Auto", and the row this opened was whichever the
+  // engine happened to list second. The id is the one column guaranteed
+  // unique, and the row draws it.
+  await settings(page).locator("tr")
+    .filter({ has: page.locator("span.slug", { hasText: new RegExp(`^${r.id}$`) }) })
+    .locator("button.act").first().click();
+
+  await expect(field(settings(page), "rt-label")).toHaveValue(r.label);
+  // The id is what a menu entry points at, so it is shown and cannot be retyped.
+  await expect(settings(page).locator("#rt-id input")).toBeDisabled();
+
+  // One card per candidate, each carrying the key the routing model must answer
+  // with and the line it is given to decide by. A card that drew a key without
+  // its when-line would be the form quietly discarding the only content of the
+  // routing prompt.
+  const cards = settings(page).locator(".cand");
+  await expect(cards).toHaveCount(r.candidates.length);
+  for (let i = 0; i < r.candidates.length; i++) {
+    await expect(field(settings(page), `rt-key-${i}`)).toHaveValue(r.candidates[i].key);
+    await expect(field(settings(page), `rt-when-${i}`)).toHaveValue(r.candidates[i].when);
+  }
+
+  // The two configurations that are not candidates: the one that decides, and
+  // the one that answers when the decision cannot be made.
+  await expect(settings(page).locator("#rt-config")).toBeVisible();
+  await expect(settings(page).locator("#rt-fallback")).toBeVisible();
+});
+
+test("a candidate cannot be saved without the line that decides it", async ({ page }) => {
+  const routers = (await page.request.get("/api/model-routers").then((r) => r.json())) as
+    { id: string; label: string; routerConfigId: string; fallbackConfigId: string;
+      routeEvery: string; escalateOnly: boolean; enabled: boolean;
+      candidates: { key: string; configId: string; when: string }[] }[];
+  test.skip(routers.length === 0, "no router configured");
+  const r = routers[0];
+  test.skip(r.candidates.length === 0, "the router has no candidate to blank");
+
+  // Straight at the API: a `when` is what the routing model is shown, and a
+  // candidate with an empty one is a key it can only pick by guessing the word.
+  const res = await page.request.put(`/api/model-routers/${r.id}`, {
+    data: { ...r, candidates: r.candidates.map((c, i) => i === 0 ? { ...c, when: "" } : c) },
+  });
+  expect(res.status()).toBe(400);
+  expect(await errorOf(res)).toMatch(/when|describ/i);
 });

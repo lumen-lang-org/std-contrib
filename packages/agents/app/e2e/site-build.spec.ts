@@ -15,7 +15,7 @@
 // double is arranged beforehand and never during.
 
 import { expect, test } from "@playwright/test";
-import { pickAgent, shell } from "./console.js";
+import { currentThread, open, pickAgent, ready, shell } from "./console.js";
 
 type Page = import("@playwright/test").Page;
 
@@ -46,18 +46,10 @@ async function answered(page: Page, words: string) {
   await expect(shell(page).locator("nr-chatbot")).toContainText(words, { timeout: 60000 });
 }
 
-// The thread the console is on, read from the sidebar's selection rather than
-// guessed: a test that asks the API "the newest thread" races every other spec.
-async function currentThread(page: Page): Promise<string> {
-  return await page.evaluate(() => {
-    const el = document.querySelector("agent-console") as (HTMLElement & { threadId?: string }) | null;
-    return el?.threadId ?? "";
-  });
-}
 
 test("a site is built in one turn and edited in the next", async ({ page }) => {
   await agentOnDouble(page);
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
 
   // --- turn one: three files ---------------------------------------------
@@ -121,7 +113,7 @@ test("each turn's calls belong to that turn, in the order they were dispatched",
   // The same conversation, read from the API rather than the screen: every step
   // carries the round it belongs to, and the two rounds are different numbers.
   await agentOnDouble(page);
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
 
   await ask(page, "build the site");
@@ -158,7 +150,7 @@ test("thinking arrives while it is being written, not when the reply lands", asy
   // tool has been dispatched — there was no round to look up and the console
   // showed nothing at all until the first call landed.
   await agentOnDouble(page);
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
   await ask(page, "build the site");
 
@@ -190,7 +182,7 @@ test("a question asked while the agent is working waits its turn instead of vani
   // would have caught that — and it is the one that caught it, from a spec
   // failing for a reason that had nothing to do with what it was testing.
   await agentOnDouble(page);
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
 
   await ask(page, "build the site");
@@ -227,7 +219,7 @@ test("a line is found and changed without the file being resent", async ({ page 
   // model asked for both tools at once, when in fact it could not name the
   // second call until the first had answered.
   await agentOnDouble(page);
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
 
   await ask(page, "build the site");
@@ -296,7 +288,7 @@ test("the cards are still there after a reload", async ({ page }) => {
   // asked for, and the thinking was asked for a round the query had already
   // been told not to name.
   await agentOnDouble(page);
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
 
   await ask(page, "build the site");
@@ -310,6 +302,7 @@ test("the cards are still there after a reload", async ({ page }) => {
   // several threads with the same title behind it.
   const mine = await currentThread(page);
   await page.reload();
+  await ready(page);
   const row = shell(page).locator(`console-sidebar .thread[data-thread="${mine}"]`);
   await expect(row).toBeVisible({ timeout: 30000 });
   await row.click();
@@ -352,7 +345,7 @@ test("a sub-agent's work shows under the delegation that asked for it", async ({
   test.skip(!parent?.subAgents.some((c) => c.agentName === "e2e-helper"),
     "the double has no sub-agent wired in this database");
 
-  await page.goto("/");
+  await open(page);
   await pickAgent(page, "a-double");
   await ask(page, "ask the helper for a summary");
   await answered(page, "The helper wrote /ledger.md");

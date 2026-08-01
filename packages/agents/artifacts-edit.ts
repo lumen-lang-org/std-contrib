@@ -170,6 +170,21 @@ function editAttempt(db: Db, edit: ArtifactEdit, attempt: int): ArtifactEdited {
         + " Read or search it again before retrying.";
       return editRefusal(why);
     }
+    // Backslashes before whitespace: a JSON body holds Windows paths as
+    // D:\\Business, the model's tool call crosses another JSON layer, and a
+    // model that guesses the escaping wrong is refused, re-reads, and guesses
+    // differently — a loop watched live, three refusals deep, that ended with
+    // it applying a stale path. Naming the exact miss is what breaks it.
+    let doubled = edit.oldText.indexOf("\\") >= 0 ? body.indexOf(edit.oldText.replaceAll("\\", "\\\\")) : -1;
+    let halved = edit.oldText.indexOf("\\\\") >= 0 ? body.indexOf(edit.oldText.replaceAll("\\\\", "\\")) : -1;
+    if (doubled >= 0 || halved >= 0) {
+      let fix = doubled >= 0
+        ? "the artifact holds MORE backslashes than your old — send each backslash as it appears in read_artifact's answer, without unescaping it"
+        : "the artifact holds FEWER backslashes than your old — you have escaped it one time too many";
+      why = why + " The text matches at line " + `${editLineAt(body, doubled >= 0 ? doubled : halved)}`
+        + " except for backslash escaping: " + fix + ".";
+      return editRefusal(why);
+    }
     let near = editLoose(body, edit.oldText);
     if (near >= 0) {
       why = why + " A whitespace-insensitive scan matches at line " + `${near}`

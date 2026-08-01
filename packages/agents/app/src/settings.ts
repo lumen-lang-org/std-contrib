@@ -19,14 +19,17 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
-  AgentFull, AgentRow, ModelConfigRow, ModelRow, PromptRow, ScriptImageRow, ServerRow,
+  AgentFull, AgentRow, ModelChoiceRow, ModelConfigRow, ModelRouterRow, ModelRow, PromptRow,
+  RouterCandidate, ScriptImageRow, ServerRow,
   SkillFileRow, SkillRow, TracingStatus,
   configureTracing, createAgent, createConfig, createModel, createPrompt,
   createScriptImage, createServer, createSkill, createSkillFile, deleteAgent, deleteConfig,
   deleteModel, deleteScriptImage, deleteServer, deleteSkill, deleteSkillFile,
-  updateScriptImage, listScriptImages,
+  updateConfig, updateScriptImage, listScriptImages,
   listAgents, listConfigs, listModels, listPrompts, listProviders, listServers,
   listSkillFiles, listSkills, linkSkill, unlinkSkill,
+  createModelChoice, deleteModelChoice, listModelChoices, rankChoice, updateModelChoice,
+  createRouter, deleteRouter, listRouters, updateRouter,
   TemplateRow, listTemplates, deleteTemplate,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
@@ -37,6 +40,7 @@ import {
 const TABS = [
   { name: "Agents", icon: "message-square" },
   { name: "Models", icon: "zap" },
+  { name: "Model menu", icon: "list" },
   { name: "Prompts", icon: "file-text" },
   { name: "Skills", icon: "sticky-note" },
   { name: "Templates", icon: "file-text" },
@@ -73,7 +77,10 @@ type View =
   | { kind: "list" }
   | { kind: "agent"; row: AgentRow; fresh: boolean }
   | { kind: "model"; row: ModelRow; fresh: boolean }
-  | { kind: "config"; row: ModelConfigRow }
+  | { kind: "config"; row: ModelConfigRow; fresh: boolean }
+  // One row of the composer's menu, and the router one of those rows can name.
+  | { kind: "choice"; row: ModelChoiceRow; fresh: boolean }
+  | { kind: "router"; row: ModelRouterRow; fresh: boolean }
   | { kind: "prompt"; row: { promptName: string; body: string } }
   // A skill's files ride the view: they are loaded when the form opens and
   // edited beside the body, each write its own call.
@@ -90,8 +97,22 @@ const NEW_MODEL: ModelRow = {
   id: "", label: "", apiName: "", provider: "mistral", kind: "chat",
   dimensions: 0, baseUrl: "", enabled: true,
 };
+// `selectable` and `rank` are the row's own flags, not the menu: a config is
+// offered where somebody picks a config, and model_choices is a separate list
+// an operator curates by hand.
 const NEW_CONFIG: ModelConfigRow = {
   id: "", modelId: "", temperature: 0.2, maxTokens: 4096, topP: 1, extra: "",
+  thinking: "", label: "", selectable: true, rank: 0,
+};
+const NEW_CHOICE: ModelChoiceRow = {
+  id: "", label: "", description: "", kind: "config", configId: "", routerId: "",
+  tier: "", enabled: true, rank: 0,
+};
+// "turn" and not "thread", because per-turn is what the design describes and
+// what a person expects: the choice follows the message, not the conversation.
+const NEW_ROUTER: ModelRouterRow = {
+  id: "", label: "", routerConfigId: "", fallbackConfigId: "", routeEvery: "turn",
+  escalateOnly: false, enabled: true, candidates: [],
 };
 const NEW_SERVER: ServerRow & { token: string } = {
   id: "", serverName: "", transport: "http", endpoint: "",
@@ -229,6 +250,33 @@ export class ConsoleSettings extends LitElement {
     }
     .req { color: var(--danger); font-style: normal; margin-left: 2px; }
     nr-input, nr-select, nr-textarea { display: block; width: 100%; }
+    /* nr-dropdown is an inline-block trigger by nature — it wraps whatever
+       opens the menu — so a form field made of one has to be told to fill its
+       column like the boxes around it. */
+    nr-dropdown.pick { display: block; width: 100%; }
+    /* The closed field. This is the whole of what a select gave for free: a
+       bordered box that looks like the inputs beside it, the current value on
+       the left and a chevron on the right. Written here rather than taken from
+       the component because nr-dropdown draws no face at all — the trigger is
+       whatever is slotted, which is exactly why it can be made to match. */
+    .pick-face {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      width: 100%; box-sizing: border-box; padding: 7px 10px; cursor: pointer;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg-card); color: var(--fg);
+      font: inherit; font-size: 13px; text-align: left;
+    }
+    .pick-face:hover { border-color: var(--muted); }
+    /* Clicking must leave no ring behind. :focus-visible alone would already
+       do that — a mouse click does not match it — but the browser's default
+       :focus outline does, so it is turned off explicitly and the keyboard
+       case is drawn as a border colour rather than as a second box outside
+       the field. */
+    .pick-face:focus,
+    .pick-face:focus-visible { outline: none; }
+    .pick-face:focus-visible { border-color: var(--accent); }
+    /* A long config id must not push the chevron out of the box. */
+    .pick-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* A checkbox is its own label, so it needs the room a label would take. */
     .f.check { justify-content: end; padding-top: 22px; }
     /* LumenUI fills a checked box violet — a hue this console spends on the
@@ -241,6 +289,29 @@ export class ConsoleSettings extends LitElement {
 
     .formacts { display: flex; gap: 8px; margin-top: 26px; padding-top: 18px;
                 border-top: 1px solid var(--border); max-width: 1000px; }
+
+    /* A menu entry is drawn here the way the composer draws it: the label on
+       one line, the description under it. An operator editing the menu should
+       be looking at the menu, not at a row of columns that happen to hold the
+       same strings. */
+    .menuname { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+    .sub { display: block; color: var(--muted); font-size: 12.5px;
+           margin-top: 2px; max-width: 56ch; }
+    td.ord { width: 1%; white-space: nowrap; padding-right: 0; }
+    /* The row the picker always adds under the list, shown so the menu on this
+       page and the menu in the composer are the same length. */
+    tr.tail td { color: var(--muted); font-style: italic; }
+
+    /* One router candidate, in a card of its own. The route description is
+       prose an operator writes for the routing model, so it gets the room
+       prose needs — a strip of one-line inputs is exactly what this editor
+       must not be. */
+    .cand { border: 1px solid var(--border); border-radius: 10px;
+            padding: 14px 16px 2px; margin: 0 0 12px; max-width: 1000px; }
+    .cand .top { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .cand .top .n { color: var(--muted); font-size: 12.5px;
+                    font-variant-numeric: tabular-nums; }
+    .cand .top .who { flex: 1; font-weight: 500; }
 
     .note { color: var(--muted); font-style: italic; margin-top: 22px; }
     .err { color: var(--danger); margin: 12px 0 0; }
@@ -255,6 +326,14 @@ export class ConsoleSettings extends LitElement {
   @state() private agents: AgentFull[] = [];
   @state() private models: ModelRow[] = [];
   @state() private configs: ModelConfigRow[] = [];
+  // The menu as the engine orders it. Never re-sorted here: the order IS the
+  // stored rank, and a second opinion about it on the way to the screen is a
+  // second thing to keep true.
+  @state() private choices: ModelChoiceRow[] = [];
+  @state() private routers: ModelRouterRow[] = [];
+  // Why the menu could not be read, when it could not. Its own field rather
+  // than `problem`, which is cleared by every other tab's next write.
+  @state() private menuProblem = "";
   @state() private prompts: PromptRow[] = [];
   @state() private skills: SkillRow[] = [];
   @state() private templates: TemplateRow[] = [];
@@ -309,6 +388,7 @@ export class ConsoleSettings extends LitElement {
           listServers(), listProviders(), tracingStatus(), listScriptImages(), listSkills(),
         listTemplates(),
         ]);
+      await this.readMenu();
       const t = this.tracing;
       if (t !== null) {
         this.trace = {
@@ -321,6 +401,26 @@ export class ConsoleSettings extends LitElement {
         };
       }
     } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+  }
+
+  // The menu and its routers, read on their own and caught on their own.
+  //
+  // Not part of the read above, and this is not tidiness. These two routes are
+  // newer than every other row this modal edits, so an engine that has not been
+  // restarted since they landed answers 404 for them — and one rejection inside
+  // that Promise.all takes out Agents, Models, Prompts, Providers and Tracing
+  // as well, none of which have anything to do with the menu. Caught here, an
+  // old engine costs exactly the tab it cannot serve, and that tab says so
+  // rather than drawing an empty list that reads as "nothing is offered".
+  private async readMenu() {
+    try {
+      [this.choices, this.routers] = await Promise.all([listModelChoices(), listRouters()]);
+      this.menuProblem = "";
+    } catch (e) {
+      this.choices = [];
+      this.routers = [];
+      this.menuProblem = e instanceof Error ? e.message : String(e);
+    }
   }
 
   // Every write goes through here: the list is re-read from the server rather
@@ -388,6 +488,7 @@ export class ConsoleSettings extends LitElement {
     switch (this.tab) {
       case "Agents": return this.agentsTab();
       case "Models": return this.modelsTab();
+      case "Model menu": return this.menuTab();
       case "Prompts": return this.promptsTab();
       case "Skills": return this.skillsTab();
       case "Templates": return this.templatesTab();
@@ -459,14 +560,52 @@ export class ConsoleSettings extends LitElement {
     options: { value: string; label: string }[];
     required?: boolean; help?: string; wide?: boolean;
   }) {
+    // An nr-dropdown rather than an nr-select, so every menu in this console is
+    // the same object: the composer's + opens one of these, and a settings form
+    // that opened something else made two components out of one idea.
+    //
+    // Three things nr-select did for free have to be done here, and each is a
+    // line rather than a paragraph because the alternative is a select:
+    //
+    //  * The LABEL is beside the field, not slotted into it. nr-dropdown has no
+    //    label slot — it is a menu, not a form control — so `.f > .label` (which
+    //    the stylesheet already dresses identically to a slotted one) carries it.
+    //  * The VALUE is drawn by the trigger. A dropdown does not know what is
+    //    chosen; it emits a click and forgets. `chosen` resolves the stored
+    //    value back to its label so the closed field still says what it is set
+    //    to, and falls back to the raw value rather than to blank — a field
+    //    pointing at a row that was deleted must not read as "nothing chosen".
+    //  * The EVENT is the item, not a value. `nr-dropdown-item-click` carries
+    //    `detail.item`, and the item's id is what was put in it below.
+    //
+    // The filter is the fourth, and it is a behaviour being kept rather than a
+    // tidy-up. A blank-labelled option is how "nothing chosen" reaches these
+    // forms — `withCurrent` appends the row's own value when it is not in the
+    // list, and an unset one appends nothing readable. nr-select never drew
+    // those; a dropdown draws every item it is given, so an unset tracing
+    // backend put an empty, clickable row under the six real ones. Dropped
+    // here rather than in `withCurrent`, which is also right about what it
+    // does: the field is what decides how "unset" looks.
+    //
+    // Tested against `Boolean(label)` and not against `label !== ""`, which is
+    // the version that did not work: an unset row reaches `withCurrent` as
+    // undefined rather than as an empty string, so it is appended as an option
+    // whose label is undefined — not equal to "", and drawn as a blank row all
+    // the same.
+    const chosen = f.options.find((o) => o.value === f.value);
     return html`
       <div class="f ${f.wide === true ? "wide" : ""}">
-        <!-- block, or the field sizes itself to its longest option and a form
-             of full-width boxes has one field that is not. -->
-        <nr-select block id=${f.id} .value=${f.value} .options=${f.options}
-          @nr-change=${(e: Event) => f.on(valueOf(e))}>
-          <span slot="label">${f.label}${f.required === true ? html`<em class="req">*</em>` : ""}</span>
-        </nr-select>
+        <span class="label">${f.label}${f.required === true ? html`<em class="req">*</em>` : ""}</span>
+        <nr-dropdown block class="pick" id=${f.id} trigger="click" placement="bottom-start" auto-close
+          .items=${f.options.filter((o) => Boolean(o.label))
+            .map((o) => ({ id: o.value, label: o.label }))}
+          @nr-dropdown-item-click=${(e: CustomEvent<{ item: { id: string } }>) =>
+            f.on(e.detail.item.id)}>
+          <button slot="trigger" type="button" class="pick-face" aria-haspopup="listbox">
+            <span class="pick-value">${chosen === undefined ? f.value : chosen.label}</span>
+            <nr-icon name="chevron-down" size="small"></nr-icon>
+          </button>
+        </nr-dropdown>
         ${f.help === undefined ? "" : html`<p class="help">${f.help}</p>`}
       </div>`;
   }
@@ -649,7 +788,7 @@ export class ConsoleSettings extends LitElement {
   private modelsTab() {
     const v = this.view;
     if (v.kind === "model") return this.modelForm(v.row, v.fresh);
-    if (v.kind === "config") return this.configForm(v.row);
+    if (v.kind === "config") return this.configForm(v.row, v.fresh);
 
     const chat = this.models.filter((m) => m.kind !== "embedding");
     const embedding = this.models.filter((m) => m.kind === "embedding");
@@ -657,7 +796,7 @@ export class ConsoleSettings extends LitElement {
       ${this.head("Models", "zap")}
       <div class="bar">
         <button class="ghost" data-new="config"
-          @click=${() => this.open({ kind: "config", row: { ...NEW_CONFIG,
+          @click=${() => this.open({ kind: "config", fresh: true, row: { ...NEW_CONFIG,
             modelId: this.models.find((m) => m.kind !== "embedding")?.id ?? "" } })}>
           <nr-icon name="settings" size="small"></nr-icon> New configuration
         </button>
@@ -679,17 +818,26 @@ export class ConsoleSettings extends LitElement {
       ${this.group("Configurations", this.configs.length)}
       <table><tbody>
         ${this.configs.map((c) => html`<tr>
-          <td class="name">${c.id}</td>
+          <td class="name">${c.label === "" ? c.id : c.label}</td>
+          <td><span class="slug">${c.id}</span></td>
           <td><span class="slug">${c.modelId}</span></td>
-          <td class="fill dim">temperature ${c.temperature} · ${c.maxTokens} max tokens · top-p ${c.topP}</td>
+          <!-- Concatenated rather than interpolated: a nested template literal
+               inside an html literal is legal, and is also the shape that has
+               ended one by accident four times in this app. -->
+          <td class="fill dim">temperature ${c.temperature} · ${c.maxTokens} max tokens · top-p ${c.topP}
+            ${c.thinking === "" ? "" : " · thinking " + c.thinking}</td>
+          <td>${c.selectable ? html`<span class="tag">offered</span>` : ""}</td>
           ${this.rowActions([
+            { icon: "edit", title: `Edit ${c.id}`,
+              run: () => this.open({ kind: "config", row: { ...c }, fresh: false }) },
             { icon: "trash", title: `Delete ${c.id}`, danger: true,
               run: () => this.act(() => deleteConfig(c.id)) },
           ])}
         </tr>`)}
       </tbody></table>
-      <p class="note">A configuration is created and repointed rather than edited: an agent
-      mid-conversation reads it every round.</p>
+      <p class="note">An agent mid-conversation reads its configuration every round, so an edit
+      here lands on the next message. The id is fixed: everything that names this row —
+      an agent, a menu entry, a router candidate — names it by that.</p>
 
       ${this.probed === "" ? "" : html`<p class="said">${this.probed}</p>`}
     `;
@@ -747,14 +895,20 @@ export class ConsoleSettings extends LitElement {
     `;
   }
 
-  private configForm(c: ModelConfigRow) {
+  private configForm(c: ModelConfigRow, fresh: boolean) {
     return html`
-      ${this.formHead("New configuration")}
+      ${this.formHead(fresh ? "New configuration" : `Edit ${c.label === "" ? c.id : c.label}`)}
       <div class="banner">A configuration is how an agent names a model: the id here is
-        what its <em>Model configuration</em> field points at.</div>
+        what its <em>Model configuration</em> field points at. It is also the unit the
+        composer's menu is built from — the same model at two thinking budgets is two
+        configurations, which is what makes Instant and Thinking two entries.</div>
       <div class="grid">
-        ${this.text({ id: "c-id", label: "Id", value: c.id, required: true,
+        ${this.text({ id: "c-id", label: "Id", value: c.id, required: true, disabled: !fresh,
           placeholder: "mistral-big", on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "c-label", label: "Name", value: c.label,
+          placeholder: "Thinking",
+          help: "What this row is called where somebody picks it. The model's own name cannot serve: two configurations over one model would arrive in a list as the same word twice.",
+          on: (v) => this.patch({ label: v }) })}
         ${this.choice({ id: "c-model", label: "Model", value: c.modelId, required: true,
           options: this.models.map((m) => ({ value: m.id, label: `${m.label} · ${m.apiName}` })),
           on: (v) => this.patch({ modelId: v }) })}
@@ -768,12 +922,430 @@ export class ConsoleSettings extends LitElement {
           on: (v) => this.patch({ temperature: Number(v || "0") }) })}
         ${this.text({ id: "c-topp", label: "Top-p", type: "number", value: String(c.topP),
           placeholder: "1", on: (v) => this.patch({ topP: Number(v || "0") }) })}
+        ${this.text({ id: "c-thinking", label: "Thinking", value: c.thinking,
+          placeholder: "medium, or 8192",
+          help: "How hard to think before answering, where the provider takes an instruction: a token budget for Anthropic, an effort — low, medium, high — for the reasoning models. Blank is however it normally answers.",
+          on: (v) => this.patch({ thinking: v }) })}
         ${this.area({ id: "c-extra", label: "Extra", value: c.extra, rows: 3,
           placeholder: "{}",
           help: "Sent to the provider as-is, for the fields this form does not carry.",
           on: (v) => this.patch({ extra: v }) })}
+        ${this.check({ id: "c-selectable", label: "Offer this configuration", checked: c.selectable,
+          help: "Whether it appears where a person picks a configuration. Not the composer's menu — that is Model menu, curated one entry at a time.",
+          on: (v) => this.patch({ selectable: v }) })}
       </div>
-      ${this.formActions(() => this.act(() => createConfig(c)), "Create")}
+      ${this.formActions(() => this.act(() => fresh ? createConfig(c) : updateConfig(c)),
+        fresh ? "Create" : "Save")}
+    `;
+  }
+
+  // --- the model menu, and the router behind its Auto row -----------------------------
+  //
+  // Two lists on one page, because they are one feature: the menu is what a
+  // person opens beside the composer, and a router is what one of its rows
+  // does. Splitting them across tabs would put the thing being configured and
+  // the thing it points at in different rooms.
+
+  // The configurations a menu entry or a router candidate may name. Embedding
+  // configurations are excluded here rather than only refused on save: an
+  // embedding model in a picker is an option somebody chooses and then gets a
+  // provider's refusal from, per turn, until an operator reads a log.
+  private chatConfigs(): ModelConfigRow[] {
+    return this.configs.filter((c) =>
+      this.models.some((m) => m.id === c.modelId && m.kind === "chat"));
+  }
+
+  // A configuration as a person should read it: what it is called, and which
+  // model is underneath. Falls back to the id, which is the only thing that is
+  // certainly there.
+  private configName(id: string): string {
+    const c = this.configs.find((x) => x.id === id);
+    if (c === undefined) { return id; }
+    const m = this.models.find((x) => x.id === c.modelId);
+    const name = c.label === "" ? c.id : c.label;
+    return m === undefined ? name : `${name} · ${m.label}`;
+  }
+
+  // The chat configurations, plus whatever the row already points at. A router
+  // whose candidate was pointed at a configuration that has since been deleted
+  // still shows what it actually says, rather than being silently redrawn as
+  // the first option that happens to fit.
+  private configOptions(current: string) {
+    const list = this.chatConfigs().map((c) => ({ value: c.id, label: this.configName(c.id) }));
+    if (current !== "" && !list.some((o) => o.value === current)) {
+      return [...list, { value: current, label: `${current} — no such configuration` }];
+    }
+    return list;
+  }
+
+  private menuTab() {
+    const v = this.view;
+    if (v.kind === "choice") return this.choiceForm(v.row, v.fresh);
+    if (v.kind === "router") return this.routerForm(v.row, v.fresh);
+
+    // An engine that cannot answer for the menu cannot be written to either,
+    // so the actions are not drawn. An empty list here would read as "nothing
+    // is offered", which is a different and much more alarming sentence.
+    if (this.menuProblem !== "") {
+      return html`
+        ${this.head("Model menu", "list")}
+        <div class="banner">The engine did not answer for the menu:
+          <strong>${this.menuProblem}</strong>. These routes are newer than the rest of
+          this page — an engine that has not been restarted since they landed does not
+          serve them, and nothing about the menu can be read or written until it has.</div>`;
+    }
+
+    const entry = this.agents.find((a) => a.isDefault);
+    const fallbackName = entry === undefined ? "" : this.configName(entry.modelConfigId);
+    const automatic = this.choices.some((c) => c.kind === "router" && c.enabled);
+    const first = this.chatConfigs()[0]?.id ?? "";
+    return html`
+      ${this.head("Model menu", "list")}
+      <div class="bar">
+        <button class="ghost" data-new="router"
+          @click=${() => this.open({ kind: "router", fresh: true, row: { ...NEW_ROUTER,
+            routerConfigId: first, fallbackConfigId: first, candidates: [] } })}>
+          <nr-icon name="shuffle" size="small"></nr-icon> New router
+        </button>
+        <button class="primary" data-new="choice"
+          @click=${() => this.open({ kind: "choice", fresh: true, row: { ...NEW_CHOICE,
+            configId: first, rank: this.choices.length + 1 } })}>
+          <nr-icon name="plus" size="small"></nr-icon> New entry
+        </button>
+      </div>
+
+      <div class="banner">This is the menu beside the composer, in this order and in these
+        words. A conversation with nothing chosen runs on its agent's own model, which is
+        what every conversation opened before this list existed still means.</div>
+
+      ${this.group("Menu", this.choices.length)}
+      ${this.choices.length === 0
+        ? html`<p class="empty">Nothing is offered, so the composer shows no picker at all —
+            which is the right answer for a deployment with one model and the wrong one for
+            this deployment as soon as there are two.</p>`
+        : html`<table><tbody>
+            ${this.choices.map((c, i) => this.choiceRow(c, i))}
+            <!-- The last line of the real menu, which is not a row of this table
+                 and never can be: it is how a person goes back to the agent's own
+                 model. Shown so this page is the same length as the menu it edits. -->
+            <tr class="tail"><td class="ord"></td>
+              <td colspan="4">${fallbackName === "" ? "Agent default" : "Agent default (" + fallbackName + ")"}</td>
+            </tr>
+          </tbody></table>`}
+
+      ${automatic ? html`<p class="note">One of these entries is automatic, so every message
+        sent under it costs one extra completion — a small model reads the message and picks.
+        Tens to low hundreds of milliseconds against a turn that takes seconds, and a token
+        bill that is small rather than absent.</p>` : ""}
+      <p class="note">Taking something off the menu is <em>On the menu</em>, not Delete: an
+      entry conversations are still set to is refused a delete, and turning it off leaves
+      those conversations running on what they already chose.</p>
+
+      ${this.group("Routers", this.routers.length)}
+      ${this.routers.length === 0
+        ? html`<p class="empty">No router. One is worth having when there are at least two
+            models worth choosing between — with one candidate the routing call can only
+            return one answer.</p>`
+        : html`<table><tbody>
+            ${this.routers.map((r) => this.routerRow(r))}
+          </tbody></table>`}
+      <p class="note">A router is not itself on the menu — a menu entry of kind
+      <em>automatic</em> points at one, and that entry is what a person picks.</p>
+    `;
+  }
+
+  private choiceRow(c: ModelChoiceRow, i: number) {
+    const target = c.kind === "router"
+      ? (this.routers.find((r) => r.id === c.routerId)?.label ?? `${c.routerId} — no such router`)
+      : this.configName(c.configId);
+    return html`<tr>
+      <td class="ord"><span class="acts">
+        <button class="act" title="Move up" ?disabled=${i === 0}
+          @click=${() => this.moveChoice(i, -1)}>
+          <nr-icon name="arrow-up" size="small"></nr-icon></button>
+        <button class="act" title="Move down" ?disabled=${i === this.choices.length - 1}
+          @click=${() => this.moveChoice(i, 1)}>
+          <nr-icon name="arrow-down" size="small"></nr-icon></button>
+      </span></td>
+      <td class="fill">
+        <span class="menuname">
+          <!-- The two marks the composer's own menu draws, for the same two
+               reasons: an automatic row decides per message which model
+               answers, and a premium row is priced. Neither is a lock; the
+               diamond in particular says priced where a padlock would say
+               forbidden, which nothing here enforces. -->
+          ${c.kind === "router" ? html`<nr-icon name="shuffle" size="small"></nr-icon>` : ""}
+          <span>${c.label}</span>
+          ${c.tier === "premium"
+            ? html`<nr-icon name="diamond" size="small" title="Premium"></nr-icon>` : ""}
+        </span>
+        ${c.description === "" ? "" : html`<span class="sub">${c.description}</span>`}
+      </td>
+      <td><span class="slug">${target}</span></td>
+      <td>${c.enabled ? "" : html`<span class="tag off">off</span>`}</td>
+      ${this.rowActions([
+        { icon: "edit", title: `Edit ${c.label}`,
+          run: () => this.open({ kind: "choice", row: { ...c }, fresh: false }) },
+        { icon: "trash", title: `Delete ${c.label}`, danger: true,
+          run: () => this.act(() => deleteModelChoice(c.id)) },
+      ])}
+    </tr>`;
+  }
+
+  private routerRow(r: ModelRouterRow) {
+    const named = this.choices.filter((c) => c.routerId === r.id).length;
+    return html`<tr>
+      <td class="name">${r.label}</td>
+      <td><span class="slug">${r.id}</span></td>
+      <td class="fill dim">${r.candidates.length} candidate${r.candidates.length === 1 ? "" : "s"}
+        · decided by ${this.configName(r.routerConfigId)}</td>
+      <td><span class="tag">${r.routeEvery === "thread" ? "once per conversation" : "every message"}</span></td>
+      <td>${r.escalateOnly ? html`<span class="tag">escalate only</span>` : ""}
+          ${r.enabled ? "" : html`<span class="tag off">off</span>`}
+          ${named === 0 ? html`<span class="tag">not on the menu</span>` : ""}</td>
+      ${this.rowActions([
+        { icon: "edit", title: `Edit ${r.label}`,
+          run: () => this.open({ kind: "router", row: { ...r, candidates: [...r.candidates] },
+            fresh: false }) },
+        { icon: "trash", title: `Delete ${r.label}`, danger: true,
+          run: () => this.act(() => deleteRouter(r.id)) },
+      ])}
+    </tr>`;
+  }
+
+  // A move renumbers the whole list from 1 and writes only the rows whose rank
+  // actually changed.
+  //
+  // Renumbering rather than swapping two numbers, because rank ties are real:
+  // the seed writes rows this list has never been reordered by hand, and the
+  // engine breaks a tie by label — so swapping the ranks of two rows that both
+  // hold 0 moves nothing and the arrow looks broken. Only the changed rows are
+  // written, and each write is the rank alone, so a reorder never carries some
+  // other field back over a row nobody opened.
+  private moveChoice(i: number, delta: number) {
+    const to = i + delta;
+    if (to < 0 || to >= this.choices.length) { return; }
+    const order = [...this.choices];
+    const moved = order[i];
+    order[i] = order[to];
+    order[to] = moved;
+    void this.act(async () => {
+      for (let k = 0; k < order.length; k += 1) {
+        if (order[k].rank !== k + 1) { await rankChoice(order[k].id, k + 1); }
+      }
+    });
+  }
+
+  private choiceForm(c: ModelChoiceRow, fresh: boolean) {
+    const automatic = c.kind === "router";
+    return html`
+      ${this.formHead(fresh ? "New menu entry" : `Edit ${c.label}`)}
+      <div class="banner">The label and the line under it are shown to whoever opens the
+        picker, exactly as they are typed here. Write them for the moment of choosing:
+        the description is the only thing that says what this entry is for.</div>
+
+      <div class="grid">
+        ${this.text({ id: "ch-label", label: "Label", value: c.label, required: true,
+          placeholder: "Thinking",
+          help: "The word in the menu.", on: (v) => this.patch({ label: v }) })}
+        ${this.text({ id: "ch-id", label: "Id", value: c.id, required: true, disabled: !fresh,
+          placeholder: "ch-thinking",
+          help: fresh
+            ? "What a conversation stores when somebody picks this. It cannot be changed later."
+            : "Conversations already point at this id, so it is fixed once the row exists.",
+          on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "ch-desc", label: "Description", value: c.description, wide: true,
+          placeholder: "Slower, and reasons before it answers",
+          help: "The one line under the label in the menu.",
+          on: (v) => this.patch({ description: v }) })}
+        ${this.choice({ id: "ch-kind", label: "What it runs", value: c.kind, required: true,
+          options: [
+            { value: "config", label: "A fixed model configuration" },
+            { value: "router", label: "Automatic — a router picks per message" },
+          ],
+          help: "An automatic entry is the menu's Auto: before each message a small model reads it and chooses one of the router's candidates. That is one extra completion per message.",
+          // Both ids are never set at once: the engine refuses a row carrying
+          // the one its kind does not use, and this is the field that decides
+          // which that is.
+          on: (v) => this.patch({
+            kind: v,
+            configId: v === "config" ? c.configId : "",
+            routerId: v === "router" ? c.routerId : "",
+          }) })}
+        ${automatic
+          ? this.choice({ id: "ch-router", label: "Router", value: c.routerId, required: true,
+              options: this.routers.map((r) => ({ value: r.id, label: r.label })),
+              help: this.routers.length === 0
+                ? "There is no router yet — make one first, on this page."
+                : "Which router decides. Its candidates and their route descriptions are edited under Routers.",
+              on: (v) => this.patch({ routerId: v }) })
+          : this.choice({ id: "ch-config", label: "Model configuration", value: c.configId,
+              required: true, options: this.configOptions(c.configId),
+              help: "Which configuration answers when this entry is picked.",
+              on: (v) => this.patch({ configId: v }) })}
+        <!-- The stored value for a standard row is the empty string, and an
+             empty value is what nr-select reads as nothing chosen: the field
+             drew "Select an option" over a row that was perfectly well set. So
+             the control carries a word and the wire keeps its empty string. -->
+        ${this.choice({ id: "ch-tier", label: "Tier",
+          value: c.tier === "premium" ? "premium" : "standard",
+          options: [
+            { value: "standard", label: "Standard" },
+            { value: "premium", label: "Premium" },
+          ],
+          help: "A mark on the row, never a refusal: the menu draws a diamond and nothing here enforces anything.",
+          on: (v) => this.patch({ tier: v === "premium" ? "premium" : "" }) })}
+        ${this.check({ id: "ch-enabled", label: "On the menu", checked: c.enabled,
+          help: "A disabled entry keeps its row and keeps working for conversations already set to it; it is simply not offered any more.",
+          on: (v) => this.patch({ enabled: v }) })}
+      </div>
+      ${this.formActions(() => this.act(() => fresh ? createModelChoice(c) : updateModelChoice(c)),
+        fresh ? "Create" : "Save")}
+    `;
+  }
+
+  // --- the router editor ---------------------------------------------------------------
+
+  // A key for a newly picked candidate: readable, and unique without regard to
+  // case — the router folds case when it matches a reply against these keys, so
+  // "fast" and "Fast" are one key and which of them a reply selects would be
+  // nobody's decision.
+  private candidateKey(taken: RouterCandidate[], c: ModelConfigRow): string {
+    const from = c.label === "" ? c.id : c.label;
+    const stem = from.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const base = stem === "" ? "option" : stem;
+    let key = base;
+    let n = 2;
+    while (taken.some((k) => k.key.toLowerCase() === key)) { key = `${base}-${n}`; n += 1; }
+    return key;
+  }
+
+  private patchCandidates(list: RouterCandidate[]) {
+    this.patch({ candidates: list });
+  }
+
+  private moveCandidate(r: ModelRouterRow, i: number, delta: number) {
+    const to = i + delta;
+    if (to < 0 || to >= r.candidates.length) { return; }
+    const list = [...r.candidates];
+    const moved = list[i];
+    list[i] = list[to];
+    list[to] = moved;
+    this.patchCandidates(list);
+  }
+
+  private routerForm(r: ModelRouterRow, fresh: boolean) {
+    const chat = this.chatConfigs();
+    const chosen = (id: string) => r.candidates.some((k) => k.configId === id);
+    return html`
+      ${this.formHead(fresh ? "New router" : `Edit ${r.label}`)}
+      <div class="banner">A router is what the menu's automatic entry does. Before each
+        message a small, cheap model is shown the candidates below — their keys and the
+        descriptions written for them — and answers with one key; that candidate answers the
+        message. <strong>It costs one extra completion per message</strong>, which is tens to
+        low hundreds of milliseconds and a token bill that is small rather than absent. Every
+        failure — an unknown answer, a provider error, a deleted configuration — lands on the
+        fallback, so a message that would have been answered is always answered.</div>
+
+      <div class="grid">
+        ${this.text({ id: "rt-label", label: "Label", value: r.label, required: true,
+          placeholder: "Auto",
+          help: "What this router is called here. What a person sees is the menu entry's own label.",
+          on: (v) => this.patch({ label: v }) })}
+        ${this.text({ id: "rt-id", label: "Id", value: r.id, required: true, disabled: !fresh,
+          placeholder: "rt-auto",
+          help: fresh ? "What a menu entry points at. It cannot be changed later."
+                      : "A menu entry points at this id, so it is fixed once the row exists.",
+          on: (v) => this.patch({ id: v }) })}
+      </div>
+
+      ${this.group("Candidates", r.candidates.length)}
+      <p class="note">Pick what this router may choose between, then say when each one should
+      be chosen. Those descriptions are the whole interface to the decision — the routing
+      model is given them and the message, and nothing else about what these models are, so
+      write about the kind of message rather than about the model, and write so the lines
+      differ from each other. The key is the word the routing model answers with: it is
+      matched as exact membership of this list and never parsed, which is also what contains
+      a message trying to talk its way onto a more expensive model — the worst it can reach
+      is another candidate you approved. Order is priority, and it is the direction
+      <em>escalate only</em> below allows: put them in increasing order of effort.</p>
+
+      ${chat.length === 0
+        ? html`<p class="empty">There is no chat configuration to route to. Make one under
+            Models first.</p>`
+        : html`<div class="grid">
+            ${chat.map((c) => this.check({
+              id: `rt-pick-${c.id}`, label: this.configName(c.id), checked: chosen(c.id),
+              on: (on) => this.patchCandidates(on
+                ? [...r.candidates, { key: this.candidateKey(r.candidates, c), configId: c.id, when: "" }]
+                : r.candidates.filter((k) => k.configId !== c.id)) }))}
+          </div>`}
+
+      ${r.candidates.length === 0
+        ? html`<p class="empty">Nothing picked yet. A router with no candidate has nothing to
+            choose and every message falls through to the fallback.</p>`
+        : ""}
+
+      ${r.candidates.map((k, i) => html`
+        <div class="cand">
+          <div class="top">
+            <span class="n">${i + 1}</span>
+            <span class="who">${this.configName(k.configId)}</span>
+            <button class="act" title="Higher priority" ?disabled=${i === 0}
+              @click=${() => this.moveCandidate(r, i, -1)}>
+              <nr-icon name="arrow-up" size="small"></nr-icon></button>
+            <button class="act" title="Lower priority" ?disabled=${i === r.candidates.length - 1}
+              @click=${() => this.moveCandidate(r, i, 1)}>
+              <nr-icon name="arrow-down" size="small"></nr-icon></button>
+            <button class="act danger" title="Remove this candidate"
+              @click=${() => this.patchCandidates(r.candidates.filter((_, j) => j !== i))}>
+              <nr-icon name="trash" size="small"></nr-icon></button>
+          </div>
+          <div class="grid">
+            <!-- Neither field carries help text, though both would earn one on
+                 their own: there are as many of these cards as there are
+                 candidates, and the same two paragraphs repeated three times
+                 push the thing being written off the screen. Both are said once,
+                 above the cards. -->
+            ${this.text({ id: `rt-key-${i}`, label: "Key", value: k.key, required: true,
+              placeholder: "fast",
+              on: (v) => this.patchCandidates(
+                r.candidates.map((x, j) => j === i ? { ...x, key: v } : x)) })}
+            ${this.area({ id: `rt-when-${i}`, label: "Choose this when", value: k.when,
+              rows: 4, required: true,
+              placeholder: "greetings, short factual questions, edits to text already in the conversation",
+              on: (v) => this.patchCandidates(
+                r.candidates.map((x, j) => j === i ? { ...x, when: v } : x)) })}
+          </div>
+        </div>`)}
+
+      ${this.group("The decision")}
+      <div class="grid">
+        ${this.choice({ id: "rt-config", label: "Routing model", value: r.routerConfigId,
+          required: true, options: this.configOptions(r.routerConfigId),
+          help: "The configuration that makes the choice — small, fast and cheap, because it runs before every message. Its own token budget is capped by the engine, so a chatty model cannot answer the routing prompt with an essay.",
+          on: (v) => this.patch({ routerConfigId: v }) })}
+        ${this.choice({ id: "rt-fallback", label: "Fallback", value: r.fallbackConfigId,
+          required: true, options: this.configOptions(r.fallbackConfigId),
+          help: "What answers when the routing call fails, times out, or names something that is not a key above. A run that would have happened still happens.",
+          on: (v) => this.patch({ fallbackConfigId: v }) })}
+        ${this.choice({ id: "rt-every", label: "Decide", value: r.routeEvery,
+          options: [
+            { value: "turn", label: "Every message" },
+            { value: "thread", label: "Once per conversation" },
+          ],
+          help: "Every message is one extra completion per message, and follows a conversation as it changes subject. Once per conversation pays for the decision a single time and keeps it — cheaper, and wrong for a conversation that starts with hello and ends with a plan.",
+          on: (v) => this.patch({ routeEvery: v }) })}
+        ${this.check({ id: "rt-escalate", label: "Escalate only", checked: r.escalateOnly,
+          help: "A ratchet within one conversation: once a message has been routed to a candidate, no later message in that conversation is routed to one ABOVE it in the list — the router can go further down, never back up. It is for the follow-up that reads as trivial. Ask something hard, get a careful answer, then ask for it shorter: on its own that routes to the fast model and produces something visibly worse than the answer it is editing.",
+          on: (v) => this.patch({ escalateOnly: v }) })}
+        ${this.check({ id: "rt-enabled", label: "Enabled", checked: r.enabled,
+          help: "A disabled router routes nothing; a menu entry pointing at it answers on the agent's own model.",
+          on: (v) => this.patch({ enabled: v }) })}
+      </div>
+
+      ${this.formActions(() => this.act(() => fresh ? createRouter(r) : updateRouter(r)),
+        fresh ? "Create" : "Save")}
     `;
   }
 

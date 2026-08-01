@@ -5,7 +5,7 @@
 // and reporting that as a failure would be reporting correct behaviour.
 
 import { Page, expect, test } from "@playwright/test";
-import { errorOf, hasPostgres, knowledge, openKnowledge, shell } from "./console.js";
+import { errorOf, hasPostgres, knowledge, open, openKnowledge, shell } from "./console.js";
 
 // A corpus the tree tests can actually read.
 //
@@ -48,13 +48,13 @@ async function seedCorpus(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await open(page);
   await expect(shell(page)).toBeVisible();
   test.skip(!(await hasPostgres(page)), "documents need PostgreSQL (pgvector)");
   if (!seeded) {
     await seedCorpus(page);
     seeded = true;
-    await page.goto("/");
+    await open(page);
   }
   await openKnowledge(page);
 });

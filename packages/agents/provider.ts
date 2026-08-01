@@ -6,6 +6,7 @@
 
 import { ModelRow, ModelConfigRow } from "./schema.ts";
 import { JsonText, jsonFind, jsonRaw, jsonText, jsonList, jsonStringMember, jsonComplete } from "./scan.ts";
+import { vertexBearer } from "./vertex.ts";
 
 export type Completion = {
   ok: bool,
@@ -88,6 +89,32 @@ export type Embedding = {
   error: string,
 };
 
+// The key a request actually carries. For every provider but one this is the
+// stored credential itself. Vertex is the exception: its stored credential is
+// a service-account JSON, and the wire wants an OAuth2 access token minted
+// from it — vertex.ts mints and caches those. Empty key answers empty, so the
+// callers' own no-key refusals keep firing first.
+export type WireKey = {
+  ok: bool,
+  key: string,
+  error: string,
+};
+
+export function wireKey(provider: string, apiKey: string): WireKey {
+  if (provider != "vertex" || apiKey == "") {
+    let plain: WireKey = { ok: true, key: apiKey, error: "" };
+    return plain;
+  }
+  let bearer = vertexBearer(apiKey, Date.now());
+  if (!bearer.ok) {
+    let refused: WireKey = { ok: false, key: "", error: bearer.error };
+    return refused;
+  }
+  let minted: WireKey = { ok: true, key: bearer.token, error: "" };
+  return minted;
+}
+
+
 // One embedding. The model is named by its row like any other, so which model
 // embeds is a column and changing it does not touch this file.
 export function embedText(model: ModelRow, text: string, apiKey: string): Embedding {
@@ -105,8 +132,42 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
     return keyless;
   }
 
-  let body = "{\"model\":" + JSON.stringify(model.apiName) + ",\"input\":[" + JSON.stringify(text) + "]}";
-  let res = http.request(endpoint, "POST", body, authHeaders(model.provider, apiKey));
+  let carried = wireKey(model.provider, apiKey);
+  if (!carried.ok) {
+    let unminted: Embedding = { ok: false, vector: "", dimensions: 0, error: carried.error };
+    return unminted;
+  }
+  // Vertex embeds through its native :predict shape, not the OpenAI-compatible
+  // one: the compat surface answers chat but 500s on /embeddings (verified
+  // against a live project, both with and without the dimensions member).
+  // The row's baseUrl names the :predict URL whole, and the reply is asked
+  // for the row's own width — Gemini defaults to 3072 and truncates on
+  // request (MRL), the vector column was sized by the row, and cosine `<=>`
+  // is scale-invariant so the un-normalised truncated vector ranks the same.
+  if (model.provider == "vertex") {
+    if (!model.baseUrl.endsWith(":predict")) {
+      let misaimed: Embedding = { ok: false, vector: "", dimensions: 0,
+        error: "a vertex embedding model's base URL is the native predict endpoint — "
+          + "https://<region>-aiplatform.googleapis.com/v1/projects/<project>/locations/<region>/publishers/google/models/<model>:predict" };
+      return misaimed;
+    }
+    let ask = "{\"instances\":[{\"content\":" + JSON.stringify(text) + "}]"
+      + ",\"parameters\":{\"outputDimensionality\":" + `${model.dimensions}` + "}}";
+    let answered = http.request(model.baseUrl, "POST", ask, authHeaders(model.provider, carried.key));
+    if (!answered.ok) {
+      let dead: Embedding = { ok: false, vector: "", dimensions: 0, error: "no answer from " + model.baseUrl };
+      return dead;
+    }
+    if (answered.status != 200) {
+      let refused: Embedding = { ok: false, vector: "", dimensions: 0, error: "HTTP " + `${answered.status}` + " " + answered.body.substring(0, 120) };
+      return refused;
+    }
+    return vertexVectorFrom(answered.body);
+  }
+
+  let body = "{\"model\":" + JSON.stringify(model.apiName)
+    + ",\"input\":[" + JSON.stringify(text) + "]}";
+  let res = http.request(endpoint, "POST", body, authHeaders(model.provider, carried.key));
   if (!res.ok) {
     let dead: Embedding = { ok: false, vector: "", dimensions: 0, error: "no answer from " + endpoint };
     return dead;
@@ -116,6 +177,42 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
     return refused;
   }
   return vectorFrom(res.body);
+}
+
+// The vector out of a native :predict reply: predictions[0].embeddings.values.
+// Its own scan rather than vectorFrom's, which looks for "embedding" with the
+// closing quote — the native reply says "embeddings", and its first array is
+// the statistics block, so the anchor here is the "values" member.
+function vertexVectorFrom(body: string): Embedding {
+  let at = body.indexOf("\"values\"");
+  if (at < 0) {
+    let missing: Embedding = { ok: false, vector: "", dimensions: 0, error: "no values in the predict reply" };
+    return missing;
+  }
+  let rest = body.substring(at, body.length);
+  let open = rest.indexOf("[");
+  let close = rest.indexOf("]");
+  if (open < 0 || close < 0 || close < open) {
+    let malformed: Embedding = { ok: false, vector: "", dimensions: 0, error: "the embedding is not an array" };
+    return malformed;
+  }
+  let pretty = rest.substring(open, close + 1);
+  // The predict reply is pretty-printed — newlines and indentation between
+  // every number — and the literal becomes a pgvector parameter, whose parser
+  // is owed digits and commas, not a transcript of Google's formatter.
+  let literal = "";
+  let dims: int = 0;
+  let i: int = 0;
+  while (i < pretty.length) {
+    let c = pretty.charAt(i);
+    if (c == ",") { dims = dims + 1; }
+    if (c != " " && c != "\n" && c != "\r" && c != "\t") { literal = literal + c; }
+    i = i + 1;
+  }
+  if (dims > 0) { dims = dims + 1; }
+  let out: Embedding = { ok: dims > 0, vector: literal, dimensions: dims, error: "" };
+  if (dims == 0) { out = { ok: false, vector: "", dimensions: 0, error: "the embedding is empty" }; }
+  return out;
 }
 
 // The first `"embedding":[...]` array, as a pgvector literal.
@@ -454,11 +551,22 @@ export function stopReasonOf(provider: string, body: string): string {
 // `content` was null, and stored the question with no answer at all where it
 // was "". A reply cut mid-*text* nothing noticed in any shape.
 //
-// Emptiness is not the test, then: the reason is. `max_tokens` is Anthropic's
-// word, `length` OpenAI's, `model_length` Mistral's.
+// Emptiness is not the test, then: the reason is, which `wasTruncated` reads.
+// Whether a reply stopped because it hit the output ceiling.
+//
+// The three spellings live here and only here: `max_tokens` is Anthropic's
+// word, `length` OpenAI's and vertex's, `model_length` Mistral's. Separate from
+// the sentence below because two callers want the fact and only one wants the
+// advice — router.ts has its own thing to say about a routing call that ran out
+// of room, and a second copy of this list is a list that drifts.
+export function wasTruncated(provider: string, body: string): bool {
+  let reason = stopReasonOf(provider, body);
+  return reason == "length" || reason == "max_tokens" || reason == "model_length";
+}
+
 export function truncationProblem(provider: string, body: string, maxTokens: int): string {
   let reason = stopReasonOf(provider, body);
-  if (reason != "length" && reason != "max_tokens" && reason != "model_length") { return ""; }
+  if (!wasTruncated(provider, body)) { return ""; }
   return "the model ran out of room before it finished this reply (it stopped on \"" + reason
     + "\"), so nothing was kept: ask for less at a time, or raise this model config's max_tokens, currently "
     + `${maxTokens}` + ".";
@@ -677,15 +785,27 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     let nowhere: Completion = { ok: false, text: "", status: 0, error: "no chat endpoint for \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
     return nowhere;
   }
+  // The same refusal `completeTurns` makes, because a switched-off row means
+  // switched off on every transport — without it, which door a run takes
+  // decides whether the model's own enabled column is honoured.
+  if (!model.enabled) {
+    let off: Completion = { ok: false, text: "", status: 0, error: model.label + " is disabled", inputTokens: 0, outputTokens: 0, counted: false };
+    return off;
+  }
   if (apiKey == "") {
     let keyless: Completion = { ok: false, text: "", status: 0, error: "no API key for " + model.provider, inputTokens: 0, outputTokens: 0, counted: false };
     return keyless;
   }
 
+  let carried = wireKey(model.provider, apiKey);
+  if (!carried.ok) {
+    let unminted: Completion = { ok: false, text: "", status: 0, error: carried.error, inputTokens: 0, outputTokens: 0, counted: false };
+    return unminted;
+  }
   let body = requestBody(model, config, systemPrompt, turns, tools);
   // The one difference from the buffered request: ask for the stream.
   let streamed = body.slice(0, body.length - 1) + ",\"stream\":true}";
-  let s = http.stream(endpoint, "POST", streamed, authHeaders(model.provider, apiKey));
+  let s = http.stream(endpoint, "POST", streamed, authHeaders(model.provider, carried.key));
 
   let status = s.status();
   if (status < 200 || status >= 300) {
@@ -784,7 +904,12 @@ export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPro
     return keyless;
   }
 
-  let res = http.request(endpoint, "POST", requestBody(model, config, systemPrompt, turns, tools), authHeaders(model.provider, apiKey));
+  let carried = wireKey(model.provider, apiKey);
+  if (!carried.ok) {
+    let unminted: Completion = { ok: false, text: "", status: 0, error: carried.error, inputTokens: 0, outputTokens: 0, counted: false };
+    return unminted;
+  }
+  let res = http.request(endpoint, "POST", requestBody(model, config, systemPrompt, turns, tools), authHeaders(model.provider, carried.key));
   if (!res.ok) {
     let dead: Completion = { ok: false, text: "", status: 0, error: "no answer from " + endpoint, inputTokens: 0, outputTokens: 0, counted: false };
     return dead;

@@ -40,3 +40,13 @@ test-results/
 playwright-report/
 tkg
 mig
+
+# Compiled engine binaries. `api` is already ignored above; its dated backups
+# are the same artifact — `lumen compile` cannot overwrite a running binary, so
+# the deploy loop moves the old one aside as api.prev-<stamp> and each is
+# 40-60MB of build output.
+/packages/agents/api.prev-*
+/packages/agents/indexer
+# Stray compiler output from a bare `lumen compile` in the repo root.
+/unk
+/unk2

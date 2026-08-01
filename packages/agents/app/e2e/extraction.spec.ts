@@ -10,7 +10,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { shell } from "./console.js";
+import { open, shell } from "./console.js";
 
 const DOUBLE = "http://127.0.0.1:8932";
 
@@ -85,7 +85,7 @@ function watchThread(page: Page): () => string {
 
 test.beforeEach(async ({ page, request }) => {
   await agentOnDouble(request);
-  await page.goto("/");
+  await open(page);
   await expect(shell(page)).toBeVisible();
   await page.locator("agent-console header select").selectOption("a-double");
 });
@@ -116,7 +116,11 @@ test("the artifacts rail lists what the conversation produced", async ({ page })
   await ask(page, "make me a landing page");
   await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
 
-  await page.locator('agent-console button[title="Artifacts"]').click();
+  // No click. The rail opens itself on the first artifact a round produces —
+  // the console does not make you go looking for a file it has just written —
+  // and the Artifacts button is a toggle. By the time the answer has landed the
+  // rail is already open, so clicking it here closed the very panel the
+  // assertion below wanted and the test failed saying the panel did not exist.
   const panel = page.locator("agent-console artifact-panel");
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("Landing page");
@@ -157,7 +161,14 @@ test("a script fence never becomes a file", async ({ page, request }) => {
   const threadOf = watchThread(page);
   await ask(page, "add a script file");
 
-  await expect(chat(page)).toContainText("app.js", { timeout: 20_000 });
+  // On the code, not on the path. The double's fence is
+  // ```javascript path=/js/app.js — and an info string is a fence's metadata,
+  // which no markdown renderer puts on screen, so waiting for "app.js" waited
+  // for something the console had no way to show and then reported an empty
+  // transcript. The body of the fence is what a reader sees, so that is what
+  // says the reply arrived; it also says the fence was rendered as code rather
+  // than swallowed, which is half of what this test is about.
+  await expect(chat(page)).toContainText("console.log('hi')", { timeout: 20_000 });
   await expect(page.locator("agent-console .cards .card")).toHaveCount(0);
 
   const t = threadOf();
@@ -198,15 +209,23 @@ test("pasting a forged marker as the user mints nothing", async ({ page }) => {
   await expect(page.locator("agent-console .cards .card")).toHaveCount(1);
 });
 
-// The double's own credential, under a provider the real deployment does not
-// use. It exists so this suite can clear and re-set a key while moving the
-// double's address — the move is refused while a secret is stored for the
-// address being left, which is the rule that stops a stored key being mailed
-// to any host a caller names.
+// The double's own credential, under a provider no real deployment can use. It
+// exists so this suite can clear and re-set a key while moving the double's
+// address — the move is refused while a secret is stored for the address being
+// left, which is the rule that stops a stored key being mailed to any host a
+// caller names.
 //
 // Never "mistral": that is where the real key lives, and a fixture that
 // overwrites a credential cannot put it back. This suite did that once.
-const DOUBLE_PROVIDER = "openai";
+//
+// And no longer "openai", which was the wire format the double speaks rather
+// than a name nobody else answers to. `menuWorthy` in schema.ts excludes
+// `models.provider = 'double'` and has nothing else to go on — a fake model row
+// is otherwise indistinguishable from a real one — so a suite that wrote
+// `openai` here published "Double" on the menu real users pick from, at a
+// loopback port. This spec REWRITES the row on every run, so it has to agree
+// with `ensureDoubled` in console.ts or it puts the old spelling back.
+const DOUBLE_PROVIDER = "double";
 const DOUBLE_KEY = "e2e-double-not-a-real-key";
 
 // Make sure the double is reachable under a provider this suite owns. Writes a

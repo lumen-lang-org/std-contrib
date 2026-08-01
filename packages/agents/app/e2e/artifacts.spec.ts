@@ -14,7 +14,7 @@
 // about bytes and headers, because that is where the claim actually lives.
 
 import { expect, test } from "@playwright/test";
-import { shell } from "./console.js";
+import { loaded, open, shell } from "./console.js";
 
 const HTML = "<!doctype html><title>t</title><p>hello</p>";
 
@@ -139,8 +139,6 @@ test.describe("paths and limits", () => {
     { why: "an empty segment", path: "/a//b.html" },
     { why: "a backslash", path: "/a\\b.html" },
     { why: "a SQL wildcard", path: "/a%b.html" },
-    { why: "no extension", path: "/plain" },
-    { why: "an unknown extension", path: "/thing.exe" },
   ];
 
   for (const c of refused) {
@@ -148,6 +146,31 @@ test.describe("paths and limits", () => {
       const thread = await openThread(request);
       const res = await write(request, thread, { path: c.path, content: "x" });
       expect(res.status()).toBe(400);
+    });
+  }
+
+  // The extension does NOT decide whether a path is allowed, and this pair
+  // used to sit in the list above claiming it did. It stopped being true when
+  // uploads landed: a customer's .xml or .pdf refused at the door was a worse
+  // answer than an opaque body scripts still get byte for byte, so anything
+  // the kind table does not name is stored as kind "file". The segment rules
+  // above — traversal, empty segments, backslashes, wildcards — are what
+  // actually protect the store, and they are unchanged.
+  //
+  // Asserted rather than deleted, because "no longer refused" is a claim about
+  // behaviour and needs a test of its own; a case removed from a list says
+  // nothing at all.
+  for (const c of [
+    { why: "no extension", path: "/plain" },
+    { why: "an unknown extension", path: "/thing.exe" },
+  ]) {
+    test(`a path with ${c.why} is stored as an opaque file`, async ({ request }) => {
+      const thread = await openThread(request);
+      const res = await write(request, thread, { path: c.path, content: "x" });
+      expect(res.status()).toBe(201);
+      const listed = (await request.get(`/api/threads/${thread}/artifacts`)
+        .then((r) => r.json())) as { path: string; kind: string }[];
+      expect(listed.find((a) => a.path === c.path)?.kind).toBe("file");
     });
   }
 
@@ -291,7 +314,7 @@ test.describe("deletion", () => {
 
 test.describe("the panel", () => {
   test("an html artifact renders in a sandboxed iframe, never inline", async ({ page }) => {
-    await page.goto("/");
+    await open(page);
     await expect(shell(page)).toBeVisible();
 
     // The panel shows the artifacts of the conversation that is open, so the
@@ -422,4 +445,204 @@ test.describe("siblings: one artifact referencing another", () => {
     expect((await request.get(`/api/preview/${b.previewToken}/a.html`)).status()).toBe(404);
     expect((await request.get(previewOf(b.previewToken))).status()).toBe(404);
   });
+});
+
+// --- the diff between versions ---------------------------------------------------
+
+test("the panel diffs a version against the one before it, sign by sign", async ({ page, request }) => {
+  const thread = await openThread(request);
+  const path = `/diffed-${Date.now()}.json`;
+  await write(request, thread, { path, content: '{\n  "QueryOperator": "Eq",\n  "Value": "x"\n}' });
+  await write(request, thread, { path, content: '{\n  "QueryOperator": "OrEq",\n  "Value": "x"\n}' });
+
+  await open(page);
+  await expect(shell(page)).toBeVisible();
+  await shell(page).locator(`console-sidebar .thread[data-thread="${thread}"]`).click();
+  await shell(page).locator('button[title="Artifacts"]').click();
+  const panel = shell(page).locator("artifact-panel");
+  await panel.locator(".artifact", { hasText: path.slice(1) }).click();
+
+  // A version past the first opens AS its diff — the first question about an
+  // edit is what it changed, so nobody clicks to ask it.
+  const removed = panel.locator(".diff .r.del");
+  const added = panel.locator(".diff .r.add");
+  await expect(removed).toHaveCount(1);
+  await expect(added).toHaveCount(1);
+  await expect(removed).toContainText('"QueryOperator": "Eq",');
+  await expect(added).toContainText('"QueryOperator": "OrEq",');
+  // Unchanged lines stay, so the reader keeps their bearings — and every row
+  // carries its line numbers.
+  await expect(panel.locator(".diff .r", { hasText: '"Value": "x"' })).toBeVisible();
+  await expect(removed.locator(".n").first()).toHaveText("2");
+  await expect(added.locator(".n").nth(1)).toHaveText("2");
+  await expect(panel.locator(".diff .tally")).toContainText("+1");
+  // The arrows walk the changes.
+  await expect(panel.locator("#a-diff-next")).toBeVisible();
+
+  // The toggle goes to the content, whole and numbered.
+  await panel.locator("#a-diff").click();
+  await expect(panel.locator(".pre")).toContainText('"QueryOperator": "OrEq"');
+  await expect(panel.locator(".pre .r").first().locator(".n")).toHaveText("1");
+
+  // A first version has nothing to differ from: the button is disabled on v1.
+  // Asserted as the attribute, not toBeDisabled(): nr-button is a custom
+  // element, and native disabled semantics are not what it carries.
+  await panel.locator(".versions .v", { hasText: "v1" }).click();
+  await expect(panel.locator("#a-diff")).toHaveAttribute("disabled", "");
+});
+
+test("a wrongly-escaped edit is refused with the escaping named, and writes nothing", async ({ page, request }) => {
+  // The live failure this pins: a model editing a JSON artifact that holds
+  // Windows paths guessed the backslash escaping wrong, was told only
+  // "matches nothing", and looped. The refusal now names the exact miss; the
+  // double's second round proves the sentence reached the model.
+  const { ensureDoubled } = await import("./console.js");
+  const agentId = await ensureDoubled(request);
+  const res = await request.post("/api/threads", { data: { agentId } });
+  const thread = (await res.json()).id as string;
+  await write(request, thread, {
+    path: "/win.json",
+    content: '{\n  "UserConfigId": "D:\\\\Fo2pdf\\\\USERCONFIG.XML"\n}',
+  });
+
+  await open(page);
+  await expect(shell(page)).toBeVisible();
+  await shell(page).locator(`console-sidebar .thread[data-thread="${thread}"]`).click();
+  const composer = page.locator('agent-console nr-chatbot [contenteditable="true"]').first();
+  await composer.click();
+  await composer.type("fix the windows path");
+  await composer.press("Enter");
+
+  // The card shows the refused edit; the answer shows the model understood.
+  const bot = page.locator("agent-console nr-chatbot .message.bot").last();
+  await expect(bot).toContainText("under-escaped", { timeout: 30000 });
+
+  // And nothing was written: the artifact is still version 1, byte-identical.
+  const arts = (await request.get(`/api/threads/${thread}/artifacts`).then((r) => r.json())) as
+    { path: string; version: number }[];
+  expect(arts.find((a) => a.path === "/win.json")?.version).toBe(1);
+});
+
+// --- uploading from the console --------------------------------------------------
+
+test("a person uploads a file from the panel and it lands as an artifact", async ({ page, request }) => {
+  const thread = await openThread(request);
+  await open(page);
+  await expect(shell(page)).toBeVisible();
+  await shell(page).locator(`console-sidebar .thread[data-thread="${thread}"]`).click();
+  await shell(page).locator('button[title="Artifacts"]').click();
+  const panel = shell(page).locator("artifact-panel");
+
+  // Through the UI, exactly as a person would: the button opens the picker,
+  // the picker is a real file input, and the panel says what happened.
+  const name = `uploaded-${Date.now()}.json`;
+  await panel.locator("#a-upload").click();
+  await panel.locator("#a-file").setInputFiles({
+    name, mimeType: "application/json", buffer: Buffer.from('{"Hello": "from the console"}'),
+  });
+  await expect(panel).toContainText(`Uploaded ${name}`);
+  await expect(panel.locator(".artifact", { hasText: name })).toBeVisible();
+
+  // The API is for asserting what was really stored, never for the action.
+  const listed = (await request.get(`/api/threads/${thread}/artifacts`).then((r) => r.json())) as
+    { path: string; version: number; slot: number }[];
+  const mine = listed.find((a) => a.path === `/${name}`);
+  expect(mine).toBeTruthy();
+  const v = await request
+    .get(`/api/threads/${thread}/artifacts/${mine!.slot}/versions/1`)
+    .then((r) => r.json());
+  expect(v.content).toBe('{"Hello": "from the console"}');
+  expect(v.origin).toBe("uploaded");
+
+  // A binary upload rides the base64 rule the office kinds share. The bytes
+  // here are a tiny zip — enough to prove the round trip is byte-faithful.
+  const zipBytes = Buffer.from("UEsDBBQAAAAIAAAAIQAAAAAAAAAAAAAAAAAJAAAAZW1wdHkudHh0AwBQSwUGAAAAAAEAAQA3AAAAIgAAAAAA", "base64");
+  const officeName = `uploaded-${Date.now()}.xlsx`;
+  await panel.locator("#a-upload").click();
+  await panel.locator("#a-file").setInputFiles({
+    name: officeName,
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer: zipBytes,
+  });
+  await expect(panel).toContainText(`Uploaded ${officeName}`);
+  const again = (await request.get(`/api/threads/${thread}/artifacts`).then((r) => r.json())) as
+    { path: string; slot: number; kind: string }[];
+  const office = again.find((a) => a.path === `/${officeName}`);
+  expect(office).toBeTruthy();
+  expect(office!.kind).toBe("office");
+  const stored = await request
+    .get(`/api/threads/${thread}/artifacts/${office!.slot}/versions/1`)
+    .then((r) => r.json());
+  expect(Buffer.from(stored.content, "base64").equals(zipBytes)).toBeTruthy();
+
+  // Any extension at all: an unknown one is not refused but stored as an
+  // opaque kind "file" — the rule customers' .xml and .pdf uploads live by.
+  const anyName = `uploaded-${Date.now()}.xml`;
+  await panel.locator("#a-upload").click();
+  await panel.locator("#a-file").setInputFiles({
+    name: anyName, mimeType: "application/xml", buffer: Buffer.from("<userconfig><pdf version=\"1.4\"/></userconfig>"),
+  });
+  await expect(panel).toContainText(`Uploaded ${anyName}`);
+  const all = (await request.get(`/api/threads/${thread}/artifacts`).then((r) => r.json())) as
+    { path: string; slot: number; kind: string }[];
+  const xml = all.find((a) => a.path === `/${anyName}`);
+  expect(xml).toBeTruthy();
+  expect(xml!.kind).toBe("file");
+});
+
+test("a file attached in the composer lands as an artifact of a freshly opened thread", async ({ page, request }) => {
+  await open(page);
+  await expect(shell(page)).toBeVisible();
+
+  // The component builds its file input on demand, so the chooser event is
+  // the only handle a test can hold.
+  await shell(page).locator('nr-chatbot [aria-label="Attach files"]').first().click();
+  const name = `attached-${Date.now()}.xml`;
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    shell(page).locator("text=Upload File").first().click(),
+  ]);
+  await chooser.setFiles({
+    name, mimeType: "application/xml", buffer: Buffer.from("<userconfig/>"),
+  });
+
+  // The receipt in the tray, then the stored truth: the attach opened a
+  // thread of its own and filed the bytes as an opaque artifact.
+  await expect(shell(page).locator("nr-chatbot")).toContainText(name);
+  const threads = (await request.get("/api/threads?limit=1").then((r) => r.json())) as { id: string }[];
+  const arts = (await request.get(`/api/threads/${threads[0].id}/artifacts`).then((r) => r.json())) as
+    { path: string; kind: string }[];
+  const mine = arts.find((a) => a.path === `/${name}`);
+  expect(mine).toBeTruthy();
+  expect(mine!.kind).toBe("file");
+});
+
+test("uploading from the panel with no conversation open creates the thread first", async ({ page, request }) => {
+  // Loaded, not merely drawn: opening the conversation needs an agent to open
+  // it against, and that list is a fetch. Uploading before it lands leaves the
+  // panel still saying "Open a conversation first", which reads as the feature
+  // being gone rather than as the console not being ready to be asked.
+  await open(page);
+  await loaded(page);
+  await expect(shell(page)).toBeVisible();
+
+  // A fresh console: no thread, rail opened by hand, and the upload button is
+  // there — it opens the conversation the same way a first message would.
+  await shell(page).locator('button[title="Artifacts"]').click();
+  const panel = shell(page).locator("artifact-panel");
+  await expect(panel.locator("#a-upload")).toBeVisible();
+  const name = `panel-fresh-${Date.now()}.pdf`;
+  await panel.locator("#a-file").setInputFiles({
+    name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 not really"),
+  });
+  await expect(panel).toContainText(`Uploaded ${name}`);
+
+  const threads = (await request.get("/api/threads?limit=1").then((r) => r.json())) as
+    { id: string; title: string }[];
+  // The thread the upload opened wears the file's name as its title — the
+  // only honest title a wordless conversation has.
+  expect(threads[0].title).toBe(`/${name}`);
+  const arts = (await request.get(`/api/threads/${threads[0].id}/artifacts`).then((r) => r.json())) as
+    { path: string; kind: string }[];
+  expect(arts.find((a) => a.path === `/${name}`)?.kind).toBe("file");
 });

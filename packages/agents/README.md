@@ -94,6 +94,122 @@ The server refuses to start without a usable `LUMEN_MASTER_KEY`, rather than
 serving with credentials it cannot open and failing every provider call later,
 far from the cause.
 
+### More than one person, if a proxy says so
+
+There are no users here, no roles and no login. There is one column — a
+thread's `owner` — and one opaque tag, which a proxy in front sets as an
+`X-USER` header. Every `/threads/:id/...` route resolves the id through
+`ownedThread`, the sidebar filters on `owner` in SQL, and a thread belonging to
+somebody else answers **404**, the same as one that never existed.
+
+It is off unless you say otherwise:
+
+```sh
+AGENTS_TRUST_PROXY_AUTH=on     # anything but 1/true/yes/on is off
+```
+
+Unset — the default, and what every deployment has run so far — the header is
+not read at all. Not parsed, not compared. Nothing is scoped, nothing is
+stamped, and the behaviour is what it was before the column existed.
+
+Set, the header is the whole of the identity, so **`:8100` must not be
+reachable by anything but that proxy**. Whoever can send an `X-USER` chooses
+who they are. Firewall first; turn this on second. The tag is the `uuid` of a
+JSON X-USER document if it is one, and otherwise the header verbatim — so an
+nginx with basic-auth in front, setting `X-USER: alice`, is a working
+multi-user deployment.
+
+A JSON document the engine cannot read a `uuid` out of — an anonymous user, a
+renamed field — is **401 at the door**, not a caller with no tag. The proxy
+said it authenticated somebody it cannot name, and the only other answer would
+be to guess, which used to mean handing over everything owned by nobody.
+
+Rows written before the gate went on carry `owner = ''` and belong to nobody:
+the filter is exact equality, never `'' OR tag`, because the other reading
+hands the whole of the box's history to whoever authenticates first. Claiming
+them is deliberate — `scenarios/backfill_owner.py`.
+
+One exception, on purpose: `/preview/:token` is a capability. Whoever holds the
+link reads that conversation's artifacts, owner or not. That is what makes a
+link shareable with someone who has no account, and `POST
+/threads/:id/artifacts/:slot/rotate` is how you take it back.
+
+### The ceilings, and who may knock
+
+Three byte caps, all of them defaulting to the number they were when they were
+constants — set none of these and nothing changes:
+
+```sh
+AGENTS_ARTIFACT_BYTES_MAX=524288     # one artifact body
+AGENTS_THREAD_BYTES_MAX=104857600    # one thread's artifacts, every version
+AGENTS_UPLOAD_BYTES_MAX=1048576      # one workspace file
+```
+
+The upload cap is new rather than moved: `POST /threads/:id/files` had none,
+and neither did the model's own `write_file`. Both go through `putFile`, so
+one number closes all three doors, `pull` from the corpus included. Anything
+unreadable — `512MB`, `0`, a stray quote — is the default, because this is
+read while the process starts and a typo in a unit file should not be a dead
+engine. The engine enforces the same limits for everyone; per-tenant quotas
+belong to a control plane, fed by `/usage` below.
+
+```sh
+AGENTS_API_TOKEN=               # unset: no token wanted, as today
+```
+
+Set, every route wants `Authorization: Bearer <token>` and answers 401 without
+one — before the router matches, so an unauthorised caller cannot even map the
+paths. Defense in depth and nothing more: the firewall is what isolates
+`:8100`. It matters because with the trust gate on, reaching the port at all
+means choosing an identity with no forgery required, and firewall-only means
+one missed rule is the whole breach.
+
+`/healthz` is the one route it never covers — a probe that needs the secret
+cannot tell "the engine is down" from "the secret is wrong".
+
+```
+GET /healthz    {"version":"0.2.0","migration":"76","docker":true}
+GET /usage?owner=u-alice
+                {"owner":"u-alice","bytes":12288,"inputTokens":40,"outputTokens":9}
+```
+
+There is no summary `ok` in the health document. The process refuses to start
+on a schema it could not migrate and refuses to start without a usable master
+key, so an answer at all means the two fatal things are fine; docker being
+down degrades scripts and nothing else. A boolean over facts of different
+weights has to lie about one of them.
+
+`/usage` is generic accounting — no plan, no quota, no price. Bytes are the
+owner's artifact versions, exactly, from the byte column each one already
+carries; workspace files are not counted, because summing them means asking
+SQL for a length, which counts characters and would under-report every
+non-ASCII upload. Tokens are summed from the run rows, which is why runs carry
+`input_tokens` and `output_tokens` at all — every run had those numbers in
+hand and dropped them. Both go out as JSON numbers straight from the
+database's own sum, never parsed: an `int` here is i32, and two billion tokens
+is a month.
+
+`?owner=` is a filter and never an escalation. A scoped caller asking about a
+tag it does not hold gets the same 404 a thread it does not own gets.
+
+### Collecting abandoned opens, if you ask for it
+
+```sh
+AGENTS_SWEEP_IDLE_MS=           # unset: nothing is ever deleted
+```
+
+Nothing in this engine has ever deleted a thread row, and unset it still does
+not. Set to a number of milliseconds, a background thread deletes threads older
+than that which hold *nothing at all* — no turn, no artifact, no step, no
+uploaded file and no run — and waits the same interval between passes. The last
+two clauses are the ones an "empty means no turns" reading gets wrong: a thread
+opened by dropping a file in has no turn until the first question, and a thread
+whose first round failed at the provider has only its `runs` row while the
+person is still looking at the error with Retry in front of them.
+
+It is not on a request path and will not be. A read that deletes rows is, under
+scoping, one person's sidebar deleting somebody else's conversations.
+
 ## Talking to what the rows describe
 
 `mcp.ts` mounts an MCP server from its row, and `provider.ts` calls a model
@@ -497,7 +613,11 @@ lumen test mcp.test.ts        # 3, the refusals — the live half is an example
 lumen test tools.test.ts      # 8, which tools an agent gets, and why not
 lumen test delegate.test.ts   # 13, children as tools, cycles, the depth limit
 lumen test evals.test.ts      # 19, datasets, judges, and route checks
-lumen test runlog.test.ts     # 7, what a run leaves behind
+lumen test runlog.test.ts     # 9, what a run leaves behind, and whose it is
+lumen test api.test.ts        # 26, what the door refuses — scoping, and the bearer lock
+lumen test caps.test.ts       # 4, what an operator may say about the ceilings
+lumen test usage.test.ts      # 7, whose bytes and whose tokens
+lumen test workspace.test.ts  # 18, names, the byte cap, and the three file tools
 lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
 lumen test run.test.ts        # 11, every refusal on the run path
@@ -514,18 +634,32 @@ Requires `sh ../plume/build.sh` first.
 
 A web frontend for this package lives in `app/`: a Lit element built on
 [LumenUI](https://www.npmjs.com/package/@nuraly/lumenui)'s `<nr-chatbot>`,
-served by Vite, talking to the API above through one origin.
+served by [LumenJS](https://www.npmjs.com/package/@nuraly/lumenjs), talking to
+the API above through one origin. The console is its own server, so `/api` and
+`/preview` are forwarded by the app rather than by an nginx in front of it —
+one place those rules live, in `app/server/api-proxy.ts`.
 
-Run everything — database, API, console — with one command:
+Run everything — database, API, indexer, console — with one command:
 
 ```sh
 cd packages/agents
 cp .env.example .env      # set LUMEN_MASTER_KEY (openssl rand -hex 16)
+cd app
 docker compose up --build
 ```
 
 Console on `http://localhost:8080`, the API behind it on `/api`, PostgreSQL
-with pgvector underneath so documents and retrieval work.
+with pgvector underneath so documents and retrieval work. It publishes to
+loopback: nobody signs in to this deployment, so whoever reaches the port is
+the operator. `app/compose.yaml` says what to change to expose it, and what to
+put in front of it when you do.
+
+One image, `ghcr.io/nuralyio/agents-console`, serves every deployment. The
+`AUTH` variable is read once at boot and chooses between three: `none` is the
+box above; `builtin` gives the console its own sign-in and its own user store;
+`proxy` trusts an `X-USER` set by an authenticating gateway in front. Nothing
+under `app/src/` knows which one it is running under — see `app/CLAUDE.md`,
+and `GATEWAY.md` for the hosted arrangement.
 
 The console has a chat surface per conversation, a workspace panel over the
 thread's files, a **Knowledge** page — folder rail, the folder's sources, and
@@ -575,7 +709,7 @@ fake, because a suite checking its own fake is checking its own fake:
 
 ```sh
 cd packages/agents/app
-npx playwright test              # needs the API and vite dev running
+npx playwright test              # needs the API and `npm run dev` running
 ```
 
 The knowledge specs skip themselves when the API is on sqlite: it answers
@@ -590,7 +724,7 @@ npm install
 npm run dev               # http://localhost:5173, /api proxied to :8100
 ```
 
-The app is plain npm/Vite and is not part of the URL-import catalog; CI's
-`packages/*/*.ts` glob is one level deep on purpose, so the TypeScript here
-is never handed to the Lumen compiler. Keep it that way — both languages
+The app is plain npm/TypeScript and is not part of the URL-import catalog;
+CI's `packages/*/*.ts` glob is one level deep on purpose, so the TypeScript
+here is never handed to the Lumen compiler. Keep it that way — both languages
 use `.ts`.

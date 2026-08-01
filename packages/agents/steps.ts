@@ -19,7 +19,7 @@
 //   cd packages/agents && lumen test steps.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { jsonFind, jsonText } from "./scan.ts";
+import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
 import { DbField, DbRepository, DbOrder, asc, desc, field, repository, persist, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
@@ -68,11 +68,21 @@ export type LiveStep = {
   // call that had in fact finished.
   millis: int,
   ok: bool,
+  // A preview of what the call answered, capped like `args`. Stored for the
+  // read AFTER the run: a step that closed `ok: false` with an empty row was
+  // undiagnosable from the console — the reply lived only in the model's
+  // transcript, and finding out why a script failed meant re-running it.
+  result: string,
 };
 
 // How much of an argument list is worth showing. Enough to tell two calls to
 // the same tool apart, short enough that a poll stays cheap.
 export const ARGS_PREVIEW = 120;
+
+// How much of a result is worth keeping. More than args: the point of the
+// column is a failure's first traceback lines or a validator's verdict head,
+// and 120 bytes cuts both off before they say anything.
+export const RESULT_PREVIEW = 700;
 
 export function stepsMapping(): DbRepository {
   let fs: DbField[] = [
@@ -90,6 +100,7 @@ export function stepsMapping(): DbRepository {
     field("endedAt", "ended_at", "text"),
     field("millis", "millis", "int"),
     field("ok", "ok", "bool"),
+    field("result", "result", "text"),
   ];
   return repository("thread_steps", "id", "id", fs);
 }
@@ -138,6 +149,10 @@ export function stepPlan(db: Db): Migration[] {
       "ALTER TABLE thread_thoughts ADD COLUMN depth INTEGER NOT NULL DEFAULT 0"),
     migration("56", "steps by round",
       "CREATE INDEX IF NOT EXISTS steps_by_round ON thread_steps (thread_id, seq, idx)"),
+    // Numbered after the skills block (67-69) that landed between; the plan
+    // is one sequence across files and the high-water rule refuses reuse.
+    migration("70", "steps keep a result preview",
+      "ALTER TABLE thread_steps ADD COLUMN result " + db.textType + " NOT NULL DEFAULT ''"),
   ];
   return plan;
 }
@@ -228,6 +243,15 @@ export function argsPreview(args: string): string {
   return args.slice(0, cut) + "...";
 }
 
+// The result's preview, same cut discipline, larger cap: kept whole when it
+// fits, else the head — a traceback and a verdict both say the most first.
+export function resultPreview(text: string): string {
+  if (text.length <= RESULT_PREVIEW) { return text; }
+  let cut = RESULT_PREVIEW - 3;
+  while (cut > 0 && continuationByte(text.charCodeAt(cut))) { cut = cut - 1; }
+  return text.slice(0, cut) + "...";
+}
+
 // A byte that continues a character rather than starting one: 10xxxxxx.
 function continuationByte(b: int): bool {
   return b >= 128 && b < 192;
@@ -264,6 +288,29 @@ function lineCount(text: string): int {
 // fields, with the line counts computed from the WHOLE strings before any
 // cut — a count made after cutting would report the preview, not the edit.
 export function stepArgs(name: string, args: string): string {
+  return stepArgsAt(name, args, 0, "");
+}
+
+// The same, carrying where the edit landed. The line is a result, not an
+// argument — the dispatch cannot know it — so it arrives when the step is
+// closed and 0 means "never learned", which renders as no numbers rather
+// than as line zero.
+export function stepArgsAt(name: string, args: string, line: int, changed: string): string {
+  // A script row keeps what its card shows: the language and paths as the
+  // summary line, the source itself for the expansion — bounded the way an
+  // edit's old and new are, because a script can be a whole program and the
+  // row is read on a timer — and the landings the reconcile minted, so the
+  // card can chip them and open each one's diff.
+  if (name == "run_script") {
+    let source = jsonText(args, "source");
+    let kept = editCut(source);
+    let paths = jsonFind(args, "paths") >= 0 ? jsonRaw(args, "paths") : "[]";
+    return "{\"language\":" + JSON.stringify(jsonText(args, "language"))
+      + ",\"paths\":" + paths
+      + ",\"source\":" + JSON.stringify(kept)
+      + ",\"cut\":" + (kept.length < source.length ? "true" : "false")
+      + ",\"changed\":" + (changed == "" ? "[]" : changed) + "}";
+  }
   if (name != "edit_artifact") { return argsPreview(args); }
   if (jsonFind(args, "old") < 0 || jsonFind(args, "new") < 0) { return argsPreview(args); }
   let oldText = jsonText(args, "old");
@@ -273,6 +320,7 @@ export function stepArgs(name: string, args: string): string {
   return "{\"path\":" + JSON.stringify(jsonText(args, "path"))
     + ",\"removed\":" + `${lineCount(oldText)}`
     + ",\"added\":" + `${lineCount(newText)}`
+    + ",\"line\":" + `${line}`
     + ",\"old\":" + JSON.stringify(keptOld)
     + ",\"new\":" + JSON.stringify(keptNew)
     + ",\"cut\":" + (keptOld.length < oldText.length || keptNew.length < newText.length ? "true" : "false")
@@ -306,19 +354,40 @@ export function beginStep(db: Db, s: StepStart): string {
     id: id, threadId: s.threadId, seq: s.seq, depth: s.depth, rotation: s.rotation, idx: s.idx,
     kind: s.kind, name: s.name, target: s.target, args: stepArgs(s.name, s.args),
     startedAt: s.now, endedAt: "", millis: -1, ok: false,
+    result: "",
   };
   persist(db, stepsMapping(), JSON.stringify(row));
   return id;
 }
 
+// Everything a close can say beyond ok and when: where an edit landed, what a
+// script's reconcile changed, and what the call answered. A record rather
+// than five more positional arguments trailing three that already exist.
+export type StepClose = {
+  ok: bool,
+  endedAt: string,
+  millis: int,
+  line: int,
+  changed: string,
+  result: string,
+};
+
 // Close it. The row is rewritten whole, because `persist` is an upsert over
 // every column and a partial document would write null over the rest.
 export function endStep(db: Db, s: StepStart, ok: bool, endedAt: string, millis: int): void {
+  let close: StepClose = { ok: ok, endedAt: endedAt, millis: millis, line: 0, changed: "", result: "" };
+  endStepAt(db, s, close);
+}
+
+// The close that knows what the call did to the store, and what it said.
+export function endStepAt(db: Db, s: StepStart, close: StepClose): void {
   let row: LiveStep = {
     id: stepId(s.threadId, s.seq, s.depth, s.idx), threadId: s.threadId, seq: s.seq,
     depth: s.depth, rotation: s.rotation, idx: s.idx,
-    kind: s.kind, name: s.name, target: s.target, args: stepArgs(s.name, s.args),
-    startedAt: s.now, endedAt: endedAt, millis: millis, ok: ok,
+    kind: s.kind, name: s.name, target: s.target,
+    args: stepArgsAt(s.name, s.args, close.line, close.changed),
+    startedAt: s.now, endedAt: close.endedAt, millis: close.millis, ok: close.ok,
+    result: resultPreview(close.result),
   };
   persist(db, stepsMapping(), JSON.stringify(row));
 }

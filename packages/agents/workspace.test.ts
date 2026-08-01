@@ -8,7 +8,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
-import { WorkspaceFileRow, workspacePlan, fileNameOk, putFile, getFile, listFiles, deleteFile, sourceOf, mimeOf, workspaceTools, callWorkspaceTool } from "./workspace.ts";
+import { WorkspaceFileRow, UPLOAD_MAX, workspacePlan, fileNameOk, putFile, getFile, listFiles, deleteFile, sourceOf, mimeOf, workspaceTools, callWorkspaceTool } from "./workspace.ts";
 
 let database: Db = sqlite();
 
@@ -81,6 +81,49 @@ test("deleting removes one file, not the workspace", () => {
   expect(deleteFile(database, "t1", "drop.md") == "");
   expect(listFiles(database, "t1").length == 1);
   expect(listFiles(database, "t1")[0].fileName == "keep.md");
+});
+
+// --- the byte cap ---------------------------------------------------------------------
+
+// A body of exactly `n` bytes, doubled into place. Concatenating one character
+// at a time is quadratic and this is a megabyte.
+function bulk(n: int): string {
+  let out = "x";
+  while (out.length * 2 <= n) { out = out + out; }
+  while (out.length < n) { out = out + "x"; }
+  return out;
+}
+
+test("a file past the cap is refused, and nothing is written", () => {
+  fresh();
+  // This door had no cap at all: whatever JSON arrived went into a text
+  // column, and a thread could be filled by one POST.
+  let refused = putFile(database, { threadId: "t1", fileName: "huge.md", mime: "text/markdown", origin: "uploaded", body: bulk(UPLOAD_MAX + 1), documentId: "", now: "now" });
+  expect(refused.indexOf("at most " + `${UPLOAD_MAX}` + " bytes") >= 0);
+  // Named, because a person looking at a failed upload of six files needs to
+  // know which one.
+  expect(refused.indexOf("huge.md") >= 0);
+  expect(listFiles(database, "t1").length == 0);
+});
+
+test("the model's own door inherits the cap", () => {
+  fresh();
+  // write_file goes through putFile, so a model cannot walk around a limit
+  // the console obeys.
+  let wrote = callWorkspaceTool(database, "t1", "write_file", "essay.md", bulk(UPLOAD_MAX + 1), "now");
+  expect(wrote.handled);
+  expect(!wrote.ok);
+  expect(wrote.text.indexOf("at most") >= 0);
+  expect(listFiles(database, "t1").length == 0);
+});
+
+test("with nothing configured the cap is a megabyte, and a file under it lands", () => {
+  fresh();
+  // Today's value as the default, which is the whole contract of moving these
+  // to the environment: an operator who sets nothing gets what shipped.
+  expect(UPLOAD_MAX == 1048576);
+  expect(putFile(database, { threadId: "t1", fileName: "big.md", mime: "text/markdown", origin: "uploaded", body: bulk(UPLOAD_MAX), documentId: "", now: "now" }) == "");
+  expect(getFile(database, "t1", "big.md").body.length == UPLOAD_MAX);
 });
 
 // --- the tools ----------------------------------------------------------------------

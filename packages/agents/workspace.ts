@@ -21,8 +21,17 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { utf8Length } from "./artifacts.ts";
+import { uploadBytesMax } from "./caps.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
+
+// The largest body one file may carry (AGENTS_UPLOAD_BYTES_MAX, caps.ts).
+//
+// Checked in putFile rather than at the REST door, because there are three
+// doors: the console's upload, the model's own `write_file`, and `pull` from
+// the corpus. A cap on the first alone is a cap a model walks around.
+export const UPLOAD_MAX: int = uploadBytesMax();
 
 export type WorkspaceFileRow = {
   id: string,
@@ -119,6 +128,10 @@ export function putFile(db: Db, write: FileWrite): string {
   }
   if (origin != "uploaded" && origin != "generated" && origin != "retrieved") {
     return "origin must be uploaded, generated or retrieved";
+  }
+  let bytes = utf8Length(body);
+  if (bytes > UPLOAD_MAX) {
+    return "a file is at most " + `${UPLOAD_MAX}` + " bytes; \"" + fileName + "\" is " + `${bytes}`;
   }
   let row: WorkspaceFileRow = {
     id: threadId + ":" + fileName,
@@ -236,16 +249,31 @@ export type FileToolResult = {
   handled: bool,
   ok: bool,
   text: string,
+  // Where an edit landed, 1-based; 0 for every answer that is not a
+  // successful edit_artifact. The step row carries it so the card can number
+  // the snippets it shows.
+  line: int,
+  // What a script's reconcile landed, as a JSON list of {path, version} —
+  // "" for every answer that is not a run_script. The card draws these as
+  // chips that open the artifact panel's diff: a script that rewrote a file
+  // must not look identical to one that only printed.
+  changed: string,
 };
 
 export function callWorkspaceTool(db: Db, threadId: string, name: string, argsName: string, argsContent: string, now: string): FileToolResult {
-  let not: FileToolResult = { handled: false, ok: false, text: "" };
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
   if (threadId == "") { return not; }
 
   if (name == "list_files") {
     let files = listFiles(db, threadId);
     if (files.length == 0) {
-      let empty: FileToolResult = { handled: true, ok: true, text: "The workspace is empty." };
+      // Named as what it is NOT about, because the one mistake models make
+      // here is reading "empty" as "the user's file does not exist": the
+      // artifacts are a different store, listed in the briefing, and a file
+      // uploaded there will never appear in this answer.
+      let empty: FileToolResult = { handled: true, ok: true,
+        text: "The workspace is empty. Artifacts are separate: the conversation's artifacts are "
+          + "listed in your briefing, and run_script materialises them when their paths are named in paths.", line: 0, changed: "" };
       return empty;
     }
     let out = "";
@@ -255,27 +283,27 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
       out = out + files[i].fileName + "  (" + `${files[i].body.length}` + " bytes, " + files[i].origin + ", " + files[i].mime + ")";
       i = i + 1;
     }
-    let listed: FileToolResult = { handled: true, ok: true, text: out };
+    let listed: FileToolResult = { handled: true, ok: true, text: out, line: 0, changed: "" };
     return listed;
   }
 
   if (name == "read_file") {
     let file = getFile(db, threadId, argsName);
     if (file.id == "") {
-      let missing: FileToolResult = { handled: true, ok: false, text: "There is no file named \"" + argsName + "\". Use list_files to see what is here." };
+      let missing: FileToolResult = { handled: true, ok: false, text: "There is no file named \"" + argsName + "\". Use list_files to see what is here.", line: 0, changed: "" };
       return missing;
     }
-    let read: FileToolResult = { handled: true, ok: true, text: file.body };
+    let read: FileToolResult = { handled: true, ok: true, text: file.body, line: 0, changed: "" };
     return read;
   }
 
   if (name == "write_file") {
     let problem = putFile(db, { threadId: threadId, fileName: argsName, mime: mimeOf(argsName), origin: "generated", body: argsContent, documentId: "", now: now });
     if (problem != "") {
-      let refused: FileToolResult = { handled: true, ok: false, text: problem };
+      let refused: FileToolResult = { handled: true, ok: false, text: problem, line: 0, changed: "" };
       return refused;
     }
-    let wrote: FileToolResult = { handled: true, ok: true, text: "Wrote " + argsName + " (" + `${argsContent.length}` + " bytes)." };
+    let wrote: FileToolResult = { handled: true, ok: true, text: "Wrote " + argsName + " (" + `${argsContent.length}` + " bytes).", line: 0, changed: "" };
     return wrote;
   }
 

@@ -20,11 +20,15 @@ import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, 
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
-import { TURN_SEQ_NONE } from "./artifacts.ts";
+import { TURN_SEQ_NONE, listArtifacts } from "./artifacts.ts";
 import { forgetRound, forgetThoughts } from "./steps.ts";
 import { extractFiles, neutraliseMarkers } from "./artifacts-fence.ts";
 import { Tracer, noTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonList, jsonText } from "./scan.ts";
+import { ModelChoiceRow, ModelRouterRow, enabledChoices, configForChoice, configAndModel, modelChoicesMapping, modelRoutersMapping } from "./schema.ts";
+import { RouteAsk, candidatesFrom, indexOfKey, routeTurn } from "./router.ts";
+import { credentialFor } from "./credentials.ts";
+import { ownerClause, documentIsOwned } from "./owner.ts";
 
 // A thread belongs to one agent. Moving a conversation to a different agent
 // would replay tool calls naming tools the new agent may not have, so it is
@@ -32,6 +36,42 @@ import { jsonRaw, jsonList, jsonText } from "./scan.ts";
 export type ThreadRow = {
   id: string,
   agentId: string,
+  // Whose conversation this is: one opaque tag a trusted proxy named, or ""
+  // for a thread nobody claimed — every thread written before there were
+  // owners, and every thread written by a deployment with no proxy in front
+  // (GATEWAY.md). Never NULL: "unowned" splitting into two spellings is a
+  // filter that misses half of them.
+  owner: string,
+  // Which row of the model menu this conversation last chose, or "" for the
+  // agent's own config — which is what every thread written before this
+  // feature means, so nothing is backfilled.
+  //
+  // Per thread rather than per message, and a thread is therefore the memory
+  // of the last override: reopening a conversation keeps answering with what
+  // was last picked. Changing it applies to the next turn, since the choice
+  // travels with the message (MODEL-CHOICE.md, "Where the choice is stored").
+  // History is never rewritten — turns are stored provider-neutrally, so a
+  // thread whose rounds were answered by different models replays with no
+  // special handling.
+  modelChoiceId: string,
+  // The candidate key this conversation last routed to, "" when it has not
+  // routed. Only a router ever writes it, and only two things read it.
+  //
+  // `escalateOnly` is the first: the ratchet is defined as "may only move UP
+  // the candidate order WITHIN A THREAD", so it needs the position the thread
+  // reached, and there is nowhere else it could come from — `runs` is a log a
+  // sweep may thin, and a note in prose is not a key. Without this column
+  // `RouteAsk.previousKey` was always "", `notEarlier` returned at its first
+  // line, and the flag was a column with tests and no effect.
+  //
+  // `routeEvery: "thread"` is the second, and for the same reason: "has this
+  // conversation already routed" is a fact about the conversation.
+  //
+  // A key and not a config id, because that is what the ratchet compares — the
+  // order is the operator's candidate list, and a config can appear twice in
+  // it. A key that is no longer a candidate imposes no floor; `indexOfKey`
+  // answers -1 and `notEarlier` says so.
+  routeKey: string,
   createdAt: string,
 };
 
@@ -51,10 +91,30 @@ export type ThreadTurnRow = {
   toolName: string,
 };
 
+// The shape migration 19 recorded, frozen — the `modelsMappingV1` precedent in
+// schema.ts, for the same reason. Migration 19 generates its CREATE from a
+// mapping, and a migration's text is checksummed: adding `owner` to the live
+// mapping below would rewrite 19 and every database that has already run it
+// would refuse the whole plan, while a fresh one migrated happily and CI
+// stayed green. A new column is an ALTER at a new version, never an edit here.
+function threadsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("agentId", "agent_id", "text"),
+    field("createdAt", "created_at", "text"),
+  ];
+  return repository("threads", "id", "id", fs);
+}
+
 export function threadsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("agentId", "agent_id", "text"),
+    // Added after 19 shipped, so it arrives as an ALTER at 71.
+    field("owner", "owner", "text"),
+    // The same, at 85 and 85.1.
+    field("modelChoiceId", "model_choice_id", "text"),
+    field("routeKey", "route_key", "text"),
     field("createdAt", "created_at", "text"),
   ];
   return repository("threads", "id", "id", fs);
@@ -76,7 +136,7 @@ export function threadTurnsMapping(): DbRepository {
 
 export function threadPlan(db: Db): Migration[] {
   let plan: Migration[] = [
-    migration("19", "threads", createTableSql(db, threadsMapping())),
+    migration("19", "threads", createTableSql(db, threadsMappingV1())),
     migration("20", "thread turns", createTableSql(db, threadTurnsMapping())),
     migration("21", "turns by thread",
       "CREATE INDEX IF NOT EXISTS turns_by_thread ON thread_turns (thread_id, seq)"),
@@ -100,6 +160,38 @@ export function threadPlan(db: Db): Migration[] {
     // are global to the migrations table, not per plan.
     migration("54", "one turn per seq",
       "CREATE UNIQUE INDEX IF NOT EXISTS turns_one_per_seq ON thread_turns (thread_id, seq)"),
+    // Whose thread it is. Two migrations because they are two facts: the
+    // column, and the index the sidebar's read needs — the list is scoped in
+    // SQL, so every page of every owner walks this.
+    //
+    // DEFAULT '' and NOT NULL: the threads already in the table belong to
+    // nobody, and one spelling of "nobody" is what makes the backfill a
+    // WHERE owner = '' rather than an archaeology exercise.
+    migration("71", "a thread has an owner",
+      "ALTER TABLE threads ADD COLUMN owner " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("72", "threads by owner",
+      "CREATE INDEX IF NOT EXISTS threads_by_owner ON threads (owner, created_at)"),
+    // Which model the person chose. No index: it is read by id along with the
+    // rest of the row and never filtered on, so an index here would be paid
+    // for on every open and never used.
+    //
+    // DEFAULT '' and NOT NULL for the same reason `owner` is: "" already means
+    // "the agent's own config" everywhere else, so every existing thread is
+    // correct without being touched.
+    migration("85", "a thread remembers the model that was chosen",
+      "ALTER TABLE threads ADD COLUMN model_choice_id " + db.textType + " NOT NULL DEFAULT ''"),
+    // And where the routing got to, which is a different fact from which menu
+    // row is in force: one is what a person picked, the other is what the
+    // router decided under it. No index, for the reason above — read by id
+    // with the rest of the row, never filtered on.
+    //
+    // 85.1 rather than a number after the seed: it belongs beside the column
+    // it completes, and a dotted version is compared numerically so it lands
+    // between 85 and 86. `migrate` refuses a step below what a database has
+    // already applied, which is why this is not simply appended at the end —
+    // the whole 82-to-87 block is unapplied wherever 85 is.
+    migration("85.1", "a thread remembers where the routing got to",
+      "ALTER TABLE threads ADD COLUMN route_key " + db.textType + " NOT NULL DEFAULT ''"),
   ];
   return plan;
 }
@@ -131,9 +223,23 @@ export function recordChunks(db: Db, threadId: string, seq: int, chunkIds: strin
 
 // --- reading and writing a thread ------------------------------------------------
 
-export function openThread(db: Db, agentId: string, now: string): string {
+// What opening a conversation needs to know. A record and not three strings:
+// `agentId`, `owner` and `now` are all text, and a caller that swapped two of
+// them would file somebody else's thread under a timestamp.
+export type ThreadOpen = {
+  agentId: string,
+  owner: string,
+  now: string,
+};
+
+export function openThread(db: Db, open: ThreadOpen): string {
   let id = crypto.randomUUID();
-  let row: ThreadRow = { id: id, agentId: agentId, createdAt: now };
+  // A thread opens on the agent's own model. The composer's picker travels
+  // with the message, so an opening choice is an UPDATE the messages POST
+  // makes on the first turn rather than a second argument here — which also
+  // keeps `POST /threads` and `POST /threads/:id/messages` reading the field
+  // from exactly one place.
+  let row: ThreadRow = { id: id, agentId: open.agentId, owner: open.owner, modelChoiceId: "", routeKey: "", createdAt: open.now };
   let written = persist(db, threadsMapping(), JSON.stringify(row));
   if (!written.ok) { return ""; }
   return id;
@@ -149,15 +255,76 @@ export type ThreadListing = {
   title: string,
 };
 
+// Which page of whose threads. An empty `tags` is the unscoped read — the
+// community edition, every thread there is; see owner.ts.
+export type ThreadPage = {
+  tags: string[],
+  limit: int,
+  offset: int,
+};
+
+// How long a thread may sit empty before the sweep may take it, read from
+// `AGENTS_SWEEP_IDLE_MS`; 0 means never, and never is the default.
+//
+// Opt-in, not merely configurable. Nothing has ever deleted a thread row in
+// this engine, so a sweeper that ran on the numbers it liked would be new data
+// loss arriving with an upgrade, in the edition that has no operator watching.
+// An operator who wants abandoned opens collected says how old is abandoned;
+// everyone else keeps every row they have.
+//
+// Unreadable is off for the same reason `bytesCap` treats unreadable as the
+// default: a typo in a unit file must not be read as a deletion policy.
+export function sweepIdleMs(said: string): int {
+  let text = said.trim();
+  if (text == "") { return 0; }
+  let i: int = 0;
+  while (i < text.length) {
+    let c = text.charCodeAt(i);
+    if (c < 48 || c > 57) { return 0; }
+    i = i + 1;
+  }
+  let n = parseInt(text, 10) ?? 0;
+  if (n < 1) { return 0; }
+  return n;
+}
+
+// A thread that never said anything, produced nothing and ran nothing is a
+// row someone abandoned before it became a conversation — an aborted open, a
+// test's leftover. Taken once it is old, and only where an operator asked for
+// that; anything with a turn, an artifact, an uploaded file, a failed round's
+// steps or a run is history and stays.
+//
+// The workspace and runs clauses are not symmetry with the other two, they are
+// the two states a thread reaches while still holding nothing else. A thread
+// opened by dropping a file in holds no turn until the first question is
+// asked. A thread whose first round failed holds no turn either — a round that
+// produced no answer is not a round (`appendTurns` below), and a provider that
+// never answered dispatched no tool call, so there is no step row either — but
+// it holds a `runs` row, and the person looking at the failure is about to
+// press Retry.
+export function sweepEmptyThreads(db: Db, before: string): void {
+  executeWith(db,
+    "DELETE FROM threads WHERE created_at < " + placeholderAt(db, 1)
+    + " AND NOT EXISTS (SELECT 1 FROM thread_turns t WHERE t.thread_id = threads.id)"
+    + " AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.thread_id = threads.id)"
+    + " AND NOT EXISTS (SELECT 1 FROM thread_steps s WHERE s.thread_id = threads.id)"
+    + " AND NOT EXISTS (SELECT 1 FROM workspace_files w WHERE w.thread_id = threads.id)"
+    + " AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.thread_id = threads.id)",
+    [before]);
+}
+
 // The threads, newest first. The title costs one query per row, which is fine
 // for a sidebar page of fifty and wrong for anything unbounded — hence the
 // limit is required, not defaulted.
-export function listThreads(db: Db, limit: int, offset: int): ThreadListing[] {
+//
+// The owner filter is in the WHERE and never a pass over the answer; owner.ts
+// says why.
+export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
   let out: ThreadListing[] = [];
   let newest: DbOrder[] = [desc("created_at")];
-  let page = pageOrdered(db, threadsMapping(), "", [], newest, limit, offset);
-  if (page == "" || page == "[]") { return out; }
-  let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(page);
+  let mine = pageOrdered(db, threadsMapping(), ownerClause(db, page.tags, 1), page.tags, newest, page.limit, page.offset);
+  if (mine == "" || mine == "[]") { return out; }
+  let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(mine);
   let i: int = 0;
   while (i < rows.length) {
     let said = threadMessages(db, rows[i].id);
@@ -166,6 +333,13 @@ export function listThreads(db: Db, limit: int, offset: int): ThreadListing[] {
     while (m < said.length) {
       if (said[m].role == "user") { title = said[m].text; break; }
       m = m + 1;
+    }
+    // A thread opened by an upload has no words yet; the file's own name is
+    // the only honest title it has. Only when no round stored — a sentence,
+    // once one exists, outranks a filename.
+    if (title == "") {
+      let held = listArtifacts(db, rows[i].id);
+      if (held.length > 0) { title = held[0].path; }
     }
     if (title.length > 80) { title = title.slice(0, 77) + "..."; }
     let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title };
@@ -178,6 +352,32 @@ export function listThreads(db: Db, limit: int, offset: int): ThreadListing[] {
 export function threadAgent(db: Db, threadId: string): string {
   let document = findById(db, threadsMapping(), threadId);
   if (document == "") { return ""; }
+  return jsonText(document, "agentId");
+}
+
+// The agent of a thread this caller may reach, or "" — which every route reads
+// as a 404. A thread owned by somebody else answers exactly as a thread that
+// was never opened: 403 would confirm the id names something real, and an id
+// is the whole of a thread's secrecy here.
+//
+// This is the one place a `/threads/:id/...` route resolves an id. Nine routes
+// repeated the ownerless version of this check inline and seven resolved the
+// file or the artifact directly without it — and the seven are why this is a
+// function rather than a line to copy again.
+// Whose thread it is, "" for a thread nobody claimed or a thread that is not
+// there. Read by the routes that stamp a second row with the same owner — a
+// run log line, today — because ownership follows the conversation and not
+// whoever happens to be asking in it.
+export function threadOwner(db: Db, threadId: string): string {
+  let document = findById(db, threadsMapping(), threadId);
+  if (document == "") { return ""; }
+  return jsonText(document, "owner");
+}
+
+export function ownedThread(db: Db, threadId: string, tags: string[]): string {
+  let document = findById(db, threadsMapping(), threadId);
+  if (document == "") { return ""; }
+  if (!documentIsOwned(document, tags)) { return ""; }
   return jsonText(document, "agentId");
 }
 
@@ -365,8 +565,282 @@ export function threadBudget(): int {
 }
 
 // The opening of what asContext writes. Kept here beside the check that uses
-// it so the two cannot drift apart silently.
-const CONTEXT_PREFIX = "Use only the following context.";
+// it so the two cannot drift apart silently — and they did drift once anyway,
+// when the sentence was rewritten in knowledge.ts and this copy kept the old
+// words; the knowledge suite pins the two together now.
+const CONTEXT_PREFIX = "Passages retrieved from the knowledge base";
+
+// --- which model answers ------------------------------------------------------------
+
+// What this conversation last chose: a `model_choices` id, or "" for the
+// agent's own config — which a thread that is not there answers too, since a
+// conversation nobody can find has nothing to run on either way.
+export function threadChoice(db: Db, threadId: string): string {
+  let document = findById(db, threadsMapping(), threadId);
+  if (document == "") { return ""; }
+  return jsonText(document, "modelChoiceId");
+}
+
+// Where this conversation's routing got to: a candidate key, or "" for a
+// thread that has not routed — which includes every thread that has never used
+// a router choice and every thread whose every routing attempt fell back.
+export function threadRouteKey(db: Db, threadId: string): string {
+  let document = findById(db, threadsMapping(), threadId);
+  if (document == "") { return ""; }
+  return jsonText(document, "routeKey");
+}
+
+// Remember where the routing got to. Returns the database's sentence, or "".
+//
+// A one-column UPDATE for the reason `rememberChoice` is one: `persist` would
+// write the whole row back from a document, which is a wider write for a
+// one-column fact and an upsert that would re-create a thread the sweep took
+// between the read and the write.
+//
+// Only a decision that actually chose a candidate is written. A fallback
+// leaves the floor where it was: the run happened on the fallback config, but
+// no candidate was picked, so recording one would let a dead provider quietly
+// ratchet a conversation somewhere nobody routed it.
+export function rememberRouteKey(db: Db, threadId: string, key: string): string {
+  if (key == "") { return ""; }
+  let wrote = executeWith(db,
+    "UPDATE threads SET route_key = " + placeholderAt(db, 1)
+    + " WHERE id = " + placeholderAt(db, 2),
+    [key, threadId]);
+  if (wrote.ok) { return ""; }
+  return wrote.error;
+}
+
+// Whether an id names a row the menu currently offers.
+//
+// Asked over `enabledChoices` — the same read the menu itself is built from —
+// rather than by fetching the one row: a choice that stops being offered stops
+// being resolvable here on the same day, without two definitions of "offered"
+// to keep in step. The menu is a handful of rows an operator curates, not a
+// table that grows with traffic, so the scan is cheaper than the second
+// definition would be.
+function inMenu(db: Db, choiceId: string): bool {
+  let rows: ModelChoiceRow[] = enabledChoices(db);
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].id == choiceId) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
+// Remember what was chosen, so the next message carrying no override keeps
+// answering with it — a thread is the memory of the last override
+// (MODEL-CHOICE.md, "API"). Returns the database's sentence, or "".
+//
+// An UPDATE of the one column rather than `persist`: persist writes a whole row
+// from a document, so keeping one field would mean reading the thread back and
+// writing `owner`, `agent_id` and `created_at` out again from what was read —
+// a wider write for a one-column fact, and an upsert that would re-create a
+// thread the sweep took between the read and the write.
+export function rememberChoice(db: Db, threadId: string, choiceId: string): string {
+  let wrote = executeWith(db,
+    "UPDATE threads SET model_choice_id = " + placeholderAt(db, 1)
+    + " WHERE id = " + placeholderAt(db, 2),
+    [choiceId, threadId]);
+  if (wrote.ok) { return ""; }
+  return wrote.error;
+}
+
+// The turn's model, decided.
+export type ChosenModel = {
+  // The menu row that was actually in force, or "" when nothing was chosen —
+  // and "" as well when what was chosen no longer exists, because a run row
+  // naming a choice that did not answer is worse than one naming none.
+  choiceId: string,
+  // The `model_configs` row to run on, "" for the agent's own.
+  configId: string,
+  // One line for `runs.route_note` when the choice did not end up answering,
+  // "" when it did and when there was nothing to choose. The only place a
+  // silent fallback is written down.
+  note: string,
+};
+
+// What a message said about the model, which is three states and not two.
+//
+// A record rather than a bare string because the two facts are only useful
+// together: what was picked, and whether anything was picked at all. Read off
+// a body by `askedPick` in api.ts, defaulted to "said nothing" by
+// `runInThread`.
+//
+// The state that was missing: "" as an ID is the menu's last row, "Agent
+// default", and it is a choice a person makes with a click. Collapsed into
+// "the caller said nothing" — which is what a single string forces — picking
+// it left the thread's memory in place, the next turn answered on the model
+// the person had just moved away from, and reopening the conversation snapped
+// the picker back to it. There was no value the wire could carry that meant
+// "clear", which made one row of the menu permanently inert.
+export type ModelPick = {
+  // The `model_choices` id, "" for the agent's own config.
+  choiceId: string,
+  // Whether the message said anything about the model. false inherits the
+  // thread's memory; true is a statement, "" included.
+  sent: bool,
+};
+
+// A message that said nothing about the model — every caller written before
+// the picker existed, and `runInThread`.
+export function inheritedPick(): ModelPick {
+  let none: ModelPick = { choiceId: "", sent: false };
+  return none;
+}
+
+// message override > threads.model_choice_id > the agent's own config
+// (MODEL-CHOICE.md, "API"). The precedence is one function because the doc's
+// "every read site uses the same one" stays true only while there is one — two
+// columns encoding one choice was rejected for the same reason.
+//
+// Nothing here can stop a turn. An override naming a row that was retired, a
+// thread remembering one that was, an id nobody ever created: each answers
+// "the agent's own" and says so in `note`. A run that would have happened must
+// still happen — silently to the person typing, recorded for the operator,
+// which is the posture `routeChoice` below inherits.
+//
+// This is the SYNCHRONOUS half only. A router choice resolves to "the agent's
+// own, and here is why" — see `configForChoice` — because which config a router
+// lands on is not known until a completion has been made and this makes none.
+// `routeChoice` is the other half, and the two are separate so that resolution
+// stays a function of the database that a test can ask without a provider.
+export function chooseModel(db: Db, threadId: string, pick: ModelPick): ChosenModel {
+  let choiceId = pick.choiceId;
+  // Absence inherits; a statement stands, and a statement of "" is the way
+  // back to the agent's own model.
+  if (!pick.sent) { choiceId = threadChoice(db, threadId); }
+  if (choiceId == "") {
+    let own: ChosenModel = { choiceId: "", configId: "", note: "" };
+    return own;
+  }
+  // Whether the menu offers it at all, asked BEFORE the config is resolved:
+  // `configForChoice` answers "" for a router row and for a typo alike, and
+  // those two must not be treated the same way. One is a choice the operator
+  // published; the other is nothing, and remembering it would overwrite a
+  // working pick with a dead one.
+  if (!inMenu(db, choiceId)) {
+    let gone: ChosenModel = { choiceId: "", configId: "",
+      note: "the chosen model " + choiceId + " is not in the menu; the agent's own answered" };
+    return gone;
+  }
+  let configId = configForChoice(db, choiceId);
+  if (configId == "") {
+    // A router row, and this phase makes no completion. The note is the
+    // caller's cue as much as the operator's: `routeChoice` is what turns this
+    // into a decision, and a turn that reaches a run with this note still on it
+    // is a turn where nothing routed — which is what the sentence says.
+    let routed: ChosenModel = { choiceId: choiceId, configId: "",
+      note: "the chosen model " + choiceId + " routes, and nothing routed this turn; the agent's own answered" };
+    return routed;
+  }
+  let chosen: ChosenModel = { choiceId: choiceId, configId: configId, note: "" };
+  return chosen;
+}
+
+// Whether a resolved choice still has a routing decision owed to it: a menu row
+// is in force, and no config has been settled on.
+function awaitsRouting(chosen: ChosenModel): bool {
+  return chosen.choiceId != "" && chosen.configId == "";
+}
+
+// What the routing phase is given. A record because `threadId`, `userText` and
+// `master` are three strings, and a caller that swapped the last two would post
+// the master key to a provider as the message being classified.
+export type RouteRun = {
+  threadId: string,
+  // What `chooseModel` resolved. Anything that is not a router choice comes
+  // back untouched, so this is safe to call on every turn and the caller does
+  // not have to know which rows route.
+  chosen: ChosenModel,
+  // The message being classified, before it is appended to the thread.
+  userText: string,
+  // The conversation so far. `recentTurns` takes the tail it wants.
+  tail: Turn[],
+  master: string,
+};
+
+// A choice that routes, routed — the asynchronous half of `chooseModel`.
+//
+// This is the function that was missing, and its absence was not visible from
+// any test: `routeTurn` had a suite, `model_routers` had a mapping and a seed,
+// and the menu's LEAD row — "Auto", rank 1, the first thing a person sees —
+// resolved to "the agent's own config" on every single turn, with a note
+// politely explaining that nothing had routed. Everything was built except the
+// call between the two halves.
+//
+// Every path out of here still leaves the run a config, or leaves it "" and
+// lets the agent's own answer. `routeTurn` guarantees that much on its own
+// arguments; what is added here is the same promise for the rows it needs —
+// a router row deleted under a live menu entry, a router config whose model is
+// gone, a credential that will not open. Each answers with a sentence in
+// `note` rather than an exception, because the note is the only place a person
+// ever finds out (MODEL-CHOICE.md, "The router never blocks the run").
+export function routeChoice(db: Db, run: RouteRun): ChosenModel {
+  let chosen = run.chosen;
+  if (!awaitsRouting(chosen)) { return chosen; }
+
+  // The row is in the menu — `chooseModel` established that — so this read is
+  // for `routerId` alone.
+  let choiceDoc = findById(db, modelChoicesMapping(), chosen.choiceId);
+  if (choiceDoc == "") { return chosen; }
+  let choice: ModelChoiceRow = JSON.parse<ModelChoiceRow>(choiceDoc);
+  if (choice.kind != "router" || choice.routerId == "") { return chosen; }
+
+  let routerDoc = findById(db, modelRoutersMapping(), choice.routerId);
+  if (routerDoc == "") {
+    let missing: ChosenModel = { choiceId: chosen.choiceId, configId: "",
+      note: "the router " + choice.routerId + " is gone; the agent's own answered" };
+    return missing;
+  }
+  let router: ModelRouterRow = JSON.parse<ModelRouterRow>(routerDoc);
+
+  let candidates = candidatesFrom(router.candidatesJson);
+  let previousKey = threadRouteKey(db, run.threadId);
+  // Paying once per conversation instead of once per turn, which is what
+  // `routeEvery` is for. Only while the stored key is still one of the
+  // operator's candidates: a list rewritten between turns leaves the thread
+  // pointing at a position that no longer exists, and reusing it would answer
+  // on whatever config happens to sit there now.
+  if (router.routeEvery == "thread" && previousKey != "") {
+    let held = indexOfKey(candidates, previousKey);
+    if (held >= 0) {
+      let again: ChosenModel = { choiceId: chosen.choiceId, configId: candidates[held].configId,
+        note: "routed to " + candidates[held].key + ": this thread already routed, and this router routes once" };
+      return again;
+    }
+  }
+
+  // The router's own row pair. A dead one is a fallback rather than a dead
+  // run, and it is named — an operator who deleted the config under their
+  // router should read which config, not "routing failed".
+  let pair = configAndModel(db, router.routerConfigId);
+  if (pair.problem != "") {
+    let broken: ChosenModel = { choiceId: chosen.choiceId, configId: router.fallbackConfigId,
+      note: "fell back: the router cannot run (" + pair.problem + ")" };
+    return broken;
+  }
+  // "" is not special-cased. `complete` refuses without a key and says so, and
+  // `routeTurn` turns that refusal into the fallback with the provider's own
+  // sentence in the note — which is more useful than a guess made here.
+  let apiKey = credentialFor(db, pair.model.provider, run.master);
+
+  let ask: RouteAsk = { userText: run.userText, tail: run.tail, previousKey: previousKey };
+  let decided = routeTurn(router, pair.model, pair.config, ask, apiKey);
+  // Only a real candidate moves the floor; a fallback leaves it where it was.
+  // Written before the run rather than after, for the reason the choice is:
+  // a round that dies at the provider must not leave the next turn routing
+  // from a different position than the attempt it is retrying.
+  rememberRouteKey(db, run.threadId, decided.key);
+
+  // `decided.configId` is the fallback on every failure path, and "" only for
+  // a router row whose fallback an operator left empty — which is a row that
+  // should not be enabled, and which lands on the agent's own model rather
+  // than on nothing at all.
+  let routed: ChosenModel = { choiceId: chosen.choiceId, configId: decided.configId, note: decided.note };
+  return routed;
+}
 
 // --- continuing a conversation ---------------------------------------------------
 
@@ -391,6 +865,40 @@ export type ThreadReply = {
   baseSeq: int,
   // Extraction's refusals and rewrites, in words, for the run log.
   notes: string[],
+  // Which menu row was in force for this turn, and why the model that answered
+  // was the one that did — the two columns migration 86 added to `runs`, ready
+  // for the `recordRun` beside the caller.
+  //
+  // Carried out rather than written here: the `runs` row is written after this
+  // returns, by whoever asked (the messages POST), so handing the decision back
+  // is the only way it reaches the row. Recomputing it there from the config
+  // that answered would be a different, unauditable claim — "the run used
+  // c-flash" is not "a person chose Fast".
+  modelChoiceId: string,
+  routeNote: string,
+};
+
+// What one turn is asked with.
+//
+// A record rather than four more positional arguments, for the reason
+// RunContext gives: `userText`, `master` and `modelChoiceId` are all text, and
+// a caller that swapped two of them would send the master key to a provider as
+// a question and nothing would report it.
+export type ThreadAsk = {
+  userText: string,
+  master: string,
+  tracer: Tracer,
+  // What this MESSAGE said about the model. The selection travels with the
+  // message (MODEL-CHOICE.md, "API"): what the composer's picker shows is what
+  // the next send carries, so changing it is never a request of its own and
+  // never rewrites history.
+  //
+  // Applied to this turn AND remembered on the thread — those are one act, not
+  // two, which is why there is no separate "set the thread's model" door to
+  // get out of step with this one. A pick of "" that was actually SENT is the
+  // way back to the agent's own model, and is remembered as such; see
+  // `ModelPick`.
+  pick: ModelPick,
 };
 
 // Ask a thread. Everything it already holds is replayed, this question is
@@ -399,6 +907,17 @@ export type ThreadReply = {
 // Retrieval still happens for the new question: the passages already in the
 // thread were fetched for older ones, and "and in Rotterdam?" needs its own.
 export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): ThreadReply {
+  let plain: ThreadAsk = { userText: userText, master: master, tracer: tracer, pick: inheritedPick() };
+  return runInThreadWith(db, threadId, plain);
+}
+
+// The same turn, carrying what the composer's picker had selected when the
+// message was sent. The pair is `runAgent`/`runAgentAt`'s: the short call is
+// the one most callers want, and the record carries what only one door needs.
+export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): ThreadReply {
+  let userText = ask.userText;
+  let master = ask.master;
+  let tracer = ask.tracer;
   let agentId = threadAgent(db, threadId);
   if (agentId == "") {
     let noThread: Turn[] = [];
@@ -406,13 +925,53 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     // Runs against an agent that does not exist, which reports "no agent " and
     // is the truth: this thread names nothing runnable.
     let noChunks: string[] = [];
-    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, baseSeq: TURN_SEQ_NONE });
+    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE });
     let noNotes: string[] = [];
-    let bare: ThreadReply = { run: refused, text: refused.text, baseSeq: TURN_SEQ_NONE, notes: noNotes };
+    // Nothing was chosen because nothing was asked: a thread that names no
+    // runnable agent has no round for a choice to apply to, and remembering an
+    // override against it would file a preference on a conversation that
+    // cannot have one.
+    let bare: ThreadReply = { run: refused, text: refused.text, baseSeq: TURN_SEQ_NONE, notes: noNotes, modelChoiceId: "", routeNote: "" };
     return bare;
   }
 
+  // Extraction's notes, and the choice's, in the order they happened.
+  let notes: string[] = [];
+  // Decided and remembered before the run, because the picker's memory is not
+  // the round's: a round that fails at the provider still leaves the thread
+  // pointing at what was picked, and the console's Retry sends the same message
+  // again — landing it on a different model than the attempt it is retrying
+  // would make the failure unreproducible.
+  //
+  // Only when the message actually said something AND what it said survived
+  // resolution. A typo must not overwrite a working pick with a dead id, and a
+  // message that carried no field at all must not rewrite the memory with what
+  // it merely inherited. A sent "" survives resolution as "" — it is the way
+  // back to the agent's own model — so it is remembered like any other pick,
+  // which is the whole of what makes the menu's last row work.
+  let chosen = chooseModel(db, threadId, ask.pick);
+  if (ask.pick.sent && chosen.choiceId == ask.pick.choiceId) {
+    let kept = rememberChoice(db, threadId, ask.pick.choiceId);
+    if (kept != "") {
+      notes.push("this turn ran on the model that was chosen, but the thread could not remember it (" + kept + "), so the next message falls back to the previous choice");
+    }
+  }
+
   let held = threadTurns(db, threadId);
+  // And now the half `chooseModel` could not make: if what is in force is a
+  // router, one small completion decides which config answers.
+  //
+  // Here rather than beside `chooseModel` because it needs `held` — the router
+  // is shown the last two turns, and "and shorter?" means nothing without the
+  // thing it is shortening. Before `forgetRound` below only by accident of
+  // reading order; what matters is that it is before `runAgentAt`, since its
+  // whole job is to decide what that call runs on.
+  //
+  // Not a tool step and not a trace span: it is a decision ABOUT the round
+  // rather than something the round did, and `runs.route_note` is where it is
+  // written down. A router that fails costs this turn nothing but the note.
+  chosen = routeChoice(db, { threadId: threadId, chosen: chosen, userText: userText, tail: held, master: master });
+
   // This round owns its seq. A round that failed stored nothing, so the count
   // below has not moved and this run reuses its number — and its dispatched
   // calls are still in the table under it. Clearing first is what keeps a
@@ -429,7 +988,9 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   // one: trimming affects what the model is shown, never the numbering — and
   // this is the seq every artifact write of the round is stamped with, the
   // same number `appendTurns` below files the round's turns from.
-  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, baseSeq: held.length });
+  // `chosen.configId` is "" whenever nothing was chosen, which is what every
+  // run before this feature passed and what run.ts reads as "the agent's own".
+  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, modelConfigId: chosen.configId, baseSeq: held.length });
 
   // What this run added: everything in its context past what was replayed.
   // Stored under the thread's own numbering, which continues from what is
@@ -446,7 +1007,6 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   // Turns first, with the RAW text — extraction only runs against a round the
   // table actually holds, because turn_seq names a stored round and a file the
   // transcript cannot account for is worse than a fence left in prose.
-  let notes: string[] = [];
   let kept = run.text;
   // A round that produced no answer is not a round.
   //
@@ -518,7 +1078,8 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
   // would be excluded from future retrieval by chunksShownSince while the
   // replay never actually carried them.
   if (stored && shown.length > 0) { recordChunks(db, threadId, held.length, shown); }
-  let reply: ThreadReply = { run: run, text: kept, baseSeq: held.length, notes: notes };
+  let reply: ThreadReply = { run: run, text: kept, baseSeq: held.length, notes: notes,
+    modelChoiceId: chosen.choiceId, routeNote: chosen.note };
   return reply;
 }
 

@@ -1,0 +1,165 @@
+# The agents platform, self-contained: console, engine, indexer, database.
+#
+#   cd packages/agents
+#   cp .env.example .env        # set LUMEN_MASTER_KEY — 32 hex characters
+#   cd app
+#   docker compose up --build
+#
+# Console on http://localhost:8080, the engine behind it on /api, PostgreSQL
+# with pgvector underneath so documents and retrieval work out of the box.
+#
+# This is the community deployment and it is the whole of it: AUTH=none, no
+# gateway, no identity, one owner. The same console image runs nuraly.io with
+# AUTH=proxy behind an authenticating gateway — that is one environment
+# variable and one nginx location, written down in ../GATEWAY.md, and no
+# second image and no build flag.
+#
+# Why the compose file lives beside the console rather than beside the engine:
+# the console is the only service here that is built from a directory instead
+# of pulled or built from the repository root, and phase 5 of
+# MIGRATION-LUMENJS.md puts it here. `../.env` is still the one place the
+# master key lives — the engine reads that file whether it is started from here
+# or by hand.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: agents
+      POSTGRES_USER: agents
+      # A literal, and deliberately not `${AGENTS_PG_PASSWORD}`.
+      #
+      # This database is reachable on the compose network and nowhere else —
+      # no published port — so the password guards a door that is already
+      # inside the house. Interpolating it here would have been worse than
+      # useless: compose reads variables from the project directory's own
+      # `.env`, which is this directory, while the engine reads them from
+      # `../.env` through `env_file` below. The two would disagree the moment
+      # anyone changed it, and the failure is the engine unable to reach a
+      # database that is running fine.
+      POSTGRES_PASSWORD: agents
+    volumes:
+      - agents-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agents -d agents"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      # The engine imports sibling packages by relative path, so its build
+      # context is the repository root — three levels up from the console.
+      #
+      # One precondition, and it is the engine's rather than this file's, so it
+      # is recorded here rather than worked around: `packages/agents/Dockerfile`
+      # installs the Lumen toolchain with
+      # `curl …/lumen/main/install.sh | sh`, and that script downloads
+      # `releases/latest`. The newest release is v0.3.2 (2026-07-03); the
+      # engine's sources have been compiled since with the toolchain at main,
+      # which is some hundreds of commits further on. So the build stops at
+      #
+      #     api.ts:1:1: error: E_MISSING_EXPORT
+      #
+      # which names no import and reads like a broken source file. It is not:
+      # the same `api.ts` compiles cleanly with the compiler on a developer's
+      # machine. Until a release is cut that can compile the engine, `docker
+      # compose up --build` cannot bring this service up, and no change on the
+      # console's side of the seam changes that. Two things would: a Lumen
+      # release, and pinning this install to it — an unpinned `latest` is why
+      # the failure arrived as a surprise rather than as a version mismatch
+      # anybody could read.
+      context: ../../..
+      dockerfile: packages/agents/Dockerfile
+    env_file:
+      # The master key, the caps, the trust gate: the engine's own settings,
+      # read from the file they already live in. Compose fails to start if it
+      # is missing, which is the intended answer — `cp ../.env.example ../.env`
+      # and set a key. It is not interpolation, so nothing here needs a second
+      # copy of the file in this directory.
+      - ../.env
+    environment:
+      # Explicit, so they win over anything `../.env` says. These four describe
+      # *this stack's* database, not the operator's laptop, and a stale
+      # AGENTS_PG_HOST in a hand-edited .env should not be able to point the
+      # containerised engine somewhere else.
+      AGENTS_PG_HOST: db
+      AGENTS_PG_DATABASE: agents
+      AGENTS_PG_USER: agents
+      AGENTS_PG_PASSWORD: agents
+    # No published port, and that is a security property rather than tidiness.
+    # The engine is identity-blind: with AGENTS_TRUST_PROXY_AUTH off it serves
+    # every thread to whoever asks, and with it on the X-USER header is the
+    # whole of the identity. Either way :8100 belongs on a private network.
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The queue drainer. Its own service because embedding a corpus must not
+  # compete with serving requests, and because scaling it is just running more
+  # of them — the claim is atomic, so two workers never take the same job.
+  indexer:
+    build:
+      context: ../../..
+      dockerfile: packages/agents/Dockerfile
+    entrypoint: ["agents-indexer"]
+    env_file:
+      - ../.env
+    environment:
+      AGENTS_PG_HOST: db
+      AGENTS_PG_DATABASE: agents
+      AGENTS_PG_USER: agents
+      AGENTS_PG_PASSWORD: agents
+    depends_on:
+      db:
+        condition: service_healthy
+
+  console:
+    build: .
+    image: ghcr.io/nuralyio/agents-console
+    ports:
+      # Loopback by default. In this deployment nobody signs in, so whoever
+      # reaches the port is the operator: they can read every conversation and
+      # every provider key in the settings overlay. On a laptop that is exactly
+      # right and the default costs nothing.
+      #
+      # To reach it from another machine — a home server, a VM — override the
+      # published address rather than editing this line, so the diff of a box
+      # that is exposed on purpose says so:
+      #
+      #   AGENTS_CONSOLE_PUBLISH=0.0.0.0:8080 docker compose up
+      #
+      # and put something in front of it that asks who is calling. `AUTH=proxy`
+      # below is how the console then learns the answer.
+      - "${AGENTS_CONSOLE_PUBLISH:-127.0.0.1:8080}:8080"
+    environment:
+      # The one switch. `none` is this deployment; `builtin` gives the console
+      # its own sign-in and its own user store in the volume below; `proxy`
+      # trusts an X-USER set by whatever is in front. Anything else refuses to
+      # start rather than rounding down to `none`.
+      AUTH: none
+      # Where the engine is, on the compose network. server/engine.ts and
+      # server/api-proxy.ts read this one variable, so the proxy and the socket
+      # pollers cannot disagree about it.
+      AGENTS_API: http://api:8100
+      # Where artifacts are served from, if anywhere.
+      #
+      # Empty on purpose here, and it is not an omission. A model-authored HTML
+      # body renders as itself only on a host that holds nothing worth
+      # stealing; this stack has one host. Empty means the console reads
+      # previews back through /api, where the engine answers text/plain and the
+      # bytes are inert — visible, and unable to act. A deployment that has a
+      # separate artifacts host names it here and gets live previews.
+      AGENTS_PREVIEW_ORIGIN: ""
+    volumes:
+      # Only `AUTH=builtin` ever writes here — the console's own user database,
+      # never the engine's. The volume exists in every mode so that turning
+      # builtin on does not silently mean "accounts last until the next
+      # `docker compose up --build`".
+      - console-data:/app/data
+    depends_on:
+      - api
+
+volumes:
+  agents-db:
+  console-data:

@@ -384,6 +384,27 @@ function followScroll(nav: HTMLElement, doc: HTMLElement, pages: HTMLElement[]):
 // document out in the browser. The fallback is silent on purpose: a reader
 // opening a document does not need to be told which of two renderers drew it,
 // and the difference shows in the page rather than in a banner.
+/* One page, one canvas, no chrome — the template picker's thumbnail.
+
+   Draws page 1 at exactly the width the card gives it, the same reasoning as
+   the panel's rail: a miniature rendered FOR its size beats one scaled down
+   from a bigger pass. Returns null instead of throwing because a card without
+   a thumbnail is a card, while a card that broke the picker is a bug report. */
+export async function renderPdfThumb(b64: string, width: number): Promise<HTMLCanvasElement | null> {
+  try {
+    const bytes = bytesOf(b64);
+    const pdfjs = await import("pdfjs-dist");
+    const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+    const file = (await pdfjs.getDocument({ data: bytes }).promise) as unknown as PdfDoc;
+    const page = await file.getPage(1);
+    const unit = page.getViewport({ scale: 1 });
+    return await drawPage(page, width / unit.width, pdfRatio());
+  } catch {
+    return null;
+  }
+}
+
 export async function renderOffice(host: HTMLElement, kind: "docx" | "xlsx" | "pptx", content: string, source?: OfficeSource): Promise<void> {
   let bytes: Uint8Array;
   try {

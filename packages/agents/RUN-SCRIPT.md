@@ -62,10 +62,22 @@ especially on failure), `changed`/`created`/`unchanged`/`refused` with versions,
 
 Same three moves as before, now inside the environment's container:
 
-- **Materialise** the named paths' newest versions into a fresh run directory
+- **Materialise** the named paths' newest versions into the run directory
   inside the container (`docker cp` or a bind mount). Fresh per run: the
   *workspace* persists, the *run directory* does not, so a script cannot be
   poisoned by a stale copy of an artifact its conversation has since rewritten.
+
+  The directory is `/artifacts`, and the name is part of the contract — the
+  tool's description says it, and the script starts there. It was once
+  `/tmp/lumen-run-<id>`: unguessable, which mattered to nothing, since one
+  script at a time per environment and no container shared between
+  conversations already rule out the collision the id was avoiding. What it
+  cost was paid by the model. An agent given an uploaded docflow to repair
+  spent its whole step budget guessing where the file was — the artifact path,
+  `/tmp`, `/workspace`, `/app` — and a small one, having failed to find the
+  document it was asked to fix, wrote a clean docflow of its own and validated
+  that instead, reporting a pass on a file the user had never sent. Fresh per
+  run is the guarantee; unique per run never was.
 - **Run** as a non-root user, with CPU, memory, pids and a wall-clock timeout
   capped, output capped, and the run directory the only place the reconcile
   will look.

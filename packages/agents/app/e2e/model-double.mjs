@@ -114,6 +114,41 @@ function orderingProblem(messages) {
   return "";
 }
 
+// An edit whose `old` under-escapes the backslashes the artifact holds — the
+// live loop's first lap, frozen. The refusal must come back naming the
+// escaping, and the double answers the second round by reading it out, which
+// is what the e2e asserts reached the model.
+const BAD_ESCAPE = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "I will replace the Windows path in the config.",
+      tool_calls: [{
+        id: "esc1", type: "function",
+        function: { name: "edit_artifact", arguments: JSON.stringify({
+          path: "/win.json",
+          old: '"UserConfigId": "D:\\Fo2pdf\\USERCONFIG.XML"',
+          new: '"UserConfigId": "c:/fop/userconfig.xml"',
+          note: "point at the new userconfig",
+        }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+function wantsWindowsPath(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return ((last?.content ?? "") + "").toLowerCase().includes("windows path");
+}
+
+function escapeRefusalSeen(messages) {
+  return messages.some((m) => m.role === "tool"
+    && typeof m.content === "string" && m.content.includes("backslash escaping"));
+}
+
 function replyFor(messages) {
   const last = [...messages].reverse().find((m) => m.role === "user");
   const said = (last?.content ?? "").toLowerCase();
@@ -502,6 +537,46 @@ const IMPORT_TWO = {
   usage: { prompt_tokens: 10, completion_tokens: 20 },
 };
 
+// A screenshot of a real site, taken by a real browser in the conversation's
+// own container. The script is what a model would write and the page is
+// fetched over the network — the point of the browser image is that neither
+// of those needs anything from the console.
+const SHOOT = {
+  choices: [{
+    finish_reason: "tool_calls",
+    message: {
+      role: "assistant",
+      content: "",
+      reasoning_content: "A screenshot needs a browser, and this environment has one. I will drive chromium headless, save the png, and let mayCreate keep it as an artifact.",
+      tool_calls: [{
+        id: "w1", type: "function",
+        function: { name: "run_script", arguments: JSON.stringify({
+          language: "python",
+          source: [
+            "from playwright.sync_api import sync_playwright",
+            "with sync_playwright() as pw:",
+            "    b = pw.chromium.launch(args=['--no-sandbox'])",
+            "    p = b.new_page(viewport={'width': 1200, 'height': 800})",
+            "    p.goto('https://aymen.co', wait_until='networkidle', timeout=45000)",
+            "    p.screenshot(path='aymen.png')",
+            "    title = p.title()",
+            "    b.close()",
+            "import os",
+            "print('shot:', os.path.getsize('aymen.png'), 'bytes of', title)",
+          ].join("\n"),
+          paths: [],
+          mayCreate: true }) },
+      }],
+    },
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 20 },
+};
+
+function wantsShot(messages) {
+  const last = [...messages].reverse().find((m) => m.role === "user");
+  return (last?.content ?? "").toLowerCase().includes("screenshot aymen.co");
+}
+
 function wantsPersistence(messages) {
   const last = [...messages].reverse().find((m) => m.role === "user");
   return (last?.content ?? "").toLowerCase().includes("install a package then use it");
@@ -555,6 +630,14 @@ function replyObject(messages) {
       ? said(EDIT_DONE, "Both writes came back clean, so the menu exists and the home page links to it.")
       : EDIT_SITE;
   }
+  if (wantsShot(messages)) {
+    const came = lastToolText(messages);
+    if (came.includes("shot:")) {
+      return said("Saved the screenshot as /aymen.png.",
+        "The script printed the byte count and the reconcile lists the file created, so the picture is stored.");
+    }
+    return SHOOT;
+  }
   if (wantsPersistence(messages)) {
     const came = lastToolText(messages);
     if (came.includes("still-installed:")) {
@@ -604,6 +687,12 @@ function replyObject(messages) {
       : SLOW_CALL;
   }
   if (wantsTruncated(messages)) { return TRUNCATED; }
+  if (wantsWindowsPath(messages)) {
+    return escapeRefusalSeen(messages)
+      ? said("The edit was refused: the file stores each backslash escaped, and my old text under-escaped them. I changed nothing.",
+        "The refusal names backslash escaping, so the mismatch is mine, not the file's.")
+      : BAD_ESCAPE;
+  }
   return said(replyFor(messages), "");
 }
 

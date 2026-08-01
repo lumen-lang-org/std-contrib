@@ -25,6 +25,14 @@ function seeded(): void {
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
+  // The skills trio as well. `forgetMigrations` makes the whole plan pending
+  // again, so a table left standing means 77 and 78 re-add a column that is
+  // already there, SQLite refuses, and the plan STOPS — every migration after
+  // it silently never runs. That was survivable while the columns these rows
+  // are persisted with all arrived before 77; 82 and 86 arrive after it.
+  execute(database, "DROP TABLE IF EXISTS agent_skills");
+  execute(database, "DROP TABLE IF EXISTS skill_files");
+  execute(database, "DROP TABLE IF EXISTS skills");
   dropTable(database, credentialsMapping());
   dropTable(database, agentsMapping());
   dropTable(database, mcpServersMapping());
@@ -35,7 +43,7 @@ function seeded(): void {
 
   let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(database, modelsMapping(), JSON.stringify(m));
-  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "" };
+  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));
   let p: PromptRow = { id: "p1", promptName: "terse", version: 3, body: "Be brief.", createdAt: "t" };
   persist(database, promptsMapping(), JSON.stringify(p));

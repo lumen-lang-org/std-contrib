@@ -18,6 +18,82 @@ export function sidebar(page: Page): Locator {
   return shell(page).locator("console-sidebar");
 }
 
+// The console, once it can answer — and the only way a spec should arrive at
+// one.
+//
+// The page is server-rendered, so its markup is on screen well before the
+// module that gives it behaviour: `<agent-console>` and every region inside it
+// arrive in the first response and paint, and until the custom element is
+// registered the browser treats all of it as unknown markup. A click in that
+// window is not queued and not replayed — it is dropped — so the account
+// block opens no menu, the rail navigates nowhere and the header's agent
+// picker holds no options, and the test then waits out its whole timeout for
+// a result nothing was ever asked to produce.
+//
+// `await expect(shell(page)).toBeVisible()` was the correct wait while the
+// console was client-rendered: the element did not exist until its module ran,
+// so seeing it meant it worked. Server-rendering severed those two facts and
+// left the assertion looking untouched, which is why the failures it caused
+// read as five broken features rather than as one changed precondition.
+//
+// So the wait is on the element being defined and past its first render, which
+// is the thing a person is actually waiting for. Nothing is skipped or
+// softened here: every assertion a spec made it still makes, one navigation
+// later.
+// `waitForFunction` rather than awaiting `customElements.whenDefined` inside
+// one `evaluate`: the wait is long enough to straddle a navigation — a dev
+// server's full reload, a redirect — and an evaluate whose page goes away dies
+// with "Resulting promise was garbage collected", which describes Playwright's
+// internals and not anything a reader of this suite did wrong. waitForFunction
+// re-runs itself on the new document instead. The registry is global, so it is
+// asked about rather than the element, and the element is only awaited once
+// there is a class to have upgraded it.
+export async function ready(page: Page): Promise<void> {
+  const el = shell(page).first();
+  await expect(el).toBeVisible();
+  await page.waitForFunction((tag) => !!customElements.get(tag), CONSOLE);
+  await el.evaluate((node) =>
+    (node as HTMLElement & { updateComplete?: Promise<unknown> }).updateComplete);
+}
+
+// Go to the console and wait for it to be the console.
+export async function open(page: Page, path = "/"): Promise<void> {
+  await page.goto(path);
+  await ready(page);
+}
+
+// The console after its own first fetches, not merely after its first render.
+//
+// For a test that counts the requests a tab makes. The console asks the API
+// two questions for itself when it loads — the conversation list and the agent
+// list — and a listener attached before those land counts them as if the tab
+// had gone looking. That is how the "no refetch" proof of the live feed failed
+// while the feed was working perfectly: two entries in an array that was
+// supposed to be empty, both of them the page opening.
+//
+// Waiting for what those answers *draw* is what makes this deterministic: the
+// rail has rows or says it has none, and the picker has options.
+export async function loaded(page: Page): Promise<void> {
+  await ready(page);
+  await expect(sidebar(page).locator(".thread, .none").first()).toBeVisible();
+  await expect(shell(page).locator("header select option").first()).toBeAttached();
+}
+
+// The conversation the console is on, read off the element rather than guessed
+// from the API: asking for "the newest thread" races every other spec.
+//
+// Read through the locator, never through `document.querySelector` in a
+// `page.evaluate`. The console is not a document-level node under LumenJS — it
+// sits inside the page element's shadow root — so a raw querySelector returns
+// null and the caller gets "" for a conversation that is plainly on screen.
+// Two spec files did exactly that and failed wholesale on `/api/threads//…`.
+// A locator crosses open shadow roots; `evaluate` on it runs against the
+// element it found, so this keeps working wherever the shell puts the console.
+export async function currentThread(page: Page): Promise<string> {
+  return await shell(page).first()
+    .evaluate((el) => (el as HTMLElement & { threadId?: string }).threadId ?? "");
+}
+
 export function knowledge(page: Page): Locator {
   return shell(page).locator("knowledge-page");
 }
@@ -30,8 +106,29 @@ export function settings(page: Page): Locator {
   return shell(page).locator("console-settings");
 }
 
+// The rail, on screen.
+//
+// It is a column at 1025px and wider and an off-canvas drawer below that —
+// one media query in src/console.ts, and the width at which a chat pane
+// squeezed between two fixed columns stops being usable. A person at a narrow
+// width presses the header's Conversations button before touching the rail,
+// and so must a test: without it every rail locator resolves to an element
+// that is parked one rail-width to the left of the viewport, which Playwright
+// reports as "element is outside of the viewport" and retries until the test
+// times out. It reads as a rail that stopped working rather than as one that
+// is closed.
+//
+// A no-op at desktop widths, where the button does not exist.
+export async function openRail(page: Page) {
+  const toggle = shell(page).locator("header .icon.nav");
+  if (!(await toggle.isVisible())) return;
+  const already = await shell(page).first().evaluate((el) => el.hasAttribute("nav"));
+  if (!already) await toggle.click();
+}
+
 // Open Settings the way a person does: the account block, then the item.
 export async function openSettings(page: Page) {
+  await openRail(page);
   await sidebar(page).locator(".me").click();
   await sidebar(page).locator(".menu div", { hasText: "Settings" }).click();
   await expect(settings(page)).toBeVisible();
@@ -45,6 +142,7 @@ export async function openTab(page: Page, name: string) {
 }
 
 export async function openKnowledge(page: Page) {
+  await openRail(page);
   await sidebar(page).locator('.item[data-nav="knowledge"]').click();
   await expect(knowledge(page)).toBeVisible();
 }
@@ -53,6 +151,7 @@ export async function openKnowledge(page: Page) {
 // sentence when it is not, and the knowledge specs skip on that rather than
 // reporting a failure for behaviour that is correct.
 export async function openCanvas(page: Page) {
+  await openRail(page);
   await sidebar(page).locator('.item[data-nav="canvas"]').click();
   await expect(canvas(page)).toBeVisible();
 }
@@ -107,11 +206,19 @@ export function selectValue(root: Locator, id: string): Locator {
   return root.locator(`#${id}`);
 }
 
-// Choosing in a LumenUI select. There is no <select> to `selectOption`: the
-// trigger opens a listbox of divs, each carrying its value as `data-value`.
-export async function choose(root: Locator, id: string, value: string) {
-  await root.locator(`#${id} .wrapper`).click();
-  await root.locator(`#${id} .option[data-value="${value}"]`).click();
+// Choosing in a settings field. There is no <select> to `selectOption`: the
+// field is an nr-dropdown whose trigger is a button and whose menu is a list of
+// `.dropdown__item`, keyed by the id put in each item.
+//
+// Matched on the item's exact text rather than on a value attribute, because
+// that is what the dropdown renders — it keeps the id in its own item objects
+// and puts only the label in the DOM. So callers pass the LABEL, which is what
+// the person clicking sees anyway; the one caller that passed a value ("m-kind"
+// → "embedding") passes a label that happens to read the same.
+export async function choose(root: Locator, id: string, label: string) {
+  await root.locator(`#${id} [slot="trigger"]`).click();
+  await root.locator(`#${id} .dropdown__item`)
+    .filter({ hasText: new RegExp(`^\\s*${label}\\s*$`) }).first().click();
 }
 
 // A LumenUI checkbox copies its id onto the <input> it renders, so an id on
@@ -120,10 +227,12 @@ export function toggle(root: Locator, id: string): Locator {
   return root.locator(`input#${id}`);
 }
 
-// What a select offers, whether or not it is open — the listbox is in the DOM
-// either way, which is what makes this readable without a click.
+// What a field offers, whether or not it is open — nr-dropdown renders its
+// panel either way and hides it with `display: none`, so the items are in the
+// DOM to be read without a click. `allTextContents` does not require
+// visibility, which is what keeps this a read rather than an interaction.
 export function choices(root: Locator, id: string): Locator {
-  return root.locator(`#${id} .option`);
+  return root.locator(`#${id} .dropdown__item`);
 }
 
 // The flat columns of an agent row, and nothing else.
@@ -134,7 +243,7 @@ export function choices(root: Locator, id: string): Locator {
 // tests at once; this is the one place that knows the shape.
 export type AgentFlat = {
   id: string; agentName: string; description: string;
-  modelConfigId: string; promptId: string; enabled: boolean;
+  modelConfigId: string; promptId: string; scriptImageId: string; enabled: boolean;
   isDefault: boolean; updatedAt: string;
 };
 
@@ -145,6 +254,7 @@ export function agentRow(a: Record<string, unknown>, over: Partial<AgentFlat> = 
     description: a.description as string,
     modelConfigId: a.modelConfigId as string,
     promptId: a.promptId as string,
+    scriptImageId: (a.scriptImageId as string) ?? "",
     enabled: a.enabled as boolean,
     isDefault: (a.isDefault as boolean) ?? false,
     updatedAt: "now",
@@ -191,20 +301,64 @@ async function rows(request: Req, path: string): Promise<Record<string, unknown>
   return await request.get(path).then((r) => r.json()) as Record<string, unknown>[];
 }
 
+// Put the doubled agent's script environment back to the default, if a run
+// left it somewhere else.
+//
+// Empty means the default image — python and node, `agents-runtime:1` in
+// run-script.ts. One spec borrows the browser image for the length of one test
+// and hands it back in a `finally`, which holds right up until the run it is
+// in is killed: a Ctrl-C, a CI step that times out, a `timeout` wrapped around
+// the suite. After that every *other* script test runs in the browser image,
+// where a plain `pip install` answers "externally-managed-environment" — so
+// the spec that exists to prove an environment remembers a package proves
+// nothing, and says so as a chat message that never arrives. It stays that way
+// for every run afterwards, because a fixture that only creates never repairs.
+//
+// One request, and the borrow can no longer outlive the run that made it.
+export async function ownScriptImage(request: Req): Promise<void> {
+  const held = (await rows(request, "/api/agents")).find((a) => a.agentName === E2E_AGENT);
+  if (!held || (held.scriptImageId ?? "") === "") return;
+  await request.put(`/api/agents/${held.id as string}`, {
+    data: agentRow(held, { scriptImageId: "" }),
+  });
+}
+
 export async function ensureDoubled(request: Req): Promise<string> {
   const agents = await rows(request, "/api/agents");
   const held = agents.find((a) => a.agentName === E2E_AGENT);
-  if (held) return held.id as string;
+  if (held) {
+    await ownScriptImage(request);
+    return held.id as string;
+  }
 
+  // `provider: "double"`, and the word is load-bearing rather than cosmetic.
+  //
+  // It used to say `openai`, because the double speaks the OpenAI wire format
+  // and naming the format in the provider column was the shortest way to get
+  // there. The engine agrees either way — provider.ts is Anthropic-shaped
+  // versus OpenAI-shaped and an unknown name falls to the OpenAI branch, while
+  // `endpointFor` prefers this row's own baseUrl over any provider address —
+  // but one thing does read the name: the derived model menu excludes
+  // `models.provider = 'double'` and nothing else can tell a fake model from a
+  // real one. Under the old spelling that exclusion matched no row, and a
+  // deployment carrying this fixture published "Double" on the menu real users
+  // pick from, pointed at a loopback port.
+  //
+  // Two consequences, both deliberate. The key is stored under `double`,
+  // because run.ts resolves `credentialFor(db, model.provider, master)` and a
+  // key filed under `openai` would not be found. And this whole function
+  // short-circuits on an existing agent, so a box that already has the old row
+  // needs `UPDATE models SET provider = 'double' WHERE id = 'm-double'` by
+  // hand — the fixture cannot repair what it never re-posts.
   if (!(await rows(request, "/api/models")).some((m) => m.id === "m-double")) {
     await request.post("/api/models", { data: {
-      id: "m-double", label: "Double", apiName: "double-1", provider: "openai",
+      id: "m-double", label: "Double", apiName: "double-1", provider: "double",
       kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true,
     } });
   }
   const providers = await request.get("/api/providers").then((r) => r.json()) as string[];
-  if (!providers.includes("openai")) {
-    await request.put("/api/providers/openai/key", { data: { apiKey: "e2e-double-not-a-real-key" } });
+  if (!providers.includes("double")) {
+    await request.put("/api/providers/double/key", { data: { apiKey: "e2e-double-not-a-real-key" } });
   }
   if (!(await rows(request, "/api/model-configs")).some((c) => c.id === "c-double")) {
     await request.post("/api/model-configs", { data: {

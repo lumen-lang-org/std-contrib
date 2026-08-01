@@ -332,9 +332,49 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
 
 // Retrieved chunks as text to put in front of a question. Each is labelled
 // with where it came from, so a model can attribute and a reader can check.
+// A 30-bit accumulator over the string's UTF-16 units, as eight hex
+// characters. Not cryptographic and not meant to be: it only has to keep two
+// long document names from sharing a chunk-id stem. Not FNV either, any
+// more: FNV wants i32 arithmetic that wraps, and this language's traps —
+// the first long-name drain died on "integer overflow" at the multiply. The
+// mask below keeps every intermediate provably inside i32: hash is at most
+// 2^25-1 when shifted left 5, so the sum stays under 2^30 + 2^26.
+function fnv1a(text: string): string {
+  let hash: int = 5381;
+  let i: int = 0;
+  while (i < text.length) {
+    let m = hash & 0x01ffffff;
+    hash = (m << 5) + m + text.charCodeAt(i);
+    i = i + 1;
+  }
+  let digits = "0123456789abcdef";
+  let out = "";
+  let d: int = 0;
+  let held = hash;
+  while (d < 8) {
+    out = digits.charAt(held & 15) + out;
+    held = held >> 4;
+    d = d + 1;
+  }
+  return out;
+}
+
 export function asContext(found: Retrieved[]): string {
   if (found.length == 0) { return ""; }
-  let out = "Use only the following context. If it does not answer the question, say so.\n";
+  // "Use only the following context" stood here once, and an agent with
+  // tools obeyed it to the letter: asked to fix a docflow, it retrieved
+  // three license agreements — retrieval runs on every turn, and "fix it"
+  // resembles nothing in any corpus — announced that the provided context
+  // did not cover the question, and stopped, with the validator one
+  // run_script call away and a skill for exactly this in its briefing. The
+  // guard this line owes is narrower: what the corpus did not say must not
+  // be attributed to it. What the agent's tools and skills can establish is
+  // not this line's to forbid.
+  let out = "Passages retrieved from the knowledge base for this question. "
+    + "When you answer from the corpus, answer from these and say so when they do not cover it "
+    + "— never attribute to the corpus what is not in them. They are retrieved by resemblance "
+    + "to the question, so they may be beside the point: judge, and when the task calls for "
+    + "your tools or skills, use them regardless of what was retrieved.\n";
   let i: int = 0;
   while (i < found.length) {
     out = out + "\n[" + found[i].source + "/" + found[i].id + "]\n" + found[i].body + "\n";
@@ -413,11 +453,24 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
 
   executeWith(db, "DELETE FROM documents WHERE source = " + placeholderAt(db, 1), [source]);
 
+  // The stem chunk ids grow from. An id is source + "_" + n and must pass
+  // safeIdentifier's 63 bytes — a 63-byte source overflowed on its very
+  // first chunk, which is how 103 documents whose names were exactly at the
+  // cap refused to index while their shorter neighbours sailed through. A
+  // long source is cut to make room, and carries a hash of its whole self,
+  // because the long names here differ only near the end: cutting alone
+  // would give two documents the same ids, and indexDocument REPLACES on id
+  // — each would silently overwrite the other.
+  let stem = source;
+  if (stem.length > 48) {
+    stem = stem.slice(0, 39) + "_" + fnv1a(source);
+  }
+
   let chunks = splitIntoChunks(body, CHUNK_CHARS);
   let written: int = 0;
   let i: int = 0;
   while (i < chunks.length) {
-    let part: DocumentChunk = { id: source + "_" + `${i}`, source: source, scope: scope, body: chunks[i] };
+    let part: DocumentChunk = { id: stem + "_" + `${i}`, source: source, scope: scope, body: chunks[i] };
     let problem = indexDocument(db, model, part, apiKey);
     if (problem != "") {
       // Partial on purpose: what was stored is real and retrievable, and the

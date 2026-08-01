@@ -6,7 +6,7 @@
 // only looked right would be worse than none.
 
 import { expect, test } from "@playwright/test";
-import { agentRow, canvas, errorOf, field, openCanvas, shell } from "./console.js";
+import { agentRow, canvas, errorOf, field, open, openCanvas, ready, shell } from "./console.js";
 import type { Page } from "@playwright/test";
 
 // What a node is labelled. The entry agent says so on the node itself, so its
@@ -21,7 +21,7 @@ function node(page: Page, a: { agentName: string; isDefault?: boolean }) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await open(page);
   await expect(shell(page)).toBeVisible();
   await openCanvas(page);
 });
@@ -118,6 +118,7 @@ test("a relation drawn on the canvas is stored through the sub-agent route", asy
     data: { childId: child!.id },
   });
   await page.reload();
+  await ready(page);
   await openCanvas(page);
 
   const after = (await page.request.get("/api/agents").then((r) => r.json())) as
@@ -182,25 +183,45 @@ test("selecting a server opens the server form, not the agent one", async ({ pag
 });
 
 test("editing a server on the canvas is stored", async ({ page }) => {
-  const servers = (await page.request.get("/api/servers").then((r) => r.json())) as
-    { id: string; serverName: string; endpoint: string }[];
-  test.skip(servers.length === 0, "no servers configured");
-  const s = servers[0];
-  const moved = "http://127.0.0.1:9999/mcp";
+  // On a server this test made, not on whichever row came back first.
+  //
+  // It used to move the endpoint of `servers[0]`, and that is a row a person
+  // configured: once a bearer token has been stored for its address, the API
+  // refuses to point it somewhere else — "its token was stored for that
+  // address; pointing it at … would send the secret there too" — because
+  // moving the endpoint under a stored secret is how a credential is leaked to
+  // a host that was never meant to have it. Correct behaviour, and a test that
+  // asserts a save cannot also depend on nobody having set a token on the
+  // first server in the list. So the row under test is created here, with no
+  // credential of its own, and deleted at the end.
+  const id = `e2e_canvas_${Date.now()}`;
+  const made = await page.request.post("/api/servers", {
+    data: {
+      id, serverName: `canvas-edit-${id}`, transport: "http",
+      endpoint: "http://127.0.0.1:9998/mcp", authKind: "none", authHeader: "", enabled: true,
+    },
+  });
+  expect(made.status()).toBe(201);
 
-  await canvas(page).getByText(s.serverName, { exact: true }).first().click();
-  await field(canvas(page), "s-endpoint").fill(moved);
-  await canvas(page).locator("aside nr-button[type=primary]").click();
-  await expect(canvas(page).locator("aside .saved")).toHaveText("saved");
+  try {
+    // The graph was drawn before that row existed.
+    await page.reload();
+    await ready(page);
+    await expect(shell(page)).toBeVisible();
+    await openCanvas(page);
 
-  const after = (await page.request.get("/api/servers").then((r) => r.json())) as
-    { id: string; endpoint: string }[];
-  expect(after.find((x) => x.id === s.id)?.endpoint).toBe(moved);
+    const moved = "http://127.0.0.1:9999/mcp";
+    await canvas(page).getByText(`canvas-edit-${id}`, { exact: true }).first().click();
+    await field(canvas(page), "s-endpoint").fill(moved);
+    await canvas(page).locator("aside nr-button[type=primary]").click();
+    await expect(canvas(page).locator("aside .saved")).toHaveText("saved");
 
-  // Put it back.
-  await field(canvas(page), "s-endpoint").fill(s.endpoint);
-  await canvas(page).locator("aside nr-button[type=primary]").click();
-  await expect(canvas(page).locator("aside .saved")).toHaveText("saved");
+    const after = (await page.request.get("/api/servers").then((r) => r.json())) as
+      { id: string; endpoint: string }[];
+    expect(after.find((x) => x.id === id)?.endpoint).toBe(moved);
+  } finally {
+    await page.request.delete(`/api/servers/${id}`);
+  }
 });
 
 test("a transport the client cannot speak is refused on create as well as update", async ({ page }) => {
