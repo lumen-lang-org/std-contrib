@@ -258,7 +258,16 @@
      scroll, so the shell stays put and the regions inside it that scroll on
      purpose keep doing so. inset: 0 with the measured height is the same
      geometry the shell already had. */
-  body { position: fixed; inset: 0; width: 100%; }
+  /* Pinned at the TOP only, and sized by --app-h — never inset: 0.
+     inset: 0 sets bottom: 0, which anchors the body to the bottom of iOS's
+     LAYOUT viewport: the tall one, measured with the toolbar retracted. With
+     both top and bottom pinned the body spans that full height and --app-h is
+     overridden, so the composer at the body's bottom lands under the toolbar —
+     exactly the report. top + left + an explicit height leaves the bottom
+     free, so the measured visible height is the only thing deciding where the
+     body ends, and the composer ends with it, above the chrome. */
+  body { position: fixed; top: 0; left: 0; width: 100%;
+         height: var(--app-h, 100svh); }
   /* And the min-height the framework adds back, taken off. LumenJS's own
      style block lands AFTER this file and says `body { min-height: 100vh }`.
      On iOS, 100vh is the LARGE viewport — the height with the toolbar hidden
@@ -269,8 +278,18 @@
      right height and the hydrated page grew past it. Firefox's 100vh is its
      real viewport, which is why the same build was fine there.
      `html body` (0,0,2) outweighs their bare `body` (0,0,1), so order stops
-     mattering — the same trick, for the same reason, as the font rule below. */
-  html body { min-height: 0; }
+     mattering — the same trick, for the same reason, as the font rule below.
+
+     nk-app is the SAME rule one line down in that framework block —
+     `nk-app { min-height: 100vh }` — and missing it was the whole of why the
+     last fix did not land. The body shrank to the measured height and nk-app,
+     the first child, kept its 100vh minimum and simply overflowed it: the
+     shell was the visible height plus the toolbar, and the composer sat at the
+     bottom of THAT. Proven by forcing --app-h 90px short and walking the
+     chain — html and body followed to 754, nk-app held 844. Both minimums
+     have to be taken off, not just the body's. `html nk-app` (0,0,2) beats
+     their bare `nk-app`. */
+  html body, html nk-app { min-height: 0; }
   /* `html body`, not `body`, and the extra specificity is load-bearing.
      LumenJS writes its own <style> block into the shell AFTER this file
      (dev-server/index-html.ts), and that block sets `body { font-family:
