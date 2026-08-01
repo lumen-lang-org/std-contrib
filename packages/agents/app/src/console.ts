@@ -17,7 +17,7 @@ import "./model-picker.js";
 import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
-  listModels, listThreads, modelChoices, previewUrl, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
+  listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -488,6 +488,14 @@ export class AgentConsole extends LitElement {
                    border: 1px solid var(--border); border-radius: 8px;
                    overflow: hidden; background: var(--bg-card); }
     .start-thumb canvas { display: block; width: 100%; height: auto; }
+    /* The iframe is laid out at 900px and scaled to the card, so the page
+       inside is the desktop one rather than a 208px reflow of it. The wrapper
+       clips; pointer-events go nowhere, because a thumbnail is a picture. */
+    .site-thumb { width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
+    .site-thumb iframe {
+      width: 900px; height: 510px; border: 0;
+      transform: scale(0.231); transform-origin: top left;
+    }
     .start { flex: none; width: 210px; text-align: left; cursor: pointer;
              display: flex; flex-direction: column; gap: 3px; padding: 12px 14px;
              border: 1px solid var(--border); border-radius: 14px;
@@ -1154,7 +1162,37 @@ export class AgentConsole extends LitElement {
      browsing — every await re-checks that the card is still on screen and
      still empty, because pinning Sheets while Docs' thumbnails are in flight
      would otherwise paint spreadsheet cards with documents. */
-  private thumbs = new Map<string, HTMLCanvasElement>();
+  private thumbs = new Map<string, HTMLElement>();
+  /* A site template's first page, drawn as itself.
+
+     `srcdoc` with the stylesheet inlined, because the iframe has no origin to
+     resolve `href="style.css"` against — the files exist as template rows, not
+     as anything the browser can fetch. Sandboxed with no allow-scripts: a
+     template is markup the operator wrote, but a thumbnail is not a place to
+     start running things, and the page needs no script to look like itself.
+     Scaled by transform rather than by rendering small: the page is laid out
+     at 900px and shown at card width, so its type and spacing are the ones a
+     reader will actually get instead of a phone-width reflow. */
+  private async siteThumb(id: string): Promise<HTMLElement | null> {
+    const files = await listTemplateFiles(id).catch(() => []);
+    const html = files.find((f) => f.path.endsWith(".html"));
+    if (html === undefined) { return null; }
+    const css = files.find((f) => f.path.endsWith(".css"));
+    const doc = css === undefined
+      ? html.body
+      : html.body.replace('<link rel="stylesheet" href="style.css">',
+                          `<style>${css.body}</style>`);
+    const hold = document.createElement("div");
+    hold.className = "site-thumb";
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("tabindex", "-1");
+    frame.srcdoc = doc;
+    hold.append(frame);
+    return hold;
+  }
+
   private async paintThumbs(): Promise<void> {
     await this.updateComplete;
     for (const t of this.starts) {
@@ -1162,6 +1200,18 @@ export class AgentConsole extends LitElement {
       const held = this.thumbs.get(t.id);
       if (held !== undefined) { port()?.replaceChildren(held); continue; }
       try {
+        // A site template has no document to convert — the office path runs
+        // LibreOffice, which does not take HTML — so its own first page is
+        // rendered instead, in a sandboxed iframe scaled down to the card.
+        // That is a real preview rather than an approximation of one: it is
+        // the page, laid out by the same engine that will lay it out later.
+        if (t.kind === "site") {
+          const frame = await this.siteThumb(t.id);
+          if (frame === null) { continue; }
+          this.thumbs.set(t.id, frame);
+          port()?.replaceChildren(frame);
+          continue;
+        }
         const { pdf } = await templatePdf(t.id);
         const { renderPdfThumb } = await import("./office-view.js");
         const canvas = await renderPdfThumb(pdf, 208);
