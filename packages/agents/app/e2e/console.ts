@@ -106,6 +106,29 @@ export function settings(page: Page): Locator {
   return shell(page).locator("console-settings");
 }
 
+// The Starting points page. It is a region of the console's own root rather
+// than an element of its own, so it is named by class — and by the class the
+// page's container carries, not the `.starts` row under the composer, which is
+// a different feature with a confusingly similar name (templates for a pinned
+// capability).
+export function startsPage(page: Page): Locator {
+  return shell(page).locator(".starts-page");
+}
+
+// The bar across the bottom of an empty home. Phone-only by design: the rail
+// carries the same destination as a row, so the bar is display:none at widths
+// where the rail is a column. A spec that wants it has to be at a phone size.
+export function exploreBar(page: Page): Locator {
+  return shell(page).locator(".explore");
+}
+
+// Open Starting points the way a person on a desktop does: the rail's row.
+export async function openStarts(page: Page) {
+  await openRail(page);
+  await sidebar(page).locator('.item[data-nav="starts"]').click();
+  await expect(startsPage(page)).toBeVisible();
+}
+
 // The rail, on screen.
 //
 // It is a column at 1025px and wider and an off-canvas drawer below that —

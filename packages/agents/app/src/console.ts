@@ -234,7 +234,46 @@ export class AgentConsole extends LitElement {
        anywhere else. Hidden above the breakpoint, where neither layer covers
        anything and a dimmed page would be dimming nothing. */
     .scrim { display: none; background: rgba(0,0,0,.28); }
-    .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .center { flex: 1; display: flex; flex-direction: column; min-width: 0;
+              position: relative; }
+    /* The bar across the bottom of an empty home, the way Kimi draws it: a
+       thing to look at when you have nothing to type, rather than a screen of
+       nothing under the composer. Theirs pairs a label on the left with a
+       quieter hint and a chevron on the right, at 14px, and reads at about
+       56% and 42% white — which is what --muted and --faint already are here.
+       Floating over the column rather than sitting in the flow, so it does not
+       enter the centring calculation the wordmark and composer depend on.
+       The chevron points RIGHT and theirs points up: theirs raises a panel
+       over the page, this one leaves for another. An arrow that lies about
+       where the content is costs more than the symmetry is worth. */
+    /* Fixed to the viewport, not absolute in the column. Absolute pinned it to
+       the bottom of .center, which is the page — and a phone's page is not what
+       a phone shows you. Safari keeps its toolbar over the bottom of the
+       viewport and reports a taller one until it collapses, so the bar sat
+       under the chrome and simply was not there. Fixed answers to the visual
+       viewport instead, and safe-area-inset-bottom keeps it clear of the home
+       indicator on a device that has one (0 everywhere else, so the expression
+       is the same rule on a laptop). */
+    /* A phone control, and only there: the rail carries "Starting points" as a
+       row already, so on a screen wide enough to show the rail this bar would
+       be a second door beside an open one. On a phone the rail is a drawer,
+       which puts the same destination two taps and a panel away — that gap is
+       the whole reason this exists. Enabled in the phone block further down,
+       because a media query has to come after the rule it overrides. */
+    .explore { display: none; position: fixed; left: 12px; right: 12px;
+               bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+               align-items: center; justify-content: space-between;
+               gap: 10px; padding: 9px 14px; border-radius: 14px;
+               border: 1px solid var(--border); background: var(--bg-card);
+               color: var(--muted); font: inherit; font-size: 14px;
+               cursor: pointer; text-align: left;
+               transition: background-color .15s cubic-bezier(.23,1,.32,1); }
+    .explore:hover { background: var(--bg-sunken); }
+    .explore span { display: inline-flex; align-items: center; gap: 7px;
+                    min-width: 0; }
+    .explore .hint { color: var(--faint); flex: none; }
+    .explore .label { overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; }
     /* No rule under the header. Measured against Kimi at the same width: it
        draws no divider anywhere on the page — header, turns, composer are all
        separated by space alone. A hairline here is the only horizontal line
@@ -405,6 +444,7 @@ export class AgentConsole extends LitElement {
          plain shorthand already wins on that element). Insetting the column
          moves the transcript with it, which is what Kimi does anyway. */
       main { padding-left: 11px; padding-right: 11px; }
+      .explore { display: flex; }
       .title { font-size: 15px; }
       /* The model chip is the first thing to go: it names a choice you make
          rarely, and the picker beside it still says which agent is answering. */
@@ -457,7 +497,7 @@ export class AgentConsole extends LitElement {
        at equal specificity the desktop rule above would win and the override
        would do nothing at all. A media query is not stronger than the rule it
        means to replace; it only has to come after it. */
-    @media (max-width: 640px) { main.empty { padding-bottom: 20vh; } }
+    @media (max-width: 640px) { main.empty { padding-bottom: 24vh; } }
     /* With thumbnails the card row is ~200px tall, so the block only needs
        to move up enough to clear it — 6vh put the wordmark against the header
        with a screen of blank beneath. Centred-but-biased: still centre, just
@@ -484,6 +524,11 @@ export class AgentConsole extends LitElement {
        is Remix — see startsPage for why there is no way to open the source. */
     .starts-page { padding: 28px 24px; max-width: 900px; margin: 0 auto;
                    overflow-y: auto; }
+    .starts-back { display: inline-flex; align-items: center; gap: 4px;
+                   margin: 0 0 14px -6px; padding: 6px 10px 6px 6px;
+                   border: 0; border-radius: 8px; background: none; font: inherit;
+                   font-size: 14px; color: var(--muted); cursor: pointer; }
+    .starts-back:hover { background: var(--bg-sunken); color: var(--fg); }
     .starts-page h2 { font-size: 20px; font-weight: 650; margin: 0 0 6px; }
     .starts-intro { color: var(--muted); margin: 0 0 20px; max-width: 60ch; }
     .offer-grid { display: grid; gap: 12px;
@@ -740,6 +785,7 @@ export class AgentConsole extends LitElement {
     // defaulted to. Safe here because SSR skips connectedCallback (see the
     // seeding note above); on the server there is no document to touch.
     document.title = BRAND;
+    this.startDot();
     this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
     // Asked before the lists, and never awaited alongside them: a 401 from the
     // list calls navigates to the login, and the answer to this one decides
@@ -815,7 +861,31 @@ export class AgentConsole extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this.threadsTicker !== null) { clearInterval(this.threadsTicker); this.threadsTicker = null; }
+    if (this.dotTicker !== null) { clearInterval(this.dotTicker); this.dotTicker = null; }
     if (this.unlisten !== null) { this.unlisten(); this.unlisten = null; }
+  }
+
+  /* The wordmark's period, drifting through colours.
+     Set on documentElement rather than on this element: the mark is drawn deep
+     inside nr-chatbot's shadow root, and a custom property inherits across a
+     shadow boundary while no selector written here can reach through one.
+     Hue only — saturation and lightness are pinned so every colour it lands on
+     is one this palette would have chosen, and none of them is a grey that
+     makes the dot look broken or a neon that makes it look like an error. The
+     step is randomised but bounded away from zero, so consecutive colours are
+     always visibly different rather than occasionally the same twice.
+     Timer, not a CSS animation, because "random" is the requirement and
+     keyframes can only ever be a fixed cycle. Cleared on disconnect. */
+  private startDot() {
+    if (this.dotTicker !== null) return;
+    let hue = Math.floor(Math.random() * 360);
+    const paint = () => {
+      hue = (hue + 40 + Math.floor(Math.random() * 280)) % 360;
+      document.documentElement.style
+        .setProperty("--nuraly-chatbot-brand-dot", `hsl(${hue} 72% 58%)`);
+    };
+    paint();
+    this.dotTicker = setInterval(paint, 1400);
   }
 
   // Take the click ring off the composer's own buttons.
@@ -979,6 +1049,7 @@ export class AgentConsole extends LitElement {
   // person who just sent the message should not wait a tick to see their own
   // conversation named.
   private threadsTicker: ReturnType<typeof setInterval> | null = null;
+  private dotTicker: ReturnType<typeof setInterval> | null = null;
 
   private tickThreads() {
     if (live.fresh()) return;
@@ -1123,6 +1194,15 @@ export class AgentConsole extends LitElement {
   private startsPage() {
     return html`
       <div class="starts-page">
+        <!-- The way out. This view replaces the whole conversation column, so
+             without it the only route back is the browser's Back — which the
+             console does not put this view into (openStarts pushes no history
+             entry), so on a phone with no visible Back there was none at all.
+             Its own control rather than a header change: the header belongs to
+             the chat view and is not rendered here. -->
+        <button class="starts-back" @click=${() => { this.view = "chat"; }}>
+          <nr-icon name="chevron-left" size="small"></nr-icon>Back
+        </button>
         <h2>Starting points</h2>
         <p class="starts-intro">Conversations people have offered to start from.
           Remixing one opens a conversation of your own with its files already in it.</p>
@@ -1460,6 +1540,19 @@ export class AgentConsole extends LitElement {
           ></nr-chatbot>
           ${this.session.getState().messages.length > 0 ? "" : this.capabilityRow()}
         </main>
+        ${this.session.getState().messages.length > 0 ? "" : html`
+          <!-- Points at the starting-points page, not at the .starts row under
+               the composer. That row is only populated once a capability is
+               pinned, so a bar hung off it is absent on the one screen it
+               exists for — the empty home nobody has touched yet. The page
+               behind openStarts() is filled from replayableThreads() on the
+               way in and is the thing a person is actually being offered. -->
+          <button class="explore" @click=${() => { void this.openStarts(); }}>
+            <span class="label"><nr-icon name="star" size="small"></nr-icon>Starting
+              points</span>
+            <span class="hint">Explore<nr-icon name="chevron-right"
+              size="small"></nr-icon></span>
+          </button>`}
         ${cards.length === 0 ? "" : html`
         <div class="cards">
           ${cards.map((c) => html`
