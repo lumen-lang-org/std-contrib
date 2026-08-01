@@ -87,6 +87,11 @@ type GalleryRow = {
   source: string; id: string;
 };
 
+/* How many rows the slash menu will ever draw. Six is about a third of a phone
+   screen: enough that a match is usually visible without the menu becoming the
+   page. Past it, keep typing — that is what the filter is for. */
+const SLASH_ROWS = 6;
+
 const capIcon = (name: string) => CAPS[name]?.icon ?? "tool";
 const capKind = (name: string) => CAPS[name]?.kind ?? "";
 
@@ -311,11 +316,12 @@ export class AgentConsole extends LitElement {
                bottom: calc(12px + env(safe-area-inset-bottom, 0px));
                align-items: center; justify-content: space-between;
                gap: 10px; padding: 9px 14px; border-radius: 14px;
-               /* Outline only. A filled bar reads as a card sitting on the
-                  page — one more surface at the bottom of a screen whose whole
-                  point is that it is empty. The border is enough to say the
-                  whole row is one target. */
-               border: 1px solid var(--border); background: none;
+               /* Neither filled nor outlined. A fill made it a card on a page
+                  whose point is that it is empty; the outline that replaced it
+                  drew a box around the emptiness instead. What is left is the
+                  words, which is all the row ever needed to be — the label and
+                  the chevron say it is a target. */
+               border: 0; background: none;
                color: var(--muted); font: inherit; font-size: 14px;
                cursor: pointer; text-align: left;
                transition: background-color .15s cubic-bezier(.23,1,.32,1); }
@@ -643,6 +649,25 @@ export class AgentConsole extends LitElement {
                  background: var(--fill-1); border: 1px solid var(--border);
                  color: var(--muted); }
     .pick.on .pick-tile { color: var(--fg); }
+    /* The slash menu. Anchored to the bottom of the viewport above the
+       composer's own band rather than measured against the composer, which
+       grows as you type — see slashMenu() for why that matters. */
+    .slash { position: fixed; z-index: 45; left: 50%; bottom: 132px;
+             transform: translateX(-50%);
+             width: min(560px, calc(100% - 24px));
+             max-height: 46vh; overflow-y: auto; overscroll-behavior: contain;
+             background: var(--bg-card); border: 1px solid var(--border);
+             border-radius: 14px; padding: 6px;
+             display: flex; flex-direction: column; gap: 2px;
+             box-shadow: 0 10px 30px rgba(0,0,0,.28); }
+    .slash-row { display: flex; align-items: center; gap: 10px; width: 100%;
+                 text-align: left; padding: 8px 10px; border: 0;
+                 border-radius: 10px; background: none; font: inherit;
+                 color: var(--fg); cursor: pointer; }
+    .slash-row:hover { background: var(--bg-sunken); }
+    .slash-row.on { background: var(--bg-user); }
+    .slash-text { display: flex; flex-direction: column; gap: 1px;
+                  min-width: 0; }
     .pick-act { align-self: flex-start; margin-top: 2px; font-size: 12.5px;
                 color: var(--muted); border: 1px solid var(--border);
                 border-radius: 999px; padding: 3px 10px; cursor: pointer; }
@@ -905,6 +930,11 @@ export class AgentConsole extends LitElement {
   /* What is typed into the gallery's filter. Cleared when it opens, because a
      filter left over from last time is a gallery that looks empty. */
   @state() private galleryFind = "";
+  /* The slash menu: what has been typed after "/" in the composer, or null
+     when the composer holds anything that is not a lone slash-word. null
+     rather than "" because "" is a real state — the moment after the slash,
+     when every skill matches. */
+  @state() private slash: string | null = null;
   /* Every skill, not just the featured few the chips draw. Fetched the first
      time the gallery is opened rather than on load: a console that nobody
      asks is a console that should not have asked. */
@@ -1336,6 +1366,105 @@ export class AgentConsole extends LitElement {
     return items;
   }
 
+  /* The composer's own text, read where it actually lives.
+     nr-chatbot's input is a contenteditable div inside its shadow root, and
+     the component publishes no value for it — so this reaches in. Kept to one
+     method so there is one place to fix if the component ever grows a real
+     property for it. */
+  private composerBox(): HTMLElement | null {
+    // Typed as Element, because the app's declaration for nr-chatbot names its
+    // properties and not the HTMLElement half — asking it for shadowRoot is a
+    // compile error even though every element has one.
+    const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
+    return chat?.shadowRoot?.querySelector(".input-box__input") as HTMLElement | null;
+  }
+
+  /* Open, filter or close the slash menu as the composer changes.
+
+     The rule is narrow on purpose: a lone "/word" and nothing else. Anything
+     with a space in it is a sentence that happens to start with a slash — a
+     path, a fraction, a date — and a menu that opened over those would be in
+     the way far more often than it helped. `input` is composed, so this fires
+     from inside the component's shadow root without the component knowing. */
+  private onComposerInput() {
+    // The full list is what the menu searches, and it is fetched the first
+    // time a slash is typed rather than on load — same reasoning as the
+    // gallery: a console nobody asks should not have asked.
+    if (this.allSkills.length === 0) { void this.loadAllSkills(); }
+    const text = (this.composerBox()?.textContent ?? "").replace(/ /g, " ");
+    const m = /^\/([\w-]*)$/.exec(text.trim());
+    this.slash = m === null ? null : m[1].toLowerCase();
+  }
+
+  private async loadAllSkills(): Promise<void> {
+    if (this.allSkills.length > 0) return;
+    this.allSkills = await listSkills().catch(() => []);
+  }
+
+  /* Choosing from the slash menu: pin the skill and take the "/…" back out.
+     The composer is emptied rather than left holding the typed name — the name
+     was the way of asking, not part of the message, and leaving it would send
+     "/make-doc" to the model as if it were a sentence. */
+  private pickSlash(skillName: string) {
+    void this.pin(skillName);
+    const box = this.composerBox();
+    if (box !== null) {
+      // Left in the box, not cleared. A pin with an empty composer reads as
+      // nothing having happened; the command staying put is what says the
+      // choice landed. ChatSession takes this exact string back off the front
+      // of the next send, so it is visible without being said.
+      const prefix = "/" + skillName + " ";
+      this.session.slashPrefix = prefix;
+      box.textContent = prefix;
+      const at = document.createRange();
+      at.selectNodeContents(box);
+      at.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(at);
+      // The component tracks its own emptiness for the placeholder and the
+      // send button, and it learns about this edit the same way it learns
+      // about typing.
+      box.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      box.focus();
+    }
+    this.slash = null;
+  }
+
+  /* Keys the slash menu owns while it is open, and only then.
+
+     Enter is the one that matters: with the menu up it takes the first match
+     instead of sending, because "/make-doc" is not a message and sending it
+     would put a command in the transcript. Escape dismisses without touching
+     what was typed, so a slash that was genuinely the start of a sentence can
+     be carried on with. Everything else falls through to the component —
+     stopping keys it needs is how a composer stops accepting text. */
+  private onComposerKey(e: KeyboardEvent) {
+    if (this.slash === null) return;
+    if (e.key === "Escape") { this.slash = null; e.stopPropagation(); return; }
+    if (e.key !== "Enter" || e.shiftKey) return;
+    const rows = this.slashMatches();
+    if (rows.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.pickSlash(rows[0].skillName);
+  }
+
+  /* The rows a slash query matches, in the order the menu draws them. */
+  private slashMatches(): SkillRow[] {
+    const q = this.slash ?? "";
+    // A bare slash offers the shelf, not the warehouse. Every skill on a
+    // deployment with fourteen of them is a menu that covers the composer and
+    // asks you to read it — and the featured ones are already the operator's
+    // answer to "which of these does anyone want". Typing widens the search to
+    // all of them, which is the point at which you have said what you are
+    // looking for.
+    if (q === "") return this.capabilities.slice(0, SLASH_ROWS);
+    return this.allSkills
+      .filter((s) => (s.skillName + " " + s.description).toLowerCase().includes(q))
+      .slice(0, SLASH_ROWS);
+  }
+
   /* What the + menu's rows do. nr-chatbot handles the two file rows itself and
      leaves the rest to whoever is listening; this is that listener. Unknown
      ids fall through on purpose — the component may grow rows of its own. */
@@ -1351,6 +1480,40 @@ export class AgentConsole extends LitElement {
       this.galleryFind = "";
       this.gallery = "plugins";
     }
+  }
+
+  /* The slash menu, over the composer.
+
+     A list and not the gallery's cards: this one is read while typing, with
+     the answer usually one or two rows down, and a grid of cards would push
+     the third match off a phone. It is the same content in the shape the
+     moment calls for.
+
+     Fixed and bottom-anchored rather than positioned against the composer:
+     the composer moves as it grows, and a menu that has to be re-measured
+     every keystroke is a menu that lags a keystroke behind. */
+  private slashMenu() {
+    if (this.slash === null) return nothing;
+    const rows = this.slashMatches();
+    if (rows.length === 0) return nothing;
+    return html`
+      <div class="slash" role="listbox" aria-label="Skills">
+        ${rows.map((s) => html`
+          <button class=${this.pinned === s.skillName ? "slash-row on" : "slash-row"}
+            role="option" aria-selected=${this.pinned === s.skillName}
+            @mousedown=${(e: Event) => {
+              // mousedown, not click: the composer loses focus first
+              // otherwise, and a blur that closed the menu would cancel the
+              // click that was choosing from it.
+              e.preventDefault(); this.pickSlash(s.skillName); }}>
+            <span class="pick-tile"><nr-icon name=${capIcon(s.skillName)}
+              size="small"></nr-icon></span>
+            <span class="slash-text">
+              <span class="pick-name">${s.skillName}</span>
+              <span class="pick-why">${s.description}</span>
+            </span>
+          </button>`)}
+      </div>`;
   }
 
   /* Skills and plugins, as a gallery rather than a menu.
@@ -1854,6 +2017,8 @@ export class AgentConsole extends LitElement {
           <nr-chatbot class=${this.session.getState().messages.length > 0 ? "talking" : ""}
             @click=${(e: Event) => { void this.chipClick(e); }}
             @nr-dropdown-item-click=${(e: Event) => { void this.onAttachPick(e); }}
+            @input=${() => { this.onComposerInput(); }}
+            @keydown=${(e: KeyboardEvent) => { this.onComposerKey(e); }}
             .controller=${this.session}
             .isBotTyping=${this.busy}
             .isQueryRunning=${this.busy}
@@ -1904,6 +2069,7 @@ export class AgentConsole extends LitElement {
           <artifact-panel .threadId=${this.threadId}
             @close-rail=${() => { this.rail = ""; this.railClosed = true; }}
             .ensureThread=${() => this.session.ensureThread()}></artifact-panel>` : ""}
+      ${this.slashMenu()}
       ${this.pickerPanel()}
       ${this.settings ? html`<console-settings @close=${() => {
         this.settings = false;
