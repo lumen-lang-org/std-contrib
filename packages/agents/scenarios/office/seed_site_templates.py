@@ -12,9 +12,16 @@
 # shipped one self-contained file would teach the opposite of what the skill
 # asks for.
 #
-# No <ANGLED> placeholders in the CSS — only in the HTML. A stylesheet with a
-# placeholder colour is a stylesheet nobody can preview, and the whole point of
-# a template is that it looks like something before you fill it in.
+# Placeholders are [SQUARE] here, not <ANGLED> as in the office templates, and
+# the reason is not taste. In HTML an angle bracket is structure: <TITLE> is a
+# REAL element, so a browser parsed the article template's <h1><TITLE></h1> as
+# an actual <title>, swallowed the rest of the document into it, and rendered a
+# blank white page. The thumbnail showed it immediately, which is the argument
+# for previewing a template at all.
+#
+# No placeholders in the CSS at all — a stylesheet with a placeholder colour is
+# one nobody can preview, and the whole point of a template is that it looks
+# like something before you fill it in.
 import json
 import os
 import urllib.error
@@ -98,30 +105,30 @@ LANDING = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><PRODUCT></title>
+  <title>[PRODUCT]</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="wrap">
-    <p class="eyebrow"><ONE WORD: what category this is in></p>
-    <h1><PRODUCT>: <the promise, in six words></h1>
-    <p class="lede"><one sentence a stranger could repeat to a colleague. Say what
-      it does and who for — not how it works.></p>
+    <p class="eyebrow">[ONE WORD: what category this is in]</p>
+    <h1>[PRODUCT]: [the promise, in six words]</h1>
+    <p class="lede">[one sentence a stranger could repeat to a colleague. Say what
+      it does and who for — not how it works.]</p>
 
     <h2>Why it exists</h2>
-    <p><the problem, described as the reader experiences it rather than as the
-      product solves it.></p>
+    <p>[the problem, described as the reader experiences it rather than as the
+      product solves it.]</p>
 
     <div class="card">
-      <h2><the one feature worth the page></h2>
-      <p><what it lets somebody do that they could not do before.></p>
+      <h2>[the one feature worth the page]</h2>
+      <p>[what it lets somebody do that they could not do before.]</p>
     </div>
 
     <h2>How to start</h2>
-    <p><the first concrete step. A command, a link, a sign-up — something a
-      reader can do in the next minute.></p>
+    <p>[the first concrete step. A command, a link, a sign-up — something a
+      reader can do in the next minute.]</p>
 
-    <footer><PRODUCT> — <a href="#"><your link></a></footer>
+    <footer>[PRODUCT] — <a href="#">[your link]</a></footer>
   </main>
 </body>
 </html>
@@ -132,29 +139,29 @@ ABOUT = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>About <SUBJECT></title>
+  <title>About [SUBJECT]</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="wrap">
     <p class="eyebrow">About</p>
-    <h1><SUBJECT></h1>
-    <p class="lede"><who or what this is, in one sentence that would make sense
-      to somebody who arrived from a search result.></p>
+    <h1>[SUBJECT]</h1>
+    <p class="lede">[who or what this is, in one sentence that would make sense
+      to somebody who arrived from a search result.]</p>
 
     <h2>The story</h2>
-    <p><how it began, and what changed. Real dates and real names — an about
-      page with no specifics reads as a placeholder even when it is finished.></p>
+    <p>[how it began, and what changed. Real dates and real names — an about
+      page with no specifics reads as a placeholder even when it is finished.]</p>
 
     <h2>What we do now</h2>
-    <p><the present tense. What somebody would actually get from you today.></p>
+    <p>[the present tense. What somebody would actually get from you today.]</p>
 
     <div class="card">
       <h2>Get in touch</h2>
-      <p><one address, one link, or one form. Not three.></p>
+      <p>[one address, one link, or one form. Not three.]</p>
     </div>
 
-    <footer><SUBJECT> — <a href="#"><your link></a></footer>
+    <footer>[SUBJECT] — <a href="#">[your link]</a></footer>
   </main>
 </body>
 </html>
@@ -165,31 +172,31 @@ POST = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><TITLE></title>
+  <title>[TITLE]</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="wrap">
-    <p class="eyebrow"><DATE> · <READING TIME></p>
-    <h1><TITLE></h1>
-    <p class="lede"><the claim of the piece, stated before the argument. A reader
-      who stops here should still know what you think.></p>
+    <p class="eyebrow">[DATE] · [READING TIME]</p>
+    <h1>[TITLE]</h1>
+    <p class="lede">[the claim of the piece, stated before the argument. A reader
+      who stops here should still know what you think.]</p>
 
-    <p><the opening: a concrete situation, not a definition.></p>
+    <p>[the opening: a concrete situation, not a definition.]</p>
 
-    <h2><the first turn of the argument></h2>
-    <p><...></p>
+    <h2>[the first turn of the argument]</h2>
+    <p>[...]</p>
 
     <div class="card">
-      <p><the quote, the number, or the example the piece rests on.></p>
+      <p>[the quote, the number, or the example the piece rests on.]</p>
     </div>
 
-    <h2><what follows from it></h2>
-    <p><...></p>
+    <h2>[what follows from it]</h2>
+    <p>[...]</p>
 
     <h2>What to do about it</h2>
-    <p><the reader's next action, or the honest admission that there isn't
-      one yet.></p>
+    <p>[the reader's next action, or the honest admission that there isn't
+      one yet.]</p>
 
     <footer><a href="#">More writing</a></footer>
   </main>
