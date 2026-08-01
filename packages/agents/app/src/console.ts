@@ -1923,7 +1923,17 @@ export class AgentConsole extends LitElement {
   private async pin(skillName: string): Promise<void> {
     if (this.pinned === skillName) { this.pinned = ""; this.starts = []; return; }
     this.pinned = skillName;
-    this.starts = await templatesOfKind(capKind(skillName)).catch(() => []);
+    // Only a skill that MAKES something has starting points, and only that
+    // skill's own kind. capKind answers "" for anything not in CAPS — every
+    // skill past the four the chips draw — and templatesOfKind("") is not
+    // "no templates" but "no filter", so it answers with all of them. Pinning
+    // search-web put a budget spreadsheet and a landing page under the
+    // composer: templates for a skill that writes nothing, offered because a
+    // missing kind read as a wildcard.
+    const kind = capKind(skillName);
+    this.starts = kind === ""
+      ? []
+      : await templatesOfKind(kind).catch(() => []);
     void this.paintThumbs();
   }
 
