@@ -9,7 +9,7 @@
 
 import { Page, expect, test } from "@playwright/test";
 import {
-  exploreBar, loaded, open, openStarts, shell, sidebar, startsPage,
+  currentThread, exploreBar, loaded, open, openStarts, shell, sidebar, startsPage,
 } from "./console.js";
 
 const PHONE = { width: 390, height: 844 };
@@ -101,6 +101,83 @@ test.describe("starting points", () => {
     // leaves nothing and a killed one is cleaned up by the next.
     await page.request.put(`/api/threads/${seeded!}/replayable`,
       { data: { replayable: false } });
+  });
+
+  // Remix, from both places it is offered.
+  //
+  // These two cost something the rest do not, and it is worth saying plainly:
+  // a remix creates a conversation, and the engine has no route that deletes
+  // one — the threads controller declares no @del at all. So each run of this
+  // block leaves a conversation in the runner's own sidebar for good. It is
+  // the cheapest honest version of the test (one remix per path, on a source
+  // the fixture offered itself, nothing pre-existing touched), but it is not
+  // free, and a suite pointed at a deployment somebody uses will grow rows
+  // there. If that becomes a problem the answer is a delete route, not a
+  // quieter test.
+  test.describe("remix", () => {
+    test("from the starting-points page, and it lands you in the copy", async ({ page }) => {
+      await open(page);
+      await loaded(page);
+      const source = await seedOffer(page);
+      expect(source, "could not seed an offered conversation").not.toBeNull();
+      const before = await currentThread(page);
+
+      await openStarts(page);
+      await startsPage(page).locator(".offer").first()
+        .getByRole("button", { name: "Remix" }).click();
+
+      // Lands IN the copy: the page goes back to a conversation, on a thread
+      // that is neither the one we started on nor the source.
+      await expect(startsPage(page)).toHaveCount(0);
+      await expect(shell(page).locator("nr-chatbot")).toBeVisible();
+      await expect.poll(async () => await currentThread(page),
+        { message: "the console never moved to the remixed thread" })
+        .not.toBe(before);
+      const made = await currentThread(page);
+      expect(made).not.toBe(source);
+      expect(made).not.toBe("");
+
+      // A copy is yours, so the borrowed banner is gone — that banner is the
+      // whole difference between reading somebody's conversation and owning
+      // one, and a remix that left it up would have copied nothing.
+      await expect(shell(page).locator(".borrowed")).toHaveCount(0);
+
+      await page.request.put(`/api/threads/${source!}/replayable`,
+        { data: { replayable: false } });
+    });
+
+    // Offering your own conversation does not make it somebody else's.
+    //
+    // This started life as a test of the borrowed banner and could not be one:
+    // the banner is drawn when `mine` comes back false, and a fixture running
+    // as one signed-in person can only ever offer that person's own thread. It
+    // failed by finding no banner, which was the console being right.
+    //
+    // What is left is worth keeping and is the half that can be checked here:
+    // an offered conversation is still YOURS to open, with no banner and no
+    // Remix, because a copy of your own conversation is not what the flag is
+    // for. The other half — arriving at a thread a different account offered —
+    // needs a second identity, which this harness has no way to hold. It is
+    // uncovered, and saying so here is better than a test that quietly asserts
+    // the single-user case and reads like it covered both.
+    test("your own offered conversation opens as yours, not as borrowed", async ({ page }) => {
+      await open(page);
+      await loaded(page);
+      const source = await seedOffer(page);
+      expect(source, "could not seed an offered conversation").not.toBeNull();
+
+      // open() and not loaded(): loaded() waits for the header's agent picker,
+      // and that is worth knowing here — a borrowed conversation draws no
+      // picker at all, so loaded() is the wrong wait for anything on this
+      // route whether or not the banner turns out to be there.
+      await open(page, `/c/${source!}`);
+      await expect(shell(page).locator("nr-chatbot")).toBeVisible();
+      await expect(shell(page).locator(".borrowed")).toHaveCount(0);
+      expect(await currentThread(page)).toBe(source);
+
+      await page.request.put(`/api/threads/${source!}/replayable`,
+        { data: { replayable: false } });
+    });
   });
 
   test.describe("on a phone", () => {
