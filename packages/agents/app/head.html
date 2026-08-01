@@ -196,13 +196,32 @@
       --ok: #5DD39E;
     }
   }
-  /* dvh, not vh or a bare 100%: on iOS Safari the visual viewport is shorter
-     than the layout viewport by the height of the bottom toolbar, so a shell
-     sized to 100% put its composer underneath that toolbar — you could type
-     into it and not see what you typed. `dvh` is the unit that tracks the
-     bar coming and going; the percentage stays as the fallback for anything
-     that does not know it. */
-  html, body { height: 100%; height: 100dvh; margin: 0; }
+  /* svh, and the three values are a ladder rather than indecision: a browser
+     takes the last unit it understands, so this is 100% where nothing else is
+     known, dvh where that is, and svh where THAT is.
+
+     svh is the SMALL viewport — the height with every piece of browser chrome
+     showing — and it does not change. dvh tracks the toolbar coming and going,
+     which sounds better and is what this file said for months, and the
+     composer still ended up under Safari's toolbar with no way to reach it.
+     Three attempts at that bug assumed the layout was right and the composer
+     was mispositioned inside it: safe-area padding, then viewport-fit=cover
+     to make those insets non-zero, then locking the page's own scroll. Each
+     was a real defect and none was this one.
+
+     The trade svh makes is deliberate and visible: when the toolbar hides,
+     the shell does NOT grow into the space it leaves, so there is a strip of
+     background at the bottom. A composer that is always reachable is worth
+     more than a page that fills the screen in a state the reader is passing
+     through anyway.
+
+     Not verifiable from here, and that is worth writing down: a headless
+     WebKit has no toolbar, reports whatever viewport it was given, and
+     reflows correctly under every one of these units — measured. This bug
+     only exists on a real device, so this line is the one change in it whose
+     proof is somebody's phone. */
+  html, body { height: 100%; height: 100dvh; height: 100svh;
+               height: var(--app-h, 100svh); margin: 0; }
   /* Nothing may scroll the page sideways. The console is a fixed shell with
      its own scrolling regions; a horizontal page scrollbar means some child
      is wider than the viewport, and on a phone that child drags the entire
@@ -324,3 +343,46 @@
   }
 
 </style>
+<!-- The shell's height, measured rather than declared.
+
+     Four CSS attempts at one bug — safe-area padding, viewport-fit=cover to
+     make those insets real, locking the page's own scroll, then svh — and the
+     composer was still under Safari's toolbar on a real phone. Each fixed
+     something true; none fixed this. A headless WebKit reflows correctly under
+     every one of those units, which is exactly why none of them could be
+     tested here: the browser being wrong is the thing that cannot be
+     reproduced without the browser.
+
+     visualViewport is not a unit and does not need to be trusted: it is what
+     the browser says is actually visible right now, toolbar and keyboard
+     included. Writing it to --app-h makes the shell exactly that tall, so the
+     composer's bottom is the bottom of what a person can see, whatever the
+     chrome is doing.
+
+     The CSS ladder above stays as the fallback for the first frame and for
+     anything without the API — --app-h simply wins once it exists.
+
+     resize AND scroll: iOS reports the toolbar collapsing as a scroll, not
+     always as a resize. requestAnimationFrame coalesces the burst that a
+     single gesture produces into one write. -->
+<script>
+  (function () {
+    var vv = window.visualViewport;
+    if (!vv) { return; }
+    var queued = false;
+    function apply() {
+      queued = false;
+      document.documentElement.style.setProperty("--app-h", vv.height + "px");
+    }
+    function schedule() {
+      if (queued) { return; }
+      queued = true;
+      requestAnimationFrame(apply);
+    }
+    vv.addEventListener("resize", schedule);
+    vv.addEventListener("scroll", schedule);
+    window.addEventListener("orientationchange", schedule);
+    apply();
+  })();
+</script>
+
