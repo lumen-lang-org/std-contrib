@@ -1,0 +1,38 @@
+# The Joule engine, supervised.
+#
+# It used to be started by hand from a terminal, which made it a child of
+# whatever session started it. On 2026-08-01 the kernel OOM-killed that
+# session and took the engine with it: the console container stayed up and
+# kept answering 200, so the site looked healthy while every request behind it
+# failed, for 84 minutes before anyone looked at :8100.
+#
+# Two properties matter here and neither is about performance:
+#
+#   Restart=always  — the engine outlives the thing that started it.
+#   MemoryMax       — a Lumen binary does not free, so a long-running one
+#                     grows until something stops it. Better a restart of this
+#                     unit than the kernel picking a victim by size, which is
+#                     how a shell session came to be the thing that died.
+[Unit]
+Description=Joule agents engine (Lumen)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projects/std-contrib/packages/agents
+EnvironmentFile=/home/ubuntu/projects/std-contrib/packages/agents/.env
+Environment=AGENTS_PG_HOST=172.22.0.2
+Environment=AGENTS_PG_DATABASE=agents
+Environment=AGENTS_PG_USER=agents
+Environment=AGENTS_PREVIEW_HOST=lumen-artifacts.the-agent.dev
+ExecStart=/home/ubuntu/projects/std-contrib/packages/agents/api
+Restart=always
+RestartSec=2
+MemoryMax=2G
+StandardOutput=append:/home/ubuntu/projects/std-contrib/packages/agents/.lumen-api.log
+StandardError=append:/home/ubuntu/projects/std-contrib/packages/agents/.lumen-api.log
+
+[Install]
+WantedBy=multi-user.target
