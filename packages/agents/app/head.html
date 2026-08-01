@@ -7,6 +7,27 @@
      The preview-origin <meta> is the other document-level thing, and it is
      NOT here — it became layout config in pages/_layout.ts so a deployment
      can set it without editing a file baked into the image. -->
+<!-- The viewport, restated so it says viewport-fit=cover.
+
+     Without that key every env(safe-area-inset-*) resolves to 0 on iOS. That
+     is not a subtlety — it silently disables the mechanism, so the composer's
+     reserve for the home indicator and the home bar's own inset were both
+     arithmetic on zero, and the input still sat under Safari's toolbar after
+     two rounds of "fixing" it. The insets are only reported to a page that
+     has said it will draw into them.
+
+     A second <meta name="viewport"> rather than an edit to the first: the
+     first is emitted by LumenJS itself (dist/dev-server/index-html.js), so
+     there is no app file holding it. The later tag wins, and this file is
+     read into the head after the framework's own tags — verified against the
+     served document, not assumed.
+
+     interactive-widget is carried over verbatim from the framework's tag,
+     because restating the viewport replaces it: dropping the key here would
+     turn the on-screen keyboard back into something that overlays the
+     composer instead of resizing the page under it. -->
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 <style>
   /* One vocabulary for the whole console, held at the root.
      The Kimi reading (KIMI-DESIGN.md): text and fills are BLACK AT AN
