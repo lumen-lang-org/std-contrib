@@ -73,6 +73,33 @@ export class ArtifactPanel extends LitElement {
     h3 { margin: 0; padding: 16px 16px 8px; font-size: 12px; text-transform: uppercase;
          letter-spacing: 0.06em; color: var(--muted); display: flex; align-items: center;
          justify-content: space-between; gap: 8px; }
+    /* The actions, as one object at the right end of the title row. 2px
+       between the pair that acts on the files, and a wider step before the
+       close — the gap is what says the last one leaves rather than does. */
+    h3 .acts { display: flex; align-items: center; gap: 2px; }
+    h3 .acts .close { margin-left: 8px; }
+    /* A bare button, and the same one the page header uses — copied rule for
+       rule from console.ts's .icon, because these two rows sit 320px apart
+       and were visibly disagreeing about what an icon control looks like.
+       ("Everything else is a LumenUI component" in CLAUDE.md is about inputs
+       and selects, which carry state and behaviour; the header has always
+       drawn its own icon buttons.)
+
+       These were nr-buttons of type default, which is white-on-#eff3f4 with a
+       VIOLET border and violet glyph on hover — three boxed rectangles in a
+       12px uppercase label row, turning purple one at a time under the
+       pointer. It made the panel's quietest line its loudest. An outline is
+       for a control you are asking somebody to press; an icon in a title row
+       is one you are telling them is there.
+
+       nr-button was not styled into shape instead because its surface is
+       painted in its own shadow root: the type rules are :host([type=...])
+       against hard-coded hexes, with no token to redirect. */
+    h3 .icon { background: none; border: 0; color: var(--fg);
+               border-radius: 8px; padding: 6px; cursor: pointer; font: inherit;
+               line-height: 1; display: inline-grid; place-items: center;
+               transition: background-color .15s cubic-bezier(.23,1,.32,1); }
+    h3 .icon:hover { background: var(--bg-sunken); }
     .list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     .artifact { padding: 8px 12px; cursor: pointer; font-size: 13.5px; border-radius: 12px;
                 transition: background-color .15s cubic-bezier(.23,1,.32,1); }
@@ -1095,24 +1122,35 @@ export class ArtifactPanel extends LitElement {
       ${this.grip()}
       <h3>
         <span>Files</span>
-        <nr-button id="a-upload" size="small" title="Upload a file as an artifact"
-          @click=${() => (this.renderRoot.querySelector("#a-file") as HTMLInputElement)?.click()}>
-          <nr-icon name="upload" size="small"></nr-icon>
-        </nr-button>
-        <input id="a-file" type="file" hidden
-          @change=${(e: Event) => this.upload(e.target as HTMLInputElement)} />
-        ${this.threadId === "" ? "" : html`
-          <nr-button id="a-refresh" size="small" title="Refresh"
-            @click=${() => this.refresh()}>
-            <nr-icon name="refresh-cw" size="small"></nr-icon>
-          </nr-button>`}
-        <!-- The list can put the rail away too — on a phone it covers the
-             conversation, and before this the only way out was the header
-             toggle hidden behind it. -->
-        <nr-button id="a-close-list" size="small" title="Close the panel"
-          @click=${() => this.dispatchEvent(new CustomEvent("close-rail"))}>
-          <nr-icon name="x" size="small"></nr-icon>
-        </nr-button>
+        <!-- One group, not three loose children. The h3 is space-between, so
+             four siblings were spread the full width of the panel: the title
+             at the left, the close at the right, and upload and refresh
+             stranded at even intervals across the middle with nothing to say
+             they belonged together. Grouped, space-between has two things to
+             separate and does the obvious thing — title left, actions right. -->
+        <span class="acts">
+          <button id="a-upload" class="icon" title="Upload a file as an artifact"
+            @click=${() => (this.renderRoot.querySelector("#a-file") as HTMLInputElement)?.click()}>
+            <nr-icon name="upload" size="small"></nr-icon>
+          </button>
+          <input id="a-file" type="file" hidden
+            @change=${(e: Event) => this.upload(e.target as HTMLInputElement)} />
+          ${this.threadId === "" ? "" : html`
+            <button id="a-refresh" class="icon" title="Refresh"
+              @click=${() => this.refresh()}>
+              <nr-icon name="refresh-cw" size="small"></nr-icon>
+            </button>`}
+          <!-- The list can put the rail away too — on a phone it covers the
+               conversation, and before this the only way out was the header
+               toggle hidden behind it. Last in the group and separated from
+               the other two: dismissing is not the same kind of act as
+               uploading or refreshing, and a close button that sits flush
+               against them gets pressed by accident. -->
+          <button id="a-close-list" class="icon close" title="Close the panel"
+            @click=${() => this.dispatchEvent(new CustomEvent("close-rail"))}>
+            <nr-icon name="x" size="small"></nr-icon>
+          </button>
+        </span>
       </h3>
       ${this.problem === "" ? "" : html`<div class="problem">${this.problem}</div>`}
       ${this.said === "" ? "" : html`<div class="said">${this.said}</div>`}
