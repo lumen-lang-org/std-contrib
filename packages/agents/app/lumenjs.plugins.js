@@ -86,6 +86,25 @@ const consoleViteConfig = {
           "highlight.js/lib/languages/sql",
           "highlight.js/lib/languages/typescript",
           "highlight.js/lib/languages/xml",
+          // Discovered LATE without these — and late discovery is not a slow
+          // path, it is a broken one. When Vite meets a dep mid-page-load it
+          // optimizes it and force-reloads the page; every fetch in flight is
+          // killed, and the console's bootstrap calls (agents, model choices,
+          // featured skills, threads) run exactly once. So the first visitor
+          // to a cold server got a page that hydrated and then sat empty —
+          // "Ask agent…", no picker, no chips. Safari surfaces the killed
+          // fetches as "due to access control checks", which is how it was
+          // finally caught: Chromium retried fast enough on the auto-reload
+          // to hide it. The list is the two rounds the dev log names:
+          //   ✨ new dependencies optimized: @lumenjs/auth
+          //   ✨ new dependencies optimized: highlight.js/.../bash, pdfjs-dist,
+          //      docx-preview, pptx-preview, xlsx
+          "@lumenjs/auth",
+          "highlight.js/lib/languages/bash",
+          "pdfjs-dist",
+          "docx-preview",
+          "pptx-preview",
+          "xlsx",
         ],
       },
       server: {
