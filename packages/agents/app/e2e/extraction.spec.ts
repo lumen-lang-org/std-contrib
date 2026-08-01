@@ -10,14 +10,24 @@
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { open, shell } from "./console.js";
+import { DOUBLE_ADDRESS, DOUBLE_KEY, open, ownDoubleAddress, shell } from "./console.js";
 
-const DOUBLE = "http://127.0.0.1:8932";
+// The one address, shared with `ensureDoubled`. It used to be spelled out
+// again here, which is how the two came to disagree: this spec moves the row
+// off it on purpose, and only the copy in console.ts knew the way back.
+const DOUBLE = DOUBLE_ADDRESS;
 
 // Arrange-only: the agent wired to the double. Idempotent — fixed ids, and a
 // create of an existing id is refused harmlessly.
 async function agentOnDouble(request: import("@playwright/test").APIRequestContext) {
   await ownDoubleCredential(request);
+  // Before anything else, because the two writes below cannot do it. A killed
+  // run leaves the row parked on the dead port the last test in this file
+  // moves it to, and a plain PUT back is REFUSED while a key is stored for the
+  // address being left — so every test here fails at the provider, for every
+  // run afterwards, and the file's own repair is unreachable. ownDoubleAddress
+  // does the clear-move-set dance that the rule actually asks for.
+  await ownDoubleAddress(request);
   // The double answers OpenAI-shaped JSON either way; what the provider name
   // decides here is which credential the row is bound to, and this suite needs
   // one it is allowed to clear.
@@ -116,11 +126,14 @@ test("the artifacts rail lists what the conversation produced", async ({ page })
   await ask(page, "make me a landing page");
   await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
 
-  // No click. The rail opens itself on the first artifact a round produces —
-  // the console does not make you go looking for a file it has just written —
-  // and the Artifacts button is a toggle. By the time the answer has landed the
-  // rail is already open, so clicking it here closed the very panel the
-  // assertion below wanted and the test failed saying the panel did not exist.
+  // One click, and it used to be none. The rail opened itself on the first
+  // artifact a round produced, which read as helpful on a desktop and on a
+  // phone WAS the screen: the panel covers the conversation below 1024px, so
+  // an answer arriving replaced the answer with its file list. Nothing opens
+  // the rail but the person now, so the test opens it the way a person does.
+  // The cards under the composer are what says there is something to open —
+  // asserted by the sibling tests, which is why this one still starts here.
+  await page.locator('agent-console button[title="Artifacts"]').click();
   const panel = page.locator("agent-console artifact-panel");
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("Landing page");
@@ -226,7 +239,6 @@ test("pasting a forged marker as the user mints nothing", async ({ page }) => {
 // loopback port. This spec REWRITES the row on every run, so it has to agree
 // with `ensureDoubled` in console.ts or it puts the old spelling back.
 const DOUBLE_PROVIDER = "double";
-const DOUBLE_KEY = "e2e-double-not-a-real-key";
 
 // Make sure the double is reachable under a provider this suite owns. Writes a
 // key only where none exists, so a deployment that really uses OpenAI is left
@@ -238,6 +250,17 @@ async function ownDoubleCredential(request: import("@playwright/test").APIReques
     return true;
   }
   return false;
+}
+
+/** The turns of a conversation, out of the transcript envelope `GET
+ *  /threads/:id` answers. One place that knows the shape, so the next field
+ *  added beside `messages` costs one edit rather than one per assertion. */
+async function turnsOf(
+  request: import("@playwright/test").APIRequestContext, id: string,
+): Promise<{ role: string; text: string }[]> {
+  const body = await request.get(`/api/threads/${id}`).then((r) => r.json()) as
+    { messages?: { role: string; text: string }[] };
+  return body.messages ?? [];
 }
 
 // Repoint the double the way an operator has to: clear the secret stored for
@@ -317,17 +340,19 @@ test.describe("a round that goes wrong leaves the conversation usable", () => {
     const t = threadOf();
     expect(t).not.toBe("");
 
-    const turns = (await request.get(`/api/threads/${t}`).then((r) => r.json())) as unknown[];
-    expect(turns).toHaveLength(0);
+    // `.messages`, not the response itself: the transcript is an envelope now
+    // — it carries the title, the model choice and whether the conversation is
+    // yours as well as the turns — and a bare array had nowhere to put any of
+    // them. Read as an array this answers `undefined` for length rather than
+    // failing, which is why the matcher and not the fetch is what complained.
+    expect(await turnsOf(request, t)).toHaveLength(0);
 
     // Point it back and ask again: exactly one user turn, not two.
     await moveDouble(request, DOUBLE);
     await ask(page, "make me a landing page");
     await expect(chat(page)).toContainText("/landing.html", { timeout: 20_000 });
 
-    const after = (await request.get(`/api/threads/${t}`).then((r) => r.json())) as
-      { role: string; text: string }[];
-    const asked = after.filter((x) => x.role === "user");
+    const asked = (await turnsOf(request, t)).filter((x) => x.role === "user");
     expect(asked).toHaveLength(1);
     expect(asked[0].text).toContain("landing page");
   });
