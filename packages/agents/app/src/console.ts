@@ -462,8 +462,10 @@ export class AgentConsole extends LitElement {
        fills a moment later — and because the whole empty block is centred, a
        row that grows from 0 to 49px pushed the wordmark and composer up by
        half that as you watched. Reserving the space costs one rule and makes
-       the load invisible. Matches the chips' own box: 14px padding-top + a
-       35px pill. */
+       the load invisible. The number is the pill's own height and has to stay
+       that: it was 49 while 35 was written here, and because a flex row
+       stretches its children the pills silently took the wrong figure as
+       their size rather than exposing it as a gap. Measured, not assumed. */
     /* Starting points: somebody else's conversations, offered. Cards rather
        than rows because each is a thing you choose, and the only action on one
        is Remix — see startsPage for why there is no way to open the source. */
@@ -495,19 +497,27 @@ export class AgentConsole extends LitElement {
                 border: 1px solid var(--border); border-radius: 12px;
                 background: var(--bg-rail); color: var(--muted); font-size: 13.5px; }
     .offer-remix:hover { background: var(--bg-user); border-color: var(--muted); }
-    .caps { min-height: 49px; box-sizing: content-box; }
-    .caps { display: flex; gap: 4px; padding: 14px 18px 0; max-width: 768px;
-            margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
+    .caps { min-height: 32px; box-sizing: content-box; }
+    /* align-items, and it is not cosmetic. A flex row stretches its children
+       to its own height by default, and this row reserves height it may not
+       have filled yet — so every pill grew to the reserved 49px and looked
+       heavily padded when its own box is 32. Changing the padding does
+       nothing while this holds; the pill is not the size of its content.
+       Centring frees the pill to be its own height, and the reserve becomes
+       what it was meant to be: space held, not size imposed. */
+    .caps { display: flex; align-items: center; gap: 4px; padding: 14px 18px 0;
+            max-width: 768px; margin: 0 auto; overflow-x: auto;
+            scrollbar-width: none; }
     .caps::-webkit-scrollbar { display: none; }
     /* Outlined pills, the way Kimi draws this row today. These shipped
        borderless on the argument that they are verbs, not buttons — but the
        row sits alone on a blank page under the composer, and without an
        outline the verbs read as a stray line of text. Kimi came to the same
        conclusion: their capability row is bordered pills now. */
-    .cap { display: inline-flex; align-items: center; gap: 7px; flex: none;
-           padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px;
+    .cap { display: inline-flex; align-items: center; gap: 6px; flex: none;
+           padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px;
            cursor: pointer; background: var(--bg-card); font: inherit;
-           font-size: 14px; color: var(--fg); white-space: nowrap; }
+           font-size: 13.5px; color: var(--fg); white-space: nowrap; }
     .cap:hover { background: var(--bg-user); border-color: var(--muted); }
     .cap.on { background: var(--bg-user); color: var(--fg); font-weight: 600; }
     /* Starting points for the pinned capability. Cards, because each is a
