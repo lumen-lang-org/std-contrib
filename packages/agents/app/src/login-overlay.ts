@@ -40,6 +40,13 @@ export class LoginOverlay extends LitElement {
       backdrop-filter: blur(2px);
     }
     .card {
+      /* border-box, and it is the whole of the phone bug it fixes. A shadow
+         root gets no reset from the page, so this card was content-box: the
+         min() below sized the CONTENT at 92vw and then the 28px of padding a
+         side and the border went on top — 359 + 56 + 2 = 417px of card on a
+         390px screen, sign-in button off the right edge. The width rule was
+         always correct; it was measuring the wrong box. */
+      box-sizing: border-box;
       width: min(92vw, 380px);
       background: var(--bg-card, #fff);
       border: 1px solid var(--border, rgba(0,0,0,.12));
