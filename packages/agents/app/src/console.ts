@@ -18,6 +18,7 @@ import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
+  ServerRow, listServers, listSkills,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -528,6 +529,33 @@ export class AgentConsole extends LitElement {
        is Remix — see startsPage for why there is no way to open the source. */
     .starts-page { padding: 28px 24px; max-width: 900px; margin: 0 auto;
                    overflow-y: auto; }
+    /* The skills gallery. A sheet on a phone and a centred card above it —
+       the artifact panel's shape, because a person has met it already and a
+       third way of showing a temporary surface is a third thing to learn. */
+    .gallery { position: fixed; z-index: 40; background: var(--bg-card);
+              border: 1px solid var(--border); border-radius: 14px;
+              display: flex; flex-direction: column; overflow: hidden;
+              left: 50%; transform: translateX(-50%); top: 10vh; bottom: 10vh;
+              width: min(560px, calc(100% - 24px)); }
+    .gallery-head { display: flex; align-items: center; justify-content: space-between;
+                   padding: 12px 10px 12px 16px; font-weight: 600;
+                   border-bottom: 1px solid var(--border); }
+    .gallery-list { overflow-y: auto; padding: 8px; display: flex;
+                   flex-direction: column; gap: 2px; }
+    .gallery-none { color: var(--muted); padding: 18px 16px; margin: 0; }
+    .pick { display: flex; flex-direction: column; gap: 3px; text-align: left;
+            padding: 10px 12px; border: 0; border-radius: 10px; background: none;
+            font: inherit; color: var(--fg); cursor: pointer; }
+    .pick:hover:not(:disabled) { background: var(--bg-sunken); }
+    /* Plugins are shown, not chosen — a server is attached to an agent in
+       Settings. Disabled rather than absent, because the list is the answer to
+       "what is available"; not-a-button is the honest way to say the choosing
+       happens elsewhere. */
+    .pick:disabled { cursor: default; }
+    .pick.on { background: var(--bg-user); }
+    .pick-name { font-size: 14px; font-weight: 600; }
+    .pick-why { font-size: 13px; color: var(--muted);
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .starts-back { display: inline-flex; align-items: center; gap: 4px;
                    margin: 0 0 14px -6px; padding: 6px 10px 6px 6px;
                    border: 0; border-radius: 8px; background: none; font: inherit;
@@ -755,6 +783,16 @@ export class AgentConsole extends LitElement {
   /* Starting points for the pinned capability, shown as cards under the
      composer once one is picked. */
   @state() private starts: TemplateRow[] = [];
+  /* Which gallery the + menu opened, or "" for none. */
+  @state() private gallery: "" | "skills" | "plugins" = "";
+  /* Every skill, not just the featured few the chips draw. Fetched the first
+     time the gallery is opened rather than on load: a console that nobody
+     asks is a console that should not have asked. */
+  @state() private allSkills: SkillRow[] = [];
+  /* MCP servers, which the + menu calls Plugins. Loaded with the rest so the
+     menu knows whether to offer the row at all — the alternative is a row that
+     opens an empty panel. */
+  @state() private servers: ServerRow[] = [];
 
   /* Seeding happens here and not in connectedCallback, and that is the whole
      reason the conversation can be server-rendered at all.
@@ -802,6 +840,10 @@ export class AgentConsole extends LitElement {
     });
     this.me = await whoami().catch(() => null);
     this.capabilities = await featuredSkills().catch(() => []);
+    // Only to decide whether the + menu offers a Plugins row. A deployment
+    // with no servers should not have one, and finding that out after the menu
+    // is open is too late.
+    this.servers = await listServers().catch(() => []);
     // The run says what it is doing while it is doing it. Held here so the
     // card re-renders; the session owns the list and never rebuilds it.
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
@@ -1147,12 +1189,83 @@ export class AgentConsole extends LitElement {
      says so. Kimi puts Skills behind the same button, and it is the right
      place: the alternative is a second affordance beside the composer for
      the same job. */
+  /* The composer's + menu: what you can bring into a message.
+
+     Three rows where it used to be one plus a copy of the capability chips.
+     The chips are already on screen directly beneath the composer, so
+     repeating them here spent the menu on the only things that did not need
+     it — and worse, they did nothing: nr-chatbot's own dropdown handler acts
+     on `upload-file` and `upload-url` and ignores every other id, so those
+     rows were dead the whole time. The event does escape the component
+     (bubbles and composed, from the dropdown controller), so what was missing
+     was a listener here, which render() now has.
+
+     Skills and Plugins open a picker rather than listing their contents
+     inline: there are fourteen skills on this deployment and a menu that long
+     is a list with a lid on it. Plugins appears only where there are servers
+     to show, because a row that opens an empty panel teaches you not to press
+     the others. */
   private attachMenu() {
-    let items = [{ id: "upload-file", label: "Add files", icon: "paperclip" }];
-    for (const c of this.capabilities) {
-      items = [...items, { id: "skill:" + c.skillName, label: c.skillName, icon: capIcon(c.skillName) }];
+    const items = [
+      { id: "upload-file", label: "Add files & photos", icon: "paperclip" },
+      { id: "pick:skills", label: "Skills", icon: "zap" },
+    ];
+    if (this.servers.length > 0) {
+      items.push({ id: "pick:plugins", label: "Plugins", icon: "share" });
     }
     return items;
+  }
+
+  /* What the + menu's rows do. nr-chatbot handles the two file rows itself and
+     leaves the rest to whoever is listening; this is that listener. Unknown
+     ids fall through on purpose — the component may grow rows of its own. */
+  private async onAttachPick(e: Event) {
+    const id = (e as CustomEvent).detail?.item?.id as string | undefined;
+    if (id === "pick:skills") {
+      this.gallery = "skills";
+      if (this.allSkills.length === 0) {
+        this.allSkills = await listSkills().catch(() => []);
+      }
+    } else if (id === "pick:plugins") {
+      this.gallery = "plugins";
+    }
+  }
+
+  /* Skills and plugins, as a gallery rather than a menu.
+     A skill is chosen the same way a capability chip is — pin() — so this adds
+     a way in rather than a second mechanism. Plugins are shown and not chosen:
+     an MCP server is attached to an agent in Settings, and a picker that
+     looked like it could attach one from here would be lying. */
+  private pickerPanel() {
+    if (this.gallery === "") return nothing;
+    const skills = this.gallery === "skills";
+    const rows = skills
+      ? this.allSkills.map((s) => ({ key: s.skillName, name: s.skillName,
+          why: s.description, on: this.pinned === s.skillName }))
+      : this.servers.map((s) => ({ key: s.id, name: s.id, why: "", on: false }));
+    return html`
+      <div class="scrim files" @click=${() => { this.gallery = ""; }}></div>
+      <div class="gallery" role="dialog" aria-label=${skills ? "Skills" : "Plugins"}>
+        <div class="gallery-head">
+          <span>${skills ? "Skills" : "Plugins"}</span>
+          <button class="icon" title="Close" @click=${() => { this.gallery = ""; }}>
+            <nr-icon name="x" size="medium"></nr-icon>
+          </button>
+        </div>
+        ${rows.length === 0
+          ? html`<p class="gallery-none">${skills
+              ? "This deployment has no skills yet."
+              : "No servers are configured."}</p>`
+          : html`<div class="gallery-list">
+              ${rows.map((r) => html`
+                <button class=${r.on ? "pick on" : "pick"}
+                  ?disabled=${!skills}
+                  @click=${() => { if (skills) { void this.pin(r.key); this.gallery = ""; } }}>
+                  <span class="pick-name">${r.name}</span>
+                  ${r.why === "" ? nothing : html`<span class="pick-why">${r.why}</span>`}
+                </button>`)}
+            </div>`}
+      </div>`;
   }
 
   /* The capability row: what this deployment can do, in the operator's order.
@@ -1531,6 +1644,7 @@ export class AgentConsole extends LitElement {
             </div>`}
           <nr-chatbot class=${this.session.getState().messages.length > 0 ? "talking" : ""}
             @click=${(e: Event) => { void this.chipClick(e); }}
+            @nr-dropdown-item-click=${(e: Event) => { void this.onAttachPick(e); }}
             .controller=${this.session}
             .isBotTyping=${this.busy}
             .isQueryRunning=${this.busy}
@@ -1581,6 +1695,7 @@ export class AgentConsole extends LitElement {
           <artifact-panel .threadId=${this.threadId}
             @close-rail=${() => { this.rail = ""; this.railClosed = true; }}
             .ensureThread=${() => this.session.ensureThread()}></artifact-panel>` : ""}
+      ${this.pickerPanel()}
       ${this.settings ? html`<console-settings @close=${() => {
         this.settings = false;
         // The settings tab says a change takes effect on the next message with
