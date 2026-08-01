@@ -78,6 +78,15 @@ const capLabel = (name: string) => CAPS[name]?.label ?? name;
 // composer's + menu, which is exactly where a new skill first appears.
 // `tool` is in the set (checked against icon-paths.js, 150 names) and is the
 // honest generic: a skill is a thing the agent can use.
+/* One row of the + menu's gallery, whether it is a skill or a server. The
+   two lists are drawn by the same code and so have to describe themselves the
+   same way; `source` is what the skills half splits on and is "local" for a
+   server, which has no such distinction yet. */
+type GalleryRow = {
+  key: string; name: string; why: string; on: boolean; icon: string;
+  source: string;
+};
+
 const capIcon = (name: string) => CAPS[name]?.icon ?? "tool";
 const capKind = (name: string) => CAPS[name]?.kind ?? "";
 
@@ -581,6 +590,14 @@ export class AgentConsole extends LitElement {
     .gallery-list { overflow-y: auto; padding: 12px; display: grid; gap: 8px;
                     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
                     align-content: start; }
+    /* Under a heading the grid stops being the scroller — the column of
+       headings and grids is. Two grids each with their own scrollbar is two
+       lists in one panel. */
+    .gallery-list.flat { overflow: visible; padding: 0 12px 12px; }
+    .gallery-scroll { overflow-y: auto; }
+    .gallery-group { font-size: 12px; font-weight: 600; letter-spacing: .04em;
+                     text-transform: uppercase; color: var(--faint);
+                     padding: 14px 12px 8px; }
     .gallery-none { color: var(--muted); padding: 18px 16px; margin: 0; }
     .pick { display: flex; flex-direction: column; gap: 5px; text-align: left;
             padding: 12px; border: 1px solid var(--border); border-radius: 12px;
@@ -1290,10 +1307,10 @@ export class AgentConsole extends LitElement {
     const rows = skills
       ? this.allSkills.map((s) => ({ key: s.skillName, name: s.skillName,
           why: s.description, on: this.pinned === s.skillName,
-          icon: capIcon(s.skillName) }))
+          icon: capIcon(s.skillName), source: s.source }))
       : this.servers.map((s) => ({ key: s.id, name: s.serverName === "" ? s.id : s.serverName,
           why: s.enabled ? s.endpoint : "Disabled · " + s.endpoint, on: false,
-          icon: serverIcon(s) }));
+          icon: serverIcon(s), source: "local" }));
     return html`
       <div class="scrim files" @click=${() => { this.gallery = ""; }}></div>
       <div class="gallery" role="dialog" aria-label=${skills ? "Skills" : "Plugins"}>
@@ -1307,7 +1324,35 @@ export class AgentConsole extends LitElement {
           ? html`<p class="gallery-none">${skills
               ? "This deployment has no skills yet."
               : "No servers are configured."}</p>`
-          : html`<div class="gallery-list">
+          : html`${this.galleryGroups(rows, skills)}`}
+      </div>`;
+  }
+
+  /* Yours, then everybody else's.
+     The split is the point of the heading, not decoration: a skill this
+     deployment wrote is one you can change, and a skill a repository owns is
+     one you cannot — the engine refuses the write. Showing them in one
+     undifferentiated grid meant the only way to find out which kind you were
+     looking at was to try to edit it. A section that has nothing in it is not
+     drawn, so a deployment with no repository skills sees no headings at all
+     and the grid looks exactly as it did. */
+  private galleryGroups(rows: GalleryRow[], skills: boolean) {
+    if (!skills) return this.galleryGrid(rows, false);
+    const mine = rows.filter((r) => r.source !== "repo");
+    const theirs = rows.filter((r) => r.source === "repo");
+    if (theirs.length === 0) return this.galleryGrid(mine, true);
+    if (mine.length === 0) return this.galleryGrid(theirs, true);
+    return html`
+      <div class="gallery-scroll">
+        <div class="gallery-group">Yours</div>
+        ${this.galleryGrid(mine, true, false)}
+        <div class="gallery-group">From a repository</div>
+        ${this.galleryGrid(theirs, true, false)}
+      </div>`;
+  }
+
+  private galleryGrid(rows: GalleryRow[], skills: boolean, scrolls = true) {
+    return html`<div class=${scrolls ? "gallery-list" : "gallery-list flat"}>
               ${rows.map((r) => html`
                 <button class=${r.on ? "pick on" : "pick"}
                   ?disabled=${!skills} title=${r.why}
@@ -1318,8 +1363,7 @@ export class AgentConsole extends LitElement {
                   </span>
                   ${r.why === "" ? nothing : html`<span class="pick-why">${r.why}</span>`}
                 </button>`)}
-            </div>`}
-      </div>`;
+            </div>`;
   }
 
   /* The capability row: what this deployment can do, in the operator's order.

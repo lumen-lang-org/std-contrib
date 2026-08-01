@@ -138,6 +138,14 @@ export type SkillRow = {
   // the only thing left that could notice.
   visibility: string;
   featuredRank: number;
+  // Where it came from, and required for the same reason the two above are:
+  // the engine's SkillRow has them, so a create that leaves them out is
+  // refused with "invalid JSON (MissingField)". 'local' is a skill written
+  // here and editable here; 'repo' is a copy of one a repository owns, and the
+  // engine refuses a PUT to it — the console greys the edit rather than
+  // letting someone type into a form whose save cannot succeed.
+  source: string;
+  sourceUrl: string;
   // Mutable, unlike a prompt: a skill is looked up by name at call time, so
   // an edit is live on the next use_skill with no version to point at.
   body: string;

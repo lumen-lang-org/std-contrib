@@ -295,6 +295,14 @@ export type SkillRow = {
   // Orders the console's capability chips; 0 is not featured. Featured
   // implies public, enforced at the API door.
   featuredRank: int,
+  // 'local' or 'repo'. A local skill was written here and is edited here. A
+  // repo skill is a copy of something a repository owns: shown, attachable,
+  // featured — but not edited, because the next sync would either lose the
+  // edit or refuse to run. The API door refuses the write instead, which is
+  // the only place that refusal is worth anything.
+  source: string,
+  // The repository a 'repo' skill came from; "" for a local one.
+  sourceUrl: string,
 };
 
 // A file a skill ships — the scripts its body tells the model to run. Rows
@@ -648,6 +656,11 @@ export function skillsMapping(): DbRepository {
     // public — enforced where writes land, not here.
     field("visibility", "visibility", "text"),
     field("featuredRank", "featured_rank", "int"),
+    // 'local' — written here, editable here — or 'repo', which is a copy of
+    // something a repository owns. sourceUrl names that repository and is ""
+    // for a local skill. Migration 88.
+    field("source", "source", "text"),
+    field("sourceUrl", "source_url", "text"),
   ];
   return repository("skills", "id", "id", fs);
 }
@@ -1695,6 +1708,25 @@ export function schemaPlan(db: Db): Migration[] {
       "ALTER TABLE mcp_servers ADD COLUMN auth_header " + db.textType + " NOT NULL DEFAULT ''"),
     migration("45", "default agent",
       "ALTER TABLE agents ADD COLUMN is_default " + dialectType(db, "bool") + " NOT NULL DEFAULT false"),
+    // Where a skill came from, and where from exactly. Two columns for the
+    // same reason visibility and featured_rank are two: they answer different
+    // questions, and folding the URL into the origin would make 'repo' a
+    // prefix to parse rather than a value to compare.
+    //
+    // Numbered 90 and not 88: the runner orders migration ids as STRINGS, so
+    // "88.1" sorts below the long-applied "9" and the engine refuses to boot
+    // with "below one already applied". "90" sorts above every id in this
+    // list. It is a sharp edge and this is the note that it exists.
+    //
+    // DEFAULT 'local' is the whole migration for every skill that exists
+    // today: they were all written here, and 'local' is what says they stay
+    // editable. A skill that came from a repository is the console's to show
+    // and the repository's to change — edit it here and the next sync either
+    // loses the edit or refuses to run, so the write path refuses first.
+    migration("90.1", "a skill knows where it came from",
+      "ALTER TABLE skills ADD COLUMN source " + db.textType + " NOT NULL DEFAULT 'local'"),
+    migration("90.2", "and a sourced skill knows where from",
+      "ALTER TABLE skills ADD COLUMN source_url " + db.textType + " NOT NULL DEFAULT ''"),
   ];
   return plan;
 }
