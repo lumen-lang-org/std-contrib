@@ -275,8 +275,8 @@ export class AgentConsole extends LitElement {
        under the 44px Apple and 48px Material both ask for and read as
        decoration next to the 54px wordmark. */
     .icon { background: none; border: 0; color: var(--fg);
-            border-radius: 8px; padding: 8px; cursor: pointer; font: inherit;
-            font-size: 20px; line-height: 1;
+            border-radius: 8px; padding: 9px; cursor: pointer; font: inherit;
+            font-size: 22px; line-height: 1;
             display: inline-grid; place-items: center;
             transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .icon:hover { background: var(--bg-sunken); }
@@ -1226,7 +1226,7 @@ export class AgentConsole extends LitElement {
         <header>
           <button class="icon nav" title="Conversations"
             @click=${() => { this.nav = !this.nav; }}>
-            <nr-icon name="panel-left" size="small"></nr-icon>
+            <nr-icon name="panel-left" size="medium"></nr-icon>
           </button>
           <!-- Starting a conversation was reachable only from inside the
                drawer, which on a phone means opening a panel to leave the one
@@ -1240,7 +1240,7 @@ export class AgentConsole extends LitElement {
                template literal, where one ends the literal.) -->
           <button class="icon" title="New conversation"
             @click=${() => { this.view = "chat"; this.nav = false; this.fresh(); }}>
-            <nr-icon name="square-pen" size="small"></nr-icon>
+            <nr-icon name="square-pen" size="medium"></nr-icon>
           </button>
           <span class="title">${this.threadTitle()}</span>
           <span class="chip"><nr-icon class="bolt" name="zap" size="small"></nr-icon>
@@ -1260,10 +1260,10 @@ export class AgentConsole extends LitElement {
                 ? "Offered as a starting point — press to withdraw"
                 : "Offer this conversation as a starting point"}
               @click=${() => { void this.toggleOffer(); }}>
-              <nr-icon name="share" size="small"></nr-icon>
+              <nr-icon name="share" size="medium"></nr-icon>
             </button>`}
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
-            @click=${() => this.show("artifacts")}><nr-icon name="folder" size="small"></nr-icon></button>
+            @click=${() => this.show("artifacts")}><nr-icon name="folder" size="medium"></nr-icon></button>
         </header>
         <main class=${this.session.getState().messages.length === 0
           ? (this.starts.length > 0 ? "empty has-starts" : "empty") : ""}>

@@ -170,6 +170,38 @@ export class ConsoleSettings extends LitElement {
 
     main { flex: 1; overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
 
+    /* On a phone the two-column shell does not fit, and pretending it does is
+       what the screenshot showed: a 216px rail plus content squeezed into
+       whatever the open drawer left, with every table clipped on the right.
+       The rail becomes a horizontal strip of tabs above the content — the
+       same information, laid out the way a narrow screen can hold it — and
+       main gets the whole width with its padding halved.
+
+       1024px, matching the console's own breakpoint: below it the shell is
+       already a single column with drawers, so settings has to stop being two
+       columns at exactly the same width or the two disagree about what a
+       narrow screen is. */
+    @media (max-width: 1024px) {
+      .body { flex-direction: column; }
+      aside {
+        width: 100%; flex: none;
+        border-right: 0; border-bottom: 1px solid var(--border);
+        display: flex; flex-direction: row; gap: 2px;
+        overflow-x: auto; scrollbar-width: none;
+        padding: 8px 10px;
+      }
+      aside::-webkit-scrollbar { display: none; }
+      /* The group label is a column heading; a row of tabs has no room for
+         one and no need of it. */
+      aside .label { display: none; }
+      aside .item { flex: none; white-space: nowrap; border-radius: 999px; }
+      main { padding: 18px 14px 32px; }
+      /* A table wider than the phone scrolls inside its own box rather than
+         dragging the panel — the rule the console's head.html states for the
+         page, applied to the one region here that can genuinely be wide. */
+      table { display: block; overflow-x: auto; }
+    }
+
     /* Page head: what this tab is, over a hairline that runs the width of the
        page. The hairline is what makes the head a head rather than a first
        paragraph. */
