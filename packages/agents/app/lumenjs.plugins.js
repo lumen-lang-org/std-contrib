@@ -107,6 +107,34 @@ const consoleViteConfig = {
           "xlsx",
         ],
       },
+      // One lit, whoever imports it.
+      //
+      // LumenUI is a symlink to the nuraly-ui working copy (see
+      // joule-console.service), and a symlinked package resolves its own
+      // imports from its own node_modules. So `lit` inside a LumenUI component
+      // met /home/ubuntu/nuraly/libs/nuraly-ui/node_modules/lit — a second copy
+      // of lit, outside this app's root, which Vite can only serve through the
+      // /@fs/ escape hatch.
+      //
+      // Two things break, and the second one is the one that reached a user.
+      // Two copies of lit means two reactive-element registries, which is the
+      // condition litDedupPlugin exists to prevent. And /@fs/ is a path the
+      // gateway in front does not route to the console: it falls to that
+      // vhost's default location, which is the engine behind an admin check,
+      // so every one of these 26 modules came back `401 {"error":"unauthorized"}`
+      // as application/json. A browser refuses a module with that content type,
+      // so no LumenUI component ever defined itself — and because the page is
+      // server-rendered, what a person saw was a complete console that did
+      // nothing: placeholder text instead of the agent's name, no model picker,
+      // no skill chips. It looked like missing data. It was a blocked import.
+      //
+      // Direct to the dev server it all works, which is what made this expensive
+      // to find: every check that skipped the gateway passed. Deduping is the
+      // fix rather than teaching the gateway about /@fs/, because a second lit
+      // is a bug on its own and no /@fs/ URL should be on this page at all.
+      resolve: {
+        dedupe: ["lit", "lit-html", "lit-element", "@lit/reactive-element"],
+      },
       server: {
         // Which address to listen on. Loopback unless an operator says otherwise,
         // which is what a laptop wants and what the firewall notes assume.
