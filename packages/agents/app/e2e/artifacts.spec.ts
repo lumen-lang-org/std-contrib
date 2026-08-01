@@ -602,9 +602,15 @@ test("a file attached in the composer lands as an artifact of a freshly opened t
   // the only handle a test can hold.
   await shell(page).locator('nr-chatbot [aria-label="Attach files"]').first().click();
   const name = `attached-${Date.now()}.xml`;
+  // "Add files" is the console's own wording, not the component's — the
+  // library still defaults to "Upload File", and this test matched that
+  // default until the console started supplying `attachItems` of its own.
+  // Matching the label is a compromise: the item's `id` is the stable half,
+  // but nr-dropdown does not put it in the DOM, so there is nothing else to
+  // hold. Renaming the item in console.ts breaks this line, by design.
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    shell(page).locator("text=Upload File").first().click(),
+    shell(page).locator('nr-chatbot button:has-text("Add files")').first().click(),
   ]);
   await chooser.setFiles({
     name, mimeType: "application/xml", buffer: Buffer.from("<userconfig/>"),
@@ -648,5 +654,10 @@ test("uploading from the panel with no conversation open creates the thread firs
   expect(threads[0].title).toBe(`/${name}`);
   const arts = (await request.get(`/api/threads/${threads[0].id}/artifacts`).then((r) => r.json())) as
     { path: string; kind: string }[];
-  expect(arts.find((a) => a.path === `/${name}`)?.kind).toBe("file");
+  // "pdf", not "file". A .pdf earned a kind of its own when previews learned
+  // to answer bytes: `file` means "we have no idea what this is, serve it as a
+  // download", and a PDF is something the panel can actually draw. Anything
+  // this test would rather assert about opacity belongs on the .xml above,
+  // which is genuinely unknown to us.
+  expect(arts.find((a) => a.path === `/${name}`)?.kind).toBe("pdf");
 });

@@ -192,6 +192,16 @@ screenshot spec's `scriptImageId` left every other script test in the browser
 image, where `pip install` refuses. `ownScriptImage()` puts it back at the
 start of a run rather than trusting the end of the last one.
 
+`ownDoubleAddress()` is the same shape, and shows why the repair has to be a
+real one rather than a re-`PUT`. One spec moves `m-double` to a dead port to
+prove a round that never reaches a provider stores nothing, then moves it
+back — and a run killed between the two leaves it there. Writing the address
+again does not fix it: the API refuses to re-address a model while a key is
+stored for the host it is leaving, so the repair has to clear the key, move,
+and set it again. Without that, every spec that drives the double answered
+"the provider refused the stream: -1" from a console that was working
+perfectly, and the file that broke it could not un-break itself.
+
 ## The console never learns how it is deployed
 
 One environment variable, `AUTH`, chooses between three deployments, and

@@ -323,11 +323,46 @@ export async function ownScriptImage(request: Req): Promise<void> {
   });
 }
 
+/** Where the model double listens. The one address the fixture will accept on
+ *  `m-double`; `playwright.config.ts` starts the process on the same port. */
+export const DOUBLE_ADDRESS = "http://127.0.0.1:8932";
+
+/** The double's key. Named so it is obvious in a diff that no real credential
+ *  is being written — see the fixtures rule in CLAUDE.md. */
+export const DOUBLE_KEY = "e2e-double-not-a-real-key";
+
+// Put the double's address back, if a run left it pointed somewhere dead.
+//
+// The same shape as ownScriptImage above, and for the same reason. One spec
+// moves m-double to 127.0.0.1:8999 to prove that a round which never reaches a
+// provider stores nothing, then moves it back — which holds right up until the
+// run is killed between the two. After that every spec that drives the double
+// gets "the provider refused the stream: -1" from a console that is working
+// perfectly, and it stays that way for every run afterwards, because
+// ensureDoubled short-circuits on the existing agent and never re-posts the
+// model row. That is exactly what had happened here: the row sat on 8999 with
+// nothing listening on it.
+//
+// Moving costs the key: the API refuses to re-address a model while a secret
+// is stored for the host it currently sends to, which is the rule that stops a
+// stored key being mailed to whatever address someone names. So this clears,
+// moves, and sets again — the double's key, never a real provider's.
+export async function ownDoubleAddress(request: Req): Promise<void> {
+  const model = (await rows(request, "/api/models")).find((m) => m.id === "m-double");
+  if (!model || model.baseUrl === DOUBLE_ADDRESS) return;
+  await request.delete("/api/providers/double/key");
+  await request.put("/api/models/m-double", {
+    data: { ...model, baseUrl: DOUBLE_ADDRESS },
+  });
+  await request.put("/api/providers/double/key", { data: { apiKey: DOUBLE_KEY } });
+}
+
 export async function ensureDoubled(request: Req): Promise<string> {
   const agents = await rows(request, "/api/agents");
   const held = agents.find((a) => a.agentName === E2E_AGENT);
   if (held) {
     await ownScriptImage(request);
+    await ownDoubleAddress(request);
     return held.id as string;
   }
 
@@ -349,16 +384,19 @@ export async function ensureDoubled(request: Req): Promise<string> {
   // key filed under `openai` would not be found. And this whole function
   // short-circuits on an existing agent, so a box that already has the old row
   // needs `UPDATE models SET provider = 'double' WHERE id = 'm-double'` by
-  // hand — the fixture cannot repair what it never re-posts.
+  // hand — the provider name is the one field the fixture cannot repair,
+  // because a row it never re-posts is a row it never reads a mistake out of.
+  // The *address* is repaired, above: it is the field a spec deliberately
+  // moves, so it is the field a killed run leaves wrong.
   if (!(await rows(request, "/api/models")).some((m) => m.id === "m-double")) {
     await request.post("/api/models", { data: {
       id: "m-double", label: "Double", apiName: "double-1", provider: "double",
-      kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true,
+      kind: "chat", dimensions: 0, baseUrl: DOUBLE_ADDRESS, enabled: true,
     } });
   }
   const providers = await request.get("/api/providers").then((r) => r.json()) as string[];
   if (!providers.includes("double")) {
-    await request.put("/api/providers/double/key", { data: { apiKey: "e2e-double-not-a-real-key" } });
+    await request.put("/api/providers/double/key", { data: { apiKey: DOUBLE_KEY } });
   }
   if (!(await rows(request, "/api/model-configs")).some((c) => c.id === "c-double")) {
     await request.post("/api/model-configs", { data: {
