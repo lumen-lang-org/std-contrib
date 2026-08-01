@@ -44,7 +44,7 @@ import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trac
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape } from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan } from "./threads.ts";
+import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan } from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
@@ -2430,6 +2430,14 @@ class ThreadApi {
   //
   // `routeNote` — why a routed round picked what it picked — joins here when
   // the router lands. `runs.route_note` is already the column it comes from.
+  //
+  // `title` joins for the same reason `modelChoiceId` did: it is a fact about
+  // the thread with nowhere to sit on a message, and a conversation page that
+  // wants its own name in the header would otherwise have to list every thread
+  // to find one. "" for a conversation nobody named, which is what the sidebar
+  // already falls back on; the LIST route serves the fallback text and this one
+  // serves the column, because a header showing the first message back to the
+  // person who typed it is noise rather than a name.
   @get("/:id")
   transcript(req: Request): Reply {
     if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
@@ -2462,6 +2470,7 @@ class ThreadApi {
       i = i + 1;
     }
     return ok("{\"modelChoiceId\":" + JSON.stringify(threadChoice(this.db, param(req, "id")))
+      + ",\"title\":" + JSON.stringify(threadTitle(this.db, param(req, "id")))
       + ",\"messages\":" + out + "]}");
   }
 }

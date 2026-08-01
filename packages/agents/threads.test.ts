@@ -3,9 +3,9 @@
 //   cd packages/agents && lumen test threads.test.ts
 
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { ModelPick, ThreadReply, withinBudget, nextRound, threadBudget, threadPlan, threadsMapping, openThread, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith } from "./threads.ts";
+import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
-import { artifactPlan } from "./artifacts.ts";
+import { artifactPlan, putArtifact, TURN_SEQ_NONE } from "./artifacts.ts";
 import { stepPlan } from "./steps.ts";
 import { RunRow, runsMapping, runLogPlan } from "./runlog.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, AgentRow, modelsMapping, modelConfigsMapping, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan } from "./schema.ts";
@@ -588,6 +588,258 @@ test("resolution is a function, and it answers before anything is run", () => {
   expect(chooseModel(database, "no-such-thread", inheritedPick()).choiceId == "");
 });
 
+// --- naming a conversation ---------------------------------------------------------
+
+// The pure half first: no database, no provider. What titling gets wrong is
+// never the HTTP call — it is what a 400-character apology looks like in a
+// sidebar, and none of that needs a network to exercise.
+
+test("a title is cut to sixty characters, whatever the model sent", () => {
+  // The cap the sidebar is sized for, and the one property every case below
+  // shares: nothing longer than TITLE_MAX is ever handed back.
+  let essay = "Certainly! Here is a name for this conversation about warehouse stock levels in Lyon and Rotterdam";
+  let cut = cleanTitle(essay);
+  expect(cut.length <= TITLE_MAX);
+  expect(cut.endsWith("..."));
+
+  // The boundary is exact rather than off by the three dots: sixty characters
+  // is kept whole, sixty-one is clipped.
+  let sixty = "123456789012345678901234567890123456789012345678901234567890";
+  expect(sixty.length == TITLE_MAX);
+  expect(cleanTitle(sixty) == sixty);
+  expect(cleanTitle(sixty + "1").length == TITLE_MAX);
+});
+
+test("a title is one line, unquoted, unprefixed and unpunctuated", () => {
+  // Each of these is a thing a model actually does when it is asked for a name.
+  expect(cleanTitle("  Lyon stock levels  ") == "Lyon stock levels");
+  expect(cleanTitle("\"Lyon stock levels\"") == "Lyon stock levels");
+  expect(cleanTitle("'Lyon stock levels'") == "Lyon stock levels");
+  expect(cleanTitle("Title: Lyon stock levels") == "Lyon stock levels");
+  expect(cleanTitle("Title: \"Lyon stock levels\"") == "Lyon stock levels");
+  expect(cleanTitle("Lyon stock levels.") == "Lyon stock levels");
+  // Newlines flattened and the whitespace they leave behind collapsed — a
+  // title with a line break in it is a sidebar row that is two rows tall.
+  expect(cleanTitle("Lyon stock\nlevels") == "Lyon stock levels");
+  expect(cleanTitle("Lyon\n\n  stock   levels") == "Lyon stock levels");
+  // A marker the model parroted out of an earlier turn loses the bracket that
+  // makes it one, so no client's marker pass can read a title as a card for a
+  // file nobody wrote.
+  expect(cleanTitle("[artifact:abc:1@v2] plan").indexOf("[artifact:") < 0);
+  // And anything that cleans away to nothing is nothing, never a blank row.
+  expect(cleanTitle("") == "");
+  expect(cleanTitle("   \n  ") == "");
+  expect(cleanTitle("\"\"") == "");
+  expect(cleanTitle(".") == "");
+});
+
+test("the naming call is capped whatever config it lands on", () => {
+  // A config pointed at cheap work by mistake must not let "explain at length"
+  // bill an essay per new conversation. The seed's own router config shared a
+  // row with a chat choice at 8192 once, which is the whole argument.
+  let roomy: ModelConfigRow = { id: "c-big", modelId: "m1", temperature: 0.0, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "8192", label: "Thinking", selectable: true, rank: 1 };
+  let capped = withinTitleBudget(roomy);
+  expect(capped.maxTokens == TITLE_MAX_TOKENS);
+  // `thinking` goes with the ceiling rather than being left behind: an
+  // Anthropic budget is clamped to maxTokens - 1, so 8192 thinking tokens
+  // under this ceiling is a request below the provider's own floor and a 400
+  // on every attempt.
+  expect(capped.thinking == "");
+  // Everything else is the operator's and is left alone.
+  expect(capped.id == "c-big" && capped.modelId == "m1" && capped.label == "Thinking");
+});
+
+test("a reply is read for its assistant text and never handed back as an envelope", () => {
+  // The live failure `answerFrom` was written for, one function over:
+  // `Completion.text` is the provider's RAW BODY, and a reader that falls back
+  // to the body when it finds no assistant text puts an envelope in somebody's
+  // sidebar.
+  let openai = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Lyon stock levels\"},\"finish_reason\":\"stop\"}]}";
+  expect(titleFrom("openai", openai).title == "Lyon stock levels");
+  expect(titleFrom("openai", openai).note == "");
+
+  let anthropic = "{\"content\":[{\"type\":\"text\",\"text\":\"Lyon stock levels\"}],\"stop_reason\":\"end_turn\"}";
+  expect(titleFrom("anthropic", anthropic).title == "Lyon stock levels");
+
+  // The exact live shape: truncated, so `content` is null and there is no
+  // assistant text to find. No title, a note naming the ceiling, and the body
+  // itself nowhere in it.
+  let cut = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null},\"finish_reason\":\"length\"}]}";
+  let truncated: Naming = titleFrom("openai", cut);
+  expect(truncated.title == "");
+  expect(truncated.note.indexOf("ran out of room") >= 0);
+  expect(truncated.note.indexOf("choices") < 0);
+
+  // A shape with no assistant text in it at all is quoted, briefly, for
+  // whoever is debugging a provider — and is never a title.
+  let strange = titleFrom("openai", "{\"error\":{\"message\":\"model not found\"}}");
+  expect(strange.title == "");
+  expect(strange.note != "");
+});
+
+// --- and the half that needs the database ------------------------------------------
+
+test("migration 88 adds the column, and every thread already there is untitled", () => {
+  freshThreads();
+  let plan = threadPlan(database);
+  let found = false;
+  let i: int = 0;
+  while (i < plan.length) {
+    if (plan[i].version == "88") { found = true; }
+    i = i + 1;
+  }
+  expect(found);
+
+  // A row written the way every row was written before the column existed.
+  // NOT NULL DEFAULT '' is what keeps the read a `title != ""` test rather
+  // than a NULL-versus-empty archaeology exercise.
+  executeWith(database,
+    "INSERT INTO threads (id, agent_id, created_at) VALUES ("
+    + placeholderAt(database, 1) + ", " + placeholderAt(database, 2) + ", " + placeholderAt(database, 3) + ")",
+    ["t-old", "a1", "1000000000000"]);
+  expect(threadTitle(database, "t-old") == "");
+  // And a thread that is not there answers the same, rather than inventing one.
+  expect(threadTitle(database, "no-such-thread") == "");
+});
+
+test("a thread is named once and is never renamed", () => {
+  freshThreads();
+  let id = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+  expect(threadTitle(database, id) == "");
+
+  expect(nameThread(database, id, "Lyon stock levels") == "");
+  expect(threadTitle(database, id) == "Lyon stock levels");
+
+  // The never-re-titled guarantee, and it is in the UPDATE's WHERE rather than
+  // in a read-then-write, because two first messages racing on one fresh
+  // thread both pass a read-then-write. The loser matches no row and says so
+  // by saying nothing.
+  expect(nameThread(database, id, "Something else entirely") == "");
+  expect(threadTitle(database, id) == "Lyon stock levels");
+
+  // Text that cleans away to nothing is refused rather than stored: "" is the
+  // column's word for "unnamed", and writing one would take the first-message
+  // fallback away without putting anything in its place.
+  let blank = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+  expect(nameThread(database, blank, "   \n  ") == "");
+  expect(threadTitle(database, blank) == "");
+
+  // The writer caps too, so a caller that has its own idea of a title cannot
+  // get past TITLE_MAX by not knowing about it.
+  let long = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+  nameThread(database, long, "Certainly! Here is a name for this conversation about warehouse stock in Lyon");
+  expect(threadTitle(database, long).length <= TITLE_MAX);
+});
+
+test("the sidebar prefers the name, and keeps every fallback it had", () => {
+  freshSweep();
+  let named = openThread(database, { agentId: "a1", owner: "", now: "1000000000003" });
+  let spoken = openThread(database, { agentId: "a1", owner: "", now: "1000000000002" });
+  let uploaded = openThread(database, { agentId: "a1", owner: "", now: "1000000000001" });
+
+  let asked: Turn[] = [userTurn("how many A-114 are in Lyon?")];
+  expect(appendTurns(database, named, asked, 0) == "");
+  expect(appendTurns(database, spoken, asked, 0) == "");
+  expect(nameThread(database, named, "Lyon stock levels") == "");
+  putArtifact(database, { threadId: uploaded, path: "/plan.md", title: "Plan", content: "a plan", note: "", origin: "uploaded", mustCreate: true, turnSeq: TURN_SEQ_NONE, now: "1000000000001" });
+
+  let rows: ThreadListing[] = listThreads(database, { tags: [], limit: 50, offset: 0 });
+  expect(rows.length == 3);
+  let i: int = 0;
+  while (i < rows.length) {
+    // The column when there is one; otherwise exactly what the sidebar showed
+    // before this feature existed — the first thing the user said, and the
+    // file's own name for a thread opened by dropping one in.
+    if (rows[i].id == named) { expect(rows[i].title == "Lyon stock levels"); }
+    if (rows[i].id == spoken) { expect(rows[i].title == "how many A-114 are in Lyon?"); }
+    if (rows[i].id == uploaded) { expect(rows[i].title == "/plan.md"); }
+    i = i + 1;
+  }
+});
+
+test("the cheap config is the router's, then the menu's first, then nothing", () => {
+  seededMenu();
+  // `AGENTS_TITLE_CONFIG_ID` is not exercised here: this suite cannot set a
+  // variable the process read at start-up. What it can pin is the rule that
+  // matters more — every step falls THROUGH, so a box that offers nothing is a
+  // box that names nothing rather than a box that fails.
+
+  // A router on the menu, and its own config is the deployment's cheap-work
+  // row: MODEL-CHOICE.md defines router_config_id as "small, fast, cheap", and
+  // 87.10 built exactly that kind of non-menu plumbing config.
+  let cheap: ModelRouterRow = {
+    id: "r1", label: "Auto", routerConfigId: "c-picked",
+    candidatesJson: twoCandidates(), fallbackConfigId: "c-own",
+    routeEvery: "turn", escalateOnly: false, enabled: true,
+  };
+  persist(database, modelRoutersMapping(), JSON.stringify(cheap));
+  expect(titlingConfigId(database) == "c-picked");
+
+  // Switched off, and the rule becomes "the first config in rank order", which
+  // is the same rule migration 87.22 already reads as "the cheapest thing
+  // available is the right default". This is the single-model box's path.
+  execute(database, "UPDATE model_routers SET enabled = 0 WHERE id = 'r1'");
+  expect(titlingConfigId(database) == "c-own");
+
+  // A menu row pointing at a router row that is gone falls through the same
+  // way rather than stopping the walk.
+  execute(database, "DELETE FROM model_routers WHERE id = 'r1'");
+  expect(titlingConfigId(database) == "c-own");
+
+  // Nothing offered at all, so nothing is named and the thread keeps today's
+  // behaviour.
+  execute(database, "DELETE FROM model_choices");
+  expect(titlingConfigId(database) == "");
+});
+
+test("a naming call that cannot be made leaves the thread untitled and says so", () => {
+  seededMenu();
+  seedRouter(twoCandidates(), "turn", false);
+  let id = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+
+  // There is no credential in this suite, so the completion refuses before it
+  // opens a socket. This is the load-bearing property of the whole feature:
+  // every failure path leaves the column at "" and hands back a sentence for
+  // the run log, and nothing anywhere branches on it.
+  let note = titleThread(database, { threadId: id, userText: "how many A-114 are in Lyon?", master: testKey() });
+  expect(note != "");
+  expect(note.indexOf("could not be named") >= 0);
+  // Named by provider, which is what an operator can act on.
+  expect(note.indexOf("mistral") >= 0);
+  expect(threadTitle(database, id) == "");
+
+  // A thread that already has a name never pays for a completion, and says
+  // nothing about it: the cheap read is the first line of the function.
+  expect(nameThread(database, id, "Lyon stock levels") == "");
+  expect(titleThread(database, { threadId: id, userText: "how many A-114 are in Lyon?", master: testKey() }) == "");
+  expect(threadTitle(database, id) == "Lyon stock levels");
+
+  // And a box with no menu is not a box with a bug.
+  execute(database, "DELETE FROM model_choices");
+  let bare = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+  expect(titleThread(database, { threadId: bare, userText: "how many A-114 are in Lyon?", master: testKey() }) == "");
+  expect(threadTitle(database, bare) == "");
+});
+
+test("a first round that failed leaves the thread unnamed, and the turn is unaffected", () => {
+  seededMenu();
+  seedRouter(twoCandidates(), "turn", false);
+  let id = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+
+  // No credential, so the round dies at the provider. Nothing was stored, so
+  // nothing is named — which is deliberate rather than incidental: the
+  // generated title and the first-message fallback are kept over the same set
+  // of threads, so the sidebar shows what it showed today and the console's
+  // Retry is what names the conversation.
+  let first = asks(id);
+  expect(!first.run.ok);
+  expect(threadTitle(database, id) == "");
+  // The turn is exactly what it was before titling existed: the round's own
+  // note, and nothing the naming attempt added.
+  expect(first.notes.length > 0);
+  expect(first.notes[0].indexOf("the round was not stored") >= 0);
+});
+
 // --- what a round showed, and what the next may fetch ------------------------------
 
 test("chunks are recorded per round and read back from a boundary", () => {
@@ -608,4 +860,27 @@ test("chunks are recorded per round and read back from a boundary", () => {
   // Another thread's chunks are not this one's.
   expect(chunksShownSince(database, "t2", 0).length == 0);
   database.close();
+});
+
+
+test("a long title is cut on a character boundary, not in the middle of one", () => {
+  // TITLE_MAX is a byte count, and Arabic is two bytes a letter — so a title
+  // that is well under 60 CHARACTERS is over the cap, and the naive slice
+  // lands mid-character and stores a broken one. The defect is invisible in
+  // English, which is exactly why it needs a test written in something else.
+  let arabic = "";
+  let i: int = 0;
+  // The literal character, not a \u escape: the escape is not expanded here,
+  // so it would build 360 bytes of ASCII and test nothing about UTF-8.
+  while (i < 60) { arabic = arabic + "م"; i = i + 1; }   // 60 x 2 bytes
+  let cut = cleanTitle(arabic);
+  expect(cut.length <= TITLE_MAX);
+  expect(cut.endsWith("..."));
+  // The body before the dots must end on a COMPLETE character. Arabic meem is
+  // 0xD9 0x85, so a whole one ends on its continuation byte (0x85 = 133); a
+  // cut that split a character would leave the lead byte 0xD9 (217) dangling,
+  // which is the broken value this test exists to catch.
+  let body = cut.slice(0, cut.length - 3);
+  let last = body.charCodeAt(body.length - 1);
+  expect(last == 133);
 });
