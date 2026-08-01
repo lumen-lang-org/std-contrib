@@ -223,11 +223,17 @@ function softenFocusRings(root: ParentNode) {
 @customElement("agent-console")
 export class AgentConsole extends LitElement {
   static styles = css`
+    /* The composer's tokens are in head.html on :root, not here. nr-chatbot
+       is not a child of this shadow root, so a rule for the tag matches
+       nothing — silently — and even :host did not carry them down in
+       practice. head.html is where the palette already lives. */
     :host { display: flex; height: 100%; }
     console-sidebar { width: 264px; flex: none; }
-    /* The scrim behind the drawer. Only ever rendered under the breakpoint,
-       and it is what closes the drawer — a tap anywhere else. */
-    .scrim { display: none; }
+    /* The scrim behind a layer that covers. Two of them — the nav drawer and
+       the files sheet — and each is what dismisses its own layer: a tap
+       anywhere else. Hidden above the breakpoint, where neither layer covers
+       anything and a dimmed page would be dimming nothing. */
+    .scrim { display: none; background: rgba(0,0,0,.28); }
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     /* No rule under the header. Measured against Kimi at the same width: it
        draws no divider anywhere on the page — header, turns, composer are all
@@ -274,9 +280,16 @@ export class AgentConsole extends LitElement {
        controls in the header and were drawn at 6px/16px, which on a phone is
        under the 44px Apple and 48px Material both ask for and read as
        decoration next to the 54px wordmark. */
+    /* 18px glyphs, not 20. The library's scale is 14, 20, 24 — a 43% jump
+       from small to medium — and this row had to pick one: at 14 it matched
+       the nav rail and read as nothing, at 20 it was the largest icon on the
+       page and top-heavy. 18 sits above the rail without shouting, and it is
+       reachable at all because nr-icon now takes --nuraly-icon-size over
+       whichever step is named. Setting a width here would do nothing: the svg
+       is sized inside the component's shadow root. */
     .icon { background: none; border: 0; color: var(--fg);
-            border-radius: 8px; padding: 9px; cursor: pointer; font: inherit;
-            font-size: 22px; line-height: 1;
+            border-radius: 8px; padding: 8px; cursor: pointer; font: inherit;
+            --nuraly-icon-size: 18px; line-height: 1;
             display: inline-grid; place-items: center;
             transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .icon:hover { background: var(--bg-sunken); }
@@ -327,22 +340,38 @@ export class AgentConsole extends LitElement {
         transform: none;
         box-shadow: 0 0 32px -8px rgba(0,0,0,.28);
       }
-      :host([nav]) .scrim {
+      :host([nav]) .scrim.nav {
         display: block; position: fixed; inset: 0; z-index: 55;
-        background: rgba(0,0,0,.28);
       }
       /* The drawer toggle only exists where the drawer does. */
       .icon.nav { display: inline-grid; }
-      /* The second rail stops sharing the width and covers instead. */
+      /* The second rail stops sharing the width and becomes a sheet, in the
+         same frame settings uses: 80vh centred, 12px of side margin, 14px
+         corners — measured off nr-overlay at 390x844 rather than guessed, so
+         the two layers land in exactly the same rectangle.
+
+         It used to be a full-bleed 100vw column, on the argument that a
+         document is what you came to look at so it should have the screen.
+         That reasoning was about the document and forgot the reader: with no
+         scrim and no edge, an opaque white column IS the page, so there is
+         nothing to say a conversation is still underneath it or that touching
+         anything will bring it back. Settings answers that with a dimmed
+         backdrop, and the panel had no reason to answer it differently. */
       artifact-panel {
-        position: fixed; inset: 0 0 0 auto; z-index: 50;
-        /* Full width, not min(420px, 100vw). Below this breakpoint the panel
-           already covers the conversation, so a 420px panel on a 440px phone
-           leaves a 20px sliver of a conversation nobody can read next to a
-           document squeezed into 420px — the worst of both. A document is
-           what you came to look at; give it the screen. */
-        width: 100vw; box-shadow: 0 0 32px -8px rgba(0,0,0,.28);
+        position: fixed; inset: 10vh 12px; z-index: 50;
+        /* width AND height, both auto, because the panel sets each to a fixed
+           value for the docked column it normally is — and a height of 100%
+           on a fixed box resolves against the viewport, not against the inset,
+           so the sheet ran 10vh past the bottom of the screen with its lower
+           corners somewhere below the fold. */
+        width: auto; height: auto; border-radius: 14px;
+        /* The radius is only real if the content is clipped to it, and the
+           panel's own children (header, list, the preview iframe) all paint
+           to its edges. */
+        overflow: hidden; border-left: 0;
+        box-shadow: 0 18px 48px -12px rgba(0,0,0,.35);
       }
+      .scrim.files { display: block; position: fixed; inset: 0; z-index: 45; }
     }
     @media (min-width: 1025px) { .icon.nav { display: none; } }
 
@@ -363,11 +392,26 @@ export class AgentConsole extends LitElement {
         justify-content: center !important;
         padding-top: 0 !important;
       }
+      /* The composer's side space on a phone, measured off Kimi at 390px: its
+         field sits at x=19, so ~19px of screen each side. Ours ran to x=8,
+         close enough to the edge that the field's own 24px corner had nothing
+         to be rounded against.
+
+         Applied to main — the element this component actually owns — and not
+         to the composer. The padding that positions it lives on .input-box
+         inside nr-chatbot's shadow root, and nothing written here reaches
+         that: not a tag selector (nr-chatbot is not a child of this root),
+         not ::part (the component exposes none), not a token (a rule with a
+         plain shorthand already wins on that element). Insetting the column
+         moves the transcript with it, which is what Kimi does anyway. */
+      main { padding-left: 11px; padding-right: 11px; }
       .title { font-size: 15px; }
       /* The model chip is the first thing to go: it names a choice you make
          rarely, and the picker beside it still says which agent is answering. */
       .chip { display: none; }
-      artifact-panel { width: 100vw; }
+      /* No width rule for the panel here any more. It used to be pinned to
+         100vw at both breakpoints; the sheet above sizes from its own inset,
+         and a width would fight it and win. */
       .cards { padding: 8px 12px 12px; }
       .card { max-width: 100%; }
     }
@@ -1295,7 +1339,7 @@ export class AgentConsole extends LitElement {
         .defaultLabel=${this.defaultModelLabel()}
         @pick-choice=${(e: CustomEvent) => { this.choiceId = e.detail.id as string; }}
       ></model-picker>
-      <div class="scrim" @click=${() => { this.nav = false; }}></div>
+      <div class="scrim nav" @click=${() => { this.nav = false; }}></div>
       <console-sidebar
         .threads=${this.threads}
         .activeId=${this.threadId}
@@ -1405,7 +1449,16 @@ export class AgentConsole extends LitElement {
       </div>
 
       ${this.rail === "artifacts"
-        ? html`<artifact-panel .threadId=${this.threadId}
+        ? html`
+          <!-- Rendered with the panel rather than always, unlike the drawer's:
+               the drawer element is permanent and only transformed off screen,
+               so its scrim needs a host attribute to know when to paint. This
+               one exists exactly as long as the thing it dims. Closing through
+               the same path as the header toggle, railClosed included, so a
+               tap outside is a decision the auto-open respects. -->
+          <div class="scrim files"
+               @click=${() => { this.rail = ""; this.railClosed = true; }}></div>
+          <artifact-panel .threadId=${this.threadId}
             @close-rail=${() => { this.rail = ""; this.railClosed = true; }}
             .ensureThread=${() => this.session.ensureThread()}></artifact-panel>` : ""}
       ${this.settings ? html`<console-settings @close=${() => {

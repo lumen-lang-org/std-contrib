@@ -5,14 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "lumenjs dev --port 5173",
-    "build": "lumenjs build",
+    "build": "npm run check:templates && lumenjs build",
     "start": "lumenjs serve --port 8080",
     "e2e": "playwright test",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "check:templates": "node tools/no-backtick-in-tagged-comments.mjs src"
   },
   "dependencies": {
     "@nuraly/lumenjs": "file:vendor/nuraly-lumenjs-0.16.3-codejar.tgz",
-    "@nuraly/lumenui": "file:vendor/nuraly-lumenui-0.16.3-scroll.tgz",
+    "@nuraly/lumenui": "file:vendor/nuraly-lumenui-0.16.3-composer-tokens.tgz",
     "@nuralyui/common": "file:vendor/nuralyui-common-0.1.5.tgz",
     "better-sqlite3": "^12.11.1",
     "docx-preview": "^0.4.0",

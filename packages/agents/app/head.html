@@ -24,6 +24,21 @@
        every token has to survive being inverted, and neutral is what does. */
     --bg-rail: #FAFAFA;     /* the ground: sidebar, panels, nav */
     --bg-card: #FFFFFF;
+    /* The composer's surface, and it is here rather than in console.ts for a
+       reason worth keeping: nr-chatbot is not a child of the console's shadow
+       root, so a rule for the tag there matches nothing — silently — and the
+       token simply never existed. On :root it inherits into every shadow tree
+       on the page, which is what a custom property is for.
+
+       Why it needed naming at all: the library painted that surface with a
+       literal #ffffff inside its own shadow root. On a phone browser that
+       auto-darkens — a hue-preserving inversion, the same behaviour this
+       file's note above records for the drawer — an inverted literal and an
+       inverted --bg-card are not obliged to land on the same grey, and they
+       did not. The composer read as a slightly different colour from every
+       other white surface, in dark mode only, which is exactly the report.
+       One token, so both invert as one thing. */
+    --nuraly-chatbot-input-bg: #FFFFFF;
     --bg-sunken: rgba(0,0,0,.045);  /* Kimi Fills-F2: hover washes, chips */
     --bg-user: rgba(0,0,0,.045);
     --fill-1: rgba(0,0,0,.03);      /* the lightest wash */
@@ -149,6 +164,15 @@
       transform: translateX(-100%);
     }
     agent-console[nav] console-sidebar { transform: none; }
+  }
+  /* The composer's gutter on a phone, measured off Kimi at 390px: its field
+     sits at x=19, so ~19px of screen each side. Ours ran to x=8, close enough
+     to the edge that the field's own 24px corner had nothing to be rounded
+     against. Set on :root for the same reason as the surface above — the
+     padding it feeds lives on .input-box inside nr-chatbot's shadow root,
+     which no selector written in the app can reach. */
+  @media (max-width: 640px) {
+    :root { --nuraly-chatbot-gutter: 19px; }
   }
   /* Unupgraded custom elements are inline by default, so the composer and the
      panels collapse to a text-line's height before hydration and then snap to
