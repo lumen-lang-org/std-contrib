@@ -1569,7 +1569,11 @@ export class ConsoleSettings extends LitElement {
       <div class="bar">
         <button class="primary" data-new="skill"
           @click=${() => this.open({ kind: "skill", fresh: true, files: [],
-            row: { id: "", skillName: "", description: "", body: "", updatedAt: "" } })}>
+            // private and unranked: a new skill is yours until you say
+            // otherwise, and the featured row is a curated shelf rather than
+            // wherever the newest skill happens to land.
+            row: { id: "", skillName: "", description: "", body: "", updatedAt: "",
+                   visibility: "private", featuredRank: 0 } })}>
           <nr-icon name="plus" size="small"></nr-icon> New skill
         </button>
       </div>
