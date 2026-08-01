@@ -333,6 +333,12 @@ export function kindOf(path: string): string {
   // console picks its viewer from the path's own extension, and the server
   // needs nothing beyond "binary document, not diffable text".
   if (ext == "docx" || ext == "xlsx" || ext == "xls" || ext == "pptx") { return "office"; }
+  // A PDF is its own kind, not a "file". It is the one binary format the
+  // preview host can hand a browser directly — every browser renders one
+  // natively — so it is the one that must not fall into the catch-all below
+  // and be served as the base64 text it is stored as. That was the reported
+  // defect: a preview link for a .pdf answered a page of JVBERi0xLjQ...
+  if (ext == "pdf") { return "pdf"; }
   // Everything else is a file: accepted, stored as base64 like the other
   // binary kinds, previewed as nothing. A customer's .xml or .pdf refused at
   // the door was a worse answer than an opaque body the scripts still get
@@ -347,7 +353,7 @@ export function kindOf(path: string): string {
 // run directory and a viewer hold bytes, and this is the list of kinds where
 // those two differ.
 export function binaryKind(kind: string): bool {
-  return kind == "image" || kind == "office" || kind == "file";
+  return kind == "image" || kind == "office" || kind == "pdf" || kind == "file";
 }
 
 // The data-URI media type for an image artifact's path. Only meaningful for
@@ -389,6 +395,11 @@ export function mimeOf(kind: string): string {
   // rather than ever answering raw image bytes, so its mime here is the text
   // it is, not the picture it encodes.
   if (kind == "image") { return "text/plain; charset=utf-8"; }
+  // The one kind whose stored body is base64 AND whose real type is served on
+  // the wire. The preview route decodes it; everywhere else the route's own
+  // downgrade to text/plain still applies, so this is not a way to serve a
+  // document as itself from the console's origin.
+  if (kind == "pdf") { return "application/pdf"; }
   // Everything else is source, and source is text. Serving it as its own
   // language's type gains nothing and asks a browser to run something nobody
   // linked.

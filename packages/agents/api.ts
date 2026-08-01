@@ -3305,9 +3305,64 @@ function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: 
   return answer;
 }
 
+// A preview answered as bytes rather than as text.
+//
+// Same headers as every other preview — the CSP, nosniff, no referrer — because
+// none of those stop being true for a document. What it does NOT get is the
+// live chrome: that is a script appended to an HTML body, and appending it to a
+// PDF would corrupt the file rather than reload it.
+function previewBytes(req: Request, bytes: string, mime: string, cache: string): Reply {
+  let answer = reply(200, bytes, mime);
+  answer.headers.set("content-security-policy", previewCsp(req));
+  answer.headers.set("x-content-type-options", "nosniff");
+  answer.headers.set("referrer-policy", "no-referrer");
+  answer.headers.set("cache-control", cache);
+  return answer;
+}
+
 // previewReply, plus the live chrome when this body qualifies for it. An
 // image is wrapped into a page first, so it reloads like any other page.
 function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
+  // A document, served as the document.
+  //
+  // This is the binary path, and it exists because the alternative was the
+  // reported defect: a .pdf preview answered a screen of base64, because the
+  // stored body IS base64 and the route served the text it found. Two things
+  // had to be true for this to work, and both were checked before it was
+  // written rather than assumed:
+  //
+  //  * A Lumen string carries arbitrary BYTES to the socket. The server writes
+  //    `Content-Length: res.body.len` and `writeAll(res.body)` with no
+  //    transcoding and no UTF-8 validation (lumen_runtime_net.zig), so the
+  //    "a string is UTF-8 and a PDF is not" note elsewhere in this package is
+  //    about string OPERATIONS, not about the wire.
+  //  * `crypto.base64Decode` is in the language (spec 474 — it is
+  //    NAMESPACED, which is the ten minutes this cost). office-render.ts shells
+  //    out to `base64 -d` for an unrelated reason — it needs a file on disk —
+  //    which is what made this look impossible at first glance.
+  //
+  // Only on the preview host. Off it, `previewType` still answers text/plain
+  // for everything, so this cannot be used to serve a document as itself from
+  // the console's own origin.
+  if (onPreviewHost(req)) {
+    if (artifact.kind == "pdf") {
+      return previewBytes(req, crypto.base64Decode(body), "application/pdf", cache);
+    }
+    // An office document is converted first, through the same LibreOffice pass
+    // and the same immutable cache the artifact panel and the template
+    // thumbnails already use — so the first open of one pays ~2s and every
+    // open after it is a database read.
+    if (artifact.kind == "office" && officeRenderExt(artifact.path) != "") {
+      let made = officeRender(db, { artifactId: artifact.id, version: artifact.currentVersion,
+        path: artifact.path, body: body, now: stamp() });
+      if (made.ok) {
+        return previewBytes(req, crypto.base64Decode(made.body), "application/pdf", cache);
+      }
+      // A box with no converter still answers, with the sentence saying why
+      // rather than with a page of base64 nobody can read.
+      return previewBytes(req, made.problem, "text/plain; charset=utf-8", cache);
+    }
+  }
   let row = previewPresentable(req, artifact, body);
   let served = body;
   if (row.kind == "image" && row.mime.startsWith("text/html")) {
