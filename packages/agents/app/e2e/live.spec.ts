@@ -153,7 +153,7 @@ test("an artifact written by somebody else appears in the open rail", async ({ p
 
   // The server's artifact poll is 4s; twice that is room for a slow tick
   // without being room for the panel's own fallback to have fired twice.
-  await expect(panel.locator(".artifact", { hasText: name })).toBeVisible({ timeout: 9_000 });
+  await expect(panel.locator(".row", { hasText: name })).toBeVisible({ timeout: 9_000 });
   expect(polled).toEqual([]);
 });
 

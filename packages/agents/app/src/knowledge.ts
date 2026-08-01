@@ -4,7 +4,7 @@
 // scopes exist by carrying documents, so creation is choosing where the next
 // upload lands.
 
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import {
   ModelRow, ScopeNode, SourceListing, deleteSource, listModels, listScopes,
@@ -194,7 +194,14 @@ export class KnowledgePage extends LitElement {
         data-open=${kids ? String(open) : "leaf"}
         style="padding-left: ${8 + depth * 14}px" @click=${() => this.pick(n.path)}>
         <span class="twist" @click=${(e: Event) => { e.stopPropagation(); this.twist(n.path); }}>
-          ${kids ? (open ? "▾" : "▸") : ""}
+          <!-- An icon, not a glyph. A triangle typed as a character is a font:
+               it draws at a different weight on every platform, ignores the
+               theme's colour, and is an empty box wherever the codepoint is
+               missing — which is the rule app/CLAUDE.md states and the last
+               place in this console that still broke it. -->
+          ${kids
+            ? html`<nr-icon name=${open ? "chevron-down" : "chevron-right"} size="small"></nr-icon>`
+            : nothing}
         </span>
         <span class="name" title=${n.path}>${n.name}</span>
         <small>${n.total}</small>

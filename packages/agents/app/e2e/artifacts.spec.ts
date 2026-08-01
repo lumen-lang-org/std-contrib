@@ -14,6 +14,10 @@
 // about bytes and headers, because that is where the claim actually lives.
 
 import { expect, test } from "@playwright/test";
+// The panel's file rows are `.row` (an icon tile, a name, a meta line), not
+// `.artifact` — that class stopped existing when the office viewer landed and
+// these selectors were never moved with it, so four tests here were failing
+// against markup that had simply been renamed under them.
 import { loaded, open, shell } from "./console.js";
 
 const HTML = "<!doctype html><title>t</title><p>hello</p>";
@@ -460,7 +464,7 @@ test("the panel diffs a version against the one before it, sign by sign", async 
   await shell(page).locator(`console-sidebar .thread[data-thread="${thread}"]`).click();
   await shell(page).locator('button[title="Artifacts"]').click();
   const panel = shell(page).locator("artifact-panel");
-  await panel.locator(".artifact", { hasText: path.slice(1) }).click();
+  await panel.locator(".row", { hasText: path.slice(1) }).click();
 
   // A version past the first opens AS its diff — the first question about an
   // edit is what it changed, so nobody clicks to ask it.
@@ -541,7 +545,7 @@ test("a person uploads a file from the panel and it lands as an artifact", async
     name, mimeType: "application/json", buffer: Buffer.from('{"Hello": "from the console"}'),
   });
   await expect(panel).toContainText(`Uploaded ${name}`);
-  await expect(panel.locator(".artifact", { hasText: name })).toBeVisible();
+  await expect(panel.locator(".row", { hasText: name })).toBeVisible();
 
   // The API is for asserting what was really stored, never for the action.
   const listed = (await request.get(`/api/threads/${thread}/artifacts`).then((r) => r.json())) as
