@@ -597,7 +597,33 @@ export class AgentConsole extends LitElement {
     .gallery-scroll { overflow-y: auto; }
     .gallery-group { font-size: 12px; font-weight: 600; letter-spacing: .04em;
                      text-transform: uppercase; color: var(--faint);
-                     padding: 14px 12px 8px; }
+                     padding: 14px 12px 8px;
+                     display: flex; align-items: center; gap: 7px; }
+    .gallery-title { display: flex; align-items: center; gap: 8px; }
+    /* How many, beside the name. Both references carry the number rather than
+       making you count the cards, and it is the fastest way to see that a
+       filter is hiding most of them. */
+    .gallery-count { font-size: 11px; font-weight: 600; letter-spacing: 0;
+                     color: var(--faint); background: var(--fill-1);
+                     border: 1px solid var(--border); border-radius: 999px;
+                     padding: 1px 7px; text-transform: none; }
+    .gallery-find { display: flex; align-items: center; gap: 8px;
+                    margin: 12px 12px 0; padding: 7px 11px; border-radius: 10px;
+                    border: 1px solid var(--border); color: var(--faint); }
+    .gallery-find:focus-within { border-color: var(--focus); }
+    .gallery-find input { flex: 1; min-width: 0; border: 0; background: none;
+                          font: inherit; font-size: 14px; color: var(--fg);
+                          outline: none; }
+    .gallery-find input::placeholder { color: var(--faint); }
+    /* The mark sits on a tile rather than loose beside the name — a bare glyph
+       at 14px next to bold text reads as punctuation. Both references give it
+       a square of its own, which is also what keeps the names on a shared left
+       edge when one skill's icon is wider than another's. */
+    .pick-tile { display: grid; place-items: center; flex: none;
+                 width: 26px; height: 26px; border-radius: 8px;
+                 background: var(--fill-1); border: 1px solid var(--border);
+                 color: var(--muted); }
+    .pick.on .pick-tile { color: var(--fg); }
     .gallery-none { color: var(--muted); padding: 18px 16px; margin: 0; }
     .pick { display: flex; flex-direction: column; gap: 5px; text-align: left;
             padding: 12px; border: 1px solid var(--border); border-radius: 12px;
@@ -850,6 +876,9 @@ export class AgentConsole extends LitElement {
   @state() private starts: TemplateRow[] = [];
   /* Which gallery the + menu opened, or "" for none. */
   @state() private gallery: "" | "skills" | "plugins" = "";
+  /* What is typed into the gallery's filter. Cleared when it opens, because a
+     filter left over from last time is a gallery that looks empty. */
+  @state() private galleryFind = "";
   /* Every skill, not just the featured few the chips draw. Fetched the first
      time the gallery is opened rather than on load: a console that nobody
      asks is a console that should not have asked. */
@@ -1287,11 +1316,13 @@ export class AgentConsole extends LitElement {
   private async onAttachPick(e: Event) {
     const id = (e as CustomEvent).detail?.item?.id as string | undefined;
     if (id === "pick:skills") {
+      this.galleryFind = "";
       this.gallery = "skills";
       if (this.allSkills.length === 0) {
         this.allSkills = await listSkills().catch(() => []);
       }
     } else if (id === "pick:plugins") {
+      this.galleryFind = "";
       this.gallery = "plugins";
     }
   }
@@ -1311,20 +1342,43 @@ export class AgentConsole extends LitElement {
       : this.servers.map((s) => ({ key: s.id, name: s.serverName === "" ? s.id : s.serverName,
           why: s.enabled ? s.endpoint : "Disabled · " + s.endpoint, on: false,
           icon: serverIcon(s), source: "local" }));
+    // Filtered on both halves, because half of what you remember about a skill
+    // is what it does rather than what it is called — "spreadsheet" should
+    // find make-sheet. Case-folded on one side only would fail every capital.
+    const find = this.galleryFind.trim().toLowerCase();
+    const shown = find === ""
+      ? rows
+      : rows.filter((r) => (r.name + " " + r.why).toLowerCase().includes(find));
     return html`
       <div class="scrim files" @click=${() => { this.gallery = ""; }}></div>
       <div class="gallery" role="dialog" aria-label=${skills ? "Skills" : "Plugins"}>
         <div class="gallery-head">
-          <span>${skills ? "Skills" : "Plugins"}</span>
+          <span class="gallery-title">${skills ? "Skills" : "Plugins"}
+            <span class="gallery-count">${rows.length}</span></span>
           <button class="icon" title="Close" @click=${() => { this.gallery = ""; }}>
             <nr-icon name="x" size="medium"></nr-icon>
           </button>
         </div>
+        <!-- A filter, because fourteen is past the number you can find one in
+             by reading. Kimi and Claude both put one above a list this long.
+             Hidden under five rows, where it would be furniture. -->
+        ${rows.length < 5 ? nothing : html`
+          <div class="gallery-find">
+            <nr-icon name="search" size="small"></nr-icon>
+            <input type="text" .value=${this.galleryFind}
+              placeholder=${skills ? "Find a skill" : "Find a plugin"}
+              aria-label=${skills ? "Find a skill" : "Find a plugin"}
+              @input=${(e: Event) => {
+                this.galleryFind = (e.target as HTMLInputElement).value; }}>
+          </div>`}
         ${rows.length === 0
           ? html`<p class="gallery-none">${skills
               ? "This deployment has no skills yet."
               : "No servers are configured."}</p>`
-          : html`${this.galleryGroups(rows, skills)}`}
+          : shown.length === 0
+            ? html`<p class="gallery-none">Nothing matches
+                “${this.galleryFind.trim()}”.</p>`
+            : html`${this.galleryGroups(shown, skills)}`}
       </div>`;
   }
 
@@ -1344,9 +1398,11 @@ export class AgentConsole extends LitElement {
     if (mine.length === 0) return this.galleryGrid(theirs, true);
     return html`
       <div class="gallery-scroll">
-        <div class="gallery-group">Yours</div>
+        <div class="gallery-group">Yours
+          <span class="gallery-count">${mine.length}</span></div>
         ${this.galleryGrid(mine, true, false)}
-        <div class="gallery-group">From a repository</div>
+        <div class="gallery-group">From a repository
+          <span class="gallery-count">${theirs.length}</span></div>
         ${this.galleryGrid(theirs, true, false)}
       </div>`;
   }
@@ -1358,7 +1414,8 @@ export class AgentConsole extends LitElement {
                   ?disabled=${!skills} title=${r.why}
                   @click=${() => { if (skills) { void this.pin(r.key); this.gallery = ""; } }}>
                   <span class="pick-top">
-                    <nr-icon name=${r.icon} size="small"></nr-icon>
+                    <span class="pick-tile"><nr-icon name=${r.icon}
+                      size="small"></nr-icon></span>
                     <span class="pick-name">${r.name}</span>
                   </span>
                   ${r.why === "" ? nothing : html`<span class="pick-why">${r.why}</span>`}
