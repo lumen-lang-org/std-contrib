@@ -10,7 +10,7 @@ import { knowledge, open, openKnowledge, openSettings, openTab, settings, shell,
 // Kept in the rail's own order (settings.ts). "Model menu" and "Templates"
 // arrived with the model picker and the capability pages; a list that lags
 // the rail fails this suite's count assertion, which is the point of it.
-const TABS = ["Agents", "Models", "Model menu", "Prompts", "Skills", "Templates", "MCP", "Images", "Providers", "Tracing"];
+const TABS = ["Agents", "Models", "Model menu", "Prompts", "Skills", "Templates", "MCP", "Plugins", "Images", "Providers", "Tracing"];
 
 test.beforeEach(async ({ page }) => {
   await open(page);

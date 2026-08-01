@@ -46,6 +46,13 @@ const TABS = [
   { name: "Skills", icon: "sticky-note" },
   { name: "Templates", icon: "file-text" },
   { name: "MCP", icon: "code" },
+  // Plugins is not a second MCP tab. MCP is the servers an operator RUNS —
+  // an endpoint they host, a transport, a credential they hold. Plugins is
+  // what somebody INSTALLS: a curated shelf, and (when they land) apps
+  // authorised over OAuth rather than configured by hand. Two different acts
+  // by two different people, so two tabs; putting the shelf inside MCP made
+  // browsing look like an advanced form.
+  { name: "Plugins", icon: "plug" },
   { name: "Images", icon: "box" },
   { name: "Providers", icon: "cloud" },
   { name: "Tracing", icon: "layers" },
@@ -526,6 +533,7 @@ export class ConsoleSettings extends LitElement {
       case "Skills": return this.skillsTab();
       case "Templates": return this.templatesTab();
       case "MCP": return this.mcpTab();
+      case "Plugins": return this.pluginsTab();
       case "Images": return this.imagesTab();
       case "Providers": return this.providersTab();
       case "Tracing": return this.tracingTab();
@@ -1691,6 +1699,33 @@ export class ConsoleSettings extends LitElement {
     void this.act(() => createServer({ ...NEW_SERVER, ...ask, serverName: name }));
   }
 
+  /* Things you install, as opposed to servers you run.
+     The shelf lives here rather than in MCP for the reason the tab list gives.
+     A plugin added from a card still becomes an ordinary MCP server row — one
+     writer for that table, whichever door you came through — which is why the
+     count below reads off `servers` and why an entry already configured shows
+     as Added rather than being hidden. */
+  private pluginsTab() {
+    return html`
+      ${this.head("Plugins", "plug")}
+      <div class="banner">Ready-made connections. Adding one writes an MCP server
+        row you can then edit under <strong>MCP</strong> — the shelf fills the form
+        in, it does not own the result. Entries arrive switched off: adding
+        something from a shelf is interest, not trust, and one that needs a token
+        would otherwise fail every call until somebody noticed.</div>
+
+      ${this.group("Available")}
+      <mcp-gallery
+        .taken=${this.servers.map((s) => s.endpoint)}
+        @add-server=${(e: CustomEvent) => this.addFromGallery(e.detail)}></mcp-gallery>
+
+      ${this.group("Authorised apps")}
+      <p class="empty">Nothing yet. This is where an app you signed in to with
+        OAuth will appear — authorised rather than configured, with no endpoint
+        or token to paste. Until one lands, everything above is a server you add
+        by address.</p>`;
+  }
+
   private mcpTab() {
     const v = this.view;
     if (v.kind === "server") return this.serverForm(v.row, v.fresh);
@@ -1702,15 +1737,6 @@ export class ConsoleSettings extends LitElement {
           <nr-icon name="plus" size="small"></nr-icon> New server
         </button>
       </div>
-
-      <!-- The shelf first, the list second. Someone opening this tab with no
-           servers configured is asking "what can I connect?", and a form is
-           the wrong answer to that question; someone who already has servers
-           scrolls past a row of cards they have seen before. -->
-      ${this.group("Add from the gallery")}
-      <mcp-gallery
-        .taken=${this.servers.map((s) => s.endpoint)}
-        @add-server=${(e: CustomEvent) => this.addFromGallery(e.detail)}></mcp-gallery>
 
       ${this.group("Servers", this.servers.length)}
       <table><tbody>

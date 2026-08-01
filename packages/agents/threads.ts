@@ -445,6 +445,26 @@ export function ownedThread(db: Db, threadId: string, tags: string[]): string {
   return jsonText(document, "agentId");
 }
 
+/** The read-only door: a thread you own, OR one somebody offered.
+ *
+ *  Deliberately NOT a relaxation of `ownedThread`. That function gates every
+ *  write in the package — appending a turn, putting an artifact, marking a
+ *  flag — and widening it so a reader could see an offered conversation would
+ *  have handed strangers a write on it in the same edit. This is a second,
+ *  narrower question asked only where reading is what is happening.
+ *
+ *  Answers the agent id, like `ownedThread`, so a caller that already reads
+ *  one can read the other. "" means no. */
+export function readableThread(db: Db, threadId: string, tags: string[]): string {
+  let mine = ownedThread(db, threadId, tags);
+  if (mine != "") { return mine; }
+  let document = findById(db, threadsMapping(), threadId);
+  if (document == "") { return ""; }
+  let row: ThreadRow = JSON.parse<ThreadRow>(document);
+  if (!row.replayable) { return ""; }
+  return row.agentId;
+}
+
 // A thread's context, in order.
 export function threadTurns(db: Db, threadId: string): Turn[] {
   let out: Turn[] = [];
