@@ -1,0 +1,48 @@
+# The Joule console, served from source rather than from an image.
+#
+# The image path still exists and still works — `npm run build` then a docker
+# run of ghcr.io/nuralyio/agents-console:<tag> — and it is what a real release
+# should use: a production bundle, no source maps, no HMR socket, one
+# immutable artefact. This unit is the other trade: every edit under app/ is
+# live on lumen-agents.the-agent.dev within a second, at the cost of serving
+# unbundled modules and a slower first paint.
+#
+# It is a unit and not a shell command for the reason the engine is: a console
+# started from a terminal is a child of that terminal, and when the session
+# holding it died the console went with it. Restart=always and a memory cap so
+# a leak restarts this rather than making the kernel choose a victim by size.
+#
+# AGENTS_CONSOLE_BIND is the docker bridge address, which is what nginx in
+# front proxies to. It matters that it is private: AUTH=proxy trusts an
+# inbound X-USER header and refuses to start on a public bind, which is the
+# whole of that mode's security.
+[Unit]
+Description=Joule console (LumenJS dev server, served from source)
+After=network-online.target joule-engine.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projects/std-contrib/packages/agents/app
+Environment=NODE_ENV=development
+Environment=AUTH=proxy
+Environment=AGENTS_CONSOLE_BIND=172.17.0.1
+Environment=AGENTS_API=http://172.17.0.1:8100
+Environment=AGENTS_PREVIEW_ORIGIN=https://lumen-artifacts.the-agent.dev
+# Vite refuses a Host header it does not recognise, and behind the gateway
+# every request arrives naming the public host. Without these two the site
+# answers 403 to every page while a direct request to the bridge address
+# works perfectly — which is a confusing way to look up and see a live server.
+Environment=AGENTS_CONSOLE_HOST=lumen-agents.the-agent.dev
+Environment=AGENTS_PREVIEW_HOST=lumen-artifacts.the-agent.dev
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/npx lumenjs dev --port 5173
+Restart=always
+RestartSec=3
+MemoryMax=3G
+StandardOutput=append:/home/ubuntu/projects/std-contrib/packages/agents/app/.console-dev.log
+StandardError=append:/home/ubuntu/projects/std-contrib/packages/agents/app/.console-dev.log
+
+[Install]
+WantedBy=multi-user.target
