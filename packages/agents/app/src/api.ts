@@ -104,6 +104,23 @@ export const templatesOfKind = (kind: string) =>
 export const templatePdf = (id: string) =>
   call<{ template: string; path: string; cached: boolean; pdf: string }>(
     `/templates/${encodeURIComponent(id)}/pdf`);
+// --- conversations offered as starting points ---------------------------------
+
+/** Offer this conversation to other people, or stop offering it. */
+export const offerThread = (id: string, on: boolean) =>
+  call<{ id: string; replayable: boolean }>(
+    `/threads/${encodeURIComponent(id)}/replayable`,
+    { method: "PUT", body: JSON.stringify({ replayable: on }) });
+
+/** Everything on offer, whoever owns it. */
+export const replayableThreads = () => call<ThreadListing[]>("/threads/replayable");
+
+/** Start a conversation of your own from an offered one. Answers the new
+ *  thread's id and how many files came across. */
+export const remixThread = (id: string) =>
+  call<{ id: string; files: number }>(
+    `/threads/${encodeURIComponent(id)}/remix`, { method: "POST" });
+
 export const startFromTemplate = (threadId: string, templateId: string) =>
   call<{ template: string; skillName: string; wrote: string[]; refused: string[] }>(
     `/threads/${encodeURIComponent(threadId)}/artifacts/from-template`,
@@ -174,6 +191,7 @@ export type ThreadListing = {
   agentId: string;
   createdAt: string;
   title: string;
+  replayable: boolean;
 };
 
 // One artifact save, as a message refers to it. The server strips its own
