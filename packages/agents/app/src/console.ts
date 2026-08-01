@@ -64,6 +64,10 @@ const CAPS: Record<string, { label: string; icon: string; kind: string }> = {
   "make-doc": { label: "Docs", icon: "file-text", kind: "doc" },
   "make-sheet": { label: "Sheets", icon: "table", kind: "sheet" },
   "make-deck": { label: "Slides", icon: "image", kind: "deck" },
+  // No templates ship for a site yet, so this chip pins the skill and shows no
+  // "Start from" row — which is the honest state, not a gap: a site's starting
+  // point is a sentence about what it is for, and the composer is right there.
+  "make-site": { label: "Site", icon: "globe", kind: "site" },
 };
 const capLabel = (name: string) => CAPS[name]?.label ?? name;
 // The fallback for a skill this table does not know, and it has to be a name

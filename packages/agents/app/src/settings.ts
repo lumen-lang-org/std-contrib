@@ -17,6 +17,7 @@
 // that product.
 
 import { LitElement, css, html } from "lit";
+import "./mcp-gallery.js";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   AgentFull, AgentRow, ModelChoiceRow, ModelConfigRow, ModelRouterRow, ModelRow, PromptRow,
@@ -1640,6 +1641,24 @@ export class ConsoleSettings extends LitElement {
 
   // --- MCP servers --------------------------------------------------------------------
 
+  /* The gallery announces, this performs — the same split the model picker
+     uses. Keeping the POST here means adding from a card and adding by hand
+     converge on one code path, so a server row has one writer however it was
+     created. `act` already refreshes the lists and surfaces a refusal. */
+  private addFromGallery(ask: {
+    serverName: string; transport: string; endpoint: string;
+    authKind: string; authHeader: string; enabled: boolean;
+  }) {
+    // A name collision is the one thing the shelf can cause that the form
+    // cannot: two people adding "github" from the same card. Suffixed rather
+    // than refused, because the person's intent is unambiguous.
+    const taken = new Set(this.servers.map((s) => s.serverName));
+    let name = ask.serverName;
+    let n = 2;
+    while (taken.has(name)) { name = ask.serverName + "-" + String(n); n = n + 1; }
+    void this.act(() => createServer({ ...NEW_SERVER, ...ask, serverName: name }));
+  }
+
   private mcpTab() {
     const v = this.view;
     if (v.kind === "server") return this.serverForm(v.row, v.fresh);
@@ -1651,6 +1670,15 @@ export class ConsoleSettings extends LitElement {
           <nr-icon name="plus" size="small"></nr-icon> New server
         </button>
       </div>
+
+      <!-- The shelf first, the list second. Someone opening this tab with no
+           servers configured is asking "what can I connect?", and a form is
+           the wrong answer to that question; someone who already has servers
+           scrolls past a row of cards they have seen before. -->
+      ${this.group("Add from the gallery")}
+      <mcp-gallery
+        .taken=${this.servers.map((s) => s.endpoint)}
+        @add-server=${(e: CustomEvent) => this.addFromGallery(e.detail)}></mcp-gallery>
 
       ${this.group("Servers", this.servers.length)}
       <table><tbody>
