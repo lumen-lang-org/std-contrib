@@ -427,6 +427,12 @@ export class ChatSession {
   // first is still running meant each of those two, and answering both on
   // whatever the picker last showed would be a different conversation.
   private pending: { id: string; said: string; choiceId: string }[] = [];
+  /* The exact text a slash pick wrote into the composer, so the next send can
+     take that and only that back off the front. Set by the console when a
+     skill is chosen from the slash menu, cleared by the send that consumes it
+     — and by any send at all, because a person who deleted it by hand should
+     not have the next message trimmed. */
+  slashPrefix = "";
   private live: LiveStep[] = [];
   private thoughts: Thought[] = [];
   private polling = 0;
@@ -567,7 +573,22 @@ export class ChatSession {
   // marked as waiting, and is sent when the turn in front of it ends. The
   // order the questions were asked in is the order they are answered in.
   async sendMessage(text: string): Promise<void> {
-    const said = text.trim();
+    // Take the slash command back out.
+    //
+    // Picking one writes "/make-sheet " into the composer so you can see what
+    // you chose — the skill is pinned, but a pin with nothing in the box reads
+    // as nothing having happened. What it must not do is travel: the model is
+    // told which skill to run through the pin, and "/make-sheet write me a
+    // budget" would put a command in the transcript as if it were English.
+    //
+    // Exactly what was inserted and nothing else. Not a pattern for
+    // slash-words in general — a message that opens "/etc/hosts is missing" is
+    // a sentence, and a rule loose enough to eat this one would eat that.
+    const asked = this.slashPrefix !== "" && text.startsWith(this.slashPrefix)
+      ? text.slice(this.slashPrefix.length)
+      : text;
+    this.slashPrefix = "";
+    const said = asked.trim();
     if (said === "") return;
 
     const waiting = this.state.isTyping;
