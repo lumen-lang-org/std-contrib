@@ -244,6 +244,21 @@
      overflow-y and not `overflow`, so the x rule above keeps its own comment
      and its own reason. */
   html, body { overflow-y: hidden; }
+  /* position: fixed, because on iOS the line above is a request, not a rule.
+
+     WebKit does not honour overflow: hidden on html or body for scrolling the
+     WINDOW — the layout viewport still pans under a drag, which is exactly the
+     gesture a person makes reading a conversation. Every other engine obeys
+     it, which is why the same build was fine in Firefox and wrong on the
+     phone: the lock below the shell was only locked where it was already
+     unnecessary.
+
+     A fixed body is the one thing iOS does honour. It takes the document out
+     of the panning system entirely: the layout viewport has nothing to
+     scroll, so the shell stays put and the regions inside it that scroll on
+     purpose keep doing so. inset: 0 with the measured height is the same
+     geometry the shell already had. */
+  body { position: fixed; inset: 0; width: 100%; }
   /* `html body`, not `body`, and the extra specificity is load-bearing.
      LumenJS writes its own <style> block into the shell AFTER this file
      (dev-server/index-html.ts), and that block sets `body { font-family:
@@ -373,6 +388,11 @@
     function apply() {
       queued = false;
       document.documentElement.style.setProperty("--app-h", vv.height + "px");
+      // iOS pans the visual viewport over the layout viewport when the
+      // toolbar collapses or the keyboard rises, and a fixed body does not
+      // bring it back. pageTop is that pan; a shell that measures its own
+      // height wants none of it.
+      if (window.scrollY > 0) { window.scrollTo(0, 0); }
     }
     function schedule() {
       if (queued) { return; }
