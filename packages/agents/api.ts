@@ -686,6 +686,15 @@ export function skillProblem(row: SkillRow): string {
     return "a featured skill must be public — featured is promotion, not access, and a featured private skill is a button most users cannot press";
   }
   if (row.featuredRank < 0) { return "featuredRank is 0 (not featured) or a positive position"; }
+  if (row.source != "local" && row.source != "repo") {
+    return "source is 'local' (written here) or 'repo' (a copy of one a repository owns)";
+  }
+  if (row.source == "repo" && row.sourceUrl.trim() == "") {
+    return "a skill from a repository has to say which one — sourceUrl is empty";
+  }
+  if (row.source == "local" && row.sourceUrl.trim() != "") {
+    return "a local skill has no sourceUrl — set source to 'repo' if it came from one";
+  }
   let named = scriptEnvNameProblem(row.skillName);
   if (named != "") { return "a skill name becomes a container path: " + named; }
   if (row.description.trim() == "") { return "a skill without a description cannot be chosen"; }
@@ -916,6 +925,16 @@ class SkillApi {
     let row: SkillRow = JSON.parse<SkillRow>(req.body);
     if (row.id != param(req, "id")) {
       return badRequest("the id in the body must match the path");
+    }
+    // A skill a repository owns is read here and changed there. Refused at the
+    // door and not merely hidden in the console: the console is one caller,
+    // and a rule that only one caller keeps is not a rule. What a person wants
+    // when they reach this is almost always their own copy, so the message
+    // says so rather than only saying no.
+    let before: SkillRow = JSON.parse<SkillRow>(findById(this.db, skillsMapping(), param(req, "id")));
+    if (before.source == "repo") {
+      return badRequest("this skill comes from " + before.sourceUrl
+        + " and is edited there; copy it to a local skill to change it here");
     }
     let named = skillProblem(row);
     if (named != "") { return badRequest(named); }

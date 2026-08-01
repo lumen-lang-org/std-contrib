@@ -1572,8 +1572,12 @@ export class ConsoleSettings extends LitElement {
             // private and unranked: a new skill is yours until you say
             // otherwise, and the featured row is a curated shelf rather than
             // wherever the newest skill happens to land.
+            // local with no sourceUrl: a skill made here is one this
+            // deployment owns and edits. The engine refuses the pair the other
+            // way round — a 'repo' skill has to say which repository.
             row: { id: "", skillName: "", description: "", body: "", updatedAt: "",
-                   visibility: "private", featuredRank: 0 } })}>
+                   visibility: "private", featuredRank: 0,
+                   source: "local", sourceUrl: "" } })}>
           <nr-icon name="plus" size="small"></nr-icon> New skill
         </button>
       </div>
