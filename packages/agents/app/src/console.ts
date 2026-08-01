@@ -1106,6 +1106,29 @@ export class AgentConsole extends LitElement {
     softenFocusRings(this.renderRoot);
     dressChat(this.renderRoot);
     void this.dock();
+    this.watchComposerKeys();
+  }
+
+  /* Enter, before the composer gets it.
+   *
+   * The slash menu has to answer Enter, and a `@keydown` on <nr-chatbot> is
+   * too late to: the component's own handler is bound to the contenteditable
+   * INSIDE its shadow root, and an event reaches the target's own listeners
+   * before it bubbles to the host. So with the menu open, Enter both chose a
+   * skill and sent what was typed — "/sheet" went to the model as a message,
+   * a real turn came back, and the empty home (with its Starting points bar)
+   * was correctly replaced by a conversation. What looked like a disappearing
+   * footer was a message nobody meant to send.
+   *
+   * Capture runs the other way, outermost first, so this sees Enter before the
+   * component does and can stop it there. Attached to the element rather than
+   * declared in the template because Lit's bindings are bubble-phase only.
+   * Idempotent: `updated` runs on every render, and addEventListener with the
+   * same function and phase is a no-op after the first. */
+  private watchComposerKeys() {
+    const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
+    if (chat === null) return;
+    chat.addEventListener("keydown", this.composerKey as EventListener, true);
   }
 
   /* The model picker, held by reference rather than looked up.
@@ -1439,6 +1462,9 @@ export class AgentConsole extends LitElement {
      what was typed, so a slash that was genuinely the start of a sentence can
      be carried on with. Everything else falls through to the component —
      stopping keys it needs is how a composer stops accepting text. */
+  /* Bound once, so the capture listener can be taken off again. */
+  private readonly composerKey = (e: KeyboardEvent) => { this.onComposerKey(e); };
+
   private onComposerKey(e: KeyboardEvent) {
     if (this.slash === null) return;
     if (e.key === "Escape") { this.slash = null; e.stopPropagation(); return; }
@@ -2018,7 +2044,6 @@ export class AgentConsole extends LitElement {
             @click=${(e: Event) => { void this.chipClick(e); }}
             @nr-dropdown-item-click=${(e: Event) => { void this.onAttachPick(e); }}
             @input=${() => { this.onComposerInput(); }}
-            @keydown=${(e: KeyboardEvent) => { this.onComposerKey(e); }}
             .controller=${this.session}
             .isBotTyping=${this.busy}
             .isQueryRunning=${this.busy}
