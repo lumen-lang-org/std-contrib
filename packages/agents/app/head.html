@@ -210,6 +210,21 @@
      row did exactly that. This is the backstop, not the fix: a wide region
      still needs its own overflow-x: auto. */
   html, body { overflow-x: hidden; }
+  /* And nothing may scroll the page DOWN either, which is the half that was
+     missing and the one a phone punishes.
+
+     The console is a fixed shell: the transcript scrolls, the rail scrolls,
+     the galleries scroll — the document never should. But only overflow-x was
+     held, so the page kept a vertical scroll of its own, and on iOS that is
+     exactly the gesture that slides the whole interface up under Safari's
+     toolbar. The composer went with it: you could type and not see what you
+     typed. Two rounds of safe-area padding could not reach this, because the
+     composer was not mis-positioned in the layout — the layout was being
+     scrolled out from under it.
+
+     overflow-y and not `overflow`, so the x rule above keeps its own comment
+     and its own reason. */
+  html, body { overflow-y: hidden; }
   /* `html body`, not `body`, and the extra specificity is load-bearing.
      LumenJS writes its own <style> block into the shell AFTER this file
      (dev-server/index-html.ts), and that block sets `body { font-family:
