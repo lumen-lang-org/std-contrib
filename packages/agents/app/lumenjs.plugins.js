@@ -136,6 +136,23 @@ const consoleViteConfig = {
         dedupe: ["lit", "lit-html", "lit-element", "@lit/reactive-element"],
       },
       server: {
+        // Where the HMR socket lives, and it needs a name of its own.
+        //
+        // Vite's default is the page's own origin at `/`, which through the
+        // gateway means a WebSocket upgrade on the root path — and the root is
+        // that vhost's catch-all, the engine behind an admin check. The
+        // handshake is refused, so a browser arriving over the tunnel logs
+        // "can't establish a connection to wss://…" and retries forever. The
+        // page works; the noise is permanent and hot reload never arrives at
+        // the one browser that is not on this machine.
+        //
+        // A distinct path is routable, and locations/agents.conf in the nuraly
+        // repo carries the matching block. Only the path is set here, never
+        // host or clientPort: Vite derives those from the page's own origin, so
+        // one setting serves the tunnel (wss://lumen-agents…/__vite_hmr) and a
+        // direct hit on the bridge address (ws://172.17.0.1:5173/__vite_hmr).
+        // Pin clientPort for the tunnel and the direct path breaks instead.
+        hmr: { path: "/__vite_hmr" },
         // Which address to listen on. Loopback unless an operator says otherwise,
         // which is what a laptop wants and what the firewall notes assume.
         //
