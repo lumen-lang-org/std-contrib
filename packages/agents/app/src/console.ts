@@ -18,7 +18,7 @@ import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
-  ServerRow, listServers, listSkills,
+  ServerRow, listServers, listSkills, copySkillLocally,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -84,7 +84,7 @@ const capLabel = (name: string) => CAPS[name]?.label ?? name;
    server, which has no such distinction yet. */
 type GalleryRow = {
   key: string; name: string; why: string; on: boolean; icon: string;
-  source: string;
+  source: string; id: string;
 };
 
 const capIcon = (name: string) => CAPS[name]?.icon ?? "tool";
@@ -624,6 +624,13 @@ export class AgentConsole extends LitElement {
                  background: var(--fill-1); border: 1px solid var(--border);
                  color: var(--muted); }
     .pick.on .pick-tile { color: var(--fg); }
+    .pick-act { align-self: flex-start; margin-top: 2px; font-size: 12.5px;
+                color: var(--muted); border: 1px solid var(--border);
+                border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+    .pick-act:hover { color: var(--fg); border-color: var(--muted);
+                      background: var(--bg-sunken); }
+    .pick-act:focus-visible { outline: 2px solid var(--focus);
+                              outline-offset: 2px; }
     .gallery-none { color: var(--muted); padding: 18px 16px; margin: 0; }
     .pick { display: flex; flex-direction: column; gap: 5px; text-align: left;
             padding: 12px; border: 1px solid var(--border); border-radius: 12px;
@@ -1338,10 +1345,10 @@ export class AgentConsole extends LitElement {
     const rows = skills
       ? this.allSkills.map((s) => ({ key: s.skillName, name: s.skillName,
           why: s.description, on: this.pinned === s.skillName,
-          icon: capIcon(s.skillName), source: s.source }))
+          icon: capIcon(s.skillName), source: s.source, id: s.id }))
       : this.servers.map((s) => ({ key: s.id, name: s.serverName === "" ? s.id : s.serverName,
           why: s.enabled ? s.endpoint : "Disabled · " + s.endpoint, on: false,
-          icon: serverIcon(s), source: "local" }));
+          icon: serverIcon(s), source: "local", id: s.id }));
     // Filtered on both halves, because half of what you remember about a skill
     // is what it does rather than what it is called — "spreadsheet" should
     // find make-sheet. Case-folded on one side only would fail every capital.
@@ -1419,8 +1426,36 @@ export class AgentConsole extends LitElement {
                     <span class="pick-name">${r.name}</span>
                   </span>
                   ${r.why === "" ? nothing : html`<span class="pick-why">${r.why}</span>`}
+                  <!-- The way out of read-only, on the card that is read-only
+                       rather than in a menu somewhere else. A nested button
+                       inside a button is invalid, so the card is the parent of
+                       a click this one stops: without stopPropagation, copying
+                       would also pin the original and close the gallery, which
+                       is two things nobody asked for. -->
+                  ${r.source !== "repo" ? nothing : html`
+                    <span class="pick-act"
+                      role="button" tabindex="0"
+                      title="Make your own editable copy"
+                      @click=${(e: Event) => { e.stopPropagation();
+                        void this.copyToLocal(r.id); }}
+                      @keydown=${(e: KeyboardEvent) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault(); e.stopPropagation();
+                        void this.copyToLocal(r.id); }}>Copy to local</span>`}
                 </button>`)}
             </div>`;
+  }
+
+  /* Take a copy of somebody else's skill, and show the result rather than
+     announcing it: the gallery reloads and the copy is in the Yours section,
+     which is the answer to "did that work" without a toast to dismiss. The
+     filter is cleared for the same reason — a copy that lands outside the
+     current filter would look like nothing happened. */
+  private async copyToLocal(id: string): Promise<void> {
+    const made = await copySkillLocally(id).catch(() => null);
+    if (made === null) return;
+    this.allSkills = await listSkills().catch(() => this.allSkills);
+    this.galleryFind = "";
   }
 
   /* The capability row: what this deployment can do, in the operator's order.

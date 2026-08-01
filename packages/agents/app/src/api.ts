@@ -928,6 +928,12 @@ export const listSkills = () => call<SkillRow[]>("/skills");
 // use_skill, so the next load sees the edit and nothing pins an old body.
 export const createSkill = (row: SkillRow) =>
   call<SkillRow>("/skills", { method: "POST", body: JSON.stringify(row) });
+
+/** Your own editable copy of a skill a repository owns. The engine picks the
+ *  name (the original's, suffixed) because it is the side that can see which
+ *  names are taken, and answers the row it made. */
+export const copySkillLocally = (id: string) =>
+  call<SkillRow>(`/skills/${encodeURIComponent(id)}/copy`, { method: "POST" });
 export const updateSkill = (row: SkillRow) =>
   call<SkillRow>(`/skills/${encodeURIComponent(row.id)}`,
     { method: "PUT", body: JSON.stringify(row) });
