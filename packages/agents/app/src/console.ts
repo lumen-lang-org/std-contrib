@@ -17,7 +17,7 @@ import "./model-picker.js";
 import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
-  listModels, listThreads, modelChoices, previewUrl, offerThread, remixThread, replayableThreads, startFromTemplate, templatePdf, templatesOfKind, whoami,
+  listModels, listThreads, modelChoices, previewUrl, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -440,6 +440,16 @@ export class AgentConsole extends LitElement {
                    font-size: 13px; padding: 6px 16px; cursor: pointer;
                    border: 1px solid var(--border); border-radius: 999px;
                    background: var(--bg-card); color: var(--fg); }
+    .offer-acts { display: flex; gap: 8px; margin-top: 6px; }
+    .offer-open { font: inherit; font-size: 13px; padding: 6px 16px; cursor: pointer;
+                  border: 0; border-radius: 999px; background: var(--accent);
+                  color: var(--accent-fg); }
+    .offer-open:hover { background: var(--accent-hover); }
+    /* The banner that stands where the composer would be. */
+    .borrowed { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+                max-width: 768px; margin: 0 auto 14px; padding: 12px 16px;
+                border: 1px solid var(--border); border-radius: 12px;
+                background: var(--bg-rail); color: var(--muted); font-size: 13.5px; }
     .offer-remix:hover { background: var(--bg-user); border-color: var(--muted); }
     .caps { min-height: 49px; box-sizing: content-box; }
     .caps { display: flex; gap: 4px; padding: 14px 18px 0; max-width: 768px;
@@ -585,6 +595,10 @@ export class AgentConsole extends LitElement {
   @state() private view: "chat" | "knowledge" | "canvas" | "starts" = "chat";
   /* What other people have offered, loaded when the page opens. */
   @state() private offers: ThreadListing[] = [];
+  /* False while reading a conversation somebody else offered. The engine
+     decides this — the console never sees an owner tag — and it is what
+     swaps the composer for a Remix banner. */
+  @state() private mine = true;
   // Who the front door says is calling. Null where nothing authenticates, which
   // is the community edition and is not the same as holding no roles.
   @state() private me: Me | null = null;
@@ -833,7 +847,15 @@ export class AgentConsole extends LitElement {
     this.railClosed = false;
     const found = this.threads.find((t) => t.id === id);
     if (found) this.agentId = found.agentId;
+    // A conversation in your own rail is yours; one opened from Starting points
+    // is not in that list, and the engine says so on the transcript. Assume
+    // yours when it IS in the rail so the composer never flickers away on a
+    // conversation you own.
+    this.mine = found !== undefined;
     await this.session.open(id);
+    if (found === undefined) {
+      this.mine = await transcript(id).then((t) => t.mine !== false).catch(() => true);
+    }
     // The conversation's memory of the last override becomes what the composer
     // shows, so reopening one keeps answering with what you last chose there.
     // Read from the session rather than pushed by it: the follower re-opens a
@@ -1041,9 +1063,17 @@ export class AgentConsole extends LitElement {
                        naming call never landed still has to read as something. -->
                   <div class="offer-name">${o.title === "" ? "Untitled conversation" : o.title}</div>
                   <div class="offer-meta">${o.agentId}</div>
-                  <button class="offer-remix" @click=${() => { void this.remix(o.id); }}>
-                    Remix
-                  </button>
+                  <div class="offer-acts">
+                    <!-- Open reads it; Remix copies it. Both, because choosing
+                         a starting point without looking at it first is
+                         choosing by its title alone. -->
+                    <button class="offer-open" @click=${() => { void this.openOffered(o.id); }}>
+                      Open
+                    </button>
+                    <button class="offer-remix" @click=${() => { void this.remix(o.id); }}>
+                      Remix
+                    </button>
+                  </div>
                 </div>`)}
             </div>`}
       </div>`;
@@ -1053,6 +1083,16 @@ export class AgentConsole extends LitElement {
     this.view = "starts";
     this.nav = false;
     this.offers = await replayableThreads().catch(() => []);
+  }
+
+  /* Read somebody else's starting point. The same conversation route as any
+     other — the engine allows the read because the conversation is offered —
+     so the transcript, its cards and its files all draw exactly as they would
+     for its owner. What differs is that `mine` comes back false, and the
+     composer is replaced by the banner that offers a copy. */
+  private async openOffered(id: string): Promise<void> {
+    this.view = "chat";
+    await this.open(id);
   }
 
   /* A remix lands you IN the copy. Anything else — a toast, a row appearing in
@@ -1276,6 +1316,18 @@ export class AgentConsole extends LitElement {
                empty state centered in a 768px column, the composer joined
                beneath it at the page's upper third, chips underneath — and
                the ordinary bottom-pinned layout the moment messages exist. -->
+          ${this.mine ? nothing : html`
+            <!-- Somebody else's starting point. No composer: a message sent
+                 here would be refused by the engine (every write still goes
+                 through ownership), and a control that cannot work is worse
+                 than one that is not drawn. The way to continue is a copy. -->
+            <div class="borrowed">
+              <span>You are reading a conversation somebody offered as a starting
+                point. Remix it to continue in one of your own.</span>
+              <button class="offer-remix" @click=${() => { void this.remix(this.threadId); }}>
+                Remix
+              </button>
+            </div>`}
           <nr-chatbot class=${this.session.getState().messages.length > 0 ? "talking" : ""}
             @click=${(e: Event) => { void this.chipClick(e); }}
             .controller=${this.session}

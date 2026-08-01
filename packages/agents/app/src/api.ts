@@ -538,6 +538,9 @@ export const openThread = (agentId: string) =>
 export type Transcript = {
   modelChoiceId: string;
   messages: TranscriptTurn[];
+  /** Whether this conversation is the caller's. False for one somebody
+   *  else offered as a starting point — readable, never writable. */
+  mine?: boolean;
 };
 
 export const transcript = (id: string) =>

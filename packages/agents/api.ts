@@ -44,7 +44,7 @@ import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trac
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw} from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread} from "./threads.ts";
+import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
@@ -2509,9 +2509,18 @@ class ThreadApi {
   // person who typed it is noise rather than a name.
   @get("/:id")
   transcript(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+    // `readableThread`, not `ownedThread`: a conversation somebody offered as a
+    // starting point can be READ by anyone, which is what makes a Starting
+    // point openable rather than only remixable. Every write to a thread still
+    // goes through `ownedThread` — the two are separate functions precisely so
+    // that widening reading cannot widen writing by accident.
+    if (readableThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
+    // Whose it is, so the console knows whether to draw a composer or a Remix
+    // button. Computed here because the client cannot: it never sees an owner
+    // tag, deliberately.
+    let mine = ownedThread(this.db, param(req, "id"), callerTags(req)) != "";
     let said: ThreadTurnRow[] = threadMessageRows(this.db, param(req, "id"));
     let out = "[";
     let i: int = 0;
@@ -2540,6 +2549,7 @@ class ThreadApi {
     }
     return ok("{\"modelChoiceId\":" + JSON.stringify(threadChoice(this.db, param(req, "id")))
       + ",\"title\":" + JSON.stringify(threadTitle(this.db, param(req, "id")))
+      + ",\"mine\":" + (mine ? "true" : "false")
       + ",\"messages\":" + out + "]}");
   }
 }
