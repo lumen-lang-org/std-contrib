@@ -54,7 +54,7 @@ import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMappin
 import { scriptEnvNameProblem } from "./run-script.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "./office-render.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
-import { envPlan, envDockerUp } from "./environments.ts";
+import { EnvSweep, ENV_IDLE_MS, envPlan, envDockerUp, envIdle } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
@@ -4175,21 +4175,64 @@ function stamp(): string {
 // — hence the try around the whole body rather than in the caller. And it
 // opens its own connection: two threads taking turns on one handle interleave
 // on the wire.
+//
+// `idleMs` of 0 means the thread half is off — the operator named no age — and
+// only the environment half runs. That split matters: deleting a conversation
+// row is destructive and stays opt-in, while stopping an idle container is
+// not, so the second must not be held hostage to the first. Wiring them
+// together is what kept envIdle uncalled on every deployment there has ever
+// been, since AGENTS_SWEEP_IDLE_MS has never been set on any of them.
 function sweepLoop(idleMs: int): int {
   try {
     let db = openDatabase();
+    // How long to wait between passes. The thread sweep's own age when it is
+    // on (an operator who says "an hour" wants an hour), the environment
+    // deadline when it is not — waiting a day to look for a fifteen-minute
+    // idle container would make the deadline a fiction.
+    let every = idleMs > 0 ? idleMs : ENV_IDLE_MS;
     while (true) {
       // Before the wait, so a process that is OOM-recycled hourly still sweeps
       // — with the wait first it never would.
-      try { sweepEmptyThreads(db, `${Date.now() - idleMs}`); }
-      catch (e) { console.error("thread sweep: " + e.message); }
-      process.sleep(idleMs);
+      if (idleMs > 0) {
+        try { sweepEmptyThreads(db, `${Date.now() - idleMs}`); }
+        catch (e) { console.error("thread sweep: " + e.message); }
+      }
+      try { sweepIdleEnvironments(db); }
+      catch (e) { console.error("environment sweep: " + e.message); }
+      process.sleep(every);
     }
   } catch (e) {
     // Only reachable from the connect: a box that cannot be swept still serves.
     console.error("thread sweep: no connection of its own — " + e.message);
   }
   return 0;
+}
+
+// Stop the containers nobody is using.
+//
+// envIdle has existed, tested and documented, since environments shipped — and
+// nothing called it. The consequence is visible in `docker ps`: a conversation
+// that ran one script left its container up, and two of them had been running
+// for forty-two hours against conversations abandoned two days earlier. Each
+// holds an image version alive as well, so a rebuilt image cannot be reclaimed
+// while a container from the old one is still standing.
+//
+// Stopped, not removed. The row stays and the container stays recreatable, so
+// the next use of that environment is a start rather than a fresh image pull
+// and a new workspace — envEnsure already sorts out which of the two the truth
+// requires. Removal belongs to envForget, which is what deleting a
+// conversation does.
+//
+// It rides the thread sweep's loop rather than taking a thread of its own: one
+// background thread with two jobs is one connection and one place to look. But
+// its deadline is its OWN — ENV_IDLE_MS, fifteen minutes — because how long an
+// abandoned CONVERSATION should live and how long an idle CONTAINER should
+// hold memory are unrelated questions, and an operator who sets the thread
+// sweep to a day did not ask for day-old containers.
+function sweepIdleEnvironments(db: Db): void {
+  let s: EnvSweep = { now: `${Date.now()}`, idleMs: ENV_IDLE_MS };
+  let stopped = envIdle(db, s);
+  if (stopped > 0) { console.log(`stopped ${stopped} idle environment(s)`); }
 }
 
 function openDatabase(): Db {
@@ -4357,8 +4400,12 @@ function main(): void {
   let sweepIdle = sweepIdleMs(process.env("AGENTS_SWEEP_IDLE_MS") ?? "");
   if (sweepIdle > 0) {
     console.log(`sweeping threads that have been empty for ${sweepIdle}ms`);
-    Worker.run(() => sweepLoop(sweepIdle));
   }
+  // Started either way now. The thread half still needs the operator's age and
+  // stays off without it; the environment half is not destructive and runs on
+  // every deployment, which is the whole point — it never ran on any of them.
+  console.log(`stopping environments idle for ${ENV_IDLE_MS}ms`);
+  Worker.run(() => sweepLoop(sweepIdle));
 
   // Nineteen controllers, handed over whole. Each one is read for its own
   // `@controller` and its methods bound (specs 477/478), so there is no table
