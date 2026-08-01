@@ -943,6 +943,73 @@ class SkillApi {
     return ok(findById(this.db, skillsMapping(), param(req, "id")));
   }
 
+  // Your own copy of a skill a repository owns.
+  //
+  // The other half of read-only, and without it 'repo' is a one-way door: the
+  // update route refuses the write and there is nothing else to do, so a
+  // person who wants to change one word has no move at all. This is the move.
+  //
+  // A new name, not the same one. use_skill resolves by name against the
+  // agent's attached skills and takes the first match, so two rows sharing a
+  // name attached to one agent is a coin toss over which body answers —
+  // "-local" says where this one came from and the suffix keeps counting if
+  // that is taken too.
+  //
+  // Private and unfeatured whatever the original was: featuring is the
+  // operator's curation of a shelf, and a copy quietly inheriting a place on
+  // it would promote something nobody chose to promote. Files come across,
+  // because a skill whose body says "run report.py" and whose report.py did
+  // not follow is a copy that cannot do the thing it describes.
+  @post("/:id/copy")
+  copyLocal(req: Request): Reply {
+    let held = findById(this.db, skillsMapping(), param(req, "id"));
+    if (held == "") { return notFound("skill " + param(req, "id")); }
+    let from: SkillRow = JSON.parse<SkillRow>(held);
+    if (from.source != "repo") {
+      return badRequest("this skill is already yours to edit — copying it would only make a second name for the same instructions");
+    }
+    let base = from.skillName + "-local";
+    let name = base;
+    let n: int = 2;
+    while (countWhere(this.db, skillsMapping(), "skill_name = " + placeholderAt(this.db, 1), [name]) > 0) {
+      name = base + "-" + `${n}`;
+      n = n + 1;
+    }
+    let made: SkillRow = {
+      id: crypto.randomUUID(),
+      skillName: name,
+      description: from.description,
+      body: from.body,
+      updatedAt: `${Date.now()}`,
+      visibility: "private",
+      featuredRank: 0,
+      source: "local",
+      sourceUrl: "",
+    };
+    let written = persist(this.db, skillsMapping(), JSON.stringify(made));
+    if (!written.ok) { return badRequest(written.error); }
+    // Read here rather than through tools.ts's skillFiles: this module does
+    // not import that one, and reaching for a helper across that line to save
+    // three statements is how a cycle starts.
+    let listed = listWhere(this.db, skillFilesMapping(),
+      "skill_id = " + placeholderAt(this.db, 1), [from.id]);
+    let files: SkillFileRow[] = listed == "" || listed == "[]"
+      ? [] : JSON.parse<SkillFileRow[]>(listed);
+    let f: int = 0;
+    while (f < files.length) {
+      let copy: SkillFileRow = {
+        id: crypto.randomUUID(),
+        skillId: made.id,
+        path: files[f].path,
+        body: files[f].body,
+      };
+      let fileWritten = persist(this.db, skillFilesMapping(), JSON.stringify(copy));
+      if (!fileWritten.ok) { return badRequest(fileWritten.error); }
+      f = f + 1;
+    }
+    return created(findById(this.db, skillsMapping(), made.id));
+  }
+
   // Deleting a skill clears its links and files in the same route: there is
   // no fallback for a dangling link the way a script image has a deployment
   // default — it would just be a skill the console shows attached that the
