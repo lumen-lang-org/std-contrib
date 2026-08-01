@@ -264,7 +264,11 @@ export class AgentConsole extends LitElement {
                bottom: calc(12px + env(safe-area-inset-bottom, 0px));
                align-items: center; justify-content: space-between;
                gap: 10px; padding: 9px 14px; border-radius: 14px;
-               border: 1px solid var(--border); background: var(--bg-card);
+               /* Outline only. A filled bar reads as a card sitting on the
+                  page — one more surface at the bottom of a screen whose whole
+                  point is that it is empty. The border is enough to say the
+                  whole row is one target. */
+               border: 1px solid var(--border); background: none;
                color: var(--muted); font: inherit; font-size: 14px;
                cursor: pointer; text-align: left;
                transition: background-color .15s cubic-bezier(.23,1,.32,1); }

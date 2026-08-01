@@ -69,6 +69,17 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env.CONSOLE_URL ?? `http://127.0.0.1:${PORT}`,
+    // A signed-in run, for a CONSOLE_URL that points at a deployment behind a
+    // gateway. Unset — every local run — this is undefined and Playwright
+    // starts each context with no cookies, exactly as before.
+    //
+    // It exists because a console reached through its real hostname is the
+    // only place several classes of bug are visible at all: a module path the
+    // gateway does not route, a WebSocket it will not upgrade, a cookie that
+    // never arrives. Those all passed locally while the site was broken. The
+    // file is a Playwright storage state, so `npx playwright open` can write
+    // one by signing in by hand — nothing here mints or holds a credential.
+    storageState: process.env.CONSOLE_STORAGE,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     // A recording per test, so a reviewer can watch what was actually checked
