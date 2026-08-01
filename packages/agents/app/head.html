@@ -259,6 +259,18 @@
      purpose keep doing so. inset: 0 with the measured height is the same
      geometry the shell already had. */
   body { position: fixed; inset: 0; width: 100%; }
+  /* And the min-height the framework adds back, taken off. LumenJS's own
+     style block lands AFTER this file and says `body { min-height: 100vh }`.
+     On iOS, 100vh is the LARGE viewport — the height with the toolbar hidden
+     — so that one line forces the body taller than what is visible whenever
+     the toolbar shows, and the composer at the body's bottom edge goes with
+     it, below the fold. It is also why the bug arrived "after hydration":
+     that stylesheet ships with the client bundle, so the SSR paint was the
+     right height and the hydrated page grew past it. Firefox's 100vh is its
+     real viewport, which is why the same build was fine there.
+     `html body` (0,0,2) outweighs their bare `body` (0,0,1), so order stops
+     mattering — the same trick, for the same reason, as the font rule below. */
+  html body { min-height: 0; }
   /* `html body`, not `body`, and the extra specificity is load-bearing.
      LumenJS writes its own <style> block into the shell AFTER this file
      (dev-server/index-html.ts), and that block sets `body { font-family:
@@ -403,6 +415,50 @@
     vv.addEventListener("scroll", schedule);
     window.addEventListener("orientationchange", schedule);
     apply();
+
+    // The debug readout, on ?hud=1 only. Five fixes for the phone composer
+    // were built on inference because no measurement from a real device ever
+    // existed — headless WebKit has no toolbar and cannot be wrong the way a
+    // phone is. This is the measurement: what the device says about itself,
+    // on the screen a person can photograph. It costs nothing to anyone who
+    // does not ask for it.
+    if (/[?&]hud=1/.test(location.search)) {
+      var hud = document.createElement("pre");
+      hud.style.cssText = "position:fixed;top:60px;left:8px;z-index:99999;"
+        + "background:rgba(0,0,0,.82);color:#7CFC9A;font:11px/1.5 monospace;"
+        + "padding:8px 10px;border-radius:8px;margin:0;pointer-events:none;";
+      document.addEventListener("DOMContentLoaded", function () {
+        document.body.appendChild(hud);
+      });
+      var deep = function (root, tag, d) {
+        if (d > 6) return null;
+        var all = root.querySelectorAll("*");
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].tagName.toLowerCase() === tag) return all[i];
+          if (all[i].shadowRoot) {
+            var hit = deep(all[i].shadowRoot, tag, d + 1);
+            if (hit) return hit;
+          }
+        }
+        return null;
+      };
+      setInterval(function () {
+        var chat = deep(document, "nr-chatbot", 0);
+        var box = chat && chat.shadowRoot
+          ? chat.shadowRoot.querySelector(".input-box") : null;
+        var b = box ? Math.round(box.getBoundingClientRect().bottom) : -1;
+        var bodyH = Math.round(document.body.getBoundingClientRect().height);
+        hud.textContent =
+          "vv.h      " + Math.round(vv.height)
+          + "\nvv.pageTop " + Math.round(vv.pageTop)
+          + "\ninnerH    " + innerHeight
+          + "\nscrollY   " + Math.round(window.scrollY)
+          + "\nbody.h    " + bodyH
+          + "\ndoc.sh    " + document.scrollingElement.scrollHeight
+          + "\ninput.btm " + b
+          + "\nclipped   " + (b > vv.height ? "YES by " + (b - Math.round(vv.height)) : "no");
+      }, 500);
+    }
   })();
 </script>
 
