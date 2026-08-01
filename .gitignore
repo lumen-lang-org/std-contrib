@@ -45,7 +45,11 @@ mig
 # are the same artifact — `lumen compile` cannot overwrite a running binary, so
 # the deploy loop moves the old one aside as api.prev-<stamp> and each is
 # 40-60MB of build output.
-/packages/agents/api.prev-*
+# Every set-aside copy of the engine binary, whatever the deploy loop called
+# it that day — prev-, stage-, anything. One pattern, so the next name is
+# covered too; api.stage-* reached a push at 60MB because the rule named
+# only prev-.
+/packages/agents/api.[a-z]*-*
 /packages/agents/indexer
 # Stray compiler output from a bare `lumen compile` in the repo root.
 /unk
