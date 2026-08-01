@@ -92,6 +92,10 @@ type GalleryRow = {
    page. Past it, keep typing — that is what the filter is for. */
 const SLASH_ROWS = 6;
 
+/* The skill the globe switches on. A name and not an id: the globe is a switch
+   on a capability, and pin() speaks names. */
+const SEARCH_SKILL = "search-web";
+
 const capIcon = (name: string) => CAPS[name]?.icon ?? "tool";
 const capKind = (name: string) => CAPS[name]?.kind ?? "";
 
@@ -994,6 +998,16 @@ export class AgentConsole extends LitElement {
     // with no servers should not have one, and finding that out after the menu
     // is open is too late.
     this.servers = await listServers().catch(() => []);
+    // The whole skill list, at startup rather than on first use.
+    //
+    // It was lazy — fetched when the gallery or the slash menu first opened —
+    // and that was fine until something had to know about a skill BEFORE
+    // anyone asked: the composer's globe appears only where search-web
+    // exists, and a list that arrives after the composer is drawn means a
+    // control that is simply missing. search-web is not featured, so the
+    // capability list does not carry it either. One small call at boot buys
+    // the answer for every reader of it.
+    this.allSkills = await listSkills().catch(() => []);
     // The run says what it is doing while it is doing it. Held here so the
     // card re-renders; the session owns the list and never rebuilds it.
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
@@ -1167,6 +1181,16 @@ export class AgentConsole extends LitElement {
    *   still push the send button 8px left on every deployment that offers no
    *   choices. */
   private async dock(): Promise<void> {
+    // The globe first, and outside the guard below: whether the operator has
+    // curated a model menu has nothing to do with whether this deployment can
+    // search, and hanging one on the other is how a control goes missing for
+    // reasons nobody can see.
+    const chatEl = this.renderRoot.querySelector("nr-chatbot") as
+      (Element & { updateComplete?: Promise<unknown> }) | null;
+    if (chatEl !== null) {
+      await chatEl.updateComplete;
+      this.dockSearch(chatEl);
+    }
     if (this.choices.length === 0) { return; }
     if (this.picker === null) {
       this.picker = this.renderRoot.querySelector("model-picker");
@@ -1185,6 +1209,92 @@ export class AgentConsole extends LitElement {
     // put it during the server render, which is under the conversation rather
     // than in the composer.
     picker.setAttribute("docked", "");
+  }
+
+  /* The globe, beside the + in the composer.
+   *
+   * Docked the way the model picker is, and for the same reason: the row it
+   * belongs in is drawn inside nr-chatbot's shadow root, so a control that
+   * belongs beside the + has to be moved there — nothing written in this
+   * component's template can render into that row.
+   *
+   * It is a switch on one skill rather than a mode of its own. Search IS a
+   * skill here, so turning it on is pinning search-web and turning it off is
+   * unpinning it; a second mechanism that meant the same thing would be a
+   * second thing to keep in step. That also means the state survives being
+   * set from anywhere else — the slash menu, the gallery, the chips — because
+   * there is only one piece of state.
+   *
+   * Absent when the deployment has no search skill. A globe that turns nothing
+   * on is worse than no globe.
+   */
+  private dockSearch(chat: Element & { updateComplete?: Promise<unknown> }) {
+    if (!this.hasSearchSkill()) return;
+    const left = chat.shadowRoot?.querySelector(".action-buttons-left") ?? null;
+    if (left === null) return;
+    let globe = left.querySelector(".joule-search") as HTMLElement | null;
+    if (globe === null) {
+      globe = document.createElement("button");
+      globe.className = "joule-search";
+      // setAttribute, not .type: the variable is an HTMLElement (the query
+      // above cannot know it found a button), and a cast for one attribute is
+      // noise where an attribute call says the same thing.
+      globe.setAttribute("type", "button");
+      globe.innerHTML =
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" '
+        + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+        + 'stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle>'
+        + '<path d="M2 12h20"></path>'
+        + '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 '
+        + '15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+      // The mark is inline SVG and not <nr-icon>, which the rest of this
+      // console uses without exception. The reason is the boundary: this
+      // element is adopted into another component's shadow root, and a custom
+      // element moved there still resolves — but its styling reaches for
+      // tokens through a tree it no longer sits in, and the icon came out at
+      // the wrong size with no colour. A path has no such dependency.
+      globe.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.pin(SEARCH_SKILL);
+      });
+      left.appendChild(globe);
+      this.styleSearchGlobe(chat);
+    }
+    const on = this.pinned === SEARCH_SKILL;
+    globe.setAttribute("aria-pressed", on ? "true" : "false");
+    globe.title = on ? "Web search is on" : "Search the web";
+    globe.classList.toggle("on", on);
+  }
+
+  private hasSearchSkill(): boolean {
+    return this.capabilities.some((s) => s.skillName === SEARCH_SKILL)
+      || this.allSkills.some((s) => s.skillName === SEARCH_SKILL);
+  }
+
+  /* One stylesheet, adopted into the composer's root once. The button lives in
+     nr-chatbot's shadow tree, so this component's own styles do not reach it;
+     adopting is the supported way in, and the guard keeps a re-render from
+     stacking copies. */
+  private styleSearchGlobe(chat: Element) {
+    const root = chat.shadowRoot;
+    if (root === null || root === undefined) return;
+    const already = (root as ShadowRoot & { jouleSearchStyled?: boolean });
+    if (already.jouleSearchStyled === true) return;
+    already.jouleSearchStyled = true;
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(`
+      .joule-search { display: inline-grid; place-items: center;
+        width: 28px; height: 28px; margin-left: 2px; padding: 0;
+        border: 0; border-radius: 999px; background: none; cursor: pointer;
+        color: var(--nuraly-chatbot-placeholder, rgba(0,0,0,.45));
+        transition: background-color .15s ease, color .15s ease; }
+      .joule-search:hover { color: var(--nuraly-chatbot-brand-fg, #17171A);
+        background: var(--bg-sunken, rgba(0,0,0,.05)); }
+      .joule-search.on { color: var(--focus, #2563EB);
+        background: var(--bg-user, rgba(37,99,235,.10)); }
+    `);
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
   }
 
   private unlisten: (() => void) | null = null;
