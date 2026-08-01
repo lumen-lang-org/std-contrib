@@ -23,11 +23,33 @@ const PHONE = { width: 390, height: 844 };
 // is idempotent — offering an already-offered thread is the same PUT — so a
 // second run adds nothing and the fixture leaves one row rather than a pile.
 //
-// It does not un-offer afterwards. What it offers is a thread it created
-// itself, so nothing that existed before the run is changed, and a `finally`
-// that tidied up would not run on a killed run anyway (see the fixture note in
-// CLAUDE.md). Repair at the start beats restore at the end.
+// It repairs before it seeds, and that is not belt-and-braces — it is the only
+// half that works. This fixture ran once against a live deployment and left an
+// empty conversation on its Starting points page, where an empty conversation
+// is not a bad starting point but a broken feature: you open it and there is
+// nothing there. A `finally` does not run when a run is killed, so tidying up
+// at the end cannot be what keeps that from happening again.
+//
+// The repair is "un-offer every offer with no messages", because that is
+// exactly the shape this fixture leaves behind and there is no way to label a
+// thread as the fixture's (the engine exposes no rename). It is also the right
+// rule on its own terms: an offered conversation with nothing in it is one
+// nobody can start from, whoever left it there.
+async function clearEmptyOffers(page: Page): Promise<void> {
+  const offers = (await page.request.get("/api/threads/replayable")
+    .then((r) => r.json())) as { id: string }[];
+  if (!Array.isArray(offers)) return;
+  for (const o of offers) {
+    const t = (await page.request.get(`/api/threads/${o.id}`)
+      .then((r) => r.json())) as { messages?: unknown[] };
+    if (Array.isArray(t.messages) && t.messages.length > 0) continue;
+    await page.request.put(`/api/threads/${o.id}/replayable`,
+      { data: { replayable: false } });
+  }
+}
+
 async function seedOffer(page: Page): Promise<string | null> {
+  await clearEmptyOffers(page);
   const agents = (await page.request.get("/api/agents").then((r) => r.json())) as
     { id: string }[];
   if (!Array.isArray(agents) || agents.length === 0) return null;
@@ -73,6 +95,12 @@ test.describe("starting points", () => {
     await expect(startsPage(page).locator(".offer")).not.toHaveCount(0);
     await expect(startsPage(page).locator(".offer").first()
       .getByRole("button", { name: "Remix" })).toBeVisible();
+
+    // Put it back on the way out too. The repair above is what makes this
+    // safe to rely on rather than necessary — between them, a completed run
+    // leaves nothing and a killed one is cleaned up by the next.
+    await page.request.put(`/api/threads/${seeded!}/replayable`,
+      { data: { replayable: false } });
   });
 
   test.describe("on a phone", () => {
