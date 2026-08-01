@@ -49,6 +49,14 @@ function seeded(): void {
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
+  // The skills trio as well. `forgetMigrations` makes the whole plan pending
+  // again, so a table left standing means 77 and 78 re-add a column that is
+  // already there, SQLite refuses, and the plan STOPS — every migration after
+  // it silently never runs. That was survivable while the columns these rows
+  // are persisted with all arrived before 77; 82 and 86 arrive after it.
+  execute(database, "DROP TABLE IF EXISTS agent_skills");
+  execute(database, "DROP TABLE IF EXISTS skill_files");
+  execute(database, "DROP TABLE IF EXISTS skills");
   dropTable(database, credentialsMapping());
   dropTable(database, agentsMapping());
   dropTable(database, mcpServersMapping());
@@ -59,7 +67,7 @@ function seeded(): void {
 
   let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(database, modelsMapping(), JSON.stringify(m));
-  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "" };
+  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));
   let p: PromptRow = { id: "p1", promptName: "terse", version: 1, body: "Be brief.", createdAt: "t" };
   persist(database, promptsMapping(), JSON.stringify(p));
@@ -143,7 +151,7 @@ test("a cycle is named, not descended into", () => {
   delegates("a2", "a1");
 
   let above: string[] = ["a1"];
-  let child = runAgentAt(database, "a2", "anything", testKey(), { depth: 1, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), baseSeq: TURN_SEQ_NONE });
+  let child = runAgentAt(database, "a2", "anything", testKey(), { depth: 1, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), modelConfigId: "", baseSeq: TURN_SEQ_NONE });
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
   expect(child.notes[0].indexOf("already in this chain") >= 0);
@@ -173,7 +181,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
   delegates("a1", "a2");
 
   let above: string[] = ["x1", "x2", "x3"];
-  let deep = runAgentAt(database, "a1", "anything", testKey(), { depth: 3, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), baseSeq: TURN_SEQ_NONE });
+  let deep = runAgentAt(database, "a1", "anything", testKey(), { depth: 3, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), modelConfigId: "", baseSeq: TURN_SEQ_NONE });
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
   // It still reached the provider — the run happened.

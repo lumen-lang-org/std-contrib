@@ -137,6 +137,31 @@ test("the zero-match refusal names a whitespace near miss when one exists", () =
   expect(done.problem.indexOf("line 2") >= 0);
 });
 
+test("a miss that is only backslash escaping is named as exactly that, in both directions", () => {
+  // The body holds a Windows path as JSON does: two characters per
+  // backslash. A model that unescapes once sends one, and one that escapes
+  // once more sends four — the live loop that reverted a user's path was a
+  // model alternating between those two guesses, told only "matches
+  // nothing" each time.
+  seeded("{\n  \"UserConfigId\": \"D:\\\\Fo2pdf\\\\config\\\\USERCONFIG.XML\"\n}\n");
+  let unescaped = editArtifact(database, edit("\"D:\\Fo2pdf\\config\\USERCONFIG.XML\"", "\"c:/fop/userconfig.xml\""));
+  expect(!unescaped.ok);
+  expect(unescaped.problem.indexOf("backslash escaping") >= 0);
+  expect(unescaped.problem.indexOf("MORE backslashes") >= 0);
+  expect(unescaped.problem.indexOf("line 2") >= 0);
+
+  let overescaped = editArtifact(database, edit("\"D:\\\\\\\\Fo2pdf\\\\\\\\config\\\\\\\\USERCONFIG.XML\"", "\"c:/fop/userconfig.xml\""));
+  expect(!overescaped.ok);
+  expect(overescaped.problem.indexOf("FEWER backslashes") >= 0);
+
+  // And nothing was written by either refusal.
+  expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
+
+  // The exact text lands first try.
+  let right = editArtifact(database, edit("\"D:\\\\Fo2pdf\\\\config\\\\USERCONFIG.XML\"", "\"c:/fop/userconfig.xml\""));
+  expect(right.ok);
+});
+
 test("the zero-match refusal says when there is no near miss either", () => {
   seeded("alpha\nbeta\n");
   let done = editArtifact(database, edit("zeta", "eta"));

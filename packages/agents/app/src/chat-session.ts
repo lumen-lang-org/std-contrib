@@ -21,7 +21,11 @@
 // shape rather than a gap. When this console grows file upload or a stop
 // button, they get added here deliberately.
 
-import { LiveStep, RoundSteps, Thought, TurnArtifactRef, WireRef, artifactsByTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
+// TranscriptTurn is imported and not merely referenced: `apply` names it in
+// its signature, and without the import that name resolved to nothing — a
+// pre-existing TS2304 in this file, and the only thing standing between it and
+// a clean check.
+import { LiveStep, RoundSteps, Thought, TranscriptTurn, TurnArtifactRef, WireRef, artifactsByTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import * as live from "./live.js";
 import { diffLines } from "./diff.js";
@@ -365,6 +369,12 @@ const EMPTY: never[] = [];
 // into is not worth a row.
 export type SessionBridge = {
   agentId: () => string;
+  // What the composer's picker is showing right now, "" for the agent's own
+  // model. Read at the moment a question is accepted rather than held here,
+  // for the same reason the agent is: the console owns the control, and a copy
+  // in this session would be a second answer to which model the next message
+  // runs on.
+  modelChoiceId: () => string;
   onThreadOpened: (threadId: string) => void;
   onTurnDone: () => void;
 };
@@ -410,8 +420,13 @@ export class ChatSession {
   // renders messages and knows nothing about tool calls — the console draws
   // these itself and asks for them here.
   // Questions asked but not yet sent, oldest first, each with the message that
-  // is already on screen for it.
-  private pending: { id: string; said: string }[] = [];
+  // is already on screen for it and the model choice that was showing when it
+  // was typed. The choice is captured here rather than read at send time
+  // because the selection travels WITH THE MESSAGE: a person who asks
+  // something on Fast, changes the picker, and asks something else while the
+  // first is still running meant each of those two, and answering both on
+  // whatever the picker last showed would be a different conversation.
+  private pending: { id: string; said: string; choiceId: string }[] = [];
   private live: LiveStep[] = [];
   private thoughts: Thought[] = [];
   private polling = 0;
@@ -564,7 +579,7 @@ export class ChatSession {
       text: escapeHtml(said) + (waiting ? QUEUED_MARK : ""),
       refs: EMPTY,
     });
-    this.pending.push({ id, said });
+    this.pending.push({ id, said, choiceId: this.bridge.modelChoiceId() });
     this.emit("message:sent", { text: said });
     // The turn already running will take it on its way out.
     if (waiting) return;
@@ -578,11 +593,11 @@ export class ChatSession {
       // It is being sent now, so it is no longer waiting.
       this.setMessages(this.state.messages.map((m) =>
         m.id === next.id ? { ...m, text: stripQueued(m.text) } : m));
-      await this.turn(next.said);
+      await this.turn(next.said, next.choiceId);
     }
   }
 
-  private async turn(said: string): Promise<void> {
+  private async turn(said: string, choiceId: string): Promise<void> {
     this.setTyping(true);
 
     try {
@@ -595,7 +610,7 @@ export class ChatSession {
       this.push({ id: liveId, sender: "bot", text: "", refs: EMPTY });
 
       this.watch();
-      const reply = await say(this.threadId, said);
+      const reply = await say(this.threadId, said, choiceId);
       // The answer carries its own calls, so the card settles on what the
       // server recorded rather than on whatever the last poll tick caught.
       this.unwatch();
@@ -782,13 +797,29 @@ export class ChatSession {
     // a live-only ornament: it is what the answer above it was made of, and a
     // reload that dropped it left the conversation claiming work it no longer
     // showed. Asked in parallel — the transcript does not depend on the steps.
-    const [turns, past, byTurn] = await Promise.all([
+    const [said, past, byTurn] = await Promise.all([
       transcript(threadId),
       threadSteps(threadId, "all").catch(() => ({ steps: [], thoughts: [] } as Pick<RoundSteps, "steps" | "thoughts">)),
       artifactsByTurn(threadId).catch(() => [] as TurnArtifactRef[]),
     ]);
-    this.apply(turns, past, byTurn);
+    // Recorded, not applied. The follower re-opens a conversation whenever a
+    // round it did not start finishes (`follow`), and applying the stored
+    // choice from in here would snap the composer's picker back under the
+    // hands of somebody who had just changed it and not yet sent. So the
+    // session keeps the fact and the console decides when to adopt it — which
+    // it does on an explicit open, and nowhere else.
+    this.remembered = said.modelChoiceId;
+    this.apply(said.messages, past, byTurn);
   }
+
+  /** What this conversation last ran on, as of the last read of it. "" for the
+   *  agent's own model, which is what every conversation opened before the
+   *  picker existed carries. */
+  rememberedChoice(): string {
+    return this.remembered;
+  }
+
+  private remembered = "";
 
   /** The transcript, joined and rendered — everything `open` does with what it
    *  fetched, and nothing that does the fetching.
@@ -862,6 +893,11 @@ export class ChatSession {
   fresh(): void {
     this.stopFollowing();
     this.threadId = "";
+    // A conversation that does not exist has remembered nothing. The
+    // composer's picker is NOT reset with it — that is the console's, and
+    // what it shows is what the next send will carry, whichever conversation
+    // that send opens.
+    this.remembered = "";
     // Nothing to watch on the home screen, and saying so stops the server
     // polling a conversation nobody has open.
     live.watch("");

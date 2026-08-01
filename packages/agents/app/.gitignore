@@ -1,0 +1,27 @@
+# State this app writes, not source it ships.
+#
+# `AUTH=builtin` keeps its users here — the sqlite file named in
+# lumenjs.config.ts, plus the `-wal` and `-shm` files SQLite's WAL mode keeps
+# beside it. It holds password hashes and live session state, so it is the one
+# directory in this package that must never reach a commit; a repository is not
+# a place a credential can be taken back out of.
+#
+# The root .gitignore already covers node_modules, dist and test-results. This
+# file exists for what phase 4 added.
+/data/
+
+# Where the local storage adapter puts uploads when no S3 bucket is configured.
+/uploads/
+
+# `lumenjs build` output: the client bundle, the server bundle and the route
+# manifest. The Dockerfile builds it inside the image and .dockerignore keeps
+# any host copy out of the context, so a checked-in one could only ever be a
+# stale second answer.
+/.lumenjs/
+
+# `lumenjs build` writes this three-line SSR entry into the project root, adds
+# it to the Rollup inputs, and deletes it in a `finally`. A build that is
+# interrupted — Ctrl-C, a killed container, a failure in a parallel target —
+# never reaches the finally, so the file is left behind at the top of the
+# package looking like source. It is not; it is regenerated on every build.
+/__nk_ssr_entry.js

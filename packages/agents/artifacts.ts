@@ -22,12 +22,16 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { artifactBytesMax, threadBytesMax } from "./caps.ts";
 import { normalScope } from "./knowledge.ts";
 
 // The largest body an artifact may carry, in bytes. Half a megabyte is far
 // more than a page a person reads and far less than a database row anyone
 // should hold in memory to serve one preview.
-export const ARTIFACT_MAX: int = 524288;
+//
+// A ceiling an operator can move (AGENTS_ARTIFACT_BYTES_MAX, caps.ts), read
+// once here so every door below compares against one number.
+export const ARTIFACT_MAX: int = artifactBytesMax();
 
 // The cap on how deep a path may nest, and how long it may be in total.
 export const ARTIFACT_MAX_SEGMENTS: int = 8;
@@ -47,7 +51,7 @@ export const ARTIFACT_NOTE_MAX: int = 400;
 // inherit them — a reply cannot grow a thread past what an operator budgeted
 // for it, no matter which door it found.
 export const THREAD_ARTIFACTS_MAX: int = 200;
-export const THREAD_BYTES_MAX: int = 104857600;
+export const THREAD_BYTES_MAX: int = threadBytesMax();
 
 // No turn number. What a write carries when no conversation round made it — a
 // console upload — and what every version row holds from before the run loop
@@ -226,9 +230,9 @@ function pathProblem(path: string): string {
     }
     i = i + 1;
   }
-  if (kindOf(normal) == "") {
-    return "an artifact path ends in a known extension — .html, .svg, .md, .json, .txt, .png or a source suffix — not \"" + normal + "\"";
-  }
+  // Any extension is accepted: an unknown one is kind "file", opaque but
+  // stored. The refusal that used to live here protected nothing the segment
+  // rules above do not already hold.
   return "";
 }
 
@@ -324,7 +328,26 @@ export function kindOf(path: string): string {
   // wants them. That keeps every storage rule — byte caps, JSON transport,
   // the append-only log — working on text it can actually hold.
   if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp") { return "image"; }
-  return "";
+  // Office documents ride the image rule: base64 text in the store, decoded
+  // only where a viewer wants bytes. One kind for the three formats — the
+  // console picks its viewer from the path's own extension, and the server
+  // needs nothing beyond "binary document, not diffable text".
+  if (ext == "docx" || ext == "xlsx" || ext == "xls" || ext == "pptx") { return "office"; }
+  // Everything else is a file: accepted, stored as base64 like the other
+  // binary kinds, previewed as nothing. A customer's .xml or .pdf refused at
+  // the door was a worse answer than an opaque body the scripts still get
+  // byte-for-byte — and one uniform rule beats guessing text-ness per
+  // extension, because the CONSUMER of a "file" body must know its encoding
+  // without opening it.
+  return "file";
+}
+
+// The kinds whose stored body is base64 rather than the text itself. The
+// boundary every carrier shares: the store and the wire hold text, a script's
+// run directory and a viewer hold bytes, and this is the list of kinds where
+// those two differ.
+export function binaryKind(kind: string): bool {
+  return kind == "image" || kind == "office" || kind == "file";
 }
 
 // The data-URI media type for an image artifact's path. Only meaningful for

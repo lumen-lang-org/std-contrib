@@ -104,8 +104,16 @@ test("context is labelled with where each chunk came from", () => {
   expect(text.indexOf("[plume/d1]") >= 0);
   expect(text.indexOf("[rest/d2]") >= 0);
   expect(text.indexOf("First chunk.") >= 0);
-  // And it tells the model what to do when the context does not answer.
-  expect(text.indexOf("say so") >= 0);
+  // It still guards the corpus's voice — nothing may be attributed to it
+  // that these passages do not say —
+  expect(text.indexOf("never attribute to the corpus") >= 0);
+  // — but it must not forbid the rest of the agent: "Use only the following
+  // context" once made a tool-carrying agent refuse a repair because the
+  // retrieval for "fix it" came back as license text.
+  expect(text.indexOf("Use only") < 0);
+  expect(text.indexOf("tools or skills") >= 0);
+  // And it opens with the words threads.ts recognises passage turns by.
+  expect(text.indexOf("Passages retrieved from the knowledge base") == 0);
 });
 
 test("no chunks is no context, rather than an empty instruction", () => {

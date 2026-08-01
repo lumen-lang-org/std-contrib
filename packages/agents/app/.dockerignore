@@ -1,0 +1,28 @@
+# What must not enter the build context.
+#
+# The first entry is the one that matters: `data/` holds the AUTH=builtin user
+# store — password hashes and live sessions — and a build context is copied
+# into the daemon and can end up in a layer. The .gitignore keeps it out of the
+# repository for the same reason; this keeps it out of the image.
+data/
+uploads/
+
+# Rebuilt inside the image, and a host copy would be both stale and wrong: the
+# host's node_modules has the dev dependencies and a better-sqlite3 compiled
+# against the host's ABI.
+node_modules/
+.lumenjs/
+dist/
+
+# Test kit and its output. The suite runs against a deployment, not inside one.
+e2e/
+test-results/
+playwright-report/
+playwright.config.ts
+
+# Documentation and local scratch.
+*.md
+demo.mjs
+Dockerfile
+.dockerignore
+compose.yaml

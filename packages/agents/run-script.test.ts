@@ -283,7 +283,11 @@ test("a new file without mayCreate is refused and dropped, not saved", () => {
   expect(getArtifact(database, "t1", "/extra.md").id == "");
 });
 
-test("a new file with an unknown extension is refused by the path rules even with mayCreate", () => {
+test("a new file with an unknown extension lands as kind file, carried as base64", () => {
+  // The rule this test used to hold — unknown extensions refused — inverted
+  // deliberately: a customer's .xml or a script's .tmp is stored as an opaque
+  // "file" body rather than turned away, and the body is base64 because that
+  // is the one encoding a consumer can rely on without opening it.
   fresh();
   seeded("/notes.md", "alpha\n");
   let dir = runDir();
@@ -291,11 +295,14 @@ test("a new file with an unknown extension is refused by the path rules even wit
   fs.writeFileSync(dir + "/cache.tmp", "junk");
   let done = scriptReconcile(database, landing(dir, snapshot, true));
   expect(done.ok);
-  expect(done.created.length == 0);
-  expect(done.refused.length == 1);
-  expect(done.refused[0].path == "/cache.tmp");
-  expect(done.refused[0].problem.indexOf("known extension") >= 0);
-  expect(getArtifact(database, "t1", "/cache.tmp").id == "");
+  expect(done.refused.length == 0);
+  expect(done.created.length == 1);
+  expect(done.created[0].path == "/cache.tmp");
+  let made = getArtifact(database, "t1", "/cache.tmp");
+  expect(made.kind == "file");
+  let body = getVersion(database, made.id, 1).body;
+  // "junk" through the system base64, newline-free.
+  expect(body == "anVuaw==");
 });
 
 test("a new file at the path of an unmaterialised artifact never blindly appends", () => {
@@ -490,7 +497,15 @@ function dockerEmulated(): void {
     + "  shift\n"
     + "  case \"$1\" in\n"
     + "  chown) exit 0 ;;\n"
-    + "  rm) exit 0 ;;\n"
+    // A real `exec rm -rf` clears the path inside the container, and the
+    // staging relies on that: docker cp into an existing directory nests
+    // rather than replaces, so a fake that swallows the rm makes the second
+    // run of any test read the first run's files.
+    + "  rm)\n"
+    + "    shift\n"
+    + "    [ \"$1\" = \"-rf\" ] && shift\n"
+    + "    for P in \"$@\"; do rm -rf \"$CTR$P\"; done\n"
+    + "    exit 0 ;;\n"
     + "  timeout)\n"
     + "    cd \"$CTR$WD\" || exit 1\n"
     + "    timeout -k \"$3\" \"$4\" \"$5\" \"$CTR$6\"\n"
@@ -562,7 +577,8 @@ test("a script runs in its environment and its changed file lands as the next ve
   expect(asked[0].indexOf("--network none") < 0);
   let exline = findLine(asked, "exec --user 0:0");
   expect(exline != "");
-  expect(exline.indexOf("--workdir /tmp/lumen-run-") >= 0);
+  // The known path, not a per-run name: a model is told this one once.
+  expect(exline.indexOf("--workdir /artifacts") >= 0);
   expect(exline.indexOf("-e HOME=/workspace") >= 0);
   expect(exline.indexOf("timeout -k 5 60 sh /tmp/lumen-job-") >= 0);
   // The run released its slot.
@@ -819,6 +835,10 @@ test("an agent's curated image is what its containers are built from, with a wor
   dockerEmulated();
   execute(database, "CREATE TABLE IF NOT EXISTS script_images (id text PRIMARY KEY, label text NOT NULL, image text NOT NULL, enabled integer NOT NULL)");
   execute(database, "CREATE TABLE IF NOT EXISTS agents (id text PRIMARY KEY, agent_name text NOT NULL, description text NOT NULL, model_config_id text NOT NULL, prompt_id text NOT NULL, enabled integer NOT NULL, is_default integer NOT NULL, script_image_id text NOT NULL DEFAULT '', updated_at text NOT NULL)");
+  // A named agent's run also asks after its skills, so the tables must answer.
+  execute(database, "CREATE TABLE IF NOT EXISTS skills (id text PRIMARY KEY, skill_name text NOT NULL, description text NOT NULL, body text NOT NULL, updated_at text NOT NULL)");
+  execute(database, "CREATE TABLE IF NOT EXISTS skill_files (id text PRIMARY KEY, skill_id text NOT NULL, path text NOT NULL, body text NOT NULL)");
+  execute(database, "CREATE TABLE IF NOT EXISTS agent_skills (agent_id text NOT NULL, skill_id text NOT NULL)");
   execute(database, "INSERT INTO script_images VALUES ('img-node', 'Node toolchain', 'node:22-bookworm', 1)");
   execute(database, "INSERT INTO script_images VALUES ('img-off', 'Retired', 'old:1', 0)");
   execute(database, "INSERT INTO agents VALUES ('a-node', 'node agent', '', 'c1', 'p1', 1, 0, 'img-node', 'now')");
@@ -842,5 +862,54 @@ test("an agent's curated image is what its containers are built from, with a wor
     mayCreate: false, environment: "", agentId: "a-node", turnSeq: 3, now: "1785200000000",
   });
   expect(ran.ok);
-  expect(argvLines()[0].indexOf("node:22-bookworm sleep infinity") > 0);
+  expect(argvLines()[0].indexOf("--entrypoint sleep node:22-bookworm infinity") > 0);
+});
+
+test("a skill's files are staged at /skills, and an edit is what the next run executes", () => {
+  fresh();
+  dockerEmulated();
+  // Dropped before created: the database file outlives a suite execution, and
+  // an INSERT that collides with last time's rows loses silently — the first
+  // symptom was this test reading the previous execution's UPDATE.
+  execute(database, "DROP TABLE IF EXISTS agent_skills");
+  execute(database, "DROP TABLE IF EXISTS skill_files");
+  execute(database, "DROP TABLE IF EXISTS skills");
+  execute(database, "DROP TABLE IF EXISTS agents");
+  execute(database, "CREATE TABLE agents (id text PRIMARY KEY, agent_name text NOT NULL, description text NOT NULL, model_config_id text NOT NULL, prompt_id text NOT NULL, enabled integer NOT NULL, is_default integer NOT NULL, script_image_id text NOT NULL DEFAULT '', updated_at text NOT NULL)");
+  // visibility and featured_rank are migrations 77/78, and this hand-rolled
+  // table has to carry them: staging reads the skills through skillsMapping(),
+  // whose SELECT names every column, and agentSkills' WHERE mentions
+  // visibility by name — a table missing them fails the read rather than
+  // returning a skill without them.
+  execute(database, "CREATE TABLE skills (id text PRIMARY KEY, skill_name text NOT NULL, description text NOT NULL, body text NOT NULL, updated_at text NOT NULL, visibility text NOT NULL DEFAULT 'private', featured_rank integer NOT NULL DEFAULT 0)");
+  execute(database, "CREATE TABLE skill_files (id text PRIMARY KEY, skill_id text NOT NULL, path text NOT NULL, body text NOT NULL)");
+  execute(database, "CREATE TABLE agent_skills (agent_id text NOT NULL, skill_id text NOT NULL)");
+  execute(database, "INSERT INTO agents VALUES ('a1', 'skilled', '', 'c1', 'p1', 1, 0, '', 'now')");
+  // Private, and reached by the agent_skills row below: staging an attached
+  // skill is the case under test, and 'public' would have staged it for an
+  // agent that never linked it.
+  execute(database, "INSERT INTO skills VALUES ('k1', 'read-proto-enums', 'compute enum values', 'Run the script.', 'now', 'private', 0)");
+  execute(database, "INSERT INTO skill_files VALUES ('f1', 'k1', 'enums.py', 'print(1)')");
+  execute(database, "INSERT INTO agent_skills VALUES ('a1', 'k1')");
+
+  seeded("/notes.md", "alpha\n");
+  let ran = scriptRun(database, {
+    threadId: "t1", language: "sh", source: "true", paths: ["/notes.md"],
+    mayCreate: false, environment: "", agentId: "a1", turnSeq: 3, now: "1785200000000",
+  });
+  expect(ran.ok);
+  // The container's /skills was cleared and re-placed, at the path the
+  // skill's body promises.
+  expect(findLine(argvLines(), "exec agents-env-t1-main rm -rf /skills") != "");
+  let placed = fs.readFileSync(FAKE_CTR + "/skills/read-proto-enums/enums.py");
+  expect(placed == "print(1)");
+
+  // The edit, live on the very next run — the artifact staleness rule.
+  execute(database, "UPDATE skill_files SET body = 'print(2)' WHERE id = 'f1'");
+  let again = scriptRun(database, {
+    threadId: "t1", language: "sh", source: "true", paths: ["/notes.md"],
+    mayCreate: false, environment: "", agentId: "a1", turnSeq: 4, now: "1785200005000",
+  });
+  expect(again.ok);
+  expect(fs.readFileSync(FAKE_CTR + "/skills/read-proto-enums/enums.py") == "print(2)");
 });

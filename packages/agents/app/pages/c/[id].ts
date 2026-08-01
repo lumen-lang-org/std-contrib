@@ -100,7 +100,14 @@ if (!import.meta.env.SSR) {
  *  Fixed upstream in `dev-server/plugins/vite-plugin-loaders.ts`; a name here
  *  is what lets the vendored build in `vendor/` cope until that ships. */
 type Past = { steps: unknown[]; thoughts: unknown[] };
-type Preloaded = { id: string; turns: unknown[]; past: Past };
+// `turns` is `unknown`, not `unknown[]`: `GET /threads/:id` answers
+// `{modelChoiceId, messages}` now, and the loader hands the body through
+// verbatim for `seedOf` in src/console.ts to shape — that function is the one
+// place that knows both the old array and the new object, and it also lifts
+// the thread's model choice out so the composer's picker is right on the
+// first frame. Casting the body to an array here would be a lie tsc believes;
+// unpacking `.messages` here instead would throw the choice away.
+type Preloaded = { id: string; turns: unknown; past: Past };
 // The framework hands a loader `{ params, query, url, headers, locale, user }`
 // — never a `request` (dev-server/ssr-render.ts). Asking for one gave
 // `undefined` on every call, so the identity was always empty and the engine
@@ -152,7 +159,7 @@ export async function loader({ params, headers, user }: LoaderArgs): Promise<Pre
     if (!t.ok) { return empty; }
     return {
       id,
-      turns: (await t.json()) as unknown[],
+      turns: (await t.json()) as unknown,
       past: p.ok ? (await p.json()) as Past : { steps: [], thoughts: [] },
     };
   } catch (e) {
@@ -176,7 +183,7 @@ export class PageConversation extends LitElement {
   /** What the loader read, handed straight to the console. Initialised rather
    *  than `declare`d — social's pages do the same, and an undefined property
    *  at first render is what a server render sees. */
-  loaderData: { turns?: unknown[]; past?: unknown } = {};
+  loaderData: { turns?: unknown; past?: unknown } = {};
 
   // The shadow root stays, for the reason pages/index.ts spells out at length:
   // rendering into the light DOM to put <agent-console> back in the document

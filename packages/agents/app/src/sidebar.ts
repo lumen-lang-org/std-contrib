@@ -2,6 +2,7 @@
 // Fires `pick-thread` ({id}) and `new-thread`.
 
 import { LitElement, css, html } from "lit";
+import { BRAND } from "./brand.js";
 import { customElement, property, state } from "lit/decorators.js";
 import type { Me, ThreadListing } from "./api.js";
 import { isAdmin } from "./api.js";
@@ -87,7 +88,7 @@ export class ConsoleSidebar extends LitElement {
   // fills `username` from the token's email when the claim carries no name,
   // so an address is the common case and the local part reads better in 13px.
   private name(): string {
-    if (this.me === null) { return "Agents"; }
+    if (this.me === null) { return BRAND; }
     const said = this.me.username !== "" ? this.me.username : this.me.email;
     return said.includes("@") ? said.split("@")[0] : said;
   }
@@ -106,7 +107,7 @@ export class ConsoleSidebar extends LitElement {
   render() {
     return html`
       <div class="top">
-        <span class="brand">Agents<span class="dot">.</span></span>
+        <span class="brand">${BRAND}<span class="dot">.</span></span>
         <button class="collapse" title="Collapse the sidebar"
           @click=${() => this.dispatchEvent(new CustomEvent("collapse"))}>
           <!-- "panel-left": the set has no "sidebar", and a name it does not
@@ -158,7 +159,7 @@ export class ConsoleSidebar extends LitElement {
         <div class="me" @click=${() => { this.menu = !this.menu; }}
              title=${this.me === null ? "" : this.me.email}>
           <span class="avatar">${this.initial()}</span>
-          <span class="who">${this.me === null ? "Agents" : this.name()}</span>
+          <span class="who">${this.me === null ? BRAND : this.name()}</span>
           <nr-icon name="chevron-up" size="small"></nr-icon>
         </div>
       </footer>

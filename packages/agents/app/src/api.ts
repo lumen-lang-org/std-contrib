@@ -46,6 +46,19 @@ export type ModelConfigRow = {
   maxTokens: number;
   topP: number;
   extra: string;
+  // How hard to think before answering, when the provider can be told: a token
+  // budget for Anthropic, an effort — low, medium, high — for the reasoning
+  // models. "" is "as it normally would". This is what makes Instant and
+  // Thinking two menu rows over one model.
+  thinking: string;
+  // What this row is called where a person picks it. `models.label` cannot
+  // serve: two configs routinely share one model at different budgets and
+  // would arrive in a list as the same word twice.
+  label: string;
+  // Whether the operator is willing to offer this config at all — not the menu
+  // itself, which is model_choices, but the flag on the row.
+  selectable: boolean;
+  rank: number;
 };
 
 export type PromptRow = {
@@ -85,6 +98,12 @@ export const listTemplateFiles = (id: string) =>
     `/templates/${encodeURIComponent(id)}/files`);
 export const templatesOfKind = (kind: string) =>
   call<TemplateRow[]>(`/templates?kind=${encodeURIComponent(kind)}`);
+// The template's document as a PDF, base64 — the picker draws its first page
+// as the card's thumbnail. Answered from the engine's conversion cache after
+// the first ask, so the network cost is one JSON body, not a LibreOffice run.
+export const templatePdf = (id: string) =>
+  call<{ template: string; path: string; cached: boolean; pdf: string }>(
+    `/templates/${encodeURIComponent(id)}/pdf`);
 export const startFromTemplate = (threadId: string, templateId: string) =>
   call<{ template: string; skillName: string; wrote: string[]; refused: string[] }>(
     `/threads/${encodeURIComponent(threadId)}/artifacts/from-template`,
@@ -228,6 +247,28 @@ export type ArtifactWritten = {
   slot: number; path: string; version: number; previewToken: string;
 };
 
+// One row of the composer's model menu.
+//
+// `configId` and `routerId` are deliberately absent from the wire, and so are
+// `enabled` and `rank` — the engine says why at `choicesJson` in api.ts. What
+// a client may name is a choice id; everything needed to draw the row is here
+// and nothing else is.
+export type ModelChoice = {
+  id: string;
+  label: string;
+  description: string;
+  // "config" or "router". A router decides per message which model answers, so
+  // the menu marks it rather than presenting it as one more fixed model.
+  kind: string;
+  // "" or "premium". A label, never a gate: the menu draws the mark and the
+  // messages POST is the only place a premium row is ever refused
+  // (MODEL-CHOICE.md, "Premium is a label on a choice, not a mechanism").
+  tier: string;
+};
+
+// The menu, enabled rows only and already in the operator's rank order.
+export const modelChoices = () => call<ModelChoice[]>("/models/choices");
+
 export type SayReply = {
   runId: string;
   ok: boolean;
@@ -237,6 +278,18 @@ export type SayReply = {
   // about exactly this round; -1 when nothing was stored.
   refs: WireRef[];
   seq: number;
+  // Which menu row this turn actually ran under, "" for the agent's own — the
+  // decision as it was made rather than as it was asked for. Not fed back into
+  // the picker: the picker says what the NEXT send will carry, and by the time
+  // an answer lands the person may already have changed it. It is here because
+  // the wire carries it and a field nobody can see is a field that gets
+  // reinvented.
+  modelChoiceId: string;
+  // Why the model that answered was the one that did — a router's pick, or a
+  // fallback after one failed. "" when there is nothing to explain. This is
+  // what the round card's "routed → Thinking" row is drawn from when the
+  // router lands.
+  routeNote: string;
   toolCalls: number;
   // The calls this round dispatched, arriving with the answer rather than
   // through a second request. The poll is for watching a round that is still
@@ -453,8 +506,24 @@ export const setServerAuth = (id: string, authKind: string, authHeader: string, 
 export const listThreads = () => call<ThreadListing[]>("/threads?limit=50");
 export const openThread = (agentId: string) =>
   call<{ id: string }>("/threads", { method: "POST", body: JSON.stringify({ agentId }) });
+// A conversation, as a person reads it, plus the one fact about the thread
+// that is not about any one message in it.
+//
+// An object where this used to be a bare array of turns, and the engine's own
+// note on the route says why: the conversation's current model choice belongs
+// to the thread, and an array has nowhere to put it. The alternatives were a
+// second round trip for a single field or a response header, and a header is
+// where facts go to be forgotten. Without it, reopening a conversation would
+// show the picker set to whatever the composer happened to be showing rather
+// than to what that conversation last chose — and the column exists for
+// exactly that memory.
+export type Transcript = {
+  modelChoiceId: string;
+  messages: TranscriptTurn[];
+};
+
 export const transcript = (id: string) =>
-  call<TranscriptTurn[]>(`/threads/${encodeURIComponent(id)}`);
+  call<Transcript>(`/threads/${encodeURIComponent(id)}`);
 // One dispatched call, as the API reports it while the round is still running.
 // `running` is the whole liveness signal; `millis` is -1 until it stops.
 export type LiveStep = {
@@ -500,10 +569,28 @@ export const threadSteps = (threadId: string, seq?: number | "all") =>
   call<RoundSteps>(`/threads/${encodeURIComponent(threadId)}/steps`
     + (seq === undefined ? "" : `?seq=${seq}`));
 
-export const say = (id: string, text: string) =>
+// A message, carrying the composer's model choice with it.
+//
+// This is the whole of the picker's contract with the engine — one optional
+// field on the send. There is no endpoint for "set the model on this thread"
+// and there must not be one: the picker is used BEFORE the thread exists on a
+// new conversation, and a control that fired its own request would need a
+// thread to fire it at. The engine applies the choice to this turn and
+// remembers it on the thread, so the next send with no field still runs on it.
+//
+// "" is not a third state. It is already what "nothing chosen" means on the
+// thread row and in the resolver, so a caller that omits the field and one
+// that sends "" both get the agent's own model.
+//
+// POST /threads accepts the same field and the console does not use it:
+// `ensureThread` is also the door a file upload and a template start knock on,
+// and a stale menu answering 400 there would fail an attachment that has
+// nothing to do with which model answers. The first message's POST sets the
+// thread's choice a moment later anyway.
+export const say = (id: string, text: string, modelChoiceId = "") =>
   call<SayReply>(`/threads/${encodeURIComponent(id)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, modelChoiceId }),
   });
 
 // --- workspace ------------------------------------------------------------------------
@@ -673,13 +760,133 @@ export const testModel = (id: string) =>
     `/models/${encodeURIComponent(id)}/test`, { method: "POST" });
 
 export const listConfigs = () => call<ModelConfigRow[]>("/model-configs");
+// Every column, because a create is parsed as a whole record on the engine
+// side and a member the record declares but the body omits is a refused
+// request, not a default — the same trap `updateAgent` records below.
 export const createConfig = (row: ModelConfigRow) =>
-  call<ModelConfigRow>("/model-configs", { method: "POST", body: JSON.stringify(row) });
-// There is no PUT: a config is created and repointed, never edited, because an
-// agent mid-conversation reads it every round. The API refuses to delete one an
-// agent still names.
+  call<ModelConfigRow>("/model-configs", { method: "POST", body: JSON.stringify(configBody(row)) });
+
+// A config IS edited now, and only in the fields below.
+//
+// The PUT is a merge — a member the body leaves out is left alone — so this
+// sends the row's own columns and nothing else. It deliberately does not send
+// back what the GET answered: `GET /model-configs` nests the whole `model`
+// object inside each row (a hasOne relation), and echoing that back would be a
+// document the engine's record type cannot parse.
+export const updateConfig = (row: ModelConfigRow) =>
+  call<ModelConfigRow>(`/model-configs/${encodeURIComponent(row.id)}`, {
+    method: "PUT", body: JSON.stringify(configBody(row)),
+  });
+
+const configBody = (c: ModelConfigRow) => ({
+  id: c.id, modelId: c.modelId, temperature: c.temperature, maxTokens: c.maxTokens,
+  topP: c.topP, extra: c.extra, thinking: c.thinking ?? "", label: c.label ?? "",
+  selectable: c.selectable ?? false, rank: c.rank ?? 0,
+});
+
 export const deleteConfig = (id: string) =>
   call<unknown>(`/model-configs/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+// --- the menu, as the operator sees it ------------------------------------------------
+//
+// `GET /model-choices` is not `GET /models/choices`. That one is the user's
+// menu: enabled rows only, and neither id on the wire. This one is every row
+// with both ids, because an operator who cannot see the disabled rows cannot
+// re-enable them and one who cannot see `configId` cannot tell two rows called
+// "Fast" apart.
+export type ModelChoiceRow = {
+  id: string;
+  label: string;
+  description: string;
+  // "config" or "router". Which one says which of the two ids below is live —
+  // stated rather than inferred, so a row with both set is a mistake the engine
+  // shows rather than a precedence rule.
+  kind: string;
+  configId: string;
+  routerId: string;
+  // "" or "premium". A label, never a gate.
+  tier: string;
+  enabled: boolean;
+  // Where it sits in the menu. The column is `menu_rank` and the wire calls it
+  // `rank`; the engine's PUT accepts either and reads `rank` first, so a row
+  // read and written back is lossless.
+  rank: number;
+};
+
+export const listModelChoices = () => call<ModelChoiceRow[]>("/model-choices");
+export const createModelChoice = (row: ModelChoiceRow) =>
+  call<ModelChoiceRow>("/model-choices", { method: "POST", body: JSON.stringify(row) });
+// Every field the form shows — and `rank`, which it does not, is deliberately
+// absent.
+//
+// The engine merges member by member, so an omitted member is left alone. The
+// form has no rank control: order is the arrows in the list, which write the
+// rank alone. Sending the rank back from a form would mean opening an entry,
+// leaving it a while, and saving a label put the menu back in the order it was
+// in when the form was opened — undoing somebody else's reorder, and one's own,
+// with a button that says nothing about order.
+export const updateModelChoice = (row: ModelChoiceRow) =>
+  call<ModelChoiceRow>(`/model-choices/${encodeURIComponent(row.id)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      id: row.id, label: row.label, description: row.description, kind: row.kind,
+      configId: row.configId, routerId: row.routerId, tier: row.tier, enabled: row.enabled,
+    }),
+  });
+// Reordering sends the rank alone. A move is one field, and a full-row PUT per
+// row of a reorder would carry every other field back over rows the operator
+// did not open — including any edit somebody else made between the read and
+// the drag.
+export const rankChoice = (id: string, rank: number) =>
+  call<ModelChoiceRow>(`/model-choices/${encodeURIComponent(id)}`, {
+    method: "PUT", body: JSON.stringify({ id, rank }),
+  });
+export const deleteModelChoice = (id: string) =>
+  call<unknown>(`/model-choices/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+// --- routers ---------------------------------------------------------------------------
+
+// One candidate the routing model may choose, and the prose that tells it when.
+//
+// `when` is the whole interface to the decision: the routing call is given the
+// keys and these lines and nothing else about what the models are.
+export type RouterCandidate = {
+  key: string;
+  configId: string;
+  when: string;
+};
+
+// `candidates` is a real array in both directions. The stored column is
+// `candidatesJson` and the engine refuses a body that names it — a
+// pre-encoded blob is the one structure the API could not look inside, and an
+// ignored edit means the router goes on routing the way it did yesterday.
+export type ModelRouterRow = {
+  id: string;
+  label: string;
+  // The config that DOES the routing: small, fast, cheap. Its reply is matched
+  // against the candidate keys, never parsed.
+  routerConfigId: string;
+  // Where every failure path lands — an unknown key, an empty reply, a
+  // provider error. A run that would have happened must still happen.
+  fallbackConfigId: string;
+  // "turn" or "thread".
+  routeEvery: string;
+  // Whether the router may only move UP the candidate order within one
+  // conversation.
+  escalateOnly: boolean;
+  enabled: boolean;
+  candidates: RouterCandidate[];
+};
+
+export const listRouters = () => call<ModelRouterRow[]>("/model-routers");
+export const createRouter = (row: ModelRouterRow) =>
+  call<ModelRouterRow>("/model-routers", { method: "POST", body: JSON.stringify(row) });
+export const updateRouter = (row: ModelRouterRow) =>
+  call<ModelRouterRow>(`/model-routers/${encodeURIComponent(row.id)}`, {
+    method: "PUT", body: JSON.stringify(row),
+  });
+export const deleteRouter = (id: string) =>
+  call<unknown>(`/model-routers/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 export const listSkills = () => call<SkillRow[]>("/skills");
 // Skills are edited in place, unlike prompts: a skill is read fresh on every

@@ -25,9 +25,9 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, callScriptTool, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
-import { StepStart, beginStep, endStep, recordThought } from "./steps.ts";
+import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -41,9 +41,27 @@ import { GenerationCall, Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, en
 // migration and the checksum refuses it — a real question about how the schema
 // evolves, and not one to answer silently in passing.
 //
-// Eight is enough for a research loop and short enough that a model stuck in
-// one costs seconds rather than an afternoon.
-const MAX_TOOL_STEPS: int = 8;
+// Eight stood here until a real repair spent exactly eight — load the skill,
+// fix the syntax an upload arrived with (three edits), read, validate,
+// validate again — and had none left for the answer, twice, on the task this
+// package is for. Twelve fitted that pipeline with an answer to spare.
+//
+// Twelve then proved too few for the shape this package exists for: inserting
+// a step into a graph — validate, read the schema, compose, edit, revalidate,
+// repair what the validator refuses, revalidate again — spends every one of
+// them and answers with an apology. Eighteen is that pipeline with room for
+// two rounds of repair. Read from the environment because the ceiling is a
+// deployment's call, not a constant: a cloud tier may want more, a demo box
+// fewer, and neither should need a rebuild.
+const MAX_TOOL_STEPS: int = maxToolSteps();
+
+function maxToolSteps(): int {
+  let said = process.env["AGENTS_MAX_TOOL_STEPS"] ?? "";
+  if (said == "") { return 18; }
+  let n = parseInt(said, 10) ?? 18;
+  if (n < 1) { return 18; }
+  return n;
+}
 
 // How deep delegation may go. A parent asking a specialist which asks another
 // is reasonable; a chain longer than this is a graph the builder should look
@@ -76,6 +94,11 @@ function stamp(): string { return `${Date.now()}`; }
 type NestedModel = { id: string, label: string, apiName: string, provider: string, enabled: bool };
 type ConfigWithModel = {
   id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string, thinking: string,
+  // The menu's three columns (82.1–82.3). Nothing on this path reads them —
+  // what a config is called and whether it is offered has no bearing on a
+  // completion — but the document carries them, and a record that does not
+  // declare a key the document has is a parse failure.
+  label: string, selectable: bool, rank: int,
   model: NestedModel,
 };
 
@@ -180,6 +203,21 @@ export type RunContext = {
   prior: Turn[],
   threadId: string,
   excludeChunks: string[],
+  // The model_configs row this turn must run on, or "" for the agent's own —
+  // which is what every run that chose nothing means, so nothing below has to
+  // know the feature exists.
+  //
+  // A config and not a choice id: precedence between the message, the thread
+  // and the agent is a conversation's question and threads.ts answers it
+  // (`chooseModel`). What reaches here is the row that won, so there is one
+  // resolution rather than one per door.
+  //
+  // A delegated child does NOT inherit it — the literal below passes "". A
+  // sub-agent is a different agent running a model its operator chose for it,
+  // and pushing the user's pick down the tree would silently re-price every
+  // delegation: "Thinking" on the lead would put every scout on the expensive
+  // model too, which is not what the person picking it asked for.
+  modelConfigId: string,
   // The thread's turn seq at this round's base — the number every artifact
   // write of the round is stamped with, whichever door and whichever agent
   // makes it. A delegated child inherits its parent's, because the child's
@@ -192,7 +230,7 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, baseSeq: TURN_SEQ_NONE };
+  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -204,7 +242,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, baseSeq: TURN_SEQ_NONE };
+  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -235,17 +273,30 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   if (promptDoc == "") { return failed(agent.agentName, "no prompt " + agent.promptId); }
   let prompt: PromptRow = JSON.parse<PromptRow>(promptDoc);
 
-  let configDoc = findById(db, modelConfigsMapping(db), agent.modelConfigId);
-  if (configDoc == "") { return failed(agent.agentName, "no model config " + agent.modelConfigId); }
+  // The agent's own config unless this turn was told otherwise. Refused by
+  // name when the chosen one is not there, exactly as the agent's own is: a
+  // menu row whose target config was deleted must stop the run rather than
+  // quietly answer on a different model, because the only symptom of the
+  // silent version is that "Thinking" stopped thinking (schema.ts,
+  // `configForChoice`, which deliberately does not check this).
+  let configId = agent.modelConfigId;
+  if (where.modelConfigId != "") { configId = where.modelConfigId; }
+  let configDoc = findById(db, modelConfigsMapping(db), configId);
+  if (configDoc == "") { return failed(agent.agentName, "no model config " + configId); }
   let config: ConfigWithModel = JSON.parse<ConfigWithModel>(configDoc);
 
   let modelDoc = findById(db, modelsMapping(), config.modelId);
   if (modelDoc == "") { return failed(agent.agentName, "no model " + config.modelId); }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
+  // Refused here rather than at the provider, alongside the other refusals and
+  // for the same reason mounting waits: a run that cannot happen should cost
+  // no network call to find that out.
+  if (!model.enabled) { return failed(agent.agentName, model.label + " is disabled"); }
 
   let configRow: ModelConfigRow = {
     id: config.id, modelId: config.modelId, temperature: config.temperature,
     maxTokens: config.maxTokens, topP: config.topP, extra: config.extra, thinking: config.thinking,
+    label: config.label, selectable: config.selectable, rank: config.rank,
   };
 
   let key = credentialFor(db, model.provider, master);
@@ -289,6 +340,16 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       specs.push(scripts[sc]);
       sc = sc + 1;
     }
+  }
+
+  // Skills ride the agent, not the thread — a bare run still has them, so
+  // this sits outside the thread-gated block. Empty when the agent has none:
+  // absent, not offered-and-failing.
+  let skills = skillTools(db, agent.id);
+  let sk: int = 0;
+  while (sk < skills.length) {
+    specs.push(skills[sk]);
+    sk = sk + 1;
   }
 
   // Mounting's problems, plus delegation's, in one list. Copied rather than
@@ -417,6 +478,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // what lets a revision land on the existing path instead of forking a new
   // file: the model can only choose a file it has been shown exists.
   let system = prompt.body;
+  // Skills before the thread block: they ride the agent, and a bare run is
+  // briefed on them too. One line per skill — the body arrives only through
+  // use_skill.
+  let skillLines = skillBriefing(db, agent.id);
+  if (skillLines != "") { system = system + "\n\n" + skillLines; }
   if (threadId != "") {
     // The fence convention rides the system prompt, not a tool description:
     // a model decides how to answer before it considers any particular tool,
@@ -535,8 +601,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // for an unbounded number of them, so without this a single round could
       // run arbitrarily many side effects.
       if (steps.length >= MAX_TOOL_STEPS) {
-        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: said.text }); }
-        return report(agent, prompt, model, notes, context, steps, last, said.text, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
+        let cutSaid = said.text;
+        if (cutSaid == "") { cutSaid = closingWord(model, configRow, system, context, key); }
+        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: cutSaid }); }
+        return report(agent, prompt, model, notes, context, steps, last, cutSaid, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       }
       // A child first: a delegation and a tool call are the same thing to the
       // model, and they should be the same thing to the trace.
@@ -588,6 +656,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         threadId: threadId, agentId: agentId, name: calls[i].name, args: calls[i].args,
         turnSeq: where.baseSeq, now: now,
       });
+      // Skills fourth, ahead of delegation and MCP: use_skill belongs to the
+      // package, and a server that happens to export a tool of that name must
+      // never answer it.
+      let skilled = callSkillTool(db, {
+        agentId: agentId, name: calls[i].name, args: calls[i].args,
+      });
       if (fileAnswer.handled) {
         resultOk = fileAnswer.ok;
         resultText = fileAnswer.text;
@@ -602,6 +676,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = scripted.ok;
         resultText = scripted.text;
         from = "scripts";
+        calledTools.push(calls[i].name);
+      } else if (skilled.handled) {
+        resultOk = skilled.ok;
+        resultText = skilled.text;
+        from = "skills";
         calledTools.push(calls[i].name);
       } else if (child.id != "") {
         let question = jsonText(calls[i].args, "question");
@@ -624,6 +703,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             depth: deeper, path: below, tracer: tracerForCallee(trace),
             parentSpan: callSpan.id, prior: childPrior, threadId: threadId,
             excludeChunks: noChildChunks,
+            // The child runs its own model, never the one chosen for this
+            // conversation — see `modelConfigId` on RunContext.
+            modelConfigId: "",
             // The parent's round, not a fresh one: the child's writes belong
             // to the round that delegated, which is what lets the round join
             // see them.
@@ -690,7 +772,15 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         // 24 days has a different problem — so the narrowing is safe, but it
         // has to be written down rather than assumed by the compiler.
         let took = parseInt(`${Date.now() - startedMs}`, 10) ?? -1;
-        endStep(db, done, resultOk, stamp(), took);
+        // Where an edit landed, when this call was one — the card numbers its
+        // snippets from it. A result, so it can only be said at the close.
+        let editLine = artifactAnswer.handled && artifactAnswer.ok ? artifactAnswer.line : 0;
+        let scriptChanged = scripted.handled ? scripted.changed : "";
+        let close: StepClose = {
+          ok: resultOk, endedAt: stamp(), millis: took,
+          line: editLine, changed: scriptChanged, result: resultText,
+        };
+        endStepAt(db, done, close);
       }
       let step: AgentStep = {
         index: steps.length,
@@ -708,6 +798,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     }
   }
 
+  if (answer == "") { answer = closingWord(model, configRow, system, context, key); }
   if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: answer }); }
   return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
 }
@@ -818,6 +909,23 @@ function childFor(children: AgentRow[], name: string): AgentRow {
   return none;
 }
 
+// Out of steps must not mean out of words. A run that spends its whole tool
+// budget mid-work used to return an empty answer; the thread then stored no
+// round at all — while the artifact edits the run DID make sat there,
+// versioned, unexplained. One more model call with no tools on offer turns
+// the cut into a status report: what was done, what still fails, what comes
+// next. The budget bounds side effects, and a closing sentence has none.
+function closingWord(model: ModelRow, configRow: ModelConfigRow, system: string, context: Turn[], key: string): string {
+  let asked: Turn[] = [...context, userTurn(
+    "You have used every available tool step for this round. Do not call any tool. "
+    + "Tell the user plainly what you changed, what the validator still refuses if anything, "
+    + "and what you would do next.")];
+  let noTools: ToolSpec[] = [];
+  let said = completeTurns(model, configRow, system, asked, noTools, key);
+  if (!said.ok) { return ""; }
+  return assistantText(model.provider, said.text).text;
+}
+
 // One place builds the result, so a run that ended four different ways still
 // reports which agent, prompt and model served it.
 function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: string[], context: Turn[], steps: AgentStep[], last: Completion, answer: string, stopReason: string, rounds: int, spans: RecordedSpan[], calledTools: string[], calledAgents: string[], retrieved: Retrieved[], inputTokens: int, outputTokens: int): AgentRun {
@@ -825,8 +933,12 @@ function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: stri
   if (stopReason == "max_steps" && why == "") {
     why = "stopped after " + `${MAX_TOOL_STEPS}` + " tool steps without a final answer";
   }
+  // A cut round that still said something IS a round: the closing word (or
+  // the model's own last text) is a real answer about real side effects, and
+  // a transcript that hides it while the artifact versions it produced stand
+  // is the worse lie. Only a silent cut stays not-ok.
   let out: AgentRun = {
-    ok: last.ok && stopReason == "final",
+    ok: last.ok && (stopReason == "final" || (stopReason == "max_steps" && answer != "")),
     text: answer,
     body: last.text,
     status: last.status,

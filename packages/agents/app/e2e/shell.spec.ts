@@ -2,21 +2,30 @@
 // person expects them.
 
 import { expect, test } from "@playwright/test";
-import { knowledge, openKnowledge, openSettings, openTab, settings, shell, sidebar } from "./console.js";
+import { BRAND } from "../src/brand.js";
+import { knowledge, open, openKnowledge, openSettings, openTab, settings, shell, sidebar } from "./console.js";
+
+// Settings' rail, in the order src/settings.ts lists it. One place for the two
+// tests below to agree, and the list a reviewer checks against the screen.
+// Kept in the rail's own order (settings.ts). "Model menu" and "Templates"
+// arrived with the model picker and the capability pages; a list that lags
+// the rail fails this suite's count assertion, which is the point of it.
+const TABS = ["Agents", "Models", "Model menu", "Prompts", "Skills", "Templates", "MCP", "Images", "Providers", "Tracing"];
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await open(page);
   await expect(shell(page)).toBeVisible();
 });
 
 test("the sidebar carries the brand, search, new conversation and the account block", async ({ page }) => {
   const rail = sidebar(page);
-  await expect(rail.locator(".brand")).toHaveText(/Agents/);
+  await expect(rail.locator(".brand")).toHaveText(new RegExp(BRAND));
   await expect(rail.locator("input[placeholder='Search…']")).toBeVisible();
   // Starting a conversation is a row in the rail now, not a button beside the
   // search box — same action, named rather than drawn as a "+".
   await expect(rail.locator('.item[data-nav="new"]')).toBeVisible();
-  await expect(rail.locator(".me")).toContainText("Agents");
+  // The signed-out chip wears the product name; a signed-in run wears the user.
+  await expect(rail.locator(".me")).toContainText(new RegExp(BRAND + "|\\w"));
 });
 
 test("settings opens from the account block, not from the header", async ({ page }) => {
@@ -24,12 +33,20 @@ test("settings opens from the account block, not from the header", async ({ page
   await expect(shell(page).locator("header .icon", { hasText: "⚙" })).toHaveCount(0);
   await openSettings(page);
   // The rail items, not every div in the rail — it carries its own heading.
-  await expect(settings(page).locator("aside .item")).toHaveCount(6);
+  //
+  // Named and in order, rather than counted. A count says nothing about which
+  // item went missing, and it went stale twice — once when Skills arrived and
+  // once when Images did — reporting "6, received 8" for a rail that was
+  // perfectly correct. The names are the thing worth pinning: a tab that
+  // disappears, or one that quietly renames itself, fails here.
+  await expect(settings(page).locator("aside .item")).toHaveCount(TABS.length);
+  expect(await settings(page).locator("aside .item")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-tab")))).toEqual(TABS);
 });
 
 test("every settings tab opens and renders something", async ({ page }) => {
   await openSettings(page);
-  for (const name of ["Agents", "Models", "Prompts", "MCP", "Providers", "Tracing"]) {
+  for (const name of TABS) {
     await openTab(page, name);
     // Each tab shows either a table of rows or a form — never an empty pane.
     await expect(settings(page).locator("main")).not.toBeEmpty();
@@ -55,9 +72,12 @@ test("the knowledge page replaces the chat pane and comes back", async ({ page }
 });
 
 test("the agent chip offers only enabled agents", async ({ page }) => {
-  const options = shell(page).locator("header select option");
-  const shown = await options.count();
   const listed = await page.request.get("/api/agents").then((r) => r.json());
   const enabled = (listed as { enabled: boolean }[]).filter((a) => a.enabled).length;
-  expect(shown).toBe(enabled);
+  // The same assertion, waited for rather than sampled. The chip is filled by
+  // a fetch the console makes after it renders, so `count()` — which reads
+  // once and does not retry — answered 0 for a picker that was a few hundred
+  // milliseconds from being right, and did it often enough to look like a
+  // feature that had stopped working.
+  await expect(shell(page).locator("header select option")).toHaveCount(enabled);
 });

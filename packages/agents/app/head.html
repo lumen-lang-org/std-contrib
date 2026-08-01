@@ -16,7 +16,13 @@
      separate by that delta — borders barely exist. */
   :root {
     --bg: #FFFFFF;          /* the content sheet */
-    --bg-rail: #FBFAF9;     /* the warm ground: sidebar, panels, nav */
+    /* Neutral, no longer the warm #FBFAF9. The warmth was real in the Kimi
+       reading but invisible at 1.5 points of difference — and it was the one
+       hued surface in the chrome, so phone browsers that auto-darken (hue-
+       preserving inversion) turned the whole drawer BROWN against a neutral
+       page. The console ships no dark palette of its own yet; until it does,
+       every token has to survive being inverted, and neutral is what does. */
+    --bg-rail: #FAFAFA;     /* the ground: sidebar, panels, nav */
     --bg-card: #FFFFFF;
     --bg-sunken: rgba(0,0,0,.045);  /* Kimi Fills-F2: hover washes, chips */
     --bg-user: rgba(0,0,0,.045);
@@ -55,6 +61,13 @@
      bar coming and going; the percentage stays as the fallback for anything
      that does not know it. */
   html, body { height: 100%; height: 100dvh; margin: 0; }
+  /* Nothing may scroll the page sideways. The console is a fixed shell with
+     its own scrolling regions; a horizontal page scrollbar means some child
+     is wider than the viewport, and on a phone that child drags the entire
+     interface — header, rail and all — off the left edge. The template card
+     row did exactly that. This is the backstop, not the fix: a wide region
+     still needs its own overflow-x: auto. */
+  html, body { overflow-x: hidden; }
   /* `html body`, not `body`, and the extra specificity is load-bearing.
      LumenJS writes its own <style> block into the shell AFTER this file
      (dev-server/index-html.ts), and that block sets `body { font-family:

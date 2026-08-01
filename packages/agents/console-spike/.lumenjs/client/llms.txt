@@ -1,0 +1,8 @@
+# Agent Console (spike)
+
+> Built with LumenJS
+
+## Pages
+
+### /
+- Server-rendered page

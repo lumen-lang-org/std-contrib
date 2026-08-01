@@ -12,7 +12,7 @@
 // double sits for 1500ms on purpose.
 
 import { expect, test } from "@playwright/test";
-import { pickAgent, shell } from "./console.js";
+import { open, pickAgent, ready, shell } from "./console.js";
 
 // The agent the model double answers for, wired to the MCP double so a tool
 // call has somewhere to go. Arranged through the API — the rule is that a test
@@ -48,7 +48,7 @@ async function sendSlowly(page: import("@playwright/test").Page, agentId: string
 }
 
 test("a dispatched call is readable while the round is still running", async ({ page }) => {
-  await page.goto("/");
+  await open(page);
   const agentId = await agentWithSlowTool(page);
   const threadId = await sendSlowly(page, agentId);
 
@@ -85,7 +85,7 @@ test("a dispatched call is readable while the round is still running", async ({ 
 test("the console draws the card while the call runs and settles it when it stops", async ({ page }) => {
   // The UI half, driven through the composer rather than the API, because the
   // card is what a person actually sees.
-  await page.goto("/");
+  await open(page);
   await agentWithSlowTool(page);
   await pickAgent(page, "a-double");
 
@@ -112,7 +112,7 @@ test("a round's calls stay attached to that round", async ({ page }) => {
   // round carries. A second message must not inherit the first one's calls —
   // and a round that failed and left its steps behind is exactly how that
   // happens, which is why runInThread clears the round before it starts.
-  await page.goto("/");
+  await open(page);
   const agentId = await agentWithSlowTool(page);
   // Awaited, unlike the liveness test: this one is about where the steps land,
   // not about catching them open, and a request still in flight when the test
@@ -138,4 +138,34 @@ test("a round's calls stay attached to that round", async ({ page }) => {
   // round contributed none.
   expect(all.steps.every((s) => s.seq === first.seq)).toBe(true);
   expect(all.steps.map((s) => s.name)).toEqual(["slow_read"]);
+});
+
+test("opening a conversation another client is running shows the run, live", async ({ page }) => {
+  // The run is started by the API — an eval script, a colleague's tab — and
+  // never by this page. The session's follower must adopt it: the card with
+  // the in-flight call appears without this client sending anything, and the
+  // stored answer replaces it when the round ends.
+  await open(page);
+  const agentId = await agentWithSlowTool(page);
+  const thread = (await page.request.post("/api/threads", { data: { agentId } })
+    .then((r) => r.json())).id as string;
+  await page.reload();
+  await ready(page);
+  // The viewer is in place BEFORE the run starts — an empty conversation,
+  // follower armed — so the adoption is what gets exercised, not a lucky
+  // page-load race against a 1500ms tool.
+  await page.locator(`agent-console console-sidebar .thread[data-thread="${thread}"]`).click();
+  void page.request.post(`/api/threads/${thread}/messages`, {
+    data: { text: "read the ledger slowly" }, timeout: 60000,
+  });
+
+  // Adopted: the card names the slow call — live if the tick caught it in
+  // flight, from the stored round if the run beat the tick. Either way it
+  // arrived with nothing typed here; the composer stays empty the whole test.
+  const card = page.locator("agent-console nr-chatbot .tool-card");
+  await expect(card).toContainText("slow_read", { timeout: 20000 });
+
+  // And when the round lands, the follower swaps in the transcript's truth.
+  await expect(page.locator("agent-console nr-chatbot .message.bot").last())
+    .toContainText("ledger reads clean", { timeout: 45000 });
 });

@@ -15,9 +15,15 @@ import { ModelRow, ModelConfigRow, CredentialRow, modelsMapping, modelConfigsMap
 import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "../credentials.ts";
 import { Completion, complete } from "../provider.ts";
 
-type ModelView = { id: string, label: string, apiName: string, provider: string, enabled: bool };
+// Every key the document has, and not one fewer: JSON.parse<T> refuses an
+// UnknownField, so a view that omits a column the row now carries fails at
+// run time with "invalid JSON" and nothing pointing at which column. kind,
+// dimensions and baseUrl arrived after this example was written, and that is
+// exactly how it broke.
+type ModelView = { id: string, label: string, apiName: string, provider: string, kind: string, dimensions: int, baseUrl: string, enabled: bool };
 type ConfigView = {
   id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string,
+  thinking: string, label: string, selectable: bool, rank: int,
   model: ModelView,
 };
 
@@ -35,9 +41,9 @@ function main(): void {
   dropTable(db, promptsMapping()); dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  let small: ModelRow = { id: "m3", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, enabled: true };
+  let small: ModelRow = { id: "m3", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(small));
-  let conf: ModelConfigRow = { id: "c3", modelId: "m3", temperature: 0.3, maxTokens: 32, topP: 1.0, extra: "{}" };
+  let conf: ModelConfigRow = { id: "c3", modelId: "m3", temperature: 0.3, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(db, modelConfigsMapping(db), JSON.stringify(conf));
 
   // Stored once, from the environment. A real deployment does this through the
@@ -56,7 +62,7 @@ function main(): void {
 
   let model: ModelRow = JSON.parse<ModelRow>(findById(db, modelsMapping(), "m3"));
   let view: ConfigView = JSON.parse<ConfigView>(findById(db, modelConfigsMapping(db), "c3"));
-  let config: ModelConfigRow = { id: view.id, modelId: view.modelId, temperature: view.temperature, maxTokens: view.maxTokens, topP: view.topP, extra: view.extra };
+  let config: ModelConfigRow = { id: view.id, modelId: view.modelId, temperature: view.temperature, maxTokens: view.maxTokens, topP: view.topP, extra: view.extra, thinking: view.thinking, label: view.label, selectable: view.selectable, rank: view.rank };
 
   // The key never leaves this line as plaintext anywhere it could be logged.
   let answer = complete(model, config, "Answer in one word.", "What is 2+40?", credentialFor(db, "mistral", master));

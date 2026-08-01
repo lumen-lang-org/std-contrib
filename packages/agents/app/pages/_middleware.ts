@@ -445,6 +445,78 @@ function hydrateIdentity(read: (req: IncomingMessage) => Promise<unknown>): Midd
   };
 }
 
+// --- the operator's tables are the operator's ------------------------------------
+//
+// The engine has no idea who is calling and is not going to grow one:
+// EDITIONS.md is explicit that identity belongs to whatever sits in front, and
+// GATEWAY.md's layering table says the same thing about these routes in
+// particular — "configuration routes have NO engine-side authorisation, their
+// only protection is the gateway's role check".
+//
+// On nuraly.io that role check is not there. The host serves ONE location,
+// `location /agents/ { authenticateRequired() }`, and `server/api-proxy.ts`
+// forwards every `/api/*` to the engine's root with no path or method
+// allowlist — so authentication is the whole of it, and an ordinary signed-in
+// user can `POST /agents/api/model-choices` or `PUT /agents/api/model-routers/
+// rt-1`. That was survivable while the config tables only described the
+// deployment. It stopped being survivable with the model menu: these rows are
+// what every other user's composer offers and what their turns cost, and a
+// choice inserted at rank 0 leads the menu for everybody.
+//
+// So the console, which is the only thing in this repo that stands in front of
+// the engine on that host, refuses those writes itself. It is the same grain
+// the gateway's own check has — a claim and a path, answerable from the request
+// alone — and it is deliberately NOT a second identity system: it reads the
+// identity this chain already established and nothing else.
+//
+// Reads are untouched. The composer's menu (`GET /models/choices`), the agent
+// picker and the settings screens' own loads all have to work for everybody,
+// and the engine decides what a read may show.
+//
+// This is a floor, not a replacement for the gateway's check. A caller who
+// reaches `:8100` directly still bypasses everything, which is why
+// "`:8100` must never be directly reachable" stays a launch gate.
+const OPERATOR_PATHS = [
+  "/api/models",
+  "/api/model-configs",
+  "/api/model-choices",
+  "/api/model-routers",
+  "/api/providers",
+];
+
+const READ_ONLY = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** Whether this request would write one of the operator's tables. */
+function writesConfiguration(req: IncomingMessage): boolean {
+  if (READ_ONLY.has((req.method ?? "GET").toUpperCase())) return false;
+  const path = (req.url ?? "/").split("?")[0];
+  // A plain prefix, the way `server/api-proxy.ts` matches: `/api/models` claims
+  // `/api/models/m1` and `/api/modelsFOO` alike. Claiming too much here refuses
+  // a write; claiming too little lets one through, so the tie goes to refusing.
+  return OPERATOR_PATHS.some((p) => path.startsWith(p));
+}
+
+/** Refuse a configuration write from somebody who is not an operator.
+ *
+ *  Installed only in the modes that HAVE identities. In `AUTH=none` there is
+ *  one operator, they own the box, and there is nobody to distinguish them
+ *  from — the same reading `isAdmin(null)` in `src/api.ts` already makes.
+ *
+ *  Absence of an identity in these modes is a refusal and not a pass: a request
+ *  that arrives here with no session in `builtin`, or with no `X-USER` in
+ *  `proxy`, is a request nobody authenticated. */
+function guardConfigWrites(): Middleware {
+  return (req, res, next) => {
+    if (!writesConfiguration(req)) { next(); return; }
+    const held = (req as unknown as { nkAuth?: { user?: { roles?: unknown } } }).nkAuth;
+    const roles = held?.user?.roles;
+    if (Array.isArray(roles) && roles.includes("admin")) { next(); return; }
+    json(res, 403, {
+      error: "changing models, the model menu or a provider key is an operator action",
+    });
+  };
+}
+
 // --- the chain -------------------------------------------------------------------
 
 function build(): Middleware[] {
@@ -458,10 +530,10 @@ function build(): Middleware[] {
       const text = Array.isArray(raw) ? raw[0] : raw;
       if (!text) { return null; }
       try { return JSON.parse(text); } catch { return null; }
-    })];
+    }), guardConfigWrites()];
   }
   installSocketIdentity();
-  return [builtinAuth, hydrateIdentity((req) => readSession(req))];
+  return [builtinAuth, hydrateIdentity((req) => readSession(req)), guardConfigWrites()];
 }
 
 /** Imported by `lumenjs.server.js`, which places it ahead of the proxy. */

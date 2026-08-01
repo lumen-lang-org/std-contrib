@@ -7,7 +7,7 @@
 //   cd packages/agents && lumen test provider.test.ts
 
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { Completion, complete, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem } from "./provider.ts";
+import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
   let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, baseUrl: "", enabled: enabled };
@@ -20,7 +20,7 @@ function gateway(provider: string, baseUrl: string): ModelRow {
 }
 
 function config(): ModelConfigRow {
-  let c: ModelConfigRow = { id: "c", modelId: "m", temperature: 0.2, maxTokens: 64, topP: 1.0, extra: "{}", thinking: "" };
+  let c: ModelConfigRow = { id: "c", modelId: "m", temperature: 0.2, maxTokens: 64, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   return c;
 }
 
@@ -40,6 +40,17 @@ test("an unknown provider is refused rather than guessed at", () => {
 
 test("a disabled model is not called", () => {
   let r = complete(model("mistral", "mistral-small-latest", false), config(), "", "hi", "k");
+  expect(!r.ok);
+  expect(r.error.indexOf("disabled") >= 0);
+});
+
+// The streamed door is a second door onto the same row, and every non-anthropic
+// run goes through it — a refusal the buffered path makes and this one does not
+// is a switched-off model that still gets called.
+test("a disabled model is not called on the streamed path either", () => {
+  let turns: Turn[] = [userTurn("hi")];
+  let none: ToolSpec[] = [];
+  let r = streamTurns(model("mistral", "mistral-small-latest", false), config(), "", turns, none, "k", (soFar: string) => {});
   expect(!r.ok);
   expect(r.error.indexOf("disabled") >= 0);
 });

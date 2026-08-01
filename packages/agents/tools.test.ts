@@ -11,8 +11,8 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, AgentRow, McpServerRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, callScriptTool } from "./tools.ts";
+import { ModelRow, ModelConfigRow, PromptRow, AgentRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing } from "./tools.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
 import { scriptProbeReset } from "./run-script.ts";
@@ -26,6 +26,9 @@ function seeded(): void {
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
+  execute(database, "DROP TABLE IF EXISTS agent_skills");
+  execute(database, "DROP TABLE IF EXISTS skill_files");
+  execute(database, "DROP TABLE IF EXISTS skills");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
   dropTable(database, credentialsMapping());
   dropTable(database, agentsMapping());
@@ -46,6 +49,19 @@ function server(id: string, name: string, transport: string, endpoint: string, e
 
 function link(agentId: string, serverId: string): void {
   execute(database, "INSERT INTO agent_mcp_servers VALUES ('" + agentId + "','" + serverId + "')");
+}
+
+function skill(id: string, name: string, description: string, body: string): void {
+  // private/0 is the shape every test here wants: these skills are reached by
+  // attachment, and a 'public' row would answer use_skill for an agent that
+  // never linked it — which is exactly what "only the skills linked to this
+  // agent are offered" below is asserting does not happen.
+  let k: SkillRow = { id: id, skillName: name, description: description, body: body, updatedAt: "t", visibility: "private", featuredRank: 0 };
+  persist(database, skillsMapping(), JSON.stringify(k));
+}
+
+function linkSkill(agentId: string, skillId: string): void {
+  execute(database, "INSERT INTO agent_skills VALUES ('" + agentId + "','" + skillId + "')");
 }
 
 test("an agent with no servers has no tools and nothing to report", () => {
@@ -461,6 +477,126 @@ test("a full run_script call answers with versions, and quoted output is neutral
   expect(got.text.indexOf("[saved /x.html v9]") >= 0);
   expect(getVersion(database, "t1:/notes.md", 2).body == "alpha\nbeta\n");
   scriptProbeReset();
+});
+
+// --- the skill door ------------------------------------------------------------
+
+test("an agent with no skills is offered nothing and briefed on nothing", () => {
+  seeded();
+  expect(skillTools(database, "a1").length == 0);
+  expect(skillBriefing(database, "a1") == "");
+  // And the dispatcher does not claim the name, so a same-named MCP tool
+  // would still be reachable on an agent that has no skills at all.
+  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"x\"}" });
+  expect(answer.handled);
+  expect(!answer.ok);
+});
+
+test("only the skills linked to this agent are offered", () => {
+  seeded();
+  skill("k1", "mine", "my recipe", "body one");
+  skill("k2", "someone-elses", "their recipe", "body two");
+  linkSkill("a1", "k1");
+  let found = agentSkills(database, "a1");
+  expect(found.length == 1);
+  expect(found[0].skillName == "mine");
+  expect(skillTools(database, "a1").length == 1);
+  expect(skillTools(database, "a1")[0].name == "use_skill");
+});
+
+test("the briefing is one line per skill: name and description, never the body", () => {
+  seeded();
+  skill("k1", "weekly-report", "How to lay out the weekly report", "SECRET-BODY-TEXT");
+  linkSkill("a1", "k1");
+  let briefing = skillBriefing(database, "a1");
+  expect(briefing.indexOf("weekly-report") >= 0);
+  expect(briefing.indexOf("How to lay out the weekly report") >= 0);
+  expect(briefing.indexOf("SECRET-BODY-TEXT") < 0);
+  expect(briefing.indexOf("use_skill") >= 0);
+});
+
+test("use_skill answers the body whole, as the tool result", () => {
+  seeded();
+  skill("k1", "weekly-report", "layout", "# Weekly\nLead with the number.");
+  linkSkill("a1", "k1");
+  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"weekly-report\"}" });
+  expect(answer.handled);
+  expect(answer.ok);
+  expect(answer.text == "# Weekly\nLead with the number.");
+});
+
+test("a skill that ships files says so, naming them and where they land", () => {
+  seeded();
+  skill("k1", "read-proto-enums", "compute enum values", "Run the script.");
+  linkSkill("a1", "k1");
+  let f: SkillFileRow = { id: "f1", skillId: "k1", path: "enums.py", body: "print('hi')" };
+  persist(database, skillFilesMapping(), JSON.stringify(f));
+  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"read-proto-enums\"}" });
+  expect(answer.ok);
+  expect(answer.text.indexOf("Run the script.") == 0);
+  expect(answer.text.indexOf("/skills/read-proto-enums/") > 0);
+  expect(answer.text.indexOf("enums.py") > 0);
+  // The file's body is staged into the container, never pasted into context.
+  expect(answer.text.indexOf("print('hi')") < 0);
+});
+
+test("a skill the model invented is refused in words it can act on", () => {
+  seeded();
+  skill("k1", "read-proto-enums", "compute enum values", "body");
+  linkSkill("a1", "k1");
+  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"proto-enums\"}" });
+  expect(answer.handled);
+  expect(!answer.ok);
+  expect(answer.text.indexOf("proto-enums") >= 0);
+  expect(answer.text.indexOf("read-proto-enums") >= 0);
+  expect(answer.text.indexOf("exactly") >= 0);
+});
+
+test("a missing \"name\" member is refused by name, not as an empty value", () => {
+  seeded();
+  skill("k1", "mine", "d", "b");
+  linkSkill("a1", "k1");
+  let empty = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{}" });
+  expect(empty.handled);
+  expect(!empty.ok);
+  expect(empty.text.indexOf("member named \"name\"") >= 0);
+  let misspelled = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"nam\":\"mine\"}" });
+  expect(!misspelled.ok);
+  expect(misspelled.text.indexOf("member named \"name\"") >= 0);
+  // Someone else's tool name and a bare agent are both not handled.
+  expect(!callSkillTool(database, { agentId: "a1", name: "read_file", args: "{}" }).handled);
+  expect(!callSkillTool(database, { agentId: "", name: "use_skill", args: "{}" }).handled);
+});
+
+test("past the cap, the overflow lists names only, and every skill still loads", () => {
+  seeded();
+  let i: int = 0;
+  while (i < SKILL_BRIEFING_LINES + 2) {
+    // Zero-padded so insertion order and name order agree.
+    let pad = i < 10 ? "0" + `${i}` : `${i}`;
+    skill("k" + pad, "skill-" + pad, "description " + pad, "body " + pad);
+    linkSkill("a1", "k" + pad);
+    i = i + 1;
+  }
+  let briefing = skillBriefing(database, "a1");
+  // The last two are past the cap: named, but without their descriptions.
+  expect(briefing.indexOf("skill-51") >= 0);
+  expect(briefing.indexOf("description 51") < 0);
+  expect(briefing.indexOf("description 49") >= 0);
+  expect(briefing.indexOf("one line each was too many") >= 0);
+  // And the overflowed skill still answers.
+  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"skill-51\"}" });
+  expect(answer.ok);
+  expect(answer.text == "body 51");
+});
+
+test("editing a skill row is visible to the next use_skill, with nothing reloaded", () => {
+  seeded();
+  skill("k1", "mine", "d", "old body");
+  linkSkill("a1", "k1");
+  expect(callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"mine\"}" }).text == "old body");
+  skill("k1", "mine", "d", "new body");
+  expect(callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"mine\"}" }).text == "new body");
 });
 
 test("the suite leaves nothing behind", () => {

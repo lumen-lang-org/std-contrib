@@ -7,6 +7,21 @@
 //   curl -s -X PUT  localhost:8100/agents/a1/model -d '{"modelConfigId":"c2"}'
 //   curl -s -X PUT  localhost:8100/agents/a1/prompt -d '{"promptId":"p1"}'
 //
+// The model menu has two faces and they are different routes on purpose:
+//
+//   curl -s localhost:8100/models/choices     # the composer's menu: enabled only
+//   curl -s localhost:8100/model-choices      # the operator's list: every row
+//   curl -s -X PUT localhost:8100/model-choices/ch-fast -d '{"label":"Instant"}'
+//   curl -s -X PUT localhost:8100/model-configs/c1 -d '{"selectable":true,"menuRank":2}'
+//   curl -s -X POST localhost:8100/model-routers -d '{"id":"rt-1","label":"Auto",
+//     "routerConfigId":"c-small","fallbackConfigId":"c-small","routeEvery":"turn",
+//     "candidates":[{"key":"fast","configId":"c1","when":"greetings, short questions"},
+//                   {"key":"deep","configId":"c2","when":"writing, multi-step analysis"}]}'
+//
+// A write there is a MERGE of the members the body names: what is left out is
+// left alone, so moving one row up the menu is one field. See "reading an
+// operator's body".
+//
 // Every read goes to the database. Nothing is cached and nothing is compiled
 // in, so a change made through this API — or by anything else touching the
 // same tables — is visible to the very next request, with no restart. That is
@@ -18,18 +33,18 @@ import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, 
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere } from "../plume/plume.ts";
+import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere, jsonMember } from "../plume/plume.ts";
 import { migrate, appliedHighWater } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, schemaPlan } from "./schema.ts";
+import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, enabledChoices, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, schemaPlan, derivedMenuStatements } from "./schema.ts";
 import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
-import { jsonList, jsonText } from "./scan.ts";
+import { jsonList, jsonText, jsonFind, jsonUnescape } from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { ThreadListing, ThreadTurnRow, listThreads, openThread, ownedThread, threadOwner, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThread, threadPlan } from "./threads.ts";
+import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan } from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
@@ -37,7 +52,7 @@ import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mi
 // name in this file, and an artifact's type is on its row anyway.
 import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
 import { scriptEnvNameProblem } from "./run-script.ts";
-import { OfficeRenderAsk, officeRender } from "./office-render.ts";
+import { OfficeRenderAsk, officeRender, officeRenderExt } from "./office-render.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
 import { envPlan, envDockerUp } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
@@ -52,11 +67,15 @@ type ServerLink = { serverId: string };
 type SkillLink = { skillId: string };
 type ChildLink = { childId: string };
 type KeyBody = { apiKey: string };
+// `RunBody` serves `POST /agents/:id/run` only, which takes no `modelChoiceId`
+// — it has no conversation and no picker in front of it. There is deliberately
+// no record for either thread door: both take an optional `modelChoiceId`, and
+// a record type refuses a document carrying a key it does not declare, so they
+// read their members instead. See `askedChoice`.
 type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
 type ScopeGrant = { scope: string };
 type ServerAuth = { authKind: string, authHeader: string, token: string };
-type ThreadStart = { agentId: string };
 type FileUpload = { name: string, content: string };
 // Every field is required, `note` included — JSON.parse refuses a body missing
 // one, so "no note" is spelled "note":"" rather than left out.
@@ -403,9 +422,13 @@ class AgentApi {
     // Logged either way: the runs an operator needs to read are mostly the
     // ones that went wrong. No thread asked, so the caller's own tag is the
     // owner — there is no conversation to inherit one from.
+    // No choice and no routing: this door has no conversation and no picker in
+    // front of it, so the agent's own model answered and there is nothing to
+    // explain. "" for both, which is what every row written before the menu
+    // existed carries.
     let runId = recordRun(this.db, {
       agentId: param(req, "id"), threadId: "", owner: owningTag(callerTags(req)),
-      question: body.text, run: answered,
+      question: body.text, run: answered, modelChoiceId: "", routeNote: "",
     });
 
     // The collector is told after the answer is in hand, and a collector that
@@ -790,6 +813,57 @@ class TemplateApi {
     deleteById(this.db, templateFilesMapping(), param(req, "fileId"));
     return noContent();
   }
+
+  // The template's document as a PDF, for the picker's thumbnail.
+  //
+  // A card that says "Status report" is a claim; the first page of the actual
+  // document is proof. Same converter and same cache as the artifact panel's
+  // PDF route — one LibreOffice pass per document, then immutable.
+  //
+  // The cache key needs a version and a template file has none, so the body's
+  // LENGTH stands in for one: `office_renders` is keyed artifactId:version,
+  // and a re-uploaded document that kept its byte count to the digit is the
+  // kind of collision worth accepting for not adding a column. Wrong at most
+  // until the next edit, and never wrong about WHICH template it shows.
+  //
+  // Open like every other template read — the menu shows these cards to
+  // whoever can start a conversation, so the thumbnail is as public as the
+  // label it sits under. Non-public templates 404 here exactly as they do on
+  // GET /templates/:id.
+  @get("/:id/pdf")
+  pdf(req: Request): Reply {
+    let held = findById(this.db, templatesMapping(), param(req, "id"));
+    if (held == "") { return notFound("template " + param(req, "id")); }
+    let tpl: TemplateRow = JSON.parse<TemplateRow>(held);
+    if (tpl.visibility != "public") { return notFound("template " + param(req, "id")); }
+
+    let listed = listWhere(this.db, templateFilesMapping(),
+      "template_id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    let files: TemplateFileRow[] = listed == "" ? [] : JSON.parse<TemplateFileRow[]>(listed);
+    // The first convertible file is the template's face. Templates today ship
+    // exactly one office document; the loop is for the day one ships a
+    // reference file beside it.
+    let i: int = 0;
+    while (i < files.length && officeRenderExt(files[i].path) == "") { i = i + 1; }
+    if (i >= files.length) {
+      return badRequest("template " + tpl.label + " holds no document a PDF can be made of");
+    }
+
+    let ask: OfficeRenderAsk = {
+      artifactId: "tpl:" + files[i].id, version: files[i].body.length,
+      path: files[i].path, body: files[i].body, now: stamp(),
+    };
+    let made = officeRender(this.db, ask);
+    if (!made.ok) { return badRequest(made.problem); }
+    let out = ok("{\"template\":" + JSON.stringify(tpl.id)
+      + ",\"path\":" + JSON.stringify(files[i].path)
+      + ",\"cached\":" + (made.cached ? "true" : "false")
+      + ",\"pdf\":" + JSON.stringify(made.body) + "}");
+    // An hour, not immutable: the underlying document is editable and the id
+    // in this URL does not change when it is.
+    out.headers.set("cache-control", "public, max-age=3600");
+    return out;
+  }
 }
 
 @controller("/skills")
@@ -923,6 +997,38 @@ class SkillApi {
   }
 }
 
+// The model menu, as the composer draws it.
+//
+// `configId` and `routerId` are deliberately not on the wire. They are the
+// operator's plumbing, and a client that can see them is a client that will
+// eventually send one back as a `modelChoiceId` — which names no choice row,
+// so it would be refused at the door and read as the menu being broken. What a
+// caller may name is a choice id, and everything needed to draw one is here.
+//
+// `enabled` and `rank` are absent for the same kind of reason: every row in
+// this answer is enabled and the array is already in rank order, so both
+// fields would carry one value forever and invite a client to filter or sort
+// on them — work that can only produce the same list again.
+export function choicesJson(rows: ModelChoiceRow[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < rows.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + "{\"id\":" + JSON.stringify(rows[i].id)
+      + ",\"label\":" + JSON.stringify(rows[i].label)
+      + ",\"description\":" + JSON.stringify(rows[i].description)
+      // "config" or "router" — the console shows an automatic choice
+      // differently, and it is the row that says which it is rather than
+      // whichever of two ids happens to be filled in.
+      + ",\"kind\":" + JSON.stringify(rows[i].kind)
+      // "" or "premium". Rendered as a lock and enforced nowhere near here;
+      // see the messages POST, which is where a choice is applied.
+      + ",\"tier\":" + JSON.stringify(rows[i].tier) + "}";
+    i = i + 1;
+  }
+  return out + "]";
+}
+
 @controller("/models")
 class ModelApi {
   db: Db;
@@ -934,6 +1040,28 @@ class ModelApi {
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("label")];
     return ok(listOrdered(this.db, modelsMapping(), "", [], keys));
+  }
+
+  // The menu a person picks from, in the order it is shown.
+  //
+  // Not scoped to a caller and not filtered by one: `model_choices` is the
+  // operator's product surface, exactly as `models` and `script_images` are,
+  // and every caller sees the same list — including the premium rows they may
+  // not be able to pick, because a menu that hides what upgrading would buy
+  // cannot sell it (MODEL-CHOICE.md, "the menu, which only renders the lock").
+  //
+  // A curated table rather than "every enabled chat config", and the live
+  // deployment is the argument: it holds `c-double`, the e2e's fake provider,
+  // and three `e2e-link-*` agents. An uncurated menu offers those to real
+  // people.
+  //
+  // A literal under a prefix that also has parameter routes, so it is declared
+  // above them — the router matches in order, and a `:id` written first would
+  // shadow this. There is no GET /:id here today; this is the line one would
+  // have to go below.
+  @get("/choices")
+  choices(req: Request): Reply {
+    return ok(choicesJson(enabledChoices(this.db)));
   }
 
   @post("/")
@@ -986,7 +1114,9 @@ class ModelApi {
         + ",\"error\":" + JSON.stringify(agrees ? "" : "the model returned a different width than this row declares") + "}");
     }
 
-    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" , thinking: "" };
+    // Never persisted and never offered: this row exists for the length of one
+    // "does this model answer" call, so it is unlabelled and not selectable.
+    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" , thinking: "", label: "", selectable: false, rank: 0 };
     let said = complete(model, config, "Reply with the single word: ok", "ping", key);
     if (!said.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(said.error) + "}"); }
     // The provider's whole envelope is not an answer. replyText pulls the
@@ -1054,13 +1184,57 @@ class ConfigApi {
   create(req: Request): Reply {
     let problem = createProblem(this.db, modelConfigsMapping(this.db), req.body);
     if (problem != "") { return badRequest(problem); }
+    // Still a whole-row parse, and deliberately: a create has no stored row to
+    // merge onto, so every field has to be stated anyway, and the record type
+    // is the cheapest way to say that. The PUT below cannot do the same — see
+    // the comment on it.
     let body: ModelConfigRow = JSON.parse<ModelConfigRow>(req.body);
-    if (!existsById(this.db, modelsMapping(), body.modelId)) {
-      return badRequest("no model " + body.modelId + "; create it first");
-    }
+    let wrong = configProblem(this.db, body);
+    if (wrong != "") { return badRequest(wrong); }
     let written = persist(this.db, modelConfigsMapping(this.db), req.body);
     if (!written.ok) { return badRequest(written.error); }
     return created(findById(this.db, modelConfigsMapping(this.db), jsonId(req.body)));
+  }
+
+  // The three columns that decide whether a config is on offer and what it is
+  // called — `label`, `selectable`, `menu_rank` — were reachable only from a
+  // psql session until this route existed. So were the tuning fields, on a row
+  // that was create-or-delete.
+  //
+  // A MERGE of the members the body carries, not a replacement of the row, and
+  // read member by member rather than parsed. Both halves are forced:
+  //
+  // - `JSON.parse<ModelConfigRow>` refuses a document carrying a member the
+  //   record does not declare, and what `GET /model-configs` hands a console is
+  //   NOT a `ModelConfigRow`: `modelConfigsMapping` declares a hasOne relation,
+  //   so every row arrives with the whole `model` object nested inside it. A
+  //   form that PUTs back what it read would 400 every time. This is the same
+  //   trap the thread doors document at length — see `askedChoice`.
+  // - Absent therefore has to mean "leave it alone", so a console that only
+  //   wants to move a row up the menu sends `{"menuRank":2}` and nothing else
+  //   is at risk of being reset to a zero value by omission.
+  //
+  // `rank` is read before `menuRank` because `rank` is the name the GET emits
+  // and a round trip has to be lossless; `menuRank` is accepted beside it
+  // because that is what the column is called and what an operator writing a
+  // curl reaches for. Same pair on `/model-choices`.
+  @put("/:id")
+  update(req: Request): Reply {
+    // Read through `modelConfigRows`, which is the same table without the
+    // nested model, for exactly the reason above: the relation's document
+    // cannot be parsed back into the record.
+    let stored = findById(this.db, modelConfigRows(this.db), param(req, "id"));
+    if (stored == "") { return notFound("model config " + param(req, "id")); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    if (bodyText(req.body, "id", param(req, "id")) != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    let row = mergedConfig(JSON.parse<ModelConfigRow>(stored), req.body);
+    let wrong = configProblem(this.db, row);
+    if (wrong != "") { return badRequest(wrong); }
+    let written = persist(this.db, modelConfigsMapping(this.db), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, modelConfigsMapping(this.db), param(req, "id")));
   }
 
   @del("/:id")
@@ -1068,12 +1242,654 @@ class ConfigApi {
     if (!existsById(this.db, modelConfigsMapping(this.db), param(req, "id"))) {
       return notFound("model config " + param(req, "id"));
     }
-    if (countWhere(this.db, agentsMapping(), "model_config_id = " + this.db.placeholder, [param(req, "id")]) > 0) {
-      return badRequest("config " + param(req, "id") + " is used by an agent; repoint it first");
-    }
+    let used = configInUse(this.db, param(req, "id"));
+    if (used != "") { return badRequest(used); }
     deleteById(this.db, modelConfigsMapping(this.db), param(req, "id"));
     return noContent();
   }
+}
+
+// --- reading an operator's body ----------------------------------------------
+//
+// Every write route below reads its body one member at a time. The rule is not
+// a style preference: `JSON.parse<T>` refuses a document that carries a member
+// the record does not declare as firmly as one that is missing a member it
+// does, so a record type on a request body makes the API refuse the two things
+// an admin console does most — echo back the row it just read (which carries
+// the nested `model`, or a `candidates` array, or a field added next month),
+// and send only the field the operator changed.
+//
+// `jsonMember` and not scan.ts's `jsonFind`, and that difference matters here
+// where it does not on the thread doors: `jsonFind` searches at ANY depth, and
+// a router body carries an array of objects with their own `configId` members.
+// A top-level reader cannot mistake a candidate's config for the router's.
+//
+// A member holding the wrong TYPE reads as absent. That is the one place these
+// are lenient, and it is bounded: the merged row is validated afterwards, so
+// `{"maxTokens":"lots"}` keeps the stored number rather than writing a zero.
+
+// A top-level string member, or `fallback` when the body does not carry one.
+export function bodyText(body: string, key: string, fallback: string): string {
+  let raw = jsonMember(body, key);
+  if (raw.length < 2 || !raw.startsWith("\"")) { return fallback; }
+  return jsonUnescape(raw.slice(1, raw.length - 1));
+}
+
+// A top-level member's raw text, with a string member unquoted.
+//
+// For `extra`, which is a text column holding whatever a provider accepts that
+// this schema does not name. A console that sends it as an object means the
+// object; one that sends it as a string means the string. Both end up as the
+// text the column holds.
+export function bodyJson(body: string, key: string, fallback: string): string {
+  let raw = jsonMember(body, key);
+  if (raw == "") { return fallback; }
+  if (raw.length >= 2 && raw.startsWith("\"")) {
+    return jsonUnescape(raw.slice(1, raw.length - 1));
+  }
+  return raw;
+}
+
+// A top-level bool. `"true"` is taken as well as `true`, because an HTML form
+// serialised by hand sends the first and refusing it teaches nobody anything.
+export function bodyBool(body: string, key: string, fallback: bool): bool {
+  let raw = jsonMember(body, key).trim();
+  if (raw == "true" || raw == "\"true\"") { return true; }
+  if (raw == "false" || raw == "\"false\"") { return false; }
+  return fallback;
+}
+
+export function bodyInt(body: string, key: string, fallback: int): int {
+  let raw = jsonMember(body, key).trim();
+  if (raw.length >= 2 && raw.startsWith("\"")) {
+    raw = raw.slice(1, raw.length - 1).trim();
+  }
+  if (raw == "") { return fallback; }
+  return parseInt(raw, 10) ?? fallback;
+}
+
+export function bodyNumber(body: string, key: string, fallback: number): number {
+  let raw = jsonMember(body, key).trim();
+  if (raw.length >= 2 && raw.startsWith("\"")) {
+    raw = raw.slice(1, raw.length - 1).trim();
+  }
+  if (raw == "") { return fallback; }
+  let parsed = parseFloat(raw);
+  if (parsed == null) { return fallback; }
+  let value: number = parsed;
+  return value;
+}
+
+// Where a row sits in the menu, under either of its two names.
+//
+// The record's field is `rank` and the column is `menu_rank` — RANK is a window
+// function in MySQL 8 and `createTableSql` does not quote identifiers, which is
+// why the column was renamed and the field was not (schema.ts says so at
+// length). That leaves two spellings loose in the world, and both arrive here:
+// `rank` is what every GET emits, `menuRank` is what the column is called.
+// Taking `rank` first keeps the round trip lossless.
+export function bodyRank(body: string, fallback: int): int {
+  if (jsonMember(body, "rank") != "") { return bodyInt(body, "rank", fallback); }
+  return bodyInt(body, "menuRank", fallback);
+}
+
+// --- model configs, written ---------------------------------------------------
+
+export function mergedConfig(stored: ModelConfigRow, body: string): ModelConfigRow {
+  let out: ModelConfigRow = {
+    // Never from the body. The path names the row; a body that disagrees is
+    // refused at the door rather than allowed to rename anything.
+    id: stored.id,
+    modelId: bodyText(body, "modelId", stored.modelId),
+    temperature: bodyNumber(body, "temperature", stored.temperature),
+    maxTokens: bodyInt(body, "maxTokens", stored.maxTokens),
+    topP: bodyNumber(body, "topP", stored.topP),
+    extra: bodyJson(body, "extra", stored.extra),
+    thinking: bodyText(body, "thinking", stored.thinking),
+    label: bodyText(body, "label", stored.label),
+    selectable: bodyBool(body, "selectable", stored.selectable),
+    rank: bodyRank(body, stored.rank),
+  };
+  return out;
+}
+
+// Why a model config will not be written, in words, or "".
+//
+// Shared by the POST and the PUT so that the two doors cannot drift — the POST
+// used to carry the model check inline and the PUT did not exist, which is how
+// a rule ends up holding through one door and not the other.
+//
+// Deliberately NOT checked: that a `selectable` row has a label. Migration
+// 87.21 turns `selectable` on for every config the derived menu covers and
+// never writes `model_configs.label` — the menu row carries the words — so
+// requiring one here would refuse an edit to rows this package created itself.
+export function configProblem(db: Db, row: ModelConfigRow): string {
+  if (row.modelId == "") { return "a modelId is required"; }
+  if (!existsById(db, modelsMapping(), row.modelId)) {
+    return "no model " + row.modelId + "; create it first";
+  }
+  if (row.maxTokens < 1) {
+    return "maxTokens must be at least 1; a config that asks for no tokens cannot answer";
+  }
+  if (row.rank < 0) { return "menuRank cannot be negative"; }
+  return "";
+}
+
+// --- the menu, written --------------------------------------------------------
+//
+// Who may call these: exactly whoever may already call `POST /model-configs`,
+// `POST /models` and `PUT /models/:id` — which is anybody the process answers
+// at all. `callerTags` is read by the thread, run and usage routes and by
+// nothing else in this file; the operator's tables (`models`, `model_configs`,
+// `agents`, `prompts`, `script_images`, `skills`) are deployment-global and
+// unscoped, exactly as MODEL-CHOICE.md describes them, and the only lock in
+// front of any of it is `AGENTS_API_TOKEN` — off by default, deployment-wide,
+// not a caller.
+//
+// That posture is stated here rather than changed here. EDITIONS.md is explicit
+// that identity belongs to the gateway and that the engine keeps not knowing
+// what a user is ("community is authless on purpose"), so inventing a scope for
+// these three routes would put a second, weaker answer to "who is calling" in a
+// binary whose whole design is that it has none — and would leave the POST
+// beside them wider than the PUT, which is the shape that actually gets
+// exploited. If these should be operator-only, the change is one gate over
+// every write route in this file, made once, and it is not this commit.
+
+// Why a config cannot serve where it was named, in words, or "".
+//
+// `role` is the field that named it, because "no model config c-x" three times
+// in one router tells an operator nothing about which of the three ids is
+// wrong.
+//
+// The chat check is the one that would otherwise be found by a user: an
+// embedding config in the menu is a row somebody picks and then gets an
+// embedding endpoint's refusal from, per turn, until an operator reads a log.
+export function chatConfigProblem(db: Db, configId: string, role: string): string {
+  if (configId == "") { return role + " is required"; }
+  let pair = configAndModel(db, configId);
+  if (pair.problem != "") { return role + ": " + pair.problem; }
+  if (pair.model.kind != "chat") {
+    return role + ": model config " + configId + " runs on a \"" + pair.model.kind
+      + "\" model, and only a chat model can answer a turn";
+  }
+  return "";
+}
+
+// The row a POST starts from: nothing stated, on the menu unless the body says
+// otherwise. `kind` is "" rather than a default, so a create that does not say
+// which kind of choice it is meets `choiceRowProblem` and is told.
+export function blankChoice(id: string): ModelChoiceRow {
+  let out: ModelChoiceRow = {
+    id: id, label: "", description: "", kind: "", configId: "", routerId: "",
+    tier: "", enabled: true, rank: 0,
+  };
+  return out;
+}
+
+export function mergedChoice(stored: ModelChoiceRow, body: string): ModelChoiceRow {
+  let out: ModelChoiceRow = {
+    id: stored.id,
+    label: bodyText(body, "label", stored.label),
+    description: bodyText(body, "description", stored.description),
+    kind: bodyText(body, "kind", stored.kind),
+    configId: bodyText(body, "configId", stored.configId),
+    routerId: bodyText(body, "routerId", stored.routerId),
+    tier: bodyText(body, "tier", stored.tier),
+    enabled: bodyBool(body, "enabled", stored.enabled),
+    rank: bodyRank(body, stored.rank),
+  };
+  return out;
+}
+
+// Why a menu row will not be written, in words, or "".
+//
+// Every one of these is a refusal rather than a repair, because the row IS the
+// menu: a choice with no label is a blank line everybody sees, a "config"
+// choice whose config was never created is an option that hard-fails every turn
+// (run.ts refuses a dangling config by name rather than answering on something
+// else), and a row with both ids set is the ambiguity `kind` exists to prevent.
+export function choiceRowProblem(db: Db, row: ModelChoiceRow): string {
+  if (row.label == "") { return "a choice needs a label; it is the word in the menu"; }
+  if (row.tier != "" && row.tier != "premium") {
+    return "tier is \"\" or \"premium\", not \"" + row.tier + "\"";
+  }
+  if (row.rank < 0) { return "menuRank cannot be negative"; }
+  if (row.kind == "config") {
+    if (row.routerId != "") {
+      return "a \"config\" choice carries no routerId; clear it, or set kind to \"router\"";
+    }
+    return chatConfigProblem(db, row.configId, "configId");
+  }
+  if (row.kind == "router") {
+    if (row.configId != "") {
+      return "a \"router\" choice carries no configId; clear it, or set kind to \"config\"";
+    }
+    if (row.routerId == "") { return "routerId is required"; }
+    if (!existsById(db, modelRoutersMapping(), row.routerId)) {
+      return "no model router " + row.routerId + "; create it first";
+    }
+    return "";
+  }
+  return "kind is \"config\" or \"router\", not \"" + row.kind + "\"";
+}
+
+// Why a menu row cannot be deleted, in words, or "".
+//
+// The reference that would be stranded is `threads.model_choice_id`. It does
+// not hard-fail — `chooseModel` answers "the agent's own" and writes a note for
+// an id that names nothing, on purpose, because a conversation must not stop
+// working because a menu changed — so this is not the same order of danger as
+// `configInUse`. It is refused anyway, for one reason: the operator's actual
+// intent is almost always "take this off the menu", `enabled` does exactly that
+// without stranding anything, and the refusal names it. A DELETE is the only
+// version of that intent which silently changes what somebody else's next turn
+// runs on.
+//
+// `runs.model_choice_id` is deliberately NOT checked. A run is history; a row
+// that can never be deleted once it has answered once is a table that only
+// grows.
+export function choiceInUse(db: Db, choiceId: string): string {
+  if (countWhere(db, threadsMapping(), "model_choice_id = " + db.placeholder, [choiceId]) > 0) {
+    return "model choice " + choiceId + " is what conversations are still set to; "
+      + "take it off the menu instead — PUT /model-choices/" + choiceId
+      + " with {\"enabled\":false} leaves those conversations running";
+  }
+  return "";
+}
+
+@controller("/model-choices")
+class ChoiceApi {
+  db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  // EVERY row, disabled ones included, and the two ids the menu hides.
+  //
+  // Distinct from `GET /models/choices`, which is the user-facing menu: that
+  // one filters to the enabled rows and refuses to put `configId` on the wire,
+  // because a client that can see one will eventually post it back as a
+  // `modelChoiceId`. This is the operator's list, and an operator who cannot
+  // see the disabled rows cannot re-enable them.
+  @get("/")
+  list(req: Request): Reply {
+    let keys: DbOrder[] = [asc("menu_rank"), asc("label")];
+    return ok(listOrdered(this.db, modelChoicesMapping(), "", [], keys));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let problem = createProblem(this.db, modelChoicesMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
+    let row = mergedChoice(blankChoice(jsonId(req.body)), req.body);
+    let wrong = choiceRowProblem(this.db, row);
+    if (wrong != "") { return badRequest(wrong); }
+    let written = persist(this.db, modelChoicesMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, modelChoicesMapping(), row.id));
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
+    let stored = findById(this.db, modelChoicesMapping(), param(req, "id"));
+    if (stored == "") { return notFound("model choice " + param(req, "id")); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    if (bodyText(req.body, "id", param(req, "id")) != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    let row = mergedChoice(JSON.parse<ModelChoiceRow>(stored), req.body);
+    let wrong = choiceRowProblem(this.db, row);
+    if (wrong != "") { return badRequest(wrong); }
+    let written = persist(this.db, modelChoicesMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, modelChoicesMapping(), param(req, "id")));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, modelChoicesMapping(), param(req, "id"))) {
+      return notFound("model choice " + param(req, "id"));
+    }
+    let used = choiceInUse(this.db, param(req, "id"));
+    if (used != "") { return badRequest(used); }
+    deleteById(this.db, modelChoicesMapping(), param(req, "id"));
+    return noContent();
+  }
+}
+
+// --- routers, written ---------------------------------------------------------
+//
+// The router is the part of MODEL-CHOICE.md that has no other way in: "a
+// special type where we select a list of models and add a route description for
+// each, and each request an LLM call decides which one to use". That list of
+// pairs is `candidatesJson`, and over this API it is a real JSON array named
+// `candidates` — not a string the client pre-encoded, which would make the one
+// structure an operator actually edits the one thing the API could not check.
+//
+// Everything here is checked BEFORE the write and refused rather than repaired.
+// The reason is asymmetric cost: a bad candidate is not a failed request that
+// somebody retries, it is a menu entry that quietly routes wrong — or does not
+// route at all — for every user of the deployment, and `routeTurn` is built to
+// fall back silently rather than to complain.
+
+// The row a POST starts from. `routeEvery` defaults to "turn", which is what
+// MODEL-CHOICE.md describes and what the seeded router uses; "thread" is the
+// deployment that would rather pay once.
+export function blankRouter(id: string): ModelRouterRow {
+  let out: ModelRouterRow = {
+    id: id, label: "", routerConfigId: "", candidatesJson: "[]",
+    fallbackConfigId: "", routeEvery: "turn", escalateOnly: false, enabled: true,
+  };
+  return out;
+}
+
+// The candidate array a body carries, as raw text, or what is already stored.
+//
+// Raw and unvalidated on purpose: `candidatesProblem` is what judges it, and
+// judging it here would mean the merge decided what a valid router is.
+export function bodyCandidates(body: string, fallback: string): string {
+  let raw = jsonMember(body, "candidates");
+  if (raw == "") { return fallback; }
+  return raw;
+}
+
+// A body that sends the column instead of the list, refused by name.
+//
+// Accepting `candidatesJson` would accept a blob this API cannot look inside —
+// which is the whole thing this route exists to stop — and ignoring it silently
+// is worse: the operator's edit vanishes and the router goes on routing the way
+// it did yesterday.
+export function preEncodedCandidates(body: string): string {
+  if (jsonMember(body, "candidatesJson") == "") { return ""; }
+  return "candidatesJson is not accepted here; send \"candidates\" as a JSON array of "
+    + "{key, configId, when}";
+}
+
+export function mergedRouter(stored: ModelRouterRow, body: string): ModelRouterRow {
+  let out: ModelRouterRow = {
+    id: stored.id,
+    label: bodyText(body, "label", stored.label),
+    routerConfigId: bodyText(body, "routerConfigId", stored.routerConfigId),
+    candidatesJson: bodyCandidates(body, stored.candidatesJson),
+    fallbackConfigId: bodyText(body, "fallbackConfigId", stored.fallbackConfigId),
+    routeEvery: bodyText(body, "routeEvery", stored.routeEvery),
+    escalateOnly: bodyBool(body, "escalateOnly", stored.escalateOnly),
+    enabled: bodyBool(body, "enabled", stored.enabled),
+  };
+  return out;
+}
+
+// Why a candidate list will not be written, in words, or "".
+//
+// Every rule here is a failure `routeTurn` cannot report, because every failure
+// path in that file leads to `fallbackConfigId` on purpose — so a router with a
+// dud candidate does not throw, it just never picks that one, and the only
+// symptom is that "Auto" answers a bit worse than it used to.
+//
+//   - a key that is empty can never be matched, so its candidate is prompt text
+//     the model is not allowed to choose;
+//   - two keys that differ only in case are ONE key to the router, because
+//     `matchKey` and `indexOfKey` both fold case — so which of the two a reply
+//     selects is whichever comes first, which is not a decision anybody made;
+//   - a `when` that is empty is a candidate the routing model cannot choose on
+//     purpose. This is the rule the human asked for by name, and it is the one
+//     that matters most: `when` is the entire interface to the decision;
+//   - a config that is missing, or is an embedding config, is a turn that
+//     hard-fails or a menu row that quietly falls back for ever.
+export function candidatesProblem(db: Db, candidatesJson: string): string {
+  let text = candidatesJson.trim();
+  if (text == "" || !text.startsWith("[")) {
+    return "\"candidates\" must be a JSON array of {key, configId, when}";
+  }
+  let items = jsonList(text);
+  if (items.length == 0) {
+    return "a router needs at least one candidate; with none there is nothing for "
+      + "the routing model to choose and every turn falls back";
+  }
+  let seen: string[] = [];
+  let i: int = 0;
+  while (i < items.length) {
+    let item = items[i].trim();
+    let at = "candidate " + `${i + 1}`;
+    if (!item.startsWith("{")) { return at + " is not an object"; }
+    let key = jsonText(item, "key").trim();
+    if (key == "") { return at + " has no \"key\""; }
+    let folded = key.toLowerCase();
+    let j: int = 0;
+    while (j < seen.length) {
+      if (seen[j] == folded) {
+        return at + " repeats the key \"" + key + "\"; the router matches keys "
+          + "without regard to case, so two of them are one";
+      }
+      j = j + 1;
+    }
+    seen.push(folded);
+    let named = at + " (\"" + key + "\")";
+    if (jsonText(item, "when").trim() == "") {
+      return named + " has no \"when\"; a candidate with no description is a "
+        + "candidate the routing model cannot choose on purpose";
+    }
+    let unusable = chatConfigProblem(db, jsonText(item, "configId").trim(), named + " configId");
+    if (unusable != "") { return unusable; }
+    i = i + 1;
+  }
+  return "";
+}
+
+// Why a router will not be written, in words, or "".
+//
+// The candidate list is judged only for a router that is ON, and that
+// exemption is the kill switch rather than a relaxation. `configInUse`
+// deliberately does not guard a config named inside `candidatesJson` — three
+// dialects of JSON function for a case run.ts already refuses by name — so a
+// config a candidate names CAN be deleted while the router still lists it.
+// Judging the whole stored list on every write then made the one action an
+// operator needs unreachable: `PUT {"id":"rt-1","enabled":false}` answered 400
+// "candidate 2 (\"deep\") configId: no model config c-deep", and the router
+// went on spending a completion per turn until somebody reconstructed the
+// array by hand. A router that is off routes nothing, so its candidates cannot
+// be wrong about anything; turning it back on is a write, and this runs again.
+export function routerRowProblem(db: Db, row: ModelRouterRow): string {
+  if (row.label == "") { return "a router needs a label"; }
+  if (row.routeEvery != "turn" && row.routeEvery != "thread") {
+    return "routeEvery is \"turn\" or \"thread\", not \"" + row.routeEvery + "\"";
+  }
+  // The config that DOES the routing. Without it there is no call to make —
+  // `routeChoice` writes a note and the menu's lead row never routes.
+  let routing = chatConfigProblem(db, row.routerConfigId, "routerConfigId");
+  if (routing != "") { return routing; }
+  // And where every failure path lands. A router nobody gave a usable fallback
+  // is a router that should not be enabled.
+  let landing = chatConfigProblem(db, row.fallbackConfigId, "fallbackConfigId");
+  if (landing != "") { return landing; }
+  if (!row.enabled) { return ""; }
+  return candidatesProblem(db, row.candidatesJson);
+}
+
+// The same row with its candidates rewritten as the three fields the router
+// reads, in order.
+//
+// Called only after `candidatesProblem` has passed, so nothing is being
+// repaired: what this drops is a member of a candidate object that is neither
+// `key`, `configId` nor `when` — which `candidatesFrom` in router.ts already
+// steps over, so it has never reached a routing prompt. Normalising it away on
+// write means what a later GET shows is what the router actually sees.
+export function withCanonicalCandidates(row: ModelRouterRow): ModelRouterRow {
+  let items = jsonList(row.candidatesJson.trim());
+  let list = "[";
+  let i: int = 0;
+  while (i < items.length) {
+    if (i > 0) { list = list + ","; }
+    list = list + "{\"key\":" + JSON.stringify(jsonText(items[i], "key").trim())
+      + ",\"configId\":" + JSON.stringify(jsonText(items[i], "configId").trim())
+      + ",\"when\":" + JSON.stringify(jsonText(items[i], "when").trim()) + "}";
+    i = i + 1;
+  }
+  let out: ModelRouterRow = {
+    id: row.id, label: row.label, routerConfigId: row.routerConfigId,
+    candidatesJson: list + "]", fallbackConfigId: row.fallbackConfigId,
+    routeEvery: row.routeEvery, escalateOnly: row.escalateOnly, enabled: row.enabled,
+  };
+  return out;
+}
+
+// A stored candidate column as it goes on the wire: the array itself, or an
+// empty one when the column holds something that is not an array. Hand-written
+// rows exist — this table was seeded by SQL — so "not an array" is a state a
+// GET has to survive rather than a case that cannot happen.
+function candidateArray(candidatesJson: string): string {
+  let text = candidatesJson.trim();
+  if (text.startsWith("[")) { return text; }
+  return "[]";
+}
+
+// A router as the admin sees it: `candidates` is the array, in and out. What
+// you PUT is what you GET, which is the property that lets a settings form read
+// a row, change one `when` line and send it back.
+export function routerJson(row: ModelRouterRow): string {
+  return "{\"id\":" + JSON.stringify(row.id)
+    + ",\"label\":" + JSON.stringify(row.label)
+    + ",\"routerConfigId\":" + JSON.stringify(row.routerConfigId)
+    + ",\"fallbackConfigId\":" + JSON.stringify(row.fallbackConfigId)
+    + ",\"routeEvery\":" + JSON.stringify(row.routeEvery)
+    + ",\"escalateOnly\":" + `${row.escalateOnly}`
+    + ",\"enabled\":" + `${row.enabled}`
+    + ",\"candidates\":" + candidateArray(row.candidatesJson) + "}";
+}
+
+export function routersJson(rows: ModelRouterRow[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < rows.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + routerJson(rows[i]);
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+export function allRouters(db: Db): ModelRouterRow[] {
+  let none: ModelRouterRow[] = [];
+  let keys: DbOrder[] = [asc("label"), asc("id")];
+  let listed = listOrdered(db, modelRoutersMapping(), "", [], keys);
+  if (listed == "" || listed == "[]") { return none; }
+  return JSON.parse<ModelRouterRow[]>(listed);
+}
+
+// Why a router cannot be deleted, in words, or "".
+//
+// `model_choices.router_id` is the only way anything names a router — a thread
+// points at a choice, and the choice points here — so this one reference is the
+// whole guard. Left unguarded it is the same class of break `configInUse`
+// catches: the menu goes on offering "Auto", `chooseModel` goes on accepting
+// it, and `routeChoice` finds no row, writes "the router rt-x is gone" into a
+// note nobody reads, and answers on the agent's own model for every user, for
+// ever.
+export function routerInUse(db: Db, routerId: string): string {
+  if (countWhere(db, modelChoicesMapping(), "router_id = " + db.placeholder, [routerId]) > 0) {
+    return "router " + routerId + " is what a menu choice points at; delete or "
+      + "repoint that choice first";
+  }
+  return "";
+}
+
+@controller("/model-routers")
+class RouterApi {
+  db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  list(req: Request): Reply {
+    return ok(routersJson(allRouters(this.db)));
+  }
+
+  @get("/:id")
+  find(req: Request): Reply {
+    let document = findById(this.db, modelRoutersMapping(), param(req, "id"));
+    if (document == "") { return notFound("model router " + param(req, "id")); }
+    return ok(routerJson(JSON.parse<ModelRouterRow>(document)));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let problem = createProblem(this.db, modelRoutersMapping(), req.body);
+    if (problem != "") { return badRequest(problem); }
+    let blob = preEncodedCandidates(req.body);
+    if (blob != "") { return badRequest(blob); }
+    let row = mergedRouter(blankRouter(jsonId(req.body)), req.body);
+    let wrong = routerRowProblem(this.db, row);
+    if (wrong != "") { return badRequest(wrong); }
+    let written = persist(this.db, modelRoutersMapping(), JSON.stringify(withCanonicalCandidates(row)));
+    if (!written.ok) { return badRequest(written.error); }
+    return created(routerJson(JSON.parse<ModelRouterRow>(findById(this.db, modelRoutersMapping(), row.id))));
+  }
+
+  @put("/:id")
+  update(req: Request): Reply {
+    let stored = findById(this.db, modelRoutersMapping(), param(req, "id"));
+    if (stored == "") { return notFound("model router " + param(req, "id")); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    if (bodyText(req.body, "id", param(req, "id")) != param(req, "id")) {
+      return badRequest("the id in the body must match the path");
+    }
+    let blob = preEncodedCandidates(req.body);
+    if (blob != "") { return badRequest(blob); }
+    let row = mergedRouter(JSON.parse<ModelRouterRow>(stored), req.body);
+    let wrong = routerRowProblem(this.db, row);
+    if (wrong != "") { return badRequest(wrong); }
+    let written = persist(this.db, modelRoutersMapping(), JSON.stringify(withCanonicalCandidates(row)));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(routerJson(JSON.parse<ModelRouterRow>(findById(this.db, modelRoutersMapping(), param(req, "id")))));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!existsById(this.db, modelRoutersMapping(), param(req, "id"))) {
+      return notFound("model router " + param(req, "id"));
+    }
+    let used = routerInUse(this.db, param(req, "id"));
+    if (used != "") { return badRequest(used); }
+    deleteById(this.db, modelRoutersMapping(), param(req, "id"));
+    return noContent();
+  }
+}
+
+// Why a model config cannot be deleted, in words, or "".
+//
+// An agent was the only thing this asked about, and the two it missed are the
+// ones a person notices. A `model_choices` row is a LIVE MENU ENTRY: delete the
+// config under it and the option is still offered, still picked, still accepted
+// at the door — `choiceProblem` asks only whether the choice is enabled — and
+// then hard-fails every turn with "no model config c-x", because run.ts
+// deliberately refuses a dangling config by name rather than quietly answering
+// on something else. Every message sent on "Fast" dies until an operator edits
+// the table by hand.
+//
+// A router is the same failure one level down, on both of the columns it
+// resolves by id: the routing call cannot be made without `routerConfigId`, and
+// `fallbackConfigId` is where every failure path in router.ts lands.
+//
+// NOT guarded: a config named inside a router's `candidatesJson`. That is JSON
+// in a text column, and asking three databases to look inside it is three
+// dialects of JSON function with three failure modes — for a case run.ts
+// already answers with a named refusal rather than a wrong model. The rows
+// below are guarded because a menu row and a fallback fail EVERY turn; a dead
+// candidate fails only the turns routed to it.
+//
+// Each sentence says what to do next, because a refusal that does not is a
+// locked door.
+export function configInUse(db: Db, configId: string): string {
+  if (countWhere(db, agentsMapping(), "model_config_id = " + db.placeholder, [configId]) > 0) {
+    return "config " + configId + " is used by an agent; repoint it first";
+  }
+  if (countWhere(db, modelChoicesMapping(), "config_id = " + db.placeholder, [configId]) > 0) {
+    return "config " + configId + " is a row of the model menu; take the choice off the menu first";
+  }
+  if (countWhere(db, modelRoutersMapping(),
+                 "router_config_id = " + placeholderAt(db, 1)
+                 + " OR fallback_config_id = " + placeholderAt(db, 2),
+                 [configId, configId]) > 0) {
+    return "config " + configId + " is a router's own config or its fallback; repoint the router first";
+  }
+  return "";
 }
 
 @controller("/prompts")
@@ -1264,6 +2080,102 @@ function maxVersion(db: Db, name: string): int {
   return rows[0].version;
 }
 
+// --- which model a conversation runs on --------------------------------------
+//
+// One field, `modelChoiceId`, on the two doors that already exist, and no route
+// of its own. The composer's picker is used BEFORE the thread exists on a new
+// conversation, so a PUT would be a request the console could not make at the
+// moment a person makes the choice — the selection travels with the message
+// instead (MODEL-CHOICE.md, "API").
+//
+// This is the door's half only: reading the field off a body, and refusing an
+// id that names nothing. What the field MEANS — message over thread over the
+// agent's own, and what happens when the row is gone — is `chooseModel` in
+// threads.ts, deliberately in one place, and it is not repeated here.
+
+// The choice a body names, or "" for "no id".
+//
+// Read off the raw body rather than declared on a record, and BOTH halves of
+// that rule are load-bearing. `JSON.parse<T>` refuses a document missing a
+// member the record declares — so adding the field to a body record would
+// refuse every request that leaves it out. It also refuses a document carrying
+// a member the record does NOT declare, which is the half that was missed and
+// the more expensive one: `{ text: string }` parsed against
+// `{"text":"hi","modelChoiceId":""}` throws UnknownField, and that is the body
+// the console sends on every single message. Declaring the field breaks the
+// old callers; not declaring it breaks the new ones. So neither thread door
+// parses its body into a narrow record at all — each reads the members it
+// wants, exactly as `fromTemplate` reads `templateId`.
+//
+// Verified rather than reasoned about: both record types were run verbatim
+// under `lumen run` against both body shapes.
+export function askedChoice(body: string): string {
+  if (body == "") { return ""; }
+  return jsonText(body, "modelChoiceId");
+}
+
+// Whether the body said anything about the model at all — which is a different
+// question from what it said, and the difference is the menu's last row.
+//
+// "Agent default" is a real choice a person makes, and the only value the wire
+// can carry for it is "". If "" meant "the caller said nothing" then picking it
+// would leave the thread's memory in place and the next turn would answer on
+// the model the person just moved away from, for ever: there would be no value
+// on the wire meaning "clear". So absence and "" are separated here, one field
+// still, read twice:
+//
+//   field absent  -> keep answering with whatever the thread last chose
+//   field present -> this is the choice, "" included, and the thread learns it
+//
+// The console always sends the field (`say` in app/src/api.ts), so it is
+// always making a statement; a curl that leaves it out inherits, which is what
+// every request written before this feature does.
+export function choiceWasSent(body: string): bool {
+  if (body == "") { return false; }
+  return jsonFind(body, "modelChoiceId") >= 0;
+}
+
+// The two halves together, in the shape `runInThreadWith` takes them.
+export function askedPick(body: string): ModelPick {
+  let pick: ModelPick = { choiceId: askedChoice(body), sent: choiceWasSent(body) };
+  return pick;
+}
+
+// Why a chosen menu row will not be accepted, in words, or "".
+//
+// The door refuses what `chooseModel` tolerates, and the asymmetry is the point
+// rather than an inconsistency to be tidied away. A thread that has pointed at
+// a row since before the operator retired it must keep running — so the
+// RESOLVER falls back to the agent's own model and writes a route note, because
+// a conversation must not stop working because a menu changed. But a request
+// arriving now with a `modelChoiceId` is a claim that the row exists now, made
+// by a client that could have reloaded the menu; answering it on the agent's
+// default while the composer reads "Thinking" tells the person nothing, and the
+// only symptom is a picker that appears not to work. One is a memory, and it is
+// absorbed; the other is an assertion, and it is answered.
+//
+// "Offered" is asked over the menu itself — the same read `GET /models/choices`
+// answers with and the same one threads.ts resolves against — rather than by
+// re-deciding it from a row's columns here. Two definitions of "offered" agree
+// right up until somebody adds a condition to one of them.
+export function choiceProblem(db: Db, choiceId: string): string {
+  if (choiceId == "") { return ""; }
+  let offered = enabledChoices(db);
+  let i: int = 0;
+  while (i < offered.length) {
+    if (offered[i].id == choiceId) { return ""; }
+    i = i + 1;
+  }
+  // The row is read only to tell the two mistakes apart, never to decide: an
+  // id a client invented and a menu the operator changed under a console that
+  // has not reloaded want different sentences, and "not offered" against an id
+  // that was never a row would send somebody looking for a row to re-enable.
+  if (findById(db, modelChoicesMapping(), choiceId) == "") {
+    return "no model choice " + choiceId;
+  }
+  return "model choice " + choiceId + " is not offered";
+}
+
 // A conversation that continues.
 //
 // The whole context is replayed into every turn — the tool calls, their
@@ -1305,15 +2217,42 @@ class ThreadApi {
   @post("/")
   open(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required: {\"agentId\":\"a1\"}"); }
-    let body: ThreadStart = JSON.parse<ThreadStart>(req.body);
-    if (!existsById(this.db, agentsMapping(), body.agentId)) {
-      return badRequest("no agent " + body.agentId);
+    // Read member by member, never parsed into `{ agentId: string }`. A record
+    // type refuses a document that carries a key it does not declare, and this
+    // body carries `modelChoiceId` whenever the composer had a model showing —
+    // so the narrow parse answered 400 to exactly the requests the field was
+    // added for. See `askedChoice`.
+    let agentId = jsonText(req.body, "agentId");
+    if (agentId == "") { return badRequest("a body is required: {\"agentId\":\"a1\"}"); }
+    if (!existsById(this.db, agentsMapping(), agentId)) {
+      return badRequest("no agent " + agentId);
     }
+    // Optional. A conversation is usually opened with the picker already
+    // showing something, so the first message must not have to re-state it.
+    let chosen = askedChoice(req.body);
+    let refused = choiceProblem(this.db, chosen);
+    if (refused != "") { return badRequest(refused); }
     // Stamped with the caller's own tag, never with the whole set it may read:
     // a shared thread has one owner.
-    let id = openThread(this.db, { agentId: body.agentId, owner: owningTag(callerTags(req)), now: stamp() });
+    let id = openThread(this.db, { agentId: agentId, owner: owningTag(callerTags(req)), now: stamp() });
     if (id == "") { return badRequest("the thread could not be opened"); }
-    return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(body.agentId) + "}");
+
+    // A second statement rather than an argument to `openThread`, which
+    // deliberately takes none: the picker travels with the message, so the
+    // field is written by whichever door was used and there is exactly one
+    // place — `rememberChoice` — that writes it.
+    let kept = chosen;
+    if (chosen != "") {
+      // Not a 400 when the UPDATE fails, and that is deliberate. The thread
+      // exists by now, so a 400 says "nothing happened", which is false: a
+      // console that retries opens a second conversation and the first is an
+      // orphan the sweeper is off by default to collect. The reply instead
+      // says what was actually stored, and "" arriving at a composer showing
+      // "Thinking" is a disagreement a client can see and act on.
+      if (rememberChoice(this.db, id, chosen) != "") { kept = ""; }
+    }
+    return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(agentId)
+      + ",\"modelChoiceId\":" + JSON.stringify(kept) + "}");
   }
 
   // What the run is doing right now.
@@ -1374,11 +2313,47 @@ class ThreadApi {
       return notFound("thread " + param(req, "id"));
     }
     if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
-    let body: RunBody = JSON.parse<RunBody>(req.body);
-    if (body.text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
+    // Member by member, never `JSON.parse<{ text: string }>`: the console's
+    // send always carries `modelChoiceId` too, and a record refuses a document
+    // holding a key it does not declare. See `askedChoice`.
+    let text = jsonText(req.body, "text");
+    if (text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
+
+    // What the composer's picker was showing when this was sent, and whether
+    // it said anything at all — the second half is what makes "Agent default"
+    // reachable. Refused by name for the reason `choiceProblem` records.
+    let pick = askedPick(req.body);
+    let noSuchChoice = choiceProblem(this.db, pick.choiceId);
+    if (noSuchChoice != "") { return badRequest(noSuchChoice); }
+
+    // ---- THE PREMIUM GATE GOES HERE, AND NOWHERE ELSE ----
+    //
+    // `model_choices.tier` is "" or "premium", and MODEL-CHOICE.md puts
+    // enforcement at the point a choice is APPLIED rather than in the menu:
+    // `GET /models/choices` above serves premium rows to everybody so the
+    // console can render the lock and say what upgrading buys, and this line
+    // is what the lock would MEAN.
+    //
+    // Nothing is checked today, deliberately, and not as an oversight to be
+    // tidied up later: there is no billing anywhere in this codebase, and the
+    // community edition will never have any (EDITIONS.md) — so a check
+    // invented here would be a guess at an interface that does not exist, and
+    // `tier` is inert on a laptop running Ollama by design. When editions do
+    // price a row (LICENSING.md), the check belongs on this line: read the
+    // chosen row, and if its tier is "premium" and this caller's edition does
+    // not include it, refuse HERE — which is before the turn below applies it,
+    // remembers it, and spends a provider call on it.
 
     let tracer = tracerFor(this.db, this.master);
-    let answered = runInThread(this.db, param(req, "id"), body.text, this.master, tracer);
+    // Handed to the turn rather than written here first. Applying the choice
+    // and remembering it are one act, and `runInThreadWith` is where that act
+    // lives — it resolves the precedence, keeps the pick only if it survived
+    // resolution, and hands back what was in force. A door that wrote the
+    // column itself would be a second writer of one field, and the two would
+    // disagree the first time a rule was added to only one of them.
+    let answered = runInThreadWith(this.db, param(req, "id"), {
+      userText: text, master: this.master, tracer: tracer, pick: pick,
+    });
     let run = answered.run;
     // The run log keeps the RAW reply — `run.text`, fences and bodies intact —
     // because the log is the audit trail of what the model actually said.
@@ -1387,10 +2362,19 @@ class ThreadApi {
     // The run is filed under the THREAD's owner, not the caller's tag: once
     // sharing exists a guest may ask a question in somebody else's
     // conversation, and the run belongs to the conversation.
+    //
+    // The decision travels into the row rather than being recomputed from the
+    // config that answered: "the run used c-gemini-flash" is not the claim
+    // "a person chose Fast", and only the second is what an eval seeded from
+    // real traffic can read (MODEL-CHOICE.md, "Evaluation"). This is also the
+    // only place a silent fallback — a retired menu row, a router that did not
+    // route, a dangling config — is written down at all; the wire below is
+    // read once by a client and discarded.
     let runId = recordRun(this.db, {
       agentId: agentId, threadId: param(req, "id"),
       owner: threadOwner(this.db, param(req, "id")),
-      question: body.text, run: withNotes(run, answered.notes),
+      question: text, run: withNotes(run, answered.notes),
+      modelChoiceId: answered.modelChoiceId, routeNote: answered.routeNote,
     });
 
     let traced = "";
@@ -1406,6 +2390,16 @@ class ThreadApi {
       + ",\"text\":" + JSON.stringify(view.text)
       + ",\"refs\":" + refsJson(view.refs)
       + ",\"seq\":" + `${answered.baseSeq}`
+      // Which menu row this turn ran under, "" for the agent's own — the
+      // decision as it was made, not as it was asked for. Echoed because a
+      // composer that sent a choice needs to know it took, and one that sent
+      // none is being told what the thread remembered.
+      + ",\"modelChoiceId\":" + JSON.stringify(answered.modelChoiceId)
+      // Why the model that answered was the one that did, "" when there is
+      // nothing to explain. This is what the round card's "routed → Thinking"
+      // row is drawn from, and the only place a fallback is said out loud to
+      // the person who chose.
+      + ",\"routeNote\":" + JSON.stringify(answered.routeNote)
       + ",\"toolCalls\":" + `${run.steps.length}`
       + ",\"steps\":" + stepsJson(stepsOfRound(this.db, param(req, "id"), answered.baseSeq))
       + ",\"thoughts\":" + thoughtsJson(thoughtsOfRound(this.db, param(req, "id"), answered.baseSeq))
@@ -1421,6 +2415,21 @@ class ThreadApi {
   // Each message carries its stored seq and its structured refs, and its text
   // passes through wireView — the reference nonce stays on the server, and a
   // client maps cards by slot@version from `refs`, never by text order.
+  //
+  // An OBJECT, and it was the bare array that `messages` still holds. A
+  // conversation's current choice is a fact about the thread and not about any
+  // one message, and an array has nowhere to put one. The alternatives were a
+  // second round trip for a single field, or a response header — and a header
+  // is where facts go to be forgotten. Reopening a conversation has to show
+  // the picker set to what was last chosen, or the memory the column exists
+  // for is invisible.
+  //
+  // The console reads `.messages` where it used to read the body: `transcript`
+  // in app/src/api.ts, and the conversation page's SSR loader in
+  // app/pages/c/[id].ts, which fetches the same route as the person asking.
+  //
+  // `routeNote` — why a routed round picked what it picked — joins here when
+  // the router lands. `runs.route_note` is already the column it comes from.
   @get("/:id")
   transcript(req: Request): Reply {
     if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
@@ -1452,7 +2461,8 @@ class ThreadApi {
       }
       i = i + 1;
     }
-    return ok(out + "]");
+    return ok("{\"modelChoiceId\":" + JSON.stringify(threadChoice(this.db, param(req, "id")))
+      + ",\"messages\":" + out + "]}");
   }
 }
 
@@ -3040,8 +4050,8 @@ function seed(db: Db): void {
   persist(db, modelsMapping(), JSON.stringify(haiku));
   persist(db, modelsMapping(), JSON.stringify(embed));
   persist(db, modelsMapping(), JSON.stringify(embedSmall));
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "" };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "" };
+  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "Careful", selectable: true, rank: 1 };
+  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "", label: "Quick", selectable: true, rank: 2 };
   persist(db, modelConfigsMapping(db), JSON.stringify(careful));
   persist(db, modelConfigsMapping(db), JSON.stringify(quick));
   let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
@@ -3060,6 +4070,38 @@ function seed(db: Db): void {
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
 }
 
+// The model menu, brought up to date with the models that are actually here.
+// "" when every statement ran, the first failure otherwise.
+//
+// Run at every start, after the seed, and NOT as a migration — which is what it
+// used to be, and the reason it never worked on a new install. `migrate` runs a
+// versioned statement once, at a moment fixed by the migration history, and on
+// a fresh database that moment is before `seed` has written a model and long
+// before an operator has configured one. The four derived statements therefore
+// read an empty database, wrote nothing, recorded themselves as applied, and
+// could never run again: `GET /models/choices` answered `[]` for ever and the
+// composer's picker was empty on every install that was not nuraly.io.
+//
+// A menu is a reading of the tables and the tables keep changing, so the
+// reading is re-taken. `derivedMenuStatements` carries what makes that safe to
+// do repeatedly — nothing it writes is written twice, and nothing an operator
+// changed is written over.
+//
+// Logged rather than fatal, unlike `migrationProblem`. A schema that did not
+// migrate serves 500s from routes whose columns are missing; a menu that did
+// not publish serves the menu it had, which on a new install is no menu — a
+// feature that is not there yet, not a broken deployment.
+export function publishMenu(db: Db): string {
+  let statements = derivedMenuStatements(db);
+  let i: int = 0;
+  while (i < statements.length) {
+    let ran = execute(db, statements[i]);
+    if (!ran.ok) { return "the model menu could not be published: " + ran.error; }
+    i = i + 1;
+  }
+  return "";
+}
+
 function main(): void {
   let db = openDatabase();
   let schema = migrationProblem(db);
@@ -3068,6 +4110,8 @@ function main(): void {
     return;
   }
   seed(db);
+  let menu = publishMenu(db);
+  if (menu != "") { console.error(menu); }
   let master = masterKey();
   let keyProblem = masterKeyProblem(master);
   if (keyProblem != "") {
@@ -3107,6 +4151,8 @@ function main(): void {
     new TemplateApi(db),
     new ModelApi(db, master),
     new ConfigApi(db),
+    new ChoiceApi(db),
+    new RouterApi(db),
     new PromptApi(db),
     new WorkspaceApi(db, master),
     new ThreadApi(db, master),

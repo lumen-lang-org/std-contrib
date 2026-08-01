@@ -4,6 +4,7 @@
 // nothing here reaches into it.
 
 import { LitElement, css, html } from "lit";
+import { BRAND, WORDMARK } from "./brand.js";
 import { customElement, property, state } from "lit/decorators.js";
 import "./ui.js";
 import "./sidebar.js";
@@ -12,10 +13,11 @@ import "./settings.js";
 import "./knowledge.js";
 import "./canvas.js";
 import "./login-overlay.js";
+import "./model-picker.js";
 import {
-  AgentRow, ArtifactListing, Me, ThreadListing, TurnArtifactRef, WireRef,
+  AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
-  listThreads, previewUrl, startFromTemplate, templatesOfKind, whoami,
+  listModels, listThreads, modelChoices, previewUrl, startFromTemplate, templatePdf, templatesOfKind, whoami,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -28,6 +30,30 @@ import * as live from "./live.js";
 function currentId(): string {
   const m = /^\/c\/([^/?#]+)/.exec(location.pathname);
   return m === null ? "" : decodeURIComponent(m[1]);
+}
+
+/* What the route page's loader read, whichever shape it read it in.
+ *
+ * `GET /threads/:id` used to answer a bare array of turns and now answers
+ * `{modelChoiceId, messages}` — a conversation's current model choice is a
+ * fact about the thread and an array has nowhere to put one. The loader in
+ * pages/c/[id].ts hands its body through verbatim as `seedTurns`, so this
+ * element is the last place that can tell the two apart, and it has to: an
+ * object reaching `apply` unrecognised is `turns.map is not a function` thrown
+ * inside a server render, which answers a 500 for a conversation that opens
+ * perfectly well on the client a moment later.
+ *
+ * Both shapes rather than the new one alone, because the seed also arrives
+ * from an older cached page and from `pages/index.ts`, which hands `[]`. */
+function seedOf(seed: unknown): { turns: unknown[]; modelChoiceId: string } {
+  if (Array.isArray(seed)) { return { turns: seed, modelChoiceId: "" }; }
+  const held = seed as { messages?: unknown; modelChoiceId?: unknown } | null;
+  const messages = held?.messages;
+  if (!Array.isArray(messages)) { return { turns: [], modelChoiceId: "" }; }
+  return {
+    turns: messages,
+    modelChoiceId: typeof held?.modelChoiceId === "string" ? held.modelChoiceId : "",
+  };
 }
 
 /* A capability's face in the row. The engine knows skills by name; the row
@@ -105,6 +131,77 @@ const FOCUS_RING = `
   }
 `;
 
+/* The conversation's gutters, and the composer's plus.
+ *
+ * Measured off the live component at 430px, which is where these numbers come
+ * from rather than taste:
+ *
+ *   .messages        padding 8px 4px   → a reply starts at x=4, and the user
+ *                                        bubble ends 4px off the right edge
+ *   .input-box       padding 8px 0     → the composer sits on the very bottom
+ *   .input-container padding-left 20px, padding-right 8px — not symmetric
+ *
+ * Kimi holds ~20px on both sides of a turn and floats the composer off the
+ * bottom. Text touching the edge of a phone screen is the single loudest
+ * difference between the two, and it is four pixels.
+ *
+ * The plus is the other half. It is an nr-button, and its inner <button>
+ * carries `color: rgb(83,100,113)` — a slate blue-grey hardcoded in the
+ * component, no custom property behind it — plus a 1px rgb(239,243,244)
+ * border. That colour is in neither palette; it is simply what the component
+ * ships. Held at --fg so it matches the header icons and the body text, the
+ * way every icon in the chrome now does.
+ *
+ * Kept OUT of FOCUS_RING and applied only inside nr-chatbot, because that
+ * sheet is handed to every component root on the page: `button { border: 0 }`
+ * there would also flatten the filled buttons in settings and the sidebar,
+ * where the border is load-bearing. */
+const CHAT_SKIN = `
+  /* Empty on purpose, and kept as the seam.
+
+     Everything this held — the composer's 16px gutters, the pill's inner 12,
+     the action row's reserved height — moved into the component's own static
+     styles (chatbot.style.ts). An adopted sheet exists only AFTER hydration,
+     so each of those rules was false for exactly one frame: the composer
+     painted at the component's padding and then jumped to the app's, and on a
+     centred home screen the wordmark rode up and back down with it. That was
+     the load bounce, and it was never the capability chips.
+
+     Anything added back here inherits that flaw. A rule that changes the SIZE
+     of a box belongs in the component; this is for what can honestly arrive
+     late. */
+`;
+
+const CHAT_BUTTON = `
+  button { border-color: transparent !important;
+           color: var(--fg, rgba(0,0,0,.9)) !important; }
+  button:hover { border-color: transparent !important;
+                 background: var(--bg-sunken, rgba(0,0,0,.045)) !important; }
+`;
+
+/* Dress the chat component and only the chat component. Same `dressed` latch
+   as softenFocusRings, under a second flag so the two passes do not cancel
+   each other out on a root that both visit. */
+function dressChat(root: ParentNode) {
+  // As Element: the generated type for <nr-chatbot> does not declare
+  // shadowRoot, though every element has one open here.
+  const chat = root.querySelector("nr-chatbot") as Element | null;
+  if (chat === null || chat.shadowRoot === null) { return; }
+  adopt(chat.shadowRoot, CHAT_SKIN, "skinned");
+  for (const el of chat.shadowRoot.querySelectorAll("nr-button")) {
+    if (el.shadowRoot !== null) { adopt(el.shadowRoot, CHAT_BUTTON, "skinned"); }
+  }
+}
+
+function adopt(sr: ShadowRoot, text: string, flag: string) {
+  const marked = sr as ShadowRoot & Record<string, unknown>;
+  if (marked[flag] === true) { return; }
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(text);
+  sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, sheet];
+  marked[flag] = true;
+}
+
 function softenFocusRings(root: ParentNode) {
   for (const el of root.querySelectorAll("*")) {
     const sr = (el as Element).shadowRoot as (ShadowRoot & { dressed?: boolean }) | null;
@@ -128,8 +225,14 @@ export class AgentConsole extends LitElement {
        and it is what closes the drawer — a tap anywhere else. */
     .scrim { display: none; }
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    /* No rule under the header. Measured against Kimi at the same width: it
+       draws no divider anywhere on the page — header, turns, composer are all
+       separated by space alone. A hairline here is the only horizontal line
+       on a phone screen and it reads as chrome around the conversation
+       rather than as structure. The sticky background is what keeps the bar
+       legible over scrolled content; the border was never doing that job. */
     header { display: flex; align-items: center; gap: 10px; padding: 10px 18px;
-             border-bottom: 1px solid var(--border); background: var(--bg);
+             background: var(--bg);
              /* Pinned. The chat pane is the thing meant to scroll, but on a
                 phone the document itself can scroll when content overflows,
                 and the bar carrying the drawer toggle and the conversation
@@ -137,7 +240,11 @@ export class AgentConsole extends LitElement {
                 rather than fixed, so it costs nothing when the document is
                 not the scroller. */
              position: sticky; top: 0; z-index: 40; }
-    .title { font: 600 17px var(--display); overflow: hidden; text-overflow: ellipsis;
+    /* 500, not 600. The title is the name of the thing you are already looking
+       at, so it wants to be legible rather than announced — Kimi sets its own
+       at the body weight. At 600 it was the heaviest mark on a phone screen
+       and pulled the eye away from the conversation under it. */
+    .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; flex: 1; }
     .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px;
             border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px;
@@ -145,14 +252,31 @@ export class AgentConsole extends LitElement {
     .chip .bolt { color: var(--accent); }
     select { background: var(--bg-card); border: 1px solid var(--border); color: inherit;
              border-radius: 8px; padding: 4px 8px; font: inherit; }
-    .icon { background: none; border: 1px solid var(--border); color: var(--muted);
-            border-radius: 10px; padding: 4px 10px; cursor: pointer; font: inherit;
-            transition: background-color .15s cubic-bezier(.23,1,.32,1),
-                        color .15s cubic-bezier(.23,1,.32,1),
-                        border-color .15s cubic-bezier(.23,1,.32,1); }
-    .icon:hover { border-color: var(--accent); color: var(--fg); }
-    .icon[aria-pressed="true"] { border-color: var(--accent); color: var(--fg);
-                                 background: var(--bg-sunken); }
+    /* An icon, not a button that contains one.
+     *
+     * Two things were wrong and they compound. The outline made each glyph a
+     * box, so the header read as a toolbar; and the glyph itself was --muted,
+     * which is rgba(0,0,0,.45) and renders 140,140,140 on white. Sampled
+     * against Kimi at the same width, its header and composer icons are
+     * 25,25,25 — the SAME ink as body text — and it spends grey only on the
+     * per-message actions under a reply, where secondary is the point.
+     *
+     * So: no border, and full-strength ink. --muted is still right for text
+     * that is genuinely subordinate (.run-row, .card-meta, .cap); it was never
+     * right for the only control in the corner of the screen. Hover moves to a
+     * background wash, which is the affordance the border was standing in for.
+     */
+    /* 20px glyph in 8px of padding — a 36px tap target. These are the only
+       controls in the header and were drawn at 6px/16px, which on a phone is
+       under the 44px Apple and 48px Material both ask for and read as
+       decoration next to the 54px wordmark. */
+    .icon { background: none; border: 0; color: var(--fg);
+            border-radius: 8px; padding: 8px; cursor: pointer; font: inherit;
+            font-size: 20px; line-height: 1;
+            display: inline-grid; place-items: center;
+            transition: background-color .15s cubic-bezier(.23,1,.32,1); }
+    .icon:hover { background: var(--bg-sunken); }
+    .icon[aria-pressed="true"] { background: var(--bg-sunken); }
     main { flex: 1; min-height: 0; }
     /* The cards live in this element's own DOM, below the chat — never inside
        the component's messages. Its artifact mode re-extracts fences from the
@@ -188,9 +312,17 @@ export class AgentConsole extends LitElement {
         position: fixed; inset: 0 auto 0 0; z-index: 60;
         transform: translateX(-100%);
         transition: transform .22s cubic-bezier(.23,1,.32,1);
+      }
+      /* The shadow belongs to the OPEN drawer, not to the element.
+         translateX(-100%) moves the box off screen but a 32px blur still
+         paints from where its right edge now is — which is x=0 — so a closed
+         drawer smeared a grey gradient down the left of every phone screen.
+         It reads as a rendering fault rather than as depth, and it was on
+         every screenshot of this console. Painted only while open. */
+      :host([nav]) console-sidebar {
+        transform: none;
         box-shadow: 0 0 32px -8px rgba(0,0,0,.28);
       }
-      :host([nav]) console-sidebar { transform: none; }
       :host([nav]) .scrim {
         display: block; position: fixed; inset: 0; z-index: 55;
         background: rgba(0,0,0,.28);
@@ -243,26 +375,84 @@ export class AgentConsole extends LitElement {
        wordmark, composer, capabilities — centres together. Without this
        nr-chatbot keeps flex:1, eats the column, and the row lands at the
        bottom edge of the window with the composer stranded in the middle. */
-    main.empty { display: flex; flex-direction: column; justify-content: center; }
+    /* Upper third, not dead centre. Centring measured out with the composer's
+       top edge at 57% of the viewport — on a tall screen the page reads as a
+       title floating in blank space with the input below the fold line of the
+       eye. The 16vh that puts the block where it belongs is the CHATBOT's own
+       (chatbot.style.ts, scoped to :has(.empty-state)); this rule's whole job
+       is to stop centring on top of it. No padding here — there was, briefly,
+       and the two 16vh stacked into a block at 44%. Phones keep the centre:
+       16vh of a short viewport is nothing, and a centred block is the only
+       layout that survives the keyboard. */
+    /* Centred until there is something below worth the room: pinning a
+       capability opens the Start-from cards, and a centred block would push
+       them off the bottom — so cards on screen is the one state that
+       top-aligns the home. The chatbot no longer places this block at all
+       (chatbot.style.ts handed it over); these two rules are the whole
+       policy. */
+    /* A little above centre, not on it: optical centre sits higher than
+       geometric centre, and the block is top-heavy (a 54px wordmark over a
+       composer), so dead centre reads as slightly low. The padding does the
+       biasing rather than a transform, so nothing overlaps when the window is
+       short enough that the block fills it. */
+    main.empty { display: flex; flex-direction: column; justify-content: center;
+                 padding-bottom: 9vh; }
+    /* With thumbnails the card row is ~200px tall, so the block only needs
+       to move up enough to clear it — 6vh put the wordmark against the header
+       with a screen of blank beneath. Centred-but-biased: still centre, just
+       with the cards' height taken out of the calculation. */
+    main.empty.has-starts { justify-content: center; padding-top: 0;
+                            padding-bottom: 0; }
     main.empty nr-chatbot { flex: 0 0 auto; height: auto; }
-    main.empty nr-chatbot::part(boxed-area) { padding-top: 0 !important; }
+    /* A ::part(boxed-area) rule sat here zeroing the chatbot's padding. It
+       never applied — nr-chatbot exposes no parts — which is the only reason
+       the home block ever sat at 16vh at all. Removed rather than kept as a
+       plausible-looking rule that a reader would edit and see nothing move. */
 
+    /* The row's height is held whether or not the chips have arrived.
+       featuredSkills is a fetch, so the row renders empty on first paint and
+       fills a moment later — and because the whole empty block is centred, a
+       row that grows from 0 to 49px pushed the wordmark and composer up by
+       half that as you watched. Reserving the space costs one rule and makes
+       the load invisible. Matches the chips' own box: 14px padding-top + a
+       35px pill. */
+    .caps { min-height: 49px; box-sizing: content-box; }
     .caps { display: flex; gap: 4px; padding: 14px 18px 0; max-width: 768px;
             margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
     .caps::-webkit-scrollbar { display: none; }
+    /* Outlined pills, the way Kimi draws this row today. These shipped
+       borderless on the argument that they are verbs, not buttons — but the
+       row sits alone on a blank page under the composer, and without an
+       outline the verbs read as a stray line of text. Kimi came to the same
+       conclusion: their capability row is bordered pills now. */
     .cap { display: inline-flex; align-items: center; gap: 7px; flex: none;
-           padding: 7px 14px; border: 0; border-radius: 999px; cursor: pointer;
-           background: none; font: inherit; font-size: 14px; color: var(--muted);
-           white-space: nowrap; }
-    .cap:hover { background: var(--bg-user); color: var(--fg); }
+           padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px;
+           cursor: pointer; background: var(--bg-card); font: inherit;
+           font-size: 14px; color: var(--fg); white-space: nowrap; }
+    .cap:hover { background: var(--bg-user); border-color: var(--muted); }
     .cap.on { background: var(--bg-user); color: var(--fg); font-weight: 600; }
     /* Starting points for the pinned capability. Cards, because each is a
        thing you would recognise by name — Kimi's "Featured cases". */
     .starts-head { max-width: 768px; margin: 18px auto 8px; padding: 0 18px;
                    font-size: 13px; color: var(--muted); }
+    /* Contained scrolling: the row is wider than a phone by design, and
+       without a max-width tied to the viewport it made the PAGE scroll
+       sideways — the whole console slid, header and all. overscroll-behavior
+       keeps a swipe that reaches the end of the cards from becoming a page
+       gesture. */
+    .starts { overscroll-behavior-x: contain; max-width: min(768px, 100%); }
     .starts { display: flex; gap: 10px; padding: 0 18px; max-width: 768px;
               margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
     .starts::-webkit-scrollbar { display: none; }
+    /* The first page of the template's own document, cropped to a card-sized
+       peek. The proof beats the label: "Status report" is a claim, the actual
+       headings and the table are what a person recognises. A card whose PDF
+       has not arrived (or cannot — no converter on this deployment) simply
+       keeps the quiet placeholder ground; the words were always enough. */
+    .start-thumb { display: block; height: 118px; margin-bottom: 8px;
+                   border: 1px solid var(--border); border-radius: 8px;
+                   overflow: hidden; background: var(--bg-card); }
+    .start-thumb canvas { display: block; width: 100%; height: auto; }
     .start { flex: none; width: 210px; text-align: left; cursor: pointer;
              display: flex; flex-direction: column; gap: 3px; padding: 12px 14px;
              border: 1px solid var(--border); border-radius: 14px;
@@ -300,7 +490,11 @@ export class AgentConsole extends LitElement {
     }
   `;
 
-  @state() private agents: AgentRow[] = [];
+  // AgentFull, not AgentRow: GET /agents has always answered the full view —
+  // the prompt and the config resolved — and this only ever declared the
+  // narrower half of what it was handed. The menu's last line needs
+  // `config.modelId` to name the agent's own model.
+  @state() private agents: AgentFull[] = [];
   @state() private agentId = "";
   @state() private threads: ThreadListing[] = [];
   @state() private threadId = "";
@@ -309,10 +503,35 @@ export class AgentConsole extends LitElement {
   // placeholder are drawn on this side.
   @state() private busy = false;
 
+  /* The composer's model menu, and what it is set to.
+   *
+   * The list is the operator's, in their rank order, straight from the engine
+   * — the same posture as the capability row above. Empty is a real and
+   * ordinary answer: a deployment with one model has no decision to offer and
+   * gets no picker rather than a menu of one.
+   *
+   * `choiceId` is "" for the agent's own model, which is what every
+   * conversation written before this feature means and what needs no backfill.
+   * It is per-composer, not per-thread: what it shows is what the NEXT send
+   * will carry. Opening an existing conversation sets it to what that
+   * conversation last ran on; starting a new one deliberately keeps it, since
+   * the person who just chose Thinking meant the next thing they ask. */
+  @state() private choices: ModelChoice[] = [];
+  @state() private choiceId = "";
+  /* Read for exactly one line of the menu — "Agent default (…)" — because an
+   * agent resolves to a config and a config to a model, and only the model
+   * row carries a label a person would recognise. Never fetched at all when
+   * there is no menu to draw. */
+  @state() private models: ModelRow[] = [];
+
   // One session for the pane. It is the controller nr-chatbot was missing:
   // without one, Enter did nothing at all.
   private session = new ChatSession({
     agentId: () => this.agentId,
+    // Read at the moment a question is accepted, not when it is sent: the
+    // choice travels with the message, and a queued question keeps whatever
+    // the picker was showing when it was typed.
+    modelChoiceId: () => this.choiceId,
     // The one place a conversation's id arrives without anyone having opened
     // it: the first message of a new thread creates it server-side and this is
     // how the console learns which one it got. It has to route too, or the
@@ -356,7 +575,7 @@ export class AgentConsole extends LitElement {
      Applied once through the same join `session.open` uses, so the first paint
      and the reload cannot disagree. Empty on `/` and on any load the loader
      could not answer. */
-  @property({ attribute: false }) seedTurns: unknown[] = [];
+  @property({ attribute: false }) seedTurns: unknown = [];
   @property({ attribute: false }) seedPast: unknown = { steps: [], thoughts: [] };
 
   /* The capability row. Public featured skills, in rank order, straight from
@@ -384,16 +603,27 @@ export class AgentConsole extends LitElement {
      transcript would throw away whatever the conversation has become since. */
   private seeded = false;
   willUpdate(): void {
-    if (this.seeded || this.seedTurns.length === 0) { return; }
+    if (this.seeded) { return; }
+    const seed = seedOf(this.seedTurns);
+    if (seed.turns.length === 0) { return; }
     this.seeded = true;
     const id = this.conversation !== "" ? this.conversation : currentId();
     if (id === "") { return; }
     this.threadId = id;
-    this.session.apply(this.seedTurns as never, this.seedPast as never);
+    // The conversation's own choice, from the first frame. The picker is drawn
+    // on the server too, and a composer that paints "Default" and then flips
+    // to "Thinking" a round trip later is worse than one that waits.
+    this.choiceId = seed.modelChoiceId;
+    this.session.apply(seed.turns as never, this.seedPast as never);
   }
 
   async connectedCallback() {
     super.connectedCallback();
+    // The tab's name is part of the brand too — nothing else in the app sets
+    // a <title>, so without this the tab wears whatever the framework's shell
+    // defaulted to. Safe here because SSR skips connectedCallback (see the
+    // seeding note above); on the server there is no document to touch.
+    document.title = BRAND;
     this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
     // Asked before the lists, and never awaited alongside them: a 401 from the
     // list calls navigates to the login, and the answer to this one decides
@@ -409,7 +639,7 @@ export class AgentConsole extends LitElement {
     // The run says what it is doing while it is doing it. Held here so the
     // card re-renders; the session owns the list and never rebuilds it.
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
-      .catch(() => [[], []] as [AgentRow[], ThreadListing[]]);
+      .catch(() => [[], []] as [AgentFull[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled);
     // The flagged default, not the first name in the list — sorted by name,
     // "the first" was whichever agent happened to sort earliest, which for a
@@ -432,6 +662,38 @@ export class AgentConsole extends LitElement {
     // conversation that moved on since the server read it catches up.
     if (wanted !== "") { void this.open(wanted); }
     this.threadsTicker = setInterval(() => { this.tickThreads(); }, 10000);
+    // Last, and awaited last on purpose: the sidebar, the header and the
+    // conversation are all already on screen by the time this asks, and
+    // nothing above it waits on a menu.
+    await this.loadChoices();
+  }
+
+  /* The composer's menu, and the one label the menu's last line needs.
+   *
+   * Refused rather than empty is the same answer here: `catch(() => [])` gives
+   * a console with no picker, which is what a deployment that has not curated
+   * a menu should look like anyway.
+   *
+   * The models are only read when there is a menu. A single-model install asks
+   * `/models/choices` once, gets nothing, and never asks anything else — which
+   * is the community edition's whole experience of this feature. */
+  private async loadChoices(): Promise<void> {
+    this.choices = await modelChoices().catch(() => []);
+    if (this.choices.length === 0) { return; }
+    this.models = await listModels().catch(() => []);
+  }
+
+  /* The agent's own model, named the way a person would recognise it.
+   *
+   * Three rows deep — agent to config to model — and it degrades at each step
+   * to "", which the picker renders as a plain "Agent default". `models.label`
+   * rather than the config's, because GET /agents resolves the config without
+   * its label column and the model is the thing a menu line is naming anyway. */
+  private defaultModelLabel(): string {
+    const agent = this.agents.find((a) => a.id === this.agentId);
+    const modelId = agent?.config?.modelId ?? "";
+    if (modelId === "") { return ""; }
+    return this.models.find((m) => m.id === modelId)?.label ?? "";
   }
 
   disconnectedCallback() {
@@ -460,6 +722,64 @@ export class AgentConsole extends LitElement {
   // settings.ts's markdown-token sheet — see the comment there.
   protected updated() {
     softenFocusRings(this.renderRoot);
+    dressChat(this.renderRoot);
+    void this.dock();
+  }
+
+  /* The model picker, held by reference rather than looked up.
+   *
+   * `renderRoot.querySelector` finds it exactly once — the first time, before
+   * it has been moved into the composer. After that it is a child of
+   * nr-chatbot's shadow root and this element's own root no longer answers for
+   * it, so a lookup on every pass would find nothing and the picker would
+   * never be re-docked after the chat pane is rebuilt (switching to the
+   * knowledge or graph view destroys the nr-chatbot that was holding it). */
+  private picker: HTMLElement | null = null;
+
+  /* Move the picker into the composer's action row, ahead of the send button.
+   *
+   * The long version of why it goes there at all, and why the component cannot
+   * simply be given content there, is at the top of model-picker.ts. The
+   * mechanics that matter here:
+   *
+   * - It is safe to move because `<model-picker>` is a STATIC node in this
+   *   element's template — never inside a conditional. lit creates such a node
+   *   once from the template clone and thereafter only updates its bindings,
+   *   which keep working wherever the node lives; a node inside a ternary
+   *   would instead be cleared between part markers that are no longer around
+   *   it, and would leak a picker per toggle.
+   * - Inserted before the row's first child, which puts it ahead of every
+   *   marker lit wrote inside that div. lit only ever clears BETWEEN its own
+   *   markers, so a node in front of all of them survives the component's
+   *   re-renders — including the one that adds the send button the moment
+   *   there is text to send.
+   * - `await chat.updateComplete` because the row is written by the
+   *   component's render, not by ours: on the first pass after hydration this
+   *   element has updated and nr-chatbot has not, so a synchronous query finds
+   *   no row at all.
+   * - Nothing is docked while there is no menu, and that is not only tidiness:
+   *   the action row has a 0.5rem gap, so an empty zero-width child would
+   *   still push the send button 8px left on every deployment that offers no
+   *   choices. */
+  private async dock(): Promise<void> {
+    if (this.choices.length === 0) { return; }
+    if (this.picker === null) {
+      this.picker = this.renderRoot.querySelector("model-picker");
+    }
+    const picker = this.picker;
+    if (picker === null) { return; }
+    const chat = this.renderRoot.querySelector("nr-chatbot") as
+      (Element & { updateComplete?: Promise<unknown> }) | null;
+    if (chat === null) { return; }
+    await chat.updateComplete;
+    const right = chat.shadowRoot?.querySelector(".action-buttons-right") ?? null;
+    if (right === null || picker.parentNode === right) { return; }
+    right.insertBefore(picker, right.firstChild);
+    // A bare attribute rather than a reactive property, because nothing must
+    // ever take it off again: it is what stops the picker painting where lit
+    // put it during the server render, which is under the conversation rather
+    // than in the composer.
+    picker.setAttribute("docked", "");
   }
 
   private unlisten: (() => void) | null = null;
@@ -487,6 +807,12 @@ export class AgentConsole extends LitElement {
     const found = this.threads.find((t) => t.id === id);
     if (found) this.agentId = found.agentId;
     await this.session.open(id);
+    // The conversation's memory of the last override becomes what the composer
+    // shows, so reopening one keeps answering with what you last chose there.
+    // Read from the session rather than pushed by it: the follower re-opens a
+    // conversation whenever a round it did not start finishes, and a push from
+    // in there would reset a picker somebody had just changed and not yet sent.
+    this.choiceId = this.session.rememberedChoice();
     await this.refreshRefs();
   }
 
@@ -635,7 +961,10 @@ export class AgentConsole extends LitElement {
      outlined pills reads as a toolbar. Scrolls sideways rather than wrapping,
      because a second line of capabilities pushes the composer off a phone. */
   private capabilityRow() {
-    if (this.capabilities.length === 0) { return ""; }
+    // The empty row still renders — see the .caps note in the stylesheet. A
+    // deployment with no featured skills keeps an empty 49px band, which is
+    // the price of nothing moving on every other deployment.
+    if (this.capabilities.length === 0) { return html`<div class="caps"></div>`; }
     return html`
       <div class="caps">
         ${this.capabilities.map((c) => html`
@@ -652,6 +981,7 @@ export class AgentConsole extends LitElement {
           ${this.starts.map((t) => html`
             <button class="start" title=${t.description}
               @click=${() => { void this.startWith(t); }}>
+              <span class="start-thumb" data-tpl=${t.id}></span>
               <span class="start-name">${t.label}</span>
               <span class="start-why">${t.description}</span>
             </button>`)}
@@ -665,6 +995,34 @@ export class AgentConsole extends LitElement {
     if (this.pinned === skillName) { this.pinned = ""; this.starts = []; return; }
     this.pinned = skillName;
     this.starts = await templatesOfKind(capKind(skillName)).catch(() => []);
+    void this.paintThumbs();
+  }
+
+  /* Each card's first page, drawn after the cards exist.
+
+     Cached per template for the tab's lifetime: the engine's side is cached
+     too, but a re-pin should not even ask. Fetch and render race the person
+     browsing — every await re-checks that the card is still on screen and
+     still empty, because pinning Sheets while Docs' thumbnails are in flight
+     would otherwise paint spreadsheet cards with documents. */
+  private thumbs = new Map<string, HTMLCanvasElement>();
+  private async paintThumbs(): Promise<void> {
+    await this.updateComplete;
+    for (const t of this.starts) {
+      const port = () => this.renderRoot.querySelector(`.start-thumb[data-tpl="${t.id}"]`);
+      const held = this.thumbs.get(t.id);
+      if (held !== undefined) { port()?.replaceChildren(held); continue; }
+      try {
+        const { pdf } = await templatePdf(t.id);
+        const { renderPdfThumb } = await import("./office-view.js");
+        const canvas = await renderPdfThumb(pdf, 208);
+        if (canvas === null) { continue; }
+        this.thumbs.set(t.id, canvas);
+        port()?.replaceChildren(canvas);
+      } catch {
+        // No thumbnail is a fine card; see the stylesheet note.
+      }
+    }
   }
 
   /* A template starts the conversation: its files land as version 1, and the
@@ -722,6 +1080,22 @@ export class AgentConsole extends LitElement {
     const cards = this.cards();
     return html`
       ${this.signedOut ? html`<login-overlay></login-overlay>` : ""}
+      <!-- The model picker, written here and drawn in the composer.
+           It is at the top level of this template and NOT inside any
+           conditional, which is what makes it safe for updated() to move it
+           into nr-chatbot's action row: lit builds a static node once and
+           never re-inserts it, so the move is permanent and the bindings below
+           keep updating it wherever it ends up. Putting it inside the view
+           ternary a few lines down would hand lit a part to clear, and every
+           switch to the graph view would leak a picker.
+           It is invisible until docked - see model-picker.ts - so its position
+           in this markup is never what a person sees. -->
+      <model-picker
+        .choices=${this.choices}
+        .choiceId=${this.choiceId}
+        .defaultLabel=${this.defaultModelLabel()}
+        @pick-choice=${(e: CustomEvent) => { this.choiceId = e.detail.id as string; }}
+      ></model-picker>
       <div class="scrim" @click=${() => { this.nav = false; }}></div>
       <console-sidebar
         .threads=${this.threads}
@@ -743,6 +1117,20 @@ export class AgentConsole extends LitElement {
             @click=${() => { this.nav = !this.nav; }}>
             <nr-icon name="panel-left" size="small"></nr-icon>
           </button>
+          <!-- Starting a conversation was reachable only from inside the
+               drawer, which on a phone means opening a panel to leave the one
+               you are in. It is the second thing every chat client puts in its
+               header, next to the drawer toggle, and it is one call to the
+               same fresh() the drawer's own button dispatches.
+               square-pen and not message-square-plus: the latter is not in
+               icon-paths, and nr-icon draws the NAME when it has no glyph, so
+               a wrong guess here prints the word in the header.
+               (No backticks in this comment: it lives inside an html
+               template literal, where one ends the literal.) -->
+          <button class="icon" title="New conversation"
+            @click=${() => { this.view = "chat"; this.nav = false; this.fresh(); }}>
+            <nr-icon name="square-pen" size="small"></nr-icon>
+          </button>
           <span class="title">${this.threadTitle()}</span>
           <span class="chip"><nr-icon class="bolt" name="zap" size="small"></nr-icon>
             ${this.threadId === "" ? html`
@@ -754,7 +1142,8 @@ export class AgentConsole extends LitElement {
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
             @click=${() => this.show("artifacts")}><nr-icon name="folder" size="small"></nr-icon></button>
         </header>
-        <main class=${this.session.getState().messages.length === 0 ? "empty" : ""}>
+        <main class=${this.session.getState().messages.length === 0
+          ? (this.starts.length > 0 ? "empty has-starts" : "empty") : ""}>
           <!-- The session is the controller. Messages are not passed in: the
                component reads them from the controller's state, and a second
                binding would fight it. The message-sent event is not listened
@@ -771,7 +1160,7 @@ export class AgentConsole extends LitElement {
             .isQueryRunning=${this.busy}
             enable-file-upload
             boxed
-            welcome-message="Agents."
+            welcome-message=${WORDMARK}
             placeholder="Ask ${this.agentName()}…"
             attach-icon="plus"
             .i18n=${{ input: { attachButton: "" } }}

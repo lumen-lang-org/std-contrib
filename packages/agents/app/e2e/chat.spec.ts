@@ -7,7 +7,7 @@
 // the request.
 
 import { expect, test } from "@playwright/test";
-import { shell } from "./console.js";
+import { open, shell } from "./console.js";
 
 // The composer is a contenteditable div, not a textarea — worth naming once
 // rather than rediscovering per test.
@@ -16,7 +16,7 @@ function composer(page: import("@playwright/test").Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
+  await open(page);
   await expect(shell(page)).toBeVisible();
 });
 

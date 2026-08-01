@@ -24,30 +24,34 @@ function main(): void {
   migrate(db, schemaPlan(db));
 
   // The server is a row. Nothing below knows its address at compile time.
-  let demo: McpServerRow = { id: "s1", serverName: "demo-mcp", transport: "http", endpoint: "http://127.0.0.1:8200", enabled: true };
+  let demo: McpServerRow = { id: "s1", serverName: "demo-mcp", transport: "http", endpoint: "http://127.0.0.1:8200", authKind: "none", authHeader: "", enabled: true };
   persist(db, mcpServersMapping(), JSON.stringify(demo));
 
   let mounted: McpServerRow = JSON.parse<McpServerRow>(findById(db, mcpServersMapping(), "s1"));
   console.log("mounting  " + mounted.serverName + " at " + mounted.endpoint);
 
-  let hello = initialize(mounted);
+  // No token: this row's authKind is "none". Every call below takes one
+  // because a server that wants a bearer or a header gets it from the
+  // credential store — mcp.ts's authHeaders decides what the text means, and
+  // an empty one sends no header at all rather than an empty one.
+  let hello = initialize(mounted, "");
   console.log("initialize ok=" + `${hello.ok}` + " " + hello.error);
 
-  let tools = toolNames(mounted);
+  let tools = toolNames(mounted, "");
   console.log("tools     " + tools.join(", "));
 
-  let sum = callTool(mounted, "add", "{\"a\":2,\"b\":40}");
+  let sum = callTool(mounted, "add", "{\"a\":2,\"b\":40}", "");
   console.log("add(2,40) " + sum.text + " " + sum.error);
 
-  let echoed = callTool(mounted, "echo", "{\"text\":\"from the database\"}");
+  let echoed = callTool(mounted, "echo", "{\"text\":\"from the database\"}", "");
   console.log("echo      " + echoed.text);
 
-  let missing = callTool(mounted, "nope", "{}");
+  let missing = callTool(mounted, "nope", "{}", "");
   console.log("nope      ok=" + `${missing.ok}` + " " + missing.error);
 
   // Disable it in the database; the next mount refuses without a code change.
   execute(db, "UPDATE mcp_servers SET enabled = 0 WHERE id = 's1'");
   let off: McpServerRow = JSON.parse<McpServerRow>(findById(db, mcpServersMapping(), "s1"));
-  console.log("disabled  ok=" + `${initialize(off).ok}` + " " + initialize(off).error);
+  console.log("disabled  ok=" + `${initialize(off, "").ok}` + " " + initialize(off, "").error);
 }
 main();

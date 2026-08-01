@@ -1,0 +1,25 @@
+{
+  "routes": [
+    {
+      "path": "/",
+      "module": "pages/index.js",
+      "hasLoader": false,
+      "hasSubscribe": false,
+      "tagName": "page-index",
+      "layouts": [
+        ""
+      ],
+      "hasSocket": true
+    }
+  ],
+  "apiRoutes": [],
+  "layouts": [
+    {
+      "dir": "",
+      "module": "layouts/_layout.js",
+      "hasLoader": false,
+      "hasSubscribe": false
+    }
+  ],
+  "prefetch": "viewport"
+}
