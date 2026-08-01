@@ -69,6 +69,99 @@
     --display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
+
+  /* --- dark ------------------------------------------------------------
+     Every token restated, and that is the point rather than an excess. A
+     partial dark palette is worse than none: --fg is black at 90%, so a dark
+     --bg with the light ink still in place is black text on a black page.
+     That is how the previous attempt at this failed — surfaces went dark,
+     inks stayed, and individual pairs fell below legibility in places nobody
+     had opened. So the rule here is that a dark value exists for every token
+     above, in the same order, and tools/contrast.mjs holds the ink/surface
+     pairs the console actually draws and prints a ratio for each.
+
+     Until this block existed the console shipped no dark palette at all, and
+     what a phone showed in dark mode was the BROWSER inverting the light one
+     — a hue-preserving inversion that no one here chose and that landed the
+     composer on a different grey from the page around it.
+
+     The values follow Kimi's reading, measured rather than eyeballed: its
+     page is rgb(24,24,23) and its composer rgb(31,31,31), so a surface you
+     act on sits one step ABOVE the ground rather than below it. That is the
+     inverse of the light theme's arrangement, where the rail is 2 points
+     darker than the sheet, and it is not an inconsistency: light separates
+     surfaces by removing light from the ground, dark separates them by
+     adding it. Following the light theme's direction literally would have
+     put the composer at #111 on a #181818 page, which reads as a hole. */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #181818;          /* the content sheet, Kimi's page, de-warmed */
+      --bg-rail: #141414;     /* the ground, one step BELOW the sheet */
+      --bg-card: #1F1F1F;     /* raised: cards, panels, menus */
+      /* The composer, Kimi's values to the number: its card is rgb(31,31,31)
+         on a rgb(24,24,23) page with a rgba(255,255,255,.12) hairline. Four
+         tokens rather than one because the card's block in the library
+         carries !important — the surface alone would have applied to the
+         element, lost to that block, and left the border and the placeholder
+         as black-on-black. */
+      --nuraly-chatbot-input-bg: #1F1F1F;
+      --nuraly-chatbot-surface: #181818;
+      --nuraly-chatbot-input-border: rgba(255,255,255,.14);
+      --nuraly-chatbot-input-border-focus: rgba(255,255,255,.30);
+      --nuraly-chatbot-placeholder: rgba(255,255,255,.42);
+      /* The wordmark. 54px of near-black by default, which on a #181818 page
+         is the largest piece of text on the screen painted the colour of the
+         screen. */
+      --nuraly-chatbot-brand-fg: rgba(255,255,255,.92);
+      /* nr-button's default type, which is what the composer's round + and
+         the panel controls are. Three literals otherwise — a white pill with
+         grey text — so + rendered as a filled white disc on the composer and
+         read as a spinner rather than a control. The violet hover is the
+         library's, kept as a hue that survives both grounds. */
+      --nuraly-button-default-bg: transparent;
+      --nuraly-button-default-border: rgba(255,255,255,.16);
+      --nuraly-button-default-color: rgba(255,255,255,.75);
+      --nuraly-button-default-hover-border: rgba(255,255,255,.34);
+      --nuraly-button-default-hover-color: rgba(255,255,255,.95);
+      --nuraly-button-default-active-bg: rgba(255,255,255,.07);
+      /* The same ladder as the light theme, in the other ink. White at an
+         opacity, not a grey ramp, so every level stays legible on any of the
+         three surfaces above — which is the property the light palette was
+         built for and the only reason it survives being restated. */
+      --bg-sunken: rgba(255,255,255,.07);
+      --bg-user: rgba(255,255,255,.07);
+      --fill-1: rgba(255,255,255,.04);
+      --fg: rgba(255,255,255,.92);
+      /* .60 and .42, not the light theme's .45 and .30. White on dark reads
+         dimmer than black on light at the same opacity — the light values
+         transcribed straight across give 3.3:1 and 2.1:1, and the numbers
+         here are where the same roles clear 4.5 and 3. (Those light figures
+         are not a typo: the light palette is itself under AA at --muted and
+         --faint. Left alone deliberately — it is the established reading and
+         changing it is a design decision, not a dark-mode fix.) */
+      --muted: rgba(255,255,255,.60);
+      --faint: rgba(255,255,255,.42);
+      --border: rgba(255,255,255,.12);   /* Kimi's border, to the number */
+      /* The accent inverts wholesale. A primary action here is a filled ink
+         button — near-black on white — and near-black on a near-black page
+         is not a button, it is a hole with a label in it. So the ink becomes
+         the light and the label becomes the dark, which keeps the rule the
+         light theme states: the primary action is ink, never a hue, and every
+         hue stays free for the graph. */
+      --accent: #EDEDED;
+      --accent-hover: #FFFFFF;
+      --accent-fg: #17171A;
+      --brand: #EDEDED;
+      /* Lifted off their light values, which are chosen to be legible ON
+         white and are simply too dark to be read on #181818: #2563EB gives
+         2.4:1 there, #B3261E 2.2:1. These clear their thresholds while
+         staying the same three signals — blue for focus, red for danger,
+         green for done. */
+      --focus: #7AA7FF;
+      --danger: #FF8A80;
+      --ok: #5DD39E;
+    }
+  }
   /* dvh, not vh or a bare 100%: on iOS Safari the visual viewport is shorter
      than the layout viewport by the height of the bottom toolbar, so a shell
      sized to 100% put its composer underneath that toolbar — you could type
