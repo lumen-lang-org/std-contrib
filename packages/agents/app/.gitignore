@@ -25,3 +25,4 @@
 # never reaches the finally, so the file is left behind at the top of the
 # package looking like source. It is not; it is regenerated on every build.
 /__nk_ssr_entry.js
+.console-dev.log

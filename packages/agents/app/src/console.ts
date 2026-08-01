@@ -444,7 +444,7 @@ export class AgentConsole extends LitElement {
        biasing rather than a transform, so nothing overlaps when the window is
        short enough that the block fills it. */
     main.empty { display: flex; flex-direction: column; justify-content: center;
-                 padding-bottom: 9vh; }
+                 padding-bottom: 14vh; }
     /* With thumbnails the card row is ~200px tall, so the block only needs
        to move up enough to clear it — 6vh put the wordmark against the header
        with a screen of blank beneath. Centred-but-biased: still centre, just
