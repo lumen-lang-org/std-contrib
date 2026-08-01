@@ -275,7 +275,12 @@ export class AgentConsole extends LitElement {
        the files sheet — and each is what dismisses its own layer: a tap
        anywhere else. Hidden above the breakpoint, where neither layer covers
        anything and a dimmed page would be dimming nothing. */
-    .scrim { display: none; background: rgba(0,0,0,.28); }
+    /* touch-action: none, so a drag that begins on the dimmed area is not a
+       scroll of the page under it. The scrim's job is to swallow what is
+       behind it, and on a touch screen a gesture is as much "behind it" as a
+       click is. */
+    .scrim { display: none; background: rgba(0,0,0,.28);
+             overscroll-behavior: contain; touch-action: none; }
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0;
               position: relative; }
     /* The bar across the bottom of an empty home, the way Kimi draws it: a
@@ -587,14 +592,28 @@ export class AgentConsole extends LitElement {
        trailing ellipsis. Two columns where there is width for them, one on a
        phone — auto-fill rather than a fixed count, so it is the panel's width
        that decides and not a breakpoint that has to be kept in step with it. */
-    .gallery-list { overflow-y: auto; padding: 12px; display: grid; gap: 8px;
+    /* overscroll-behavior, and it is the whole of the phone bug it fixes.
+       The list scrolls perfectly well — 563px of window over 1427px of cards —
+       but with the default 'auto' a drag that reaches either end keeps going
+       into whatever is behind, and on a touch screen a flick reaches the end
+       constantly. What that looks like is a panel that will not scroll and a
+       page that scrolls instead. 'contain' stops the chain at this box.
+       min-height: 0 belongs with it: this is a grid inside a flex column, and
+       a flex child's automatic minimum is its content, so the day the panel
+       is shorter than the cards it would grow past the panel rather than
+       scroll inside it. It has not happened yet only because the phone sheet
+       is tall. */
+    .gallery-list { overflow-y: auto; overscroll-behavior: contain;
+                    -webkit-overflow-scrolling: touch; min-height: 0;
+                    padding: 12px; display: grid; gap: 8px;
                     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
                     align-content: start; }
     /* Under a heading the grid stops being the scroller — the column of
        headings and grids is. Two grids each with their own scrollbar is two
        lists in one panel. */
     .gallery-list.flat { overflow: visible; padding: 0 12px 12px; }
-    .gallery-scroll { overflow-y: auto; }
+    .gallery-scroll { overflow-y: auto; overscroll-behavior: contain;
+                      -webkit-overflow-scrolling: touch; min-height: 0; }
     .gallery-group { font-size: 12px; font-weight: 600; letter-spacing: .04em;
                      text-transform: uppercase; color: var(--faint);
                      padding: 14px 12px 8px;
