@@ -82,6 +82,14 @@ const capLabel = (name: string) => CAPS[name]?.label ?? name;
    two lists are drawn by the same code and so have to describe themselves the
    same way; `source` is what the skills half splits on and is "local" for a
    server, which has no such distinction yet. */
+/* One row of the slash menu. Two kinds, because the menu answers two
+   questions with one gesture — which skill runs, and which agent answers —
+   and `kind` is what tells pickSlash which of those a press meant. */
+type SlashRow = {
+  kind: "skill" | "agent";
+  key: string; name: string; why: string; icon: string; on: boolean;
+};
+
 type GalleryRow = {
   key: string; name: string; why: string; on: boolean; icon: string;
   source: string; id: string;
@@ -1623,15 +1631,20 @@ export class AgentConsole extends LitElement {
      The composer is emptied rather than left holding the typed name — the name
      was the way of asking, not part of the message, and leaving it would send
      "/make-doc" to the model as if it were a sentence. */
-  private pickSlash(skillName: string) {
-    void this.pin(skillName);
+  private pickSlash(row: SlashRow) {
+    if (row.kind === "agent") {
+      this.agentId = row.key;
+    } else {
+      void this.pin(row.key);
+    }
+    const label = row.kind === "agent" ? row.name : row.key;
     const box = this.composerBox();
     if (box !== null) {
       // Left in the box, not cleared. A pin with an empty composer reads as
       // nothing having happened; the command staying put is what says the
       // choice landed. ChatSession takes this exact string back off the front
       // of the next send, so it is visible without being said.
-      const prefix = "/" + skillName + " ";
+      const prefix = "/" + label + " ";
       this.session.slashPrefix = prefix;
       box.textContent = prefix;
       const at = document.createRange();
@@ -1668,22 +1681,46 @@ export class AgentConsole extends LitElement {
     if (rows.length === 0) return;
     e.preventDefault();
     e.stopPropagation();
-    this.pickSlash(rows[0].skillName);
+    this.pickSlash(rows[0]);
   }
 
   /* The rows a slash query matches, in the order the menu draws them. */
-  private slashMatches(): SkillRow[] {
+  private slashMatches(): SlashRow[] {
     const q = this.slash ?? "";
+    const skill = (s: SkillRow): SlashRow => ({
+      kind: "skill", key: s.skillName, name: s.skillName, why: s.description,
+      icon: capIcon(s.skillName), on: this.pinned === s.skillName,
+    });
+    // Agents, but only where choosing one still means anything.
+    //
+    // The header offers its picker on a NEW conversation and prints a name on
+    // an existing one, because the agent answering a thread is fixed once that
+    // thread exists. A slash row that switched it mid-conversation would be
+    // offering something the rest of the console refuses, so this follows the
+    // same condition rather than inventing a second rule.
+    //
+    // Servers are deliberately absent. An MCP server is attached to an agent
+    // in Settings; there is no per-conversation act to perform on one, and a
+    // row that only reports something is a row that does nothing when pressed
+    // — the same reason the gallery lists them without making them choosable.
+    const agents: SlashRow[] = this.threadId !== "" ? [] : this.agents.map((a) => ({
+      kind: "agent", key: a.id, name: a.agentName,
+      why: a.description === "" ? "Agent" : a.description,
+      icon: "user", on: a.id === this.agentId,
+    }));
     // A bare slash offers the shelf, not the warehouse. Every skill on a
     // deployment with fourteen of them is a menu that covers the composer and
     // asks you to read it — and the featured ones are already the operator's
     // answer to "which of these does anyone want". Typing widens the search to
     // all of them, which is the point at which you have said what you are
     // looking for.
-    if (q === "") return this.capabilities.slice(0, SLASH_ROWS);
-    return this.allSkills
-      .filter((s) => (s.skillName + " " + s.description).toLowerCase().includes(q))
-      .slice(0, SLASH_ROWS);
+    if (q === "") return this.capabilities.map(skill).slice(0, SLASH_ROWS);
+    const hits = [
+      ...this.allSkills.filter((s) =>
+        (s.skillName + " " + s.description).toLowerCase().includes(q)).map(skill),
+      ...agents.filter((a) => (a.name + " " + a.why).toLowerCase().includes(q)),
+    ];
+    return hits.slice(0, SLASH_ROWS);
   }
 
   /* What the + menu's rows do. nr-chatbot handles the two file rows itself and
@@ -1719,19 +1756,19 @@ export class AgentConsole extends LitElement {
     if (rows.length === 0) return nothing;
     return html`
       <div class="slash" role="listbox" aria-label="Skills">
-        ${rows.map((s) => html`
-          <button class=${this.pinned === s.skillName ? "slash-row on" : "slash-row"}
-            role="option" aria-selected=${this.pinned === s.skillName}
+        ${rows.map((r) => html`
+          <button class=${r.on ? "slash-row on" : "slash-row"}
+            role="option" aria-selected=${r.on}
             @mousedown=${(e: Event) => {
               // mousedown, not click: the composer loses focus first
               // otherwise, and a blur that closed the menu would cancel the
               // click that was choosing from it.
-              e.preventDefault(); this.pickSlash(s.skillName); }}>
-            <span class="pick-tile"><nr-icon name=${capIcon(s.skillName)}
+              e.preventDefault(); this.pickSlash(r); }}>
+            <span class="pick-tile"><nr-icon name=${r.icon}
               size="small"></nr-icon></span>
             <span class="slash-text">
-              <span class="pick-name">${s.skillName}</span>
-              <span class="pick-why">${s.description}</span>
+              <span class="pick-name">${r.name}</span>
+              <span class="pick-why">${r.why}</span>
             </span>
           </button>`)}
       </div>`;
