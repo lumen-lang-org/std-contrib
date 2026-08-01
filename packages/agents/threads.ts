@@ -16,11 +16,11 @@
 // go, oldest first, never single turns.
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute, beginTransaction, commitTransaction, rollbackTransaction, dialectType} from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn, complete, assistantText, stopReasonOf, wasTruncated } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
-import { TURN_SEQ_NONE, listArtifacts } from "./artifacts.ts";
+import { TURN_SEQ_NONE, listArtifacts, getVersion, putArtifact } from "./artifacts.ts";
 import { forgetRound, forgetThoughts } from "./steps.ts";
 import { extractFiles, neutraliseMarkers } from "./artifacts-fence.ts";
 import { Tracer, noTracer } from "../tracing/tracing.ts";
@@ -84,6 +84,10 @@ export type ThreadRow = {
   // column existed and what it goes on showing wherever titling did not
   // happen.
   title: string,
+  // Whether this conversation is offered as a starting point for other
+  // people. Off for everything: a conversation is private until its owner
+  // says otherwise, and this is that saying-so.
+  replayable: bool,
   createdAt: string,
 };
 
@@ -129,6 +133,7 @@ export function threadsMapping(): DbRepository {
     field("routeKey", "route_key", "text"),
     // And the same again, at 88.
     field("title", "title", "text"),
+    field("replayable", "replayable", "bool"),
     field("createdAt", "created_at", "text"),
   ];
   return repository("threads", "id", "id", fs);
@@ -223,6 +228,15 @@ export function threadPlan(db: Db): Migration[] {
     // merge conflict, it is every live database refusing one of them wholesale.
     migration("88", "a thread has a title",
       "ALTER TABLE threads ADD COLUMN title " + db.textType + " NOT NULL DEFAULT ''"),
+    // 89, and the same warning as 88 applies to it: one claim per number per
+    // release, or every live database refuses one of the two wholesale.
+    //
+    // Default 0, and that is the security property rather than a convenience:
+    // every conversation that exists today, and every one opened tomorrow, is
+    // private until somebody marks it. A column defaulting the other way would
+    // publish the entire history of every deployment on the day it migrated.
+    migration("89", "a conversation can be offered as a starting point",
+      "ALTER TABLE threads ADD COLUMN replayable " + dialectType(db, "bool") + " NOT NULL DEFAULT false"),
   ];
   return plan;
 }
@@ -275,7 +289,7 @@ export function openThread(db: Db, open: ThreadOpen): string {
   // belongs to whatever files that message — `runInThreadWith` — in exactly one
   // place, rather than to an argument every caller of this would have to make
   // up.
-  let row: ThreadRow = { id: id, agentId: open.agentId, owner: open.owner, modelChoiceId: "", routeKey: "", title: "", createdAt: open.now };
+  let row: ThreadRow = { id: id, agentId: open.agentId, owner: open.owner, modelChoiceId: "", routeKey: "", title: "", replayable: false, createdAt: open.now };
   let written = persist(db, threadsMapping(), JSON.stringify(row));
   if (!written.ok) { return ""; }
   return id;
@@ -286,9 +300,14 @@ export type ThreadListing = {
   id: string,
   agentId: string,
   createdAt: string,
-  // The first thing the user said, which is the only honest title a thread
-  // has — nobody names their conversations.
+  // What the conversation is called. This USED to be the first thing the user
+  // said — the comment here still said so long after migration 88 made it a
+  // name a model writes, which is the kind of stale sentence that teaches the
+  // next reader something false. It is the title now, and "" for a thread
+  // whose naming call never landed.
   title: string,
+  // Offered as a starting point to other people.
+  replayable: bool,
 };
 
 // Which page of whose threads. An empty `tags` is the unscoped read — the
@@ -387,7 +406,7 @@ export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
       if (held.length > 0) { title = held[0].path; }
     }
     if (title.length > 80) { title = title.slice(0, 77) + "..."; }
-    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title };
+    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title, replayable: rows[i].replayable };
     out.push(listing);
     i = i + 1;
   }
@@ -690,6 +709,150 @@ export function rememberChoice(db: Db, threadId: string, choiceId: string): stri
     [choiceId, threadId]);
   if (wrote.ok) { return ""; }
   return wrote.error;
+}
+
+// --- a conversation offered as a starting point --------------------------------
+//
+// The product idea: somebody gets a conversation to a useful place — the right
+// files, the right first few turns — and marks it so other people can start
+// from there instead of from nothing. A template is the operator's version of
+// this; a replayable conversation is anybody's.
+//
+// Three functions, and the split matters. Marking is a write on the OWNER's own
+// row. Listing is a read anybody may do, because that is what being offered
+// means. Remixing writes an entirely new thread owned by whoever asked — it
+// never touches the original, so a source cannot be edited, emptied or renamed
+// by the people starting from it.
+
+/** Offer this conversation, or stop offering it. The caller has already proved
+ *  it is theirs (or that they are an operator); this only writes. */
+export function markReplayable(db: Db, threadId: string, on: bool): string {
+  let wrote = executeWith(db,
+    "UPDATE threads SET replayable = " + placeholderAt(db, 1)
+    + " WHERE id = " + placeholderAt(db, 2),
+    [on ? "1" : "0", threadId]);
+  if (wrote.ok) { return ""; }
+  return wrote.error;
+}
+
+/** Whether a thread is on offer. The gate every unowned read goes through:
+ *  a conversation nobody marked stays as private as it was. */
+export function isReplayable(db: Db, threadId: string): bool {
+  let held = findById(db, threadsMapping(), threadId);
+  if (held == "") { return false; }
+  let row: ThreadRow = JSON.parse<ThreadRow>(held);
+  return row.replayable;
+}
+
+/** Everything on offer, newest first — the gallery's list.
+ *
+ *  Deliberately not scoped by owner: that is the whole point of the flag. What
+ *  it does NOT carry is who offered it. A tag is an opaque identifier the
+ *  gateway minted, not a name anybody chose to publish, and putting it in a
+ *  list every caller can read would leak the deployment's user set to anyone
+ *  with an account. */
+export function listReplayable(db: Db, limit: int): ThreadListing[] {
+  let out: ThreadListing[] = [];
+  let keys: DbOrder[] = [desc("created_at")];
+  // "= ?" with "1", the way enabledChoices filters on `enabled`: a bound
+  // parameter is what each driver converts to its own boolean, where a literal
+  // `true` in the SQL is only true on the dialects that have one.
+  let held = pageOrdered(db, threadsMapping(), "replayable = " + placeholderAt(db, 1), ["1"], keys, limit, 0);
+  if (held == "" || held == "[]") { return out; }
+  let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(held);
+  let i: int = 0;
+  while (i < rows.length) {
+    let title = rows[i].title;
+    // The same fallback ladder listThreads uses, minus the artifact rung: a
+    // conversation with nothing said in it is not worth offering, and an
+    // untitled one reads better as its first message than as a filename.
+    if (title == "") {
+      let said = threadMessages(db, rows[i].id);
+      let m: int = 0;
+      while (m < said.length) {
+        if (said[m].role == "user") { title = said[m].text; break; }
+        m = m + 1;
+      }
+    }
+    if (title.length > 80) { title = title.slice(0, 77) + "..."; }
+    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId,
+      createdAt: rows[i].createdAt, title: title, replayable: true };
+    out.push(listing);
+    i = i + 1;
+  }
+  return out;
+}
+
+/** Everything `remixThread` needs. */
+export type RemixAsk = {
+  sourceId: string,
+  // Whose the copy will be — the caller's tag, never the source's.
+  owner: string,
+  now: string,
+};
+
+/** What a remix produced. */
+export type Remixed = {
+  // The new thread, or "" when nothing was made.
+  threadId: string,
+  // How many artifacts came across.
+  files: int,
+  // Why not, when threadId is "".
+  problem: string,
+};
+
+/** Start a new conversation from an offered one.
+ *
+ *  What comes across is the FILES, at their current version, and nothing else.
+ *  That is a decision worth stating, because copying the turns as well is the
+ *  obvious alternative and it is wrong twice over: the transcript is the other
+ *  person's words, which they offered as a starting point and not as something
+ *  to be republished under a stranger's name; and a model handed somebody
+ *  else's conversation as its own history will answer as though it said those
+ *  things. A remix starts empty, with the documents on the table.
+ *
+ *  Version 1 in the new thread, not the source's version number: the copy has
+ *  its own history from here, and inheriting "v7" would promise six earlier
+ *  versions that do not exist in it. */
+// A remix that did not happen, with the sentence saying why. A record's fields
+// are immutable, so every refusal builds its own rather than filling one in.
+function refusedRemix(why: string): Remixed {
+  let no: Remixed = { threadId: "", files: 0, problem: why };
+  return no;
+}
+
+export function remixThread(db: Db, ask: RemixAsk): Remixed {
+  let held = findById(db, threadsMapping(), ask.sourceId);
+  if (held == "") { return refusedRemix("no conversation " + ask.sourceId); }
+  let source: ThreadRow = JSON.parse<ThreadRow>(held);
+  // The gate, and it is checked HERE rather than trusted from the caller: a
+  // remix is the one door that reads another owner's rows, so the condition
+  // that makes that legal belongs beside the read it authorises.
+  if (!source.replayable) {
+    return refusedRemix("conversation " + ask.sourceId + " is not offered as a starting point");
+  }
+
+  let fresh = openThread(db, { agentId: source.agentId, owner: ask.owner, now: ask.now });
+  if (fresh == "") { return refusedRemix("the new conversation could not be opened"); }
+
+  let files: int = 0;
+  let sourceFiles = listArtifacts(db, ask.sourceId);
+  let i: int = 0;
+  while (i < sourceFiles.length) {
+    let version = getVersion(db, sourceFiles[i].id, sourceFiles[i].currentVersion);
+    if (version.id != "") {
+      let put = putArtifact(db, {
+        threadId: fresh, path: sourceFiles[i].path, title: sourceFiles[i].title,
+        content: version.body, note: "remixed from " + ask.sourceId,
+        origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE, now: ask.now,
+      });
+      if (put.ok) { files = files + 1; }
+    }
+    i = i + 1;
+  }
+
+  let made: Remixed = { threadId: fresh, files: files, problem: "" };
+  return made;
 }
 
 // The turn's model, decided.

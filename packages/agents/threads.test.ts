@@ -3,9 +3,9 @@
 //   cd packages/agents && lumen test threads.test.ts
 
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
+import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
-import { artifactPlan, putArtifact, TURN_SEQ_NONE } from "./artifacts.ts";
+import { artifactPlan, putArtifact, listArtifacts, TURN_SEQ_NONE } from "./artifacts.ts";
 import { stepPlan } from "./steps.ts";
 import { RunRow, runsMapping, runLogPlan } from "./runlog.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, AgentRow, modelsMapping, modelConfigsMapping, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan } from "./schema.ts";
@@ -883,4 +883,77 @@ test("a long title is cut on a character boundary, not in the middle of one", ()
   let body = cut.slice(0, cut.length - 3);
   let last = body.charCodeAt(body.length - 1);
   expect(last == 133);
+});
+
+
+// --- offered as a starting point ----------------------------------------------------
+
+test("a conversation is private until it is offered, and offering it is one field", () => {
+  freshThreads();
+  let id = openThread(database, { agentId: "a1", owner: "alice", now: "1000000000000" });
+  // The default is the security property: every thread that exists, and every
+  // one opened after the migration, is private until somebody says otherwise.
+  expect(!isReplayable(database, id));
+  expect(listReplayable(database, 20).length == 0);
+
+  expect(markReplayable(database, id, true) == "");
+  expect(isReplayable(database, id));
+  expect(listReplayable(database, 20).length == 1);
+
+  // And it goes back. An offer that could not be withdrawn would make marking
+  // one irreversible, which is not a thing to learn by trying it.
+  expect(markReplayable(database, id, false) == "");
+  expect(!isReplayable(database, id));
+  expect(listReplayable(database, 20).length == 0);
+});
+
+test("a remix copies the files, under the new owner, and leaves the source alone", () => {
+  freshThreads();
+  let source = openThread(database, { agentId: "a1", owner: "alice", now: "1000000000000" });
+  putArtifact(database, { threadId: source, path: "/plan.md", title: "Plan",
+    content: "# the plan", note: "", origin: "generated", mustCreate: false,
+    turnSeq: TURN_SEQ_NONE, now: "1000000000000" });
+  markReplayable(database, source, true);
+
+  let made = remixThread(database, { sourceId: source, owner: "bob", now: "1000000000001" });
+  expect(made.problem == "");
+  expect(made.threadId != "" && made.threadId != source);
+  expect(made.files == 1);
+
+  // Bob's copy is Bob's: the row carries his tag, not Alice's, which is what
+  // makes it his to edit and hers to keep.
+  let mine = findById(database, threadsMapping(), made.threadId);
+  let row: ThreadRow = JSON.parse<ThreadRow>(mine);
+  expect(row.owner == "bob");
+  // The copy is not itself on offer. Marking is a decision its new owner makes.
+  expect(!row.replayable);
+
+  // The file came across at version 1 — its own history starts here.
+  let copied = listArtifacts(database, made.threadId);
+  expect(copied.length == 1);
+  expect(copied[0].path == "/plan.md");
+  expect(copied[0].currentVersion == 1);
+
+  // And Alice still has exactly what she had.
+  expect(listArtifacts(database, source).length == 1);
+});
+
+test("a conversation nobody offered cannot be remixed, however the id was found", () => {
+  freshThreads();
+  let private_ = openThread(database, { agentId: "a1", owner: "alice", now: "1000000000000" });
+  putArtifact(database, { threadId: private_, path: "/secret.md", title: "Secret",
+    content: "not for you", note: "", origin: "generated", mustCreate: false,
+    turnSeq: TURN_SEQ_NONE, now: "1000000000000" });
+
+  // The whole security property in one assertion: knowing the id is not
+  // permission. The flag is checked inside remixThread, beside the read it
+  // authorises, so no caller can forget to check it first.
+  let tried = remixThread(database, { sourceId: private_, owner: "bob", now: "1000000000001" });
+  expect(tried.threadId == "");
+  expect(tried.problem.indexOf("not offered") >= 0);
+
+  // A thread that does not exist says so rather than opening an empty one.
+  let missing = remixThread(database, { sourceId: "no-such-thread", owner: "bob", now: "1000000000001" });
+  expect(missing.threadId == "");
+  expect(missing.problem.indexOf("no conversation") >= 0);
 });

@@ -42,9 +42,9 @@ import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, repl
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
-import { jsonList, jsonText, jsonFind, jsonUnescape } from "./scan.ts";
+import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw} from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan } from "./threads.ts";
+import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
@@ -2192,6 +2192,74 @@ class ThreadApi {
   }
 
   // The sidebar's list: id, agent, when, and the first thing the user said.
+  // Conversations their owners have offered as starting points.
+  //
+  // Declared before every "/:id" route in this controller, and that is a hard
+  // requirement rather than tidiness: "replayable" is a literal where ":id" is
+  // a parameter, and the router refuses at startup a table whose literal is
+  // written second — the parameter would shadow it. `GET /threads/by-turn`
+  // carries the same note for the same reason.
+  //
+  // Unscoped by owner, because that is what being offered means. What it does
+  // not carry is WHO offered each one: an owner tag is an opaque identifier a
+  // gateway minted, not a name anybody chose to publish.
+  @get("/replayable")
+  replayable(req: Request): Reply {
+    let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
+    let rows = listReplayable(this.db, limit);
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
+        + ",\"agentId\":" + JSON.stringify(rows[i].agentId)
+        + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt)
+        + ",\"title\":" + JSON.stringify(rows[i].title)
+        + ",\"replayable\":true}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
+  // Offer this conversation, or stop offering it. The owner's decision, and
+  // `ownedThread` is what proves it is theirs — the same gate every other
+  // write to a thread goes through, so an operator with no tag on a community
+  // box can still mark one and a tagged caller can only mark their own.
+  @put("/:id/replayable")
+  offer(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required: {\"replayable\":true}"); }
+    // `jsonRaw`, never `jsonText`: this member is a JSON BOOLEAN, and jsonText
+    // answers "" for anything that is not a string — so it returns "" for true
+    // and "" for false alike. Written with jsonText first, this read said "on"
+    // for every body including {"replayable":false}, which made offering a
+    // conversation irreversible. Caught by putting both halves of the loop in
+    // one prod check rather than only the half that turns it on.
+    let on = jsonRaw(req.body, "replayable") == "true";
+    let wrong = markReplayable(this.db, param(req, "id"), on);
+    if (wrong != "") { return badRequest(wrong); }
+    return ok("{\"id\":" + JSON.stringify(param(req, "id"))
+      + ",\"replayable\":" + (on ? "true" : "false") + "}");
+  }
+
+  // Start a conversation of your own from somebody else's offered one.
+  //
+  // No `ownedThread` here, deliberately, and it is the only door in this file
+  // that reads another owner's rows: the flag IS the authorisation, and it is
+  // checked inside `remixThread` beside the read it permits rather than here,
+  // so no future caller can forget it. What comes back is a thread owned by
+  // whoever asked.
+  @post("/:id/remix")
+  remix(req: Request): Reply {
+    let made = remixThread(this.db, { sourceId: param(req, "id"),
+      owner: owningTag(callerTags(req)), now: stamp() });
+    if (made.threadId == "") { return notFound(made.problem); }
+    return created("{\"id\":" + JSON.stringify(made.threadId)
+      + ",\"files\":" + `${made.files}` + "}");
+  }
+
   @get("/")
   list(req: Request): Reply {
     let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
@@ -2208,7 +2276,8 @@ class ThreadApi {
       out = out + "{\"id\":" + JSON.stringify(rows[i].id)
         + ",\"agentId\":" + JSON.stringify(rows[i].agentId)
         + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt)
-        + ",\"title\":" + JSON.stringify(rows[i].title) + "}";
+        + ",\"title\":" + JSON.stringify(rows[i].title)
+        + ",\"replayable\":" + (rows[i].replayable ? "true" : "false") + "}";
       i = i + 1;
     }
     return ok(out + "]");
