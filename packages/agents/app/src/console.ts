@@ -81,6 +81,38 @@ const capLabel = (name: string) => CAPS[name]?.label ?? name;
 const capIcon = (name: string) => CAPS[name]?.icon ?? "tool";
 const capKind = (name: string) => CAPS[name]?.kind ?? "";
 
+// A mark for a server, recognised from what it calls itself or where it points.
+//
+// These are not brand marks and cannot be: the icon set carries no Jira, no
+// GitHub, no Slack, and the rule in CLAUDE.md against emoji rules out the
+// usual cheat — an emoji is a font, so it is a coloured cartoon on one machine
+// and an empty box on the next. So each known service gets the closest true
+// thing in the set (an issue tracker is a calendar of work, a repository is a
+// link to somewhere else, a mail server is mail), and everything unrecognised
+// gets `plug`, which is what an MCP server is.
+//
+// Matching on both name and endpoint because either can be the honest one: a
+// server called "tickets" pointed at atlassian.net is Jira, and so is one
+// called "Jira" behind a gateway URL that says nothing.
+const SERVICE_ICONS: [RegExp, string][] = [
+  [/jira|atlassian|linear|tracker|issue/i, "calendar"],
+  [/github|gitlab|bitbucket|repo/i, "link"],
+  [/mail|gmail|smtp|imap/i, "mail"],
+  [/file|drive|dropbox|s3|storage|bucket/i, "hard-drive"],
+  [/postgres|mysql|sqlite|database|sql/i, "database"],
+  [/web|search|browse|fetch|http-client/i, "globe"],
+];
+// The name is asked first, and the endpoint is reduced to its host before it
+// is asked at all. Both matter: a pattern let loose on a whole endpoint
+// matches the scheme, and since every endpoint is an http URL, one greedy
+// `http` turned a server plainly called "filesystem" into a globe.
+const serverIcon = (s: { serverName: string; endpoint: string }) => {
+  const host = s.endpoint.replace(/^[a-z]+:\/\//i, "").split(/[/:?]/)[0] ?? "";
+  for (const [re, icon] of SERVICE_ICONS) if (re.test(s.serverName)) return icon;
+  for (const [re, icon] of SERVICE_ICONS) if (re.test(host)) return icon;
+  return "plug";
+};
+
 /* Take the heavy click ring off LumenUI's controls.
  *
  * Its buttons draw `outline: 0.25rem solid #7c3aed` on focus — a 4px violet
@@ -540,22 +572,38 @@ export class AgentConsole extends LitElement {
     .gallery-head { display: flex; align-items: center; justify-content: space-between;
                    padding: 12px 10px 12px 16px; font-weight: 600;
                    border-bottom: 1px solid var(--border); }
-    .gallery-list { overflow-y: auto; padding: 8px; display: flex;
-                   flex-direction: column; gap: 2px; }
+    /* Cards, not rows. A row list is for things you scan down looking for one
+       name you already know; these are things you are choosing between, and a
+       card gives the description room to be read rather than truncated to a
+       trailing ellipsis. Two columns where there is width for them, one on a
+       phone — auto-fill rather than a fixed count, so it is the panel's width
+       that decides and not a breakpoint that has to be kept in step with it. */
+    .gallery-list { overflow-y: auto; padding: 12px; display: grid; gap: 8px;
+                    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+                    align-content: start; }
     .gallery-none { color: var(--muted); padding: 18px 16px; margin: 0; }
-    .pick { display: flex; flex-direction: column; gap: 3px; text-align: left;
-            padding: 10px 12px; border: 0; border-radius: 10px; background: none;
-            font: inherit; color: var(--fg); cursor: pointer; }
-    .pick:hover:not(:disabled) { background: var(--bg-sunken); }
+    .pick { display: flex; flex-direction: column; gap: 5px; text-align: left;
+            padding: 12px; border: 1px solid var(--border); border-radius: 12px;
+            background: none; font: inherit; color: var(--fg); cursor: pointer;
+            transition: background-color .15s cubic-bezier(.23,1,.32,1),
+                        border-color .15s cubic-bezier(.23,1,.32,1); }
+    .pick:hover:not(:disabled) { background: var(--bg-sunken);
+                                 border-color: var(--muted); }
+    .pick-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
     /* Plugins are shown, not chosen — a server is attached to an agent in
        Settings. Disabled rather than absent, because the list is the answer to
        "what is available"; not-a-button is the honest way to say the choosing
        happens elsewhere. */
     .pick:disabled { cursor: default; }
     .pick.on { background: var(--bg-user); }
-    .pick-name { font-size: 14px; font-weight: 600; }
-    .pick-why { font-size: 13px; color: var(--muted);
-                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pick-name { font-size: 14px; font-weight: 600; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+    /* Three lines, then stop. A card whose height follows its description
+       makes a grid of ragged boxes, and the full text is on the card's title
+       for anyone who wants it. */
+    .pick-why { font-size: 13px; color: var(--muted); line-height: 1.4;
+                overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3;
+                -webkit-box-orient: vertical; }
     .starts-back { display: inline-flex; align-items: center; gap: 4px;
                    margin: 0 0 14px -6px; padding: 6px 10px 6px 6px;
                    border: 0; border-radius: 8px; background: none; font: inherit;
@@ -1241,8 +1289,11 @@ export class AgentConsole extends LitElement {
     const skills = this.gallery === "skills";
     const rows = skills
       ? this.allSkills.map((s) => ({ key: s.skillName, name: s.skillName,
-          why: s.description, on: this.pinned === s.skillName }))
-      : this.servers.map((s) => ({ key: s.id, name: s.id, why: "", on: false }));
+          why: s.description, on: this.pinned === s.skillName,
+          icon: capIcon(s.skillName) }))
+      : this.servers.map((s) => ({ key: s.id, name: s.serverName === "" ? s.id : s.serverName,
+          why: s.enabled ? s.endpoint : "Disabled · " + s.endpoint, on: false,
+          icon: serverIcon(s) }));
     return html`
       <div class="scrim files" @click=${() => { this.gallery = ""; }}></div>
       <div class="gallery" role="dialog" aria-label=${skills ? "Skills" : "Plugins"}>
@@ -1259,9 +1310,12 @@ export class AgentConsole extends LitElement {
           : html`<div class="gallery-list">
               ${rows.map((r) => html`
                 <button class=${r.on ? "pick on" : "pick"}
-                  ?disabled=${!skills}
+                  ?disabled=${!skills} title=${r.why}
                   @click=${() => { if (skills) { void this.pin(r.key); this.gallery = ""; } }}>
-                  <span class="pick-name">${r.name}</span>
+                  <span class="pick-top">
+                    <nr-icon name=${r.icon} size="small"></nr-icon>
+                    <span class="pick-name">${r.name}</span>
+                  </span>
                   ${r.why === "" ? nothing : html`<span class="pick-why">${r.why}</span>`}
                 </button>`)}
             </div>`}
