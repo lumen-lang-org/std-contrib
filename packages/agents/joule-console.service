@@ -16,6 +16,29 @@
 # front proxies to. It matters that it is private: AUTH=proxy trusts an
 # inbound X-USER header and refuses to start on a public bind, which is the
 # whole of that mode's security.
+#
+# LumenUI comes from the working copy, not the vendored tarball: the app's
+# node_modules/@nuraly/lumenui is a symlink to the nuraly-ui checkout, so a
+# token added to a component is on the live site without packing, installing
+# or building an image. That symlink is a local arrangement and cannot travel
+# — `docker build` runs `npm ci` against package.json, which names
+# vendor/*.tgz, and the host's node_modules never enters the context. So an
+# image built while the symlink is in place ships whatever the tarball last
+# held, which is how the site came to disagree with a developer's screen for
+# an afternoon. Refresh the tarball before building a release image.
+#
+# The two edit loops are not the same speed, and the difference is the dep
+# optimizer rather than the symlink:
+#
+#   app/src/*.ts      HMR, live in under a second. Nothing to do.
+#   nuraly-ui/src     `npx tsc && npm run roll` in the lib (~75s), then
+#                     `sudo systemctl restart joule-console`. Vite pre-bundles
+#                     @nuraly/lumenui (lumenjs.plugins.js says why it must),
+#                     and a pre-bundled dep is read once at boot — the edit is
+#                     on disk and invisible until the server reads it again.
+#                     The restart is enough; node_modules/.vite needs no
+#                     clearing, which was worth measuring because clearing it
+#                     costs a cold optimize on the next visitor.
 [Unit]
 Description=Joule console (LumenJS dev server, served from source)
 After=network-online.target joule-engine.service
