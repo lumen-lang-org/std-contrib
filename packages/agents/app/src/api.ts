@@ -130,8 +130,14 @@ export type SkillRow = {
   id: string;
   skillName: string;
   description: string;
-  visibility?: string;
-  featuredRank?: number;
+  // Not optional, and that is the whole point of the two lines. The engine's
+  // SkillRow requires both, so a create that omits them is refused with
+  // "invalid JSON (MissingField)" — which is exactly what the New skill button
+  // was sending, so no skill could be made from the console at all. Optional
+  // here meant the compiler had nothing to say about it and the e2e suite was
+  // the only thing left that could notice.
+  visibility: string;
+  featuredRank: number;
   // Mutable, unlike a prompt: a skill is looked up by name at call time, so
   // an edit is live on the next use_skill with no version to point at.
   body: string;
