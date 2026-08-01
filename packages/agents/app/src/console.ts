@@ -445,6 +445,19 @@ export class AgentConsole extends LitElement {
        short enough that the block fills it. */
     main.empty { display: flex; flex-direction: column; justify-content: center;
                  padding-bottom: 14vh; }
+    /* Higher again on a phone. The figure above centres a block in a window
+       wider than it is tall; a phone is the other shape, and the same block
+       reads low because what is left under it is a third of the screen rather
+       than a strip. Half the difference is what moves — padding-bottom biases
+       a centred box by half of itself — so this is ~25px up at 844px, and it
+       scales with the screen instead of naming a pixel that suits one phone.
+
+       Here rather than in the phone block above, which is the whole reason
+       this needs saying: that block is written EARLIER in this stylesheet, so
+       at equal specificity the desktop rule above would win and the override
+       would do nothing at all. A media query is not stronger than the rule it
+       means to replace; it only has to come after it. */
+    @media (max-width: 640px) { main.empty { padding-bottom: 20vh; } }
     /* With thumbnails the card row is ~200px tall, so the block only needs
        to move up enough to clear it — 6vh put the wordmark against the header
        with a screen of blank beneath. Centred-but-biased: still centre, just
