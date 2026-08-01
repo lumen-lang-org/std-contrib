@@ -227,6 +227,21 @@ const CHAT_SKIN = `
      late. */
 `;
 
+const CHAT_SOURCES = `
+  .joule-sources { display: flex; flex-wrap: wrap; gap: 6px;
+                   margin: 10px 0 2px; }
+  .joule-source { display: inline-flex; align-items: center; gap: 6px;
+                  max-width: 220px; padding: 4px 10px 4px 7px;
+                  border: 1px solid var(--border, rgba(0,0,0,.09));
+                  border-radius: 999px; text-decoration: none;
+                  font-size: 12.5px; line-height: 1.3;
+                  color: var(--muted, rgba(0,0,0,.45));
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .joule-source:hover { color: var(--fg, rgba(0,0,0,.9));
+                        border-color: var(--muted, rgba(0,0,0,.45)); }
+  .joule-source img { border-radius: 3px; flex: none; }
+`;
+
 const CHAT_BUTTON = `
   button { border-color: transparent !important;
            color: var(--fg, rgba(0,0,0,.9)) !important; }
@@ -243,8 +258,78 @@ function dressChat(root: ParentNode) {
   const chat = root.querySelector("nr-chatbot") as Element | null;
   if (chat === null || chat.shadowRoot === null) { return; }
   adopt(chat.shadowRoot, CHAT_SKIN, "skinned");
+  adopt(chat.shadowRoot, CHAT_SOURCES, "sourced");
   for (const el of chat.shadowRoot.querySelectorAll("nr-button")) {
     if (el.shadowRoot !== null) { adopt(el.shadowRoot, CHAT_BUTTON, "skinned"); }
+  }
+  citeSources(chat.shadowRoot);
+}
+
+/* The pages an answer stood on, under the answer.
+ *
+ * A model that searched says so in prose — "according to github.com/..." — and
+ * a url in a sentence is a thing to squint at rather than a thing to click.
+ * This lifts every link out of a finished turn and puts the distinct ones in a
+ * row beneath it: favicon, host, one click.
+ *
+ * Read off the rendered message rather than carried alongside it, because the
+ * transcript is the one place every path agrees. A turn that searched, a turn
+ * that was handed a link, and a turn replayed from history all arrive here the
+ * same way — nothing has to be threaded through the session, the socket and
+ * the API for the row to appear.
+ *
+ * The favicon comes from DuckDuckGo's icon service, which is a request to a
+ * third party for every distinct host an answer cites. That is a real cost and
+ * the reason it is one host and not a page fetch: it leaks which domains were
+ * cited, to a company that already saw the search. `onerror` hides the image
+ * rather than leaving a broken glyph, so a host with no icon degrades to text.
+ */
+function citeSources(root: ShadowRoot) {
+  for (const msg of root.querySelectorAll(".message.bot .message__content")) {
+    const holder = msg as HTMLElement & { cited?: boolean };
+    if (holder.cited === true) { continue; }
+    // The text, not the anchors. The transcript renders a model's urls as
+    // plain words — there is no linkifier in the component and the console
+    // escapes what it stores — so a pass that lifted <a href> found nothing on
+    // an answer that plainly cited two pages.
+    const text = holder.textContent ?? "";
+    const found = text.match(/https?:\/\/[^\s<>"')\]]+/g);
+    if (found === null) { continue; }
+    const seen = new Set<string>();
+    const hosts: { host: string; href: string }[] = [];
+    for (const raw of found) {
+      // Trailing punctuation belongs to the sentence, not the address.
+      const href = raw.replace(/[.,;:!?)]+$/, "");
+      let host = "";
+      try { host = new URL(href).hostname.replace(/^www\./, ""); } catch { continue; }
+      // One entry per SITE. An answer citing four pages of one doc set is
+      // citing one source, and four identical favicons say less than one.
+      if (host === "" || seen.has(host)) { continue; }
+      seen.add(host);
+      hosts.push({ host, href });
+    }
+    if (hosts.length === 0) { continue; }
+    holder.cited = true;
+    const row = document.createElement("div");
+    row.className = "joule-sources";
+    for (const s of hosts) {
+      const chip = document.createElement("a");
+      chip.className = "joule-source";
+      chip.href = s.href;
+      chip.target = "_blank";
+      // noopener: the linked page is somebody else's, and window.opener would
+      // be a handle on this one.
+      chip.rel = "noopener noreferrer";
+      const img = document.createElement("img");
+      img.src = "https://icons.duckduckgo.com/ip3/" + s.host + ".ico";
+      img.alt = "";
+      img.width = 14;
+      img.height = 14;
+      img.addEventListener("error", () => { img.style.display = "none"; });
+      chip.append(img, document.createTextNode(s.host));
+      row.appendChild(chip);
+    }
+    holder.appendChild(row);
   }
 }
 
