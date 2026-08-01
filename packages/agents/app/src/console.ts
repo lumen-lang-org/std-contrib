@@ -3,7 +3,7 @@
 // is LumenUI's <nr-chatbot>, driven through its properties and events —
 // nothing here reaches into it.
 
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { BRAND, WORDMARK } from "./brand.js";
 import { customElement, property, state } from "lit/decorators.js";
 import "./ui.js";
@@ -17,7 +17,7 @@ import "./model-picker.js";
 import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
-  listModels, listThreads, modelChoices, previewUrl, startFromTemplate, templatePdf, templatesOfKind, whoami,
+  listModels, listThreads, modelChoices, previewUrl, offerThread, remixThread, replayableThreads, startFromTemplate, templatePdf, templatesOfKind, whoami,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -420,6 +420,27 @@ export class AgentConsole extends LitElement {
        half that as you watched. Reserving the space costs one rule and makes
        the load invisible. Matches the chips' own box: 14px padding-top + a
        35px pill. */
+    /* Starting points: somebody else's conversations, offered. Cards rather
+       than rows because each is a thing you choose, and the only action on one
+       is Remix — see startsPage for why there is no way to open the source. */
+    .starts-page { padding: 28px 24px; max-width: 900px; margin: 0 auto;
+                   overflow-y: auto; }
+    .starts-page h2 { font-size: 20px; font-weight: 650; margin: 0 0 6px; }
+    .starts-intro { color: var(--muted); margin: 0 0 20px; max-width: 60ch; }
+    .offer-grid { display: grid; gap: 12px;
+                  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+    .offer { display: flex; flex-direction: column; gap: 6px; padding: 14px;
+             border: 1px solid var(--border); border-radius: 12px;
+             background: var(--bg-card); }
+    .offer-name { font-size: 14px; font-weight: 600; line-height: 1.35;
+                  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3;
+                  -webkit-box-orient: vertical; }
+    .offer-meta { font-size: 12px; color: var(--muted); }
+    .offer-remix { margin-top: 6px; align-self: flex-start; font: inherit;
+                   font-size: 13px; padding: 6px 16px; cursor: pointer;
+                   border: 1px solid var(--border); border-radius: 999px;
+                   background: var(--bg-card); color: var(--fg); }
+    .offer-remix:hover { background: var(--bg-user); border-color: var(--muted); }
     .caps { min-height: 49px; box-sizing: content-box; }
     .caps { display: flex; gap: 4px; padding: 14px 18px 0; max-width: 768px;
             margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
@@ -561,7 +582,9 @@ export class AgentConsole extends LitElement {
      links address it by that word. */
   @state() private rail: "" | "artifacts" = "";
   @state() private settings = false;
-  @state() private view: "chat" | "knowledge" | "canvas" = "chat";
+  @state() private view: "chat" | "knowledge" | "canvas" | "starts" = "chat";
+  /* What other people have offered, loaded when the page opens. */
+  @state() private offers: ThreadListing[] = [];
   // Who the front door says is calling. Null where nothing authenticates, which
   // is the community edition and is not the same as holding no roles.
   @state() private me: Me | null = null;
@@ -992,6 +1015,88 @@ export class AgentConsole extends LitElement {
         </div>`}`;
   }
 
+  /* Conversations other people offered, and one button that makes a copy.
+
+     A gallery and not a list of links: the point of offering is that somebody
+     starts from your files, so the action on each card is Remix — which opens
+     a NEW conversation of their own — rather than a way to read yours. There
+     is deliberately no way to open the source itself: it is somebody else's
+     conversation, and the flag offers its files as a starting point, not its
+     transcript as reading. */
+  private startsPage() {
+    return html`
+      <div class="starts-page">
+        <h2>Starting points</h2>
+        <p class="starts-intro">Conversations people have offered to start from.
+          Remixing one opens a conversation of your own with its files already in it.</p>
+        ${this.offers.length === 0
+          ? html`<p class="empty">Nothing is on offer yet. Open a conversation you
+              are pleased with and press the share button in its header.</p>`
+          : html`<div class="offer-grid">
+              ${this.offers.map((o) => html`
+                <div class="offer">
+                  <!-- A card with a blank name is a card nobody can choose.
+                       An offered conversation usually has a title by now (the
+                       engine names one from its first message), but one whose
+                       naming call never landed still has to read as something. -->
+                  <div class="offer-name">${o.title === "" ? "Untitled conversation" : o.title}</div>
+                  <div class="offer-meta">${o.agentId}</div>
+                  <button class="offer-remix" @click=${() => { void this.remix(o.id); }}>
+                    Remix
+                  </button>
+                </div>`)}
+            </div>`}
+      </div>`;
+  }
+
+  private async openStarts(): Promise<void> {
+    this.view = "starts";
+    this.nav = false;
+    this.offers = await replayableThreads().catch(() => []);
+  }
+
+  /* A remix lands you IN the copy. Anything else — a toast, a row appearing in
+     the rail — would leave the person on a page about other people's work
+     after asking for something of their own. */
+  private async remix(id: string): Promise<void> {
+    try {
+      const made = await remixThread(id);
+      this.threads = await listThreads();
+      this.view = "chat";
+      await this.open(made.id);
+    } catch {
+      // The engine refuses a source that stopped being offered between the
+      // page loading and the click, which is a race worth losing quietly:
+      // the list is stale, so refresh it and let them choose again.
+      this.offers = await replayableThreads().catch(() => []);
+    }
+  }
+
+  /* Whether the open conversation is on offer. Read from the rail's own
+     listing rather than kept as a second copy: the sidebar already fetches
+     every thread with its flag, so a lookup is free and cannot drift from
+     what the rail is drawing. */
+  private get offered(): boolean {
+    const row = this.threads.find((t) => t.id === this.threadId);
+    return row !== undefined && row.replayable;
+  }
+
+  /* Offer this conversation, or withdraw it. The listing is refreshed rather
+     than patched in place: the engine decides what the flag is now, and a
+     local guess that disagreed with it would be a second source of truth for
+     one boolean. */
+  private async toggleOffer(): Promise<void> {
+    if (this.threadId === "") { return; }
+    const want = !this.offered;
+    try {
+      await offerThread(this.threadId, want);
+      this.threads = await listThreads();
+    } catch {
+      // A refusal leaves the rail as it was, which is the honest picture: the
+      // flag did not change, so neither should the control.
+    }
+  }
+
   /* Pinning a capability shows its starting points; pinning it twice lets go.
      Nothing is sent yet — the pin is a statement of intent, and the round
      still carries whatever the person types. */
@@ -1111,11 +1216,13 @@ export class AgentConsole extends LitElement {
         @open-settings=${() => { this.settings = true; }}
         @open-knowledge=${() => { this.view = "knowledge"; }}
         @open-canvas=${() => { this.view = "canvas"; }}
+        @open-starts=${() => { void this.openStarts(); }}
       ></console-sidebar>
 
       <div class="center">
         ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
-          : this.view === "canvas" ? html`<agent-canvas></agent-canvas>` : html`
+          : this.view === "canvas" ? html`<agent-canvas></agent-canvas>`
+          : this.view === "starts" ? this.startsPage() : html`
         <header>
           <button class="icon nav" title="Conversations"
             @click=${() => { this.nav = !this.nav; }}>
@@ -1143,6 +1250,18 @@ export class AgentConsole extends LitElement {
                   <option value=${a.id} ?selected=${a.id === this.agentId}>${a.agentName}</option>`)}
               </select>` : this.agentName()}
           </span>
+          <!-- Offer this conversation as a starting point. Only on a
+               conversation that exists — there is nothing to offer before the
+               first message — and pressed when it is already on offer, so the
+               control reports the state rather than only changing it. -->
+          ${this.threadId === "" ? nothing : html`
+            <button class="icon" aria-pressed=${this.offered}
+              title=${this.offered
+                ? "Offered as a starting point — press to withdraw"
+                : "Offer this conversation as a starting point"}
+              @click=${() => { void this.toggleOffer(); }}>
+              <nr-icon name="share" size="small"></nr-icon>
+            </button>`}
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
             @click=${() => this.show("artifacts")}><nr-icon name="folder" size="small"></nr-icon></button>
         </header>

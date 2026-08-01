@@ -127,6 +127,11 @@ export class ConsoleSidebar extends LitElement {
       <div class="item" data-nav="canvas" @click=${() => this.dispatchEvent(new CustomEvent("open-canvas"))}>
         <nr-icon name="git-fork" size="small"></nr-icon><span>Agent graph</span>
       </div>
+      <!-- What other people have offered to start from. Under the three that
+           are about your own work, because it is somebody else's. -->
+      <div class="item" data-nav="starts" @click=${() => this.dispatchEvent(new CustomEvent("open-starts"))}>
+        <nr-icon name="share" size="small"></nr-icon><span>Starting points</span>
+      </div>
 
       <div class="find">
         <nr-icon name="search" size="small"></nr-icon>
