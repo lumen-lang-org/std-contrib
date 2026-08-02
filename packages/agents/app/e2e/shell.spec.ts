@@ -10,7 +10,10 @@ import { knowledge, open, openKnowledge, openSettings, openTab, settings, shell,
 // Kept in the rail's own order (settings.ts). "Model menu" and "Templates"
 // arrived with the model picker and the capability pages; a list that lags
 // the rail fails this suite's count assertion, which is the point of it.
-const TABS = ["Agents", "Models", "Model menu", "Prompts", "Skills", "Templates", "MCP", "Plugins", "Images", "Providers", "Tracing"];
+// The USER zone's tabs, in rail order. The admin zone is its own route and
+// its own spec (admin.spec.ts); this list went stale twice when it tried to
+// carry both.
+const TABS = ["Preferences", "Agents", "Prompts", "Skills", "Templates", "Connectors", "Plugins"];
 
 test.beforeEach(async ({ page }) => {
   await open(page);
@@ -71,13 +74,14 @@ test("the knowledge page replaces the chat pane and comes back", async ({ page }
   await expect(shell(page).locator("nr-chatbot")).toBeVisible();
 });
 
-test("the agent chip offers only enabled agents", async ({ page }) => {
+test("the directory's Agents shelf offers only enabled agents", async ({ page }) => {
   const listed = await page.request.get("/api/agents").then((r) => r.json());
   const enabled = (listed as { enabled: boolean }[]).filter((a) => a.enabled).length;
-  // The same assertion, waited for rather than sampled. The chip is filled by
-  // a fetch the console makes after it renders, so `count()` — which reads
-  // once and does not retry — answered 0 for a picker that was a few hundred
-  // milliseconds from being right, and did it often enough to look like a
-  // feature that had stopped working.
-  await expect(shell(page).locator("header select option")).toHaveCount(enabled);
+  // The header chip this used to read is gone — who answers moved to the
+  // directory (and the slash menu), so the same fact is asserted where it now
+  // lives. toHaveCount waits, which matters for the same reason it always
+  // did: the shelf is filled by a fetch a few hundred milliseconds after it
+  // renders.
+  await sidebar(page).locator('.item[data-nav="agents"]').click();
+  await expect(shell(page).locator(".gallery .pick")).toHaveCount(enabled);
 });
