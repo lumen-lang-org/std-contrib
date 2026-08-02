@@ -31,6 +31,7 @@
 // blanks the whole console, not the one component. So: primitives first,
 // composites after, and nothing here reordered casually.
 import "@nuraly/lumenui/icon";
+import "@nuraly/lumenui/sparkline";
 import "@nuraly/lumenui/button";
 import "@nuraly/lumenui/input";
 import "@nuraly/lumenui/checkbox";
