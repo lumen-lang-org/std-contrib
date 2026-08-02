@@ -252,15 +252,36 @@ export function toolSpecs(mounted: Mounted): ToolSpec[] {
 export function callMounted(mounted: Mounted, name: string, args: string): McpCall {
   let at = mountedIndex(mounted.tools, name);
   if (at < 0) {
+    // Naming what IS there, not only what is not. A model that invented
+    // "search_web" and is told "no such tool" invents another name or gives
+    // up and answers from memory — which is exactly what it must not do
+    // about a live question. The list is the recovery: it is short, it is
+    // this run's own, and it turns a dead end into the next call.
     let unknown: McpCall = {
       ok: false,
-      text: "There is no tool named \"" + name + "\". Call one of the tools you were given.",
+      text: "There is no tool named \"" + name + "\". The tools you have are: "
+        + mountedNames(mounted) + ". Call one of those instead — "
+        + "anything a skill does is reached through use_skill, not by its own name.",
       error: "no tool named \"" + name + "\"",
     };
     return unknown;
   }
   let which = mounted.tools[at].server;
   return callTool(mounted.servers[which], name, args, mounted.tokens[which]);
+}
+
+// Every tool name this run offered, as a sentence — the MCP ones the mount
+// carries plus the built-ins every run has. Written here because this is
+// where a refusal needs it; the built-ins are named literally because they
+// are not in `mounted` and their names are fixed by their own tool specs.
+function mountedNames(mounted: Mounted): string {
+  let out = "use_skill, run_script, read_artifact, write_artifact, edit_artifact";
+  let i: int = 0;
+  while (i < mounted.tools.length) {
+    out = out + ", " + mounted.tools[i].name;
+    i = i + 1;
+  }
+  return out;
 }
 
 // Which server answers a tool, for a caller recording what ran.
@@ -1044,5 +1065,12 @@ export function skillBriefing(db: Db, agentId: string): string {
     out = out + "\n…and also, one line each was too many: " + names + " — use_skill loads any of them.";
   }
   out = out + "\nEach line is for choosing, not for doing: when a task matches one, load the skill before starting the work.";
+  // Spelled out because the failure it prevents is common and expensive: a
+  // model that wants to search invents a tool called search_web, is told
+  // there is no such tool, and answers from memory — confidently, about a
+  // thing it cannot know. A skill is not a tool; use_skill is the only door,
+  // and saying so once here is cheaper than the wrong answer.
+  out = out + " There is no tool named after a skill — call use_skill with the skill's name,"
+    + " and never answer from memory about anything current when a skill could have told you.";
   return out;
 }
