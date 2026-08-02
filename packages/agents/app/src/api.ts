@@ -696,10 +696,13 @@ export const threadSteps = (threadId: string, seq?: number | "all") =>
 // and a stale menu answering 400 there would fail an attachment that has
 // nothing to do with which model answers. The first message's POST sets the
 // thread's choice a moment later anyway.
-export const say = (id: string, text: string, modelChoiceId = "") =>
+export const say = (id: string, text: string, modelChoiceId = "", think = false) =>
   call<SayReply>(`/threads/${encodeURIComponent(id)}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text, modelChoiceId }),
+    // `think` travels with the message, like the picker beside it: what the
+    // composer shows is what the next send carries, and an earlier answer is
+    // never re-thought because a later one asked to be.
+    body: JSON.stringify({ text, modelChoiceId, think }),
   });
 
 // --- workspace ------------------------------------------------------------------------

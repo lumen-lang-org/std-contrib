@@ -376,6 +376,9 @@ export type SessionBridge = {
   // in this session would be a second answer to which model the next message
   // runs on.
   modelChoiceId: () => string;
+  // Whether the composer's Think toggle is on for this send. Optional: a host
+  // without the toggle simply never asks for thinking, which is the default.
+  think?: () => boolean;
   onThreadOpened: (threadId: string) => void;
   onTurnDone: () => void;
   // How many free messages this guest has left today, straight off the say
@@ -637,7 +640,7 @@ export class ChatSession {
       this.push({ id: liveId, sender: "bot", text: "", refs: EMPTY });
 
       this.watch();
-      const reply = await say(this.threadId, said, choiceId);
+      const reply = await say(this.threadId, said, choiceId, this.bridge.think?.() ?? false);
       // The answer carries its own calls, so the card settles on what the
       // server recorded rather than on whatever the last poll tick caught.
       this.unwatch();

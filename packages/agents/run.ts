@@ -231,13 +231,25 @@ export type RunContext = {
   // the door that knows; a delegated child inherits it, because the child is
   // doing the same person's work on the same person's connectors.
   owner: string,
+  // Whether this turn asked the model to think out loud before answering.
+  //
+  // False is not "no opinion": a reasoning model reasons unless told not to,
+  // and the thinking is charged to the same token budget the answer comes out
+  // of. A local 8B with the switch left on spent its whole budget deliberating
+  // and re-read the same skill five rounds running, which reads as a hang. So
+  // a turn that did not ask says so, and `thinkingJson` turns that into the
+  // provider's own spelling.
+  //
+  // A delegated child inherits it: a person asking for care wants it from the
+  // agents the answer actually passes through, not only the first one.
+  think: bool,
 };
 
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "" };
+  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -249,7 +261,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "" };
+  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -290,7 +302,19 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   if (where.modelConfigId != "") { configId = where.modelConfigId; }
   let configDoc = findById(db, modelConfigsMapping(db), configId);
   if (configDoc == "") { return failed(agent.agentName, "no model config " + configId); }
-  let config: ConfigWithModel = JSON.parse<ConfigWithModel>(configDoc);
+  let parsed: ConfigWithModel = JSON.parse<ConfigWithModel>(configDoc);
+  // A turn that did not ask to think says so, rather than leaving the model to
+  // its own default — which for a reasoning model is to think, at the expense
+  // of the same budget the answer is drawn from. The config still decides HOW
+  // much thinking (a budget, an effort); this decides whether any was asked
+  // for at all, and only ever narrows: a config that never asks stays silent.
+  let asks = parsed.thinking;
+  if (!where.think) { asks = "off"; }
+  let config: ConfigWithModel = {
+    id: parsed.id, modelId: parsed.modelId, temperature: parsed.temperature,
+    maxTokens: parsed.maxTokens, topP: parsed.topP, extra: parsed.extra, thinking: asks,
+    label: parsed.label, selectable: parsed.selectable, rank: parsed.rank, model: parsed.model,
+  };
 
   let modelDoc = findById(db, modelsMapping(), config.modelId);
   if (modelDoc == "") { return failed(agent.agentName, "no model " + config.modelId); }
@@ -723,6 +747,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             // see them.
             baseSeq: where.baseSeq,
             owner: where.owner,
+            // Inherited: a person who asked for care wants it from the agents
+            // the answer passes through, not only the one they addressed.
+            think: where.think,
           };
           let asked = runAgentAt(db, child.id, question, master, below2);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }

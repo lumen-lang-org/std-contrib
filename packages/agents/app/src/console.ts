@@ -1097,6 +1097,7 @@ export class AgentConsole extends LitElement {
     // choice travels with the message, and a queued question keeps whatever
     // the picker was showing when it was typed.
     modelChoiceId: () => this.choiceId,
+    think: () => this.thinkOn,
     // The one place a conversation's id arrives without anyone having opened
     // it: the first message of a new thread creates it server-side and this is
     // how the console learns which one it got. It has to route too, or the
@@ -1542,6 +1543,7 @@ export class AgentConsole extends LitElement {
       await chatEl.updateComplete;
       this.defaultSearchOn();
       this.dockSearch(chatEl);
+      this.dockThink(chatEl);
     }
     if (this.choices.length === 0) { return; }
     if (this.picker === null) {
@@ -1623,6 +1625,47 @@ export class AgentConsole extends LitElement {
     globe.classList.toggle("on", on);
   }
 
+  /* Think, beside the globe.
+   *
+   * Docked the same way and for the same reason — the row lives in the
+   * chatbot's shadow root — and drawn from the same stylesheet, so the pair
+   * read as one control each rather than two unrelated buttons. Unlike
+   * search, this is NOT a skill: it rides on the send as `think`, which the
+   * engine turns into whatever the provider spells thinking as.
+   *
+   * Offered for every deployment. A model with nothing to switch simply
+   * answers as it always did, which is what "off" already means. */
+  private dockThink(chat: Element & { updateComplete?: Promise<unknown> }) {
+    const left = chat.shadowRoot?.querySelector(".action-buttons-left") ?? null;
+    if (left === null) return;
+    let bulb = left.querySelector(".joule-think") as HTMLElement | null;
+    if (bulb === null) {
+      bulb = document.createElement("button");
+      bulb.className = "joule-search joule-think";
+      bulb.setAttribute("type", "button");
+      // Inline SVG for the reason the globe is one: an nr-icon adopted into
+      // another component's shadow root loses the tokens it styles from.
+      bulb.innerHTML =
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" '
+        + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+        + 'stroke-linejoin="round"><path d="M9 18h6"></path>'
+        + '<path d="M10 22h4"></path>'
+        + '<path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"></path>'
+        + '</svg><span>Think</span>';
+      bulb.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.thinkOn = !this.thinkOn;
+        this.dockThink(chat);
+      });
+      left.appendChild(bulb);
+      this.styleSearchGlobe(chat);
+    }
+    bulb.setAttribute("aria-pressed", this.thinkOn ? "true" : "false");
+    bulb.title = this.thinkOn ? "Thinking out loud is on" : "Think before answering";
+    bulb.classList.toggle("on", this.thinkOn);
+  }
+
   /* Search on by default.
    *
    * It was a switch that started off, so every conversation that wanted a
@@ -1633,6 +1676,13 @@ export class AgentConsole extends LitElement {
    * something is already pinned (a capability chip, a slash command, a
    * template) that pin wins.
    */
+  /* The composer's Think toggle. Off, and it stays off unless someone asks:
+     a reasoning model spends the same token budget on deliberating that the
+     answer comes out of, and left on by default a local 8B talked itself out
+     of a whole reply. So thinking is something a person turns on for a
+     question that deserves it, not a tax on every "hi". */
+  @state() private thinkOn = false;
+
   private searchDefaulted = false;
   private defaultSearchOn() {
     if (this.searchDefaulted) return;
