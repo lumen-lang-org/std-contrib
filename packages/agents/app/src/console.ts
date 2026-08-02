@@ -2963,12 +2963,6 @@ export class AgentConsole extends LitElement {
             welcome-message=${WORDMARK}
             placeholder="Ask ${this.agentName()}…"
             attach-icon="plus"
-            <!-- Labels blanked, marks kept. The attach button was already
-                 wordless; Send and Stop join it, because the composer's row
-                 is the tightest strip on a phone and a mark that everyone
-                 knows does not need naming twice. The ARIA names live in
-                 separate keys (sendMessageLabel / stopQueryLabel) and are
-                 untouched, so a screen reader still hears the verb. -->
             .i18n=${{ input: { attachButton: "" },
                       send: { sendButton: "", stopButton: "" } }}
             .attachItems=${this.attachMenu()}
