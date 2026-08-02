@@ -94,6 +94,10 @@ export function renderWithCards(raw: string, renderText: (segment: string) => st
 type CurrencyData = {
   from: string; to: string; rate: number;
   amount?: number; converted?: number; asOf?: string; source?: string;
+  // Optional rate history — one number per day, oldest first, with a label
+  // each. Present, the card draws an interactive <nr-sparkline> under the
+  // numbers; absent, the card is the numbers alone.
+  history?: number[]; historyLabels?: string[];
 };
 
 function esc(raw: string): string {
@@ -133,10 +137,24 @@ export const currencyCard: CardPlugin = {
     // Inline styles: the string lands inside the chatbot's shadow root, where
     // the console stylesheet does not reach. Custom properties do cross the
     // boundary, so colors lean on the theme's vars with plain fallbacks.
+    // The chart, when the payload carries a history. The element parses its
+    // own attributes (Lit's JSON converter), so the numbers are re-serialized
+    // from the parsed floats — nothing model-written lands in the attribute —
+    // and the labels are escaped like every other string here.
+    let spark = "";
+    const hist = (d.history ?? []).filter((n) => typeof n === "number" && isFinite(n)).slice(0, 120);
+    if (hist.length >= 2) {
+      // Sliced only: the attribute as a whole is escaped below, and the element
+      // renders labels as Lit text, which cannot become markup.
+      const labels = (d.historyLabels ?? []).slice(0, hist.length).map((l) => String(l).slice(0, 24));
+      spark = `<nr-sparkline style="margin-top:10px" points="${JSON.stringify(hist)}"`
+        + ` labels="${esc(JSON.stringify(labels))}" unit="${to}"></nr-sparkline>`;
+    }
     return `<div style="margin:10px 0;padding:14px 16px;border:1px solid var(--nuraly-border-color,rgba(128,128,128,.25));border-radius:12px;max-width:420px;font-family:inherit">`
       + `<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6;margin-bottom:6px">Currency conversion</div>`
       + `<div style="font-size:19px;line-height:1.3">${hero}</div>`
       + `<div style="font-size:12px;opacity:.65;margin-top:6px">${meta.join(" · ")}</div>`
+      + spark
       + `</div>`;
   },
 };
