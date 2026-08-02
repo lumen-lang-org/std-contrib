@@ -14,7 +14,7 @@
 // error line in front of it.
 
 import { LitElement, css, html } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 // Plain constants, so this stays within the rule below: no component imports.
 import { BRAND } from "./brand.js";
 // No component imports here on purpose. `src/ui.ts` holds the one combination
@@ -89,10 +89,38 @@ export class LoginOverlay extends LitElement {
     .why { min-height: 18px; font-size: 13px; color: var(--danger, #a8321f); }
     .note { font-size: 12.5px; color: var(--muted, #667); }
     .note a { color: inherit; }
+    /* The soft wall's way out. A text button, not a second nr-button: "Not
+       now" must read as smaller than signing in, because it is. */
+    .later { background: none; border: 0; padding: 6px; cursor: pointer;
+             font: inherit; font-size: 13px; color: var(--muted, #667);
+             text-align: center; }
+    .later:hover { text-decoration: underline; }
   `;
+
+  /* Soft: the quota wall, not the locked door. The thread behind stays
+     readable, the backdrop and a "Not now" button both dismiss, and the card
+     explains itself through `note`. Default (hard) mode is the real 401 and
+     changes not at all: no dismissal, no note, same form. */
+  @property({ type: Boolean }) soft = false;
+  /* The sentence above the form when there is something to explain — the
+     quota wall's "you have used your free messages". Empty draws the default
+     lede. */
+  @property() note = "";
 
   @state() private busy = false;
   @state() private why = "";
+
+  private dismiss(): void {
+    if (!this.soft) { return; }
+    this.dispatchEvent(new CustomEvent("dismiss"));
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    // The backdrop IS the host, so a click on it can only be caught here; the
+    // card stops its own clicks below so pressing the form is never a close.
+    this.addEventListener("click", () => { this.dismiss(); });
+  }
 
   private async submit(): Promise<void> {
     if (this.busy) { return; }
@@ -135,11 +163,17 @@ export class LoginOverlay extends LitElement {
 
   render() {
     return html`
-      <div class="card" @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter") { void this.submit(); } }}>
+      <div class="card"
+        @click=${(e: Event) => { e.stopPropagation(); }}
+        @keydown=${(e: KeyboardEvent) => {
+          if (e.key === "Enter") { void this.submit(); }
+          if (e.key === "Escape") { this.dismiss(); }
+        }}>
         <!-- The wordmark IS the heading. "Sign in" under it said what the
              button already says, twice on one small card. -->
         <div class="mark">${BRAND}<span class="dot">.</span></div>
-        <p class="lede">Your conversations are private to your account.</p>
+        <p class="lede">${this.note !== "" ? this.note
+          : "Your conversations are private to your account."}</p>
         <nr-input id="email" type="email" placeholder="Email" autocomplete="username"></nr-input>
         <nr-input id="password" type="password" placeholder="Password"
                   autocomplete="current-password"></nr-input>
@@ -149,6 +183,8 @@ export class LoginOverlay extends LitElement {
             ${this.busy ? "Signing in…" : "Sign in"}
           </nr-button>
         </div>
+        ${this.soft ? html`
+          <button class="later" @click=${() => { this.dismiss(); }}>Not now</button>` : ""}
         <!-- Reset and signup stay on the pages that own them: they send mail,
              they have their own rate limits, and neither is a thing you do
              often enough to be worth a second form in here. -->

@@ -16,7 +16,7 @@ import "./model-picker.js";
 import "./settings.js";
 import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
-  SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
+  QUOTA_SPENT, SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, getQuota, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
   ServerRow, listServers, listSkills, copySkillLocally,
   PluginRow, listPlugins, pluginItems,
@@ -557,6 +557,27 @@ export class AgentConsole extends LitElement {
                     background: none; font: inherit; font-size: 13.5px;
                     color: var(--fg); cursor: pointer; text-align: left; }
     .hmenu button:hover { background: var(--bg-sunken); }
+    /* The guest strip: ration and door, worn in the header like the chips
+       around it. The count is a bordered pill in muted ink — information, not
+       a control — and the sign-in is the one filled mark in the bar, because
+       it is the one thing a guest is being asked to consider. (No backticks
+       in this comment: it lives inside a css template literal.) The low class
+       borrows the danger ink once three messages remain; it must change
+       colour, not start blinking. */
+    .guest-strip { display: flex; align-items: center; gap: 8px; flex: none; }
+    .guest-count { font-size: 12.5px; color: var(--muted);
+                   border: 1px solid var(--border); border-radius: 999px;
+                   padding: 4px 10px; white-space: nowrap; }
+    .guest-count.low { color: var(--danger, #a8321f);
+                       border-color: var(--danger, #a8321f); }
+    .guest-signin { border: 0; border-radius: 999px; padding: 6px 12px;
+                    cursor: pointer; font: 500 12.5px var(--display);
+                    background: var(--brand); color: var(--accent-fg, #fff); }
+    .guest-signin:hover { filter: brightness(1.06); }
+    /* On a phone the pill's sentence is the widest thing in the bar; the
+       button carries the feature alone and the count lives in its title and
+       in the wall. */
+    @media (max-width: 640px) { .guest-count { display: none; } }
     main { flex: 1; min-height: 0; }
     /* The cards live in this element's own DOM, below the chat — never inside
        the component's messages. Its artifact mode re-extracts fences from the
@@ -1083,6 +1104,12 @@ export class AgentConsole extends LitElement {
     // back into.
     onThreadOpened: (id) => { this.threadId = id; this.route(id); },
     onTurnDone: () => { void this.refreshThreads(); void this.refreshRefs(); },
+    // The strip's clock: each guest reply carries the count the engine
+    // recorded after the run, so two tabs agree without either asking again.
+    onGuestRemaining: (n) => {
+      this.guestRemaining = n;
+      if (this.guestLimit === 0) { this.guestLimit = 10; }
+    },
   });
   // What the conversation saved, from two sources that must agree before a
   // card is drawn: the refs each message carries (slot@version, from the say
@@ -1115,6 +1142,21 @@ export class AgentConsole extends LitElement {
   // had drawn behind the overlay: signing back in should return you to the
   // conversation you were reading, not to an empty shell.
   @state() private signedOut = false;
+  /* The guest ration, for the strip in the header. `remaining` is null until
+     the server has said a number — a strip that guesses "10" and corrects
+     itself a beat later is a strip that lies once per page load. Every value
+     here is the engine's: GET /quota once at boot, then `guestRemaining` off
+     each say reply. Nothing decrements locally. */
+  @state() private guestLimit = 0;
+  @state() private guestRemaining: number | null = null;
+  @state() private guestResetsAt = "";
+  /* The soft wall: raised by QUOTA_SPENT (a send met the 429), dismissible,
+     thread still readable behind it. Distinct from `signedOut`, which is a
+     real 401 and stays the hard, undismissable path. */
+  @state() private quotaWall = false;
+  /* The same overlay opened on purpose — the strip's Sign in, the rail's row.
+     Soft and dismissible, with the default lede rather than the wall's. */
+  @state() private signIn = false;
   /* Reflected, because the drawer and its scrim are styled from the host —
      a boolean in a template cannot reach the sidebar element's own transform. */
   @property({ type: Boolean, reflect: true }) nav = false;
@@ -1212,12 +1254,31 @@ export class AgentConsole extends LitElement {
     // list calls navigates to the login, and the answer to this one decides
     // what the rail may even offer.
     window.addEventListener(SIGNED_OUT, () => { this.signedOut = true; });
+    // The guest wall, beside the sign-out for the same reason: `call` cannot
+    // know who holds the shell. Soft where SIGNED_OUT is hard — the thread
+    // stays readable, and dismissing it is allowed. Not latched: a guest who
+    // dismisses and sends again meets the 429 again and this fires again.
+    window.addEventListener(QUOTA_SPENT, (e) => {
+      const said = (e as CustomEvent).detail as
+        { resetsAt?: string; limit?: number } | undefined;
+      if (typeof said?.resetsAt === "string" && said.resetsAt !== "") {
+        this.guestResetsAt = said.resetsAt;
+      }
+      if (typeof said?.limit === "number" && said.limit > 0) { this.guestLimit = said.limit; }
+      this.guestRemaining = 0;
+      this.quotaWall = true;
+    });
     // Back and Forward move between conversations rather than out of the app.
     window.addEventListener("popstate", () => {
       const id = currentId();
       if (id === "") { this.fresh(); } else if (id !== this.threadId) { void this.open(id); }
     });
     this.me = await whoami().catch(() => null);
+    // The strip's first number, asked only when there is a strip to draw.
+    // Not awaited: the header renders "Guest · Sign in" without the count and
+    // fills it in when this lands — the answer decorates the strip, it does
+    // not gate the shell.
+    if (this.me?.anonymous === true) { void this.loadQuota(); }
     this.capabilities = await featuredSkills().catch(() => []);
     // Only to decide whether the + menu offers a Plugins row. A deployment
     // with no servers should not have one, and finding that out after the menu
@@ -1263,6 +1324,65 @@ export class AgentConsole extends LitElement {
     // conversation are all already on screen by the time this asks, and
     // nothing above it waits on a menu.
     await this.loadChoices();
+  }
+
+  /* The guest ration at boot. `limit: 0` is the signed-in and community
+     answer — unlimited — and leaves every guest field untouched, so the strip
+     never draws for anyone who is not rationed. Refused is treated the same
+     way: a strip is not worth an error surface, and the send path's 429 stays
+     the honest gate either way. */
+  private async loadQuota(): Promise<void> {
+    const q = await getQuota().catch(() => null);
+    if (q === null || q.limit <= 0) { return; }
+    this.guestLimit = q.limit;
+    this.guestRemaining = typeof q.remaining === "number"
+      ? q.remaining
+      : Math.max(0, q.limit - (q.used ?? 0));
+    this.guestResetsAt = q.resetsAt ?? "";
+  }
+
+  /* "in 5h 20m" — how long until the ration comes back, from the engine's own
+     resetsAt instant. "" when it is unknown or already past, and the copy that
+     appends it must survive the "" ("today" alone is still true). Computed at
+     render, not ticked: the wall re-renders on every open anyway, and a
+     counter that visibly counts would promise a precision nobody needs. */
+  private resetsIn(): string {
+    if (this.guestResetsAt === "") { return ""; }
+    const left = Date.parse(this.guestResetsAt) - Date.now();
+    if (!Number.isFinite(left) || left <= 0) { return ""; }
+    const h = Math.floor(left / 3600000);
+    const m = Math.max(1, Math.round((left % 3600000) / 60000));
+    return h > 0 ? `in ${h}h ${m}m` : `in ${m}m`;
+  }
+
+  /* What the soft wall says. The spent case and the chosen case share one
+     overlay; only the sentence differs, and neither promises the conversation
+     carries over — it does not, yet. */
+  private quotaNote(): string {
+    const limit = this.guestLimit > 0 ? String(this.guestLimit) : "";
+    const when = this.resetsIn();
+    return `You have used your ${limit === "" ? "" : limit + " "}free messages for today.`
+      + ` They come back ${when === "" ? "at midnight UTC" : when} — or sign in to keep chatting.`;
+  }
+
+  /* The header's guest strip: who you are, what is left, and the way up. Only
+     for a caller the gateway marked anonymous; everyone signed in — and the
+     community box, where `me` is null — never sees it. The count waits for
+     the server's number rather than assuming 10. */
+  private guestStrip() {
+    if (this.me?.anonymous !== true) { return nothing; }
+    const n = this.guestRemaining;
+    const limit = this.guestLimit > 0 ? this.guestLimit : 10;
+    const worn = n === null ? "Guest"
+      : n <= 0 ? "No free messages left today"
+      : `Guest · ${n} of ${limit} free message${limit === 1 ? "" : "s"} left today`;
+    return html`
+      <div class="guest-strip">
+        <span class="guest-count ${n !== null && n <= 3 ? "low" : ""}"
+          title=${this.guestResetsAt === "" ? "Free messages reset at midnight UTC"
+            : `Free messages reset ${this.resetsIn() || "at midnight UTC"}`}>${worn}</span>
+        <button class="guest-signin" @click=${() => { this.signIn = true; }}>Sign in</button>
+      </div>`;
   }
 
   /* The composer's menu, and the one label the menu's last line needs.
@@ -2477,7 +2597,18 @@ export class AgentConsole extends LitElement {
   render() {
     const cards = this.cards();
     return html`
-      ${this.signedOut ? html`<login-overlay></login-overlay>` : ""}
+      <!-- Three reasons the overlay rises, in rank order. A real 401 is the
+           hard door and dismisses nothing; the quota wall and a chosen
+           sign-in are both soft — thread readable behind, backdrop and "Not
+           now" close them — and differ only in what the card says. Login
+           itself is one path for all three: the form POSTs, the page reloads,
+           and the fresh cookie outranks the guest one on the next request. -->
+      ${this.signedOut ? html`<login-overlay></login-overlay>`
+        : this.quotaWall ? html`<login-overlay soft .note=${this.quotaNote()}
+            @dismiss=${() => { this.quotaWall = false; }}></login-overlay>`
+        : this.signIn ? html`<login-overlay soft
+            @dismiss=${() => { this.signIn = false; }}></login-overlay>`
+        : ""}
       <!-- The model picker, written here and drawn in the composer.
            It is at the top level of this template and NOT inside any
            conditional, which is what makes it safe for updated() to move it
@@ -2514,6 +2645,7 @@ export class AgentConsole extends LitElement {
         @new-thread=${() => { this.view = "chat"; this.nav = false; this.fresh(); }}
         @collapse=${() => { this.nav = false; }}
         @open-settings=${() => { this.settings = true; }}
+        @open-signin=${() => { this.signIn = true; }}
         @open-knowledge=${() => { this.view = "knowledge"; }}
         @open-canvas=${() => { this.view = "canvas"; }}
         @open-starts=${() => { void this.openStarts(); }}
@@ -2545,6 +2677,7 @@ export class AgentConsole extends LitElement {
             <nr-icon name="square-pen" size="medium"></nr-icon>
           </button>
           <span class="title">${this.threadTitle()}</span>
+          ${this.guestStrip()}
           <!-- No agent chip. Who answers is said three times already — the
                composer's "Ask <agent>" placeholder, the directory's Agents
                tab, the slash menu — and the bolt glyph beside a name in the

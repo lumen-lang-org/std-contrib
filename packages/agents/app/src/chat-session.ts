@@ -378,6 +378,11 @@ export type SessionBridge = {
   modelChoiceId: () => string;
   onThreadOpened: (threadId: string) => void;
   onTurnDone: () => void;
+  // How many free messages this guest has left today, straight off the say
+  // reply. Optional twice over: the console only wires it when there is a
+  // strip to update, and the reply only carries the number for guest callers
+  // — a signed-in reply has no member, and this is never called.
+  onGuestRemaining?: (remaining: number) => void;
 };
 
 // What the composer's tray shows for an attached file. The shape nr-chatbot
@@ -662,6 +667,12 @@ export class ChatSession {
         error: !reply.ok,
       }, liveId);
       this.emit("message:received", { ok: reply.ok });
+      // The reply is the strip's clock: server-counted after this run was
+      // recorded, so the number a guest reads is the engine's, never an
+      // optimistic decrement that drifts across two tabs.
+      if (typeof reply.guestRemaining === "number") {
+        this.bridge.onGuestRemaining?.(reply.guestRemaining);
+      }
       this.bridge.onTurnDone();
     } catch (e) {
       const said2 = e instanceof Error ? e.message : String(e);

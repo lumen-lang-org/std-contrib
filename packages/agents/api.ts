@@ -48,7 +48,7 @@ import { userTokenKey } from "./tools.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
-import { ownerUsage, usageJson } from "./usage.ts";
+import { ownerUsage, usageJson, runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
@@ -95,6 +95,32 @@ type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number
 // times.
 function callerTags(req: Request): string[] {
   return tagsFromHeader(trustsProxyAuth(), header(req, "x-user"));
+}
+
+// How many turns a guest gets in one UTC day. The window is the calendar day
+// — it resets at a moment the refusal can name honestly — and the count is
+// runs, failed ones included, because a failed run spent a provider call too.
+const GUEST_DAILY_RUNS: int = 10;
+
+// The caller's tag when the gateway minted this caller a guest identity, ""
+// for everybody else. The gateway stamps guests `guest:<hex>`, and `:` cannot
+// appear in a real user's uuid — so the prefix is the whole test. Only tags that came through `callerTags` reach here, which is what
+// keeps the community deployment out of this entirely: untrusted, the tag
+// list is empty and every caller is nobody's guest.
+export function guestTag(tags: string[]): string {
+  if (tags.length != 1) { return ""; }
+  if (!tags[0].startsWith("guest:")) { return ""; }
+  return tags[0];
+}
+
+// The 429 a guest over the day's ceiling gets. `remaining` is spelled out as 0
+// — the client keys its wall off `error` but shows the numbers — and
+// `resetsAt` is the same instant the Retry-After header counts down to.
+export function guestQuotaJson(used: int, resetsAt: string): string {
+  return "{\"error\":\"guest_quota\",\"limit\":" + `${GUEST_DAILY_RUNS}`
+    + ",\"used\":" + `${used}`
+    + ",\"remaining\":0"
+    + ",\"resetsAt\":" + JSON.stringify(resetsAt) + "}";
 }
 
 // Credentials, over the API. A key can be written and named; it can never be
@@ -413,6 +439,20 @@ class AgentApi {
     if (body.text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
     if (!existsById(this.db, this.flat, param(req, "id"))) {
       return notFound("agent " + param(req, "id"));
+    }
+
+    // The same ceiling the thread door enforces, or this route is the way
+    // around it: it is the only other door that spends a provider call, and a
+    // guest who found it would have unlimited turns while say() counted them.
+    let guest = guestTag(callerTags(req));
+    if (guest != "") {
+      let atGate = Date.now();
+      let used = runsSince(this.db, guest, utcDayStartText(atGate));
+      if (used >= GUEST_DAILY_RUNS) {
+        let refusal = reply(429, guestQuotaJson(used, nextUtcMidnightIso(atGate)), "application/json");
+        refusal.headers.set("retry-after", `${secondsToUtcMidnight(atGate)}`);
+        return refusal;
+      }
     }
 
     // The tracer is read per request, not held: turning tracing on is an
@@ -2819,6 +2859,23 @@ class ThreadApi {
     // not include it, refuse HERE — which is before the turn below applies it,
     // remembers it, and spends a provider call on it.
 
+    // The slot's first occupant, and the same shape that check will have: a
+    // guest — a caller the gateway minted an anonymous identity for — gets
+    // GUEST_DAILY_RUNS turns per UTC day, counted off the runs table, and the
+    // refusal lands before a run row is written or a provider call is spent.
+    // Two guest sends racing at nine-of-ten can both pass; the accepted cost
+    // is one extra turn, never an extra 429.
+    let guest = guestTag(tags);
+    if (guest != "") {
+      let atGate = Date.now();
+      let used = runsSince(this.db, guest, utcDayStartText(atGate));
+      if (used >= GUEST_DAILY_RUNS) {
+        let refusal = reply(429, guestQuotaJson(used, nextUtcMidnightIso(atGate)), "application/json");
+        refusal.headers.set("retry-after", `${secondsToUtcMidnight(atGate)}`);
+        return refusal;
+      }
+    }
+
     let tracer = tracerFor(this.db, this.master);
     // Handed to the turn rather than written here first. Applying the choice
     // and remembering it are one act, and `runInThreadWith` is where that act
@@ -2856,6 +2913,18 @@ class ThreadApi {
     if (tracing(tracer) && run.spans.length > 0) {
       if (flush(tracerWithMoreSpans(tracer, run.spans)).ok) { traced = traceId(tracer); }
     }
+    // What the guest has left after this turn, re-counted rather than
+    // decremented: the run row above is already filed, so the count is the
+    // server's own answer and the strip that shows it never drifts from what
+    // the gate will decide next send. "" for everybody else — a member that is
+    // simply absent from a signed-in caller's reply.
+    let guestLeft = "";
+    if (guest != "") {
+      let left = GUEST_DAILY_RUNS - runsSince(this.db, guest, utcDayStartText(Date.now()));
+      if (left < 0) { left = 0; }
+      guestLeft = ",\"guestRemaining\":" + `${left}`;
+    }
+
     // The wire answers the rewritten text with its nonce stripped, plus the
     // refs a card resolves by. Never `run.text`: the raw reply is the log's,
     // and the marker's nonce must not reach a DOM.
@@ -2881,7 +2950,7 @@ class ThreadApi {
       + ",\"inputTokens\":" + `${run.inputTokens}`
       + ",\"outputTokens\":" + `${run.outputTokens}`
       + ",\"traceId\":" + JSON.stringify(traced)
-      + ",\"error\":" + JSON.stringify(run.error) + "}");
+      + ",\"error\":" + JSON.stringify(run.error) + guestLeft + "}");
   }
 
   // What a person reads: the questions and the answers. The tool calls and the
@@ -4155,6 +4224,36 @@ class UsageApi {
   }
 }
 
+// What the day's ceiling looks like from where this caller stands — read once
+// at console boot; every send after that carries `guestRemaining` in its own
+// reply, so nothing polls this.
+//
+// A signed-in caller (and the community deployment, which has no gateway and
+// no guests) gets `{"limit":0}`: 0 is "no ceiling", and answering it here
+// rather than 404ing keeps the console's one boot call unconditional.
+@controller("/quota")
+class QuotaApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  show(req: Request): Reply {
+    let guest = guestTag(callerTags(req));
+    if (guest == "") { return ok("{\"limit\":0}"); }
+    let now = Date.now();
+    let used = runsSince(this.db, guest, utcDayStartText(now));
+    let left = GUEST_DAILY_RUNS - used;
+    if (left < 0) { left = 0; }
+    return ok("{\"limit\":" + `${GUEST_DAILY_RUNS}`
+      + ",\"used\":" + `${used}`
+      + ",\"remaining\":" + `${left}`
+      + ",\"resetsAt\":" + JSON.stringify(nextUtcMidnightIso(now)) + "}");
+  }
+}
+
 // What this build calls itself.
 //
 // Written by hand because there is no build step to stamp a commit into: the
@@ -4762,6 +4861,7 @@ function main(): void {
     new PreviewApi(db),
     new HealthApi(db),
     new UsageApi(db),
+    new QuotaApi(db),
   ];
 
   let table = mountedRoutes(mounts);

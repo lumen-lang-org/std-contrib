@@ -89,6 +89,9 @@ export class ConsoleSidebar extends LitElement {
   // so an address is the common case and the local part reads better in 13px.
   private name(): string {
     if (this.me === null) { return BRAND; }
+    // The gateway calls a minted visitor "guest" with an empty email; say the
+    // word properly rather than printing the tag's lowercase spelling.
+    if (this.me.anonymous === true) { return "Guest"; }
     const said = this.me.username !== "" ? this.me.username : this.me.email;
     return said.includes("@") ? said.split("@")[0] : said;
   }
@@ -173,9 +176,14 @@ export class ConsoleSidebar extends LitElement {
           ${isAdmin(this.me) ? html`
             <div @click=${() => { this.menu = false; location.assign("/admin/models"); }}>Deployment settings</div>
           ` : ""}
-          ${this.me !== null ? html`
+          ${this.me === null ? "" : this.me.anonymous === true ? html`
+            <!-- A guest signs IN, not out: /logout would only mint them a new
+                 guest cookie on the next request. The console owns the
+                 overlay, so this is an event, like every other row here. -->
+            <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-signin")); }}>Sign in</div>
+          ` : html`
             <div @click=${() => { location.assign("/logout"); }}>Sign out</div>
-          ` : ""}
+          `}
           <div class="about">Agent console · std-contrib</div>
         </div>` : ""}
         <div class="me" @click=${() => { this.menu = !this.menu; }}
