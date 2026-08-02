@@ -124,9 +124,9 @@ export class ConsoleSidebar extends LitElement {
       <div class="item" data-nav="knowledge" @click=${() => this.dispatchEvent(new CustomEvent("open-knowledge"))}>
         <nr-icon name="database" size="small"></nr-icon><span>Knowledge</span>
       </div>
-      <div class="item" data-nav="canvas" @click=${() => this.dispatchEvent(new CustomEvent("open-canvas"))}>
-        <nr-icon name="git-fork" size="small"></nr-icon><span>Agent graph</span>
-      </div>
+      <!-- No "Agent graph" row. The graph is not a place beside Knowledge; it
+           is a view OF an agent, and the way in is the agent's own card in
+           the directory — where "which agent" has already been answered. -->
       <!-- The two directory shelves that are worth a standing place. They were
            reachable only from the composer's + menu, which is a menu you open
            mid-sentence — fine for pinning a skill while you write, wrong for

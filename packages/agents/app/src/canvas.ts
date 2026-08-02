@@ -13,7 +13,7 @@
 // was wrong.
 
 import { LitElement, css, html } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 // <workflow-canvas> is registered by the single LumenUI bundle in ui.ts.
 import "./ui.js";
 import {
@@ -277,6 +277,12 @@ export class AgentCanvas extends LitElement {
     header nr-button { font-size: 13px; }
   `;
 
+  /* An agent to arrive selected on, by id. The rail used to offer the graph
+     as a destination of its own; now the way in is an agent's card in the
+     directory, and a graph you asked for through an agent should open talking
+     about that agent rather than about nothing. */
+  @property({ attribute: "focus-agent" }) focusAgent = "";
+
   @state() private agents: AgentFull[] = [];
   @state() private servers: ServerRow[] = [];
   @state() private tools: ServerTools[] = [];
@@ -328,7 +334,8 @@ export class AgentCanvas extends LitElement {
       ...agents.flatMap((a) => a.servers.map((v) =>
         ({ parent: a.id, child: v.id, kind: "server" as Kind }))),
     ];
-    if (this.picked !== "") this.pick(this.picked);
+    if (this.picked !== "") { this.pick(this.picked); }
+    else if (this.focusAgent !== "") { this.pick(nodeId("agent", this.focusAgent)); }
   }
 
   private workflow(): CanvasWorkflow {
