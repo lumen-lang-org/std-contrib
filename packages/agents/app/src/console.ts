@@ -19,8 +19,7 @@ import {
   QUOTA_SPENT, SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, getQuota, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
   ServerRow, listServers, listSkills, copySkillLocally,
-  PluginRow, listPlugins, pluginItems,
-} from "./api.js";
+  PluginRow, listPlugins, pluginItems, SkillFileRow, listSkillFiles } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
 
@@ -423,6 +422,25 @@ function softenFocusRings(root: ParentNode) {
   }
 }
 
+/* Agents a person may be handed, out of every agent the deployment has.
+
+   The engine's list is the operator's whole bench, fixtures included: the
+   scripted model double the e2e suite talks to, its sub-agent, the eval
+   judge, and a link agent per test run that nothing cleans up. Eleven of the
+   eighteen rows on joule.sh were those, and the composer offered them by
+   name — a visitor was invited to "Ask e2e-doubled…", and a conversation
+   that landed on one would be answered by a stub.
+
+   The convention is the filter: a fixture is named e2e-*, which the specs
+   that create them already follow, and the two long-lived ones say so in
+   their own descriptions. Naming rather than a new column because this is a
+   question about who may be OFFERED one, which is a console question — the
+   API still serves them, /admin still lists them, and a test that names an
+   agent directly is unaffected. */
+function offerable(a: { agentName?: string }): boolean {
+  return !(a.agentName ?? "").startsWith("e2e-");
+}
+
 @customElement("agent-console")
 export class AgentConsole extends LitElement {
   static styles = css`
@@ -727,8 +745,15 @@ export class AgentConsole extends LitElement {
        composer), so dead centre reads as slightly low. The padding does the
        biasing rather than a transform, so nothing overlaps when the window is
        short enough that the block fills it. */
+    /* The bias is a fraction of the height the shell ACTUALLY has, not of vh.
+       vh is the layout viewport, which on iOS does not shrink when the
+       keyboard opens — so with the keyboard up the block was still being
+       pushed a seventh of a FULL screen upward inside a half-screen window,
+       and the wordmark was clipped through the middle of its own letters.
+       --app-h is the measured visible height (head.html sets it from
+       visualViewport), so the bias shrinks with the room. */
     main.empty { display: flex; flex-direction: column; justify-content: center;
-                 padding-bottom: 14vh; }
+                 padding-bottom: calc(var(--app-h, 100svh) * 0.14); }
     /* Higher again on a phone. The figure above centres a block in a window
        wider than it is tall; a phone is the other shape, and the same block
        reads low because what is left under it is a third of the screen rather
@@ -741,7 +766,9 @@ export class AgentConsole extends LitElement {
        at equal specificity the desktop rule above would win and the override
        would do nothing at all. A media query is not stronger than the rule it
        means to replace; it only has to come after it. */
-    @media (max-width: 640px) { main.empty { padding-bottom: 24vh; } }
+    @media (max-width: 640px) {
+      main.empty { padding-bottom: calc(var(--app-h, 100svh) * 0.24); }
+    }
     /* With thumbnails the card row is ~200px tall, so the block only needs
        to move up enough to clear it — 6vh put the wordmark against the header
        with a screen of blank beneath. Centred-but-biased: still centre, just
@@ -912,6 +939,32 @@ export class AgentConsole extends LitElement {
     .pick-act:focus-visible { outline: 2px solid var(--focus);
                               outline-offset: 2px; }
     .gallery-none { color: var(--muted); padding: 18px 16px; margin: 0; }
+    /* Reading a skill. The briefing is preformatted because it IS formatted —
+       its indentation and its blank lines are how a model reads it, and
+       reflowing it here would show something other than what the model gets. */
+    .skill-open { display: flex; flex-direction: column; min-height: 0; }
+    .skill-open-head { display: flex; align-items: center; gap: 8px;
+              padding: 10px 16px 0; }
+    .skill-open-name { font-size: 15px; font-weight: 600; flex: 1; min-width: 0;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pin-now { flex: none; border: 1px solid var(--border); border-radius: 999px;
+              background: none; color: var(--fg); font: 600 12px var(--sans, sans-serif);
+              padding: 6px 12px; cursor: pointer; }
+    .pin-now:hover { background: var(--bg-sunken); }
+    .skill-open-body { overflow-y: auto; overscroll-behavior: contain;
+              padding: 4px 16px 16px; }
+    .skill-open-why { color: var(--muted); margin: 6px 0 12px; font-size: 13px; }
+    .skill-open-label { display: flex; align-items: center; gap: 6px;
+              font-size: 12px; font-weight: 600; letter-spacing: .04em;
+              text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+    .skill-open-text { margin: 0; padding: 12px; border-radius: 10px;
+              background: var(--bg-sunken); border: 1px solid var(--border);
+              font: 12px/1.5 var(--mono, ui-monospace, monospace);
+              white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); }
+    .skill-file { margin-top: 8px; }
+    .skill-file summary { cursor: pointer; font: 12px var(--mono, ui-monospace, monospace);
+              color: var(--muted); padding: 6px 0; }
+    .skill-file summary:hover { color: var(--fg); }
     .pick { display: flex; flex-direction: column; gap: 5px; text-align: left;
             padding: 12px; border: 1px solid var(--border); border-radius: 12px;
             background: none; font: inherit; color: var(--fg); cursor: pointer;
@@ -997,9 +1050,16 @@ export class AgentConsole extends LitElement {
        sideways — the whole console slid, header and all. overscroll-behavior
        keeps a swipe that reaches the end of the cards from becoming a page
        gesture. */
-    .starts { overscroll-behavior-x: contain; max-width: min(768px, 100%); }
-    .starts { display: flex; gap: 10px; padding: 0 18px; max-width: 768px;
-              margin: 0 auto; overflow-x: auto; scrollbar-width: none; }
+    /* One rule, not two. The pair that used to be here disagreed — the second
+       set max-width: 768px and, coming later, won — so on a phone the row was
+       wider than the screen it was supposed to scroll inside. An element wider
+       than its viewport does not scroll itself; it just hangs off the edge,
+       which is exactly what a person saw: a second card half off screen and no
+       way to reach it. */
+    .starts { display: flex; gap: 10px; padding: 0 18px;
+              max-width: min(768px, 100%); margin: 0 auto;
+              overflow-x: auto; overscroll-behavior-x: contain;
+              scrollbar-width: none; }
     .starts::-webkit-scrollbar { display: none; }
     /* The first page of the template's own document, cropped to a card-sized
        peek. The proof beats the label: "Status report" is a claim, the actual
@@ -1188,6 +1248,12 @@ export class AgentConsole extends LitElement {
      surfaces, which is Kimi's shape — you go there to browse, and browsing
      means moving between them without closing anything. */
   @state() private gallery: Shelf = "";
+  /* The skill whose body and files are open, and what they are. A card used
+     to pin and close, which answered "give me this" and never "what IS this"
+     — and a briefing is the whole of what a skill does, so not being able to
+     read one made every skill a name and a sentence. */
+  @state() private skillOpen = "";
+  @state() private skillFiles: SkillFileRow[] = [];
   /* What is typed into the gallery's filter. Cleared when it opens, because a
      filter left over from last time is a gallery that looks empty. */
   @state() private galleryFind = "";
@@ -1299,7 +1365,7 @@ export class AgentConsole extends LitElement {
     // card re-renders; the session owns the list and never rebuilds it.
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentFull[], ThreadListing[]]);
-    this.agents = this.agents.filter((a) => a.enabled);
+    this.agents = this.agents.filter((a) => a.enabled).filter(offerable);
     // The flagged default, not the first name in the list — sorted by name,
     // "the first" was whichever agent happened to sort earliest, which for a
     // while was the e2e model double.
@@ -1868,7 +1934,7 @@ export class AgentConsole extends LitElement {
 
   private async reloadAgents() {
     const listed = await listAgents().catch(() => this.agents);
-    this.agents = listed.filter((a) => a.enabled);
+    this.agents = listed.filter((a) => a.enabled).filter(offerable);
     // An agent disabled while it was selected must not stay selected. The
     // replacement is the flagged default, same as first load.
     if (!this.agents.some((a) => a.id === this.agentId)) {
@@ -2137,9 +2203,71 @@ export class AgentConsole extends LitElement {
      and not chosen: a connector is attached to an agent in Settings and a
      plugin is installed there, and a card that looked like it could do either
      from here would be lying about what a press does. */
+  /* Read a skill: its briefing, and the scripts it stages into a run. The
+     files are fetched per skill and not held — a skill is edited in place, so
+     a cached copy is a copy that can be wrong, and this is one small request
+     behind a deliberate press. */
+  private async showSkill(name: string): Promise<void> {
+    // A gallery row carries the skill's NAME — it is what pin() speaks and
+    // what use_skill resolves — while files hang off the id, so the row has
+    // to be found before anything can be asked for.
+    const row = this.allSkills.find((s) => s.skillName === name);
+    this.skillOpen = name;
+    this.skillFiles = [];
+    if (!row) return;
+    this.skillFiles = await listSkillFiles(row.id).catch(() => []);
+  }
+
+  /* The open skill's own row, or null. */
+  private openSkillRow(): SkillRow | null {
+    return this.allSkills.find((s) => s.skillName === this.skillOpen) ?? null;
+  }
+
+  /* What a skill IS: the briefing the model is handed, and the scripts staged
+     into its runs at /skills/<name>/. Read-only on purpose — editing lives in
+     Settings, and a reader who opened this wanted to know what the thing does
+     before pinning it. */
+  private skillDetail() {
+    const row = this.openSkillRow();
+    if (row === null) return nothing;
+    return html`
+      <div class="skill-open">
+        <div class="skill-open-head">
+          <button class="icon" title="Back" @click=${() => { this.skillOpen = ""; }}>
+            <nr-icon name="chevron-left" size="medium"></nr-icon>
+          </button>
+          <span class="skill-open-name">${row.skillName}</span>
+          <button class="pin-now" @click=${() => { void this.pin(row.skillName); this.skillOpen = ""; this.gallery = ""; }}>
+            ${this.pinned === row.skillName ? "Pinned" : "Use in this chat"}
+          </button>
+        </div>
+        <div class="skill-open-body">
+          <p class="skill-open-why">${row.description}</p>
+          <div class="skill-open-label">Instructions</div>
+          <pre class="skill-open-text">${row.body ?? ""}</pre>
+          ${this.skillFiles.length === 0 ? nothing : html`
+            <div class="skill-open-label">
+              Scripts<span class="gallery-count">${this.skillFiles.length}</span>
+            </div>
+            ${this.skillFiles.map((f) => html`
+              <details class="skill-file">
+                <summary>${f.path}</summary>
+                <pre class="skill-open-text">${f.body}</pre>
+              </details>`)}`}
+        </div>
+      </div>`;
+  }
+
   private openShelf(shelf: Shelf) {
     this.galleryFind = "";
+    this.skillOpen = "";
     this.gallery = shelf;
+    // The drawer is a layer, and so is this. On a phone the two stacked, so
+    // the panel a person had just asked for opened UNDER the menu they asked
+    // from and looked like nothing had happened. Every door into a panel
+    // closes the drawer behind it; the desktop rail is not a drawer, so
+    // clearing the flag there costs nothing and means nothing.
+    this.nav = false;
     return this.loadShelves();
   }
 
@@ -2237,7 +2365,7 @@ export class AgentConsole extends LitElement {
     const one = shelf === "skills" ? "skill" : shelf === "agents" ? "agent"
       : shelf === "connectors" ? "connector" : "plugin";
     return html`
-      <div class="scrim shelves" @click=${() => { this.gallery = ""; }}></div>
+      <div class="scrim shelves" @click=${() => { this.gallery = ""; this.skillOpen = ""; }}></div>
       <div class="gallery" role="dialog" aria-label="Directory">
         <div class="gallery-head">
           <!-- Tabs, not a title. The heading is the thing you are looking at,
@@ -2248,7 +2376,7 @@ export class AgentConsole extends LitElement {
             ${(["skills", "agents", "connectors", "plugins"] as const).map((t) => html`
               <button class=${t === shelf ? "gallery-tab on" : "gallery-tab"}
                 role="tab" aria-selected=${t === shelf ? "true" : "false"}
-                @click=${() => { this.galleryFind = ""; this.gallery = t; }}>
+                @click=${() => { this.galleryFind = ""; this.skillOpen = ""; this.gallery = t; }}>
                 ${t === "skills" ? "Skills" : t === "agents" ? "Agents"
                   : t === "connectors" ? "Connectors" : "Plugins"}
                 <span class="gallery-count">${this.shelfRows(t).length}</span>
@@ -2258,6 +2386,7 @@ export class AgentConsole extends LitElement {
             <nr-icon name="x" size="medium"></nr-icon>
           </button>
         </div>
+        ${this.skillOpen !== "" && shelf === "skills" ? this.skillDetail() : html`
         <p class="gallery-lede">${lede}</p>
         <!-- A filter, because fourteen is past the number you can find one in
              by reading. Kimi and Claude both put one above a list this long.
@@ -2276,7 +2405,7 @@ export class AgentConsole extends LitElement {
           : shown.length === 0
             ? html`<p class="gallery-none">Nothing matches
                 “${this.galleryFind.trim()}”.</p>`
-            : html`${this.galleryGroups(shown, shelf)}`}
+            : html`${this.galleryGroups(shown, shelf)}`}`}
       </div>`;
   }
 
@@ -2319,7 +2448,7 @@ export class AgentConsole extends LitElement {
                 <button class=${r.on ? "pick on" : "pick"}
                   ?disabled=${!choosable} title=${r.why}
                   @click=${() => {
-                    if (shelf === "skills") { void this.pin(r.key); this.gallery = ""; }
+                    if (shelf === "skills") { void this.showSkill(r.key); }
                     else if (shelf === "agents") { this.agentId = r.key; this.gallery = ""; }
                   }}>
                   <span class="pick-top">
@@ -2714,13 +2843,13 @@ export class AgentConsole extends LitElement {
         @pick-thread=${(e: CustomEvent) => { this.view = "chat"; this.nav = false; this.open(e.detail.id); }}
         @new-thread=${() => { this.view = "chat"; this.nav = false; this.fresh(); }}
         @collapse=${() => { this.nav = false; }}
-        @open-settings=${() => { this.settings = true; }}
-        @open-signin=${() => { this.signIn = true; }}
-        @open-knowledge=${() => { this.view = "knowledge"; }}
+        @open-settings=${() => { this.nav = false; this.settings = true; }}
+        @open-signin=${() => { this.nav = false; this.signIn = true; }}
+        @open-knowledge=${() => { this.nav = false; this.view = "knowledge"; }}
         @open-canvas=${() => { this.view = "canvas"; }}
-        @open-starts=${() => { void this.openStarts(); }}
-        @open-agents=${() => { void this.openShelf("agents"); }}
-        @open-connectors=${() => { void this.openShelf("connectors"); }}
+        @open-starts=${() => { this.nav = false; void this.openStarts(); }}
+        @open-agents=${() => { this.nav = false; void this.openShelf("agents"); }}
+        @open-connectors=${() => { this.nav = false; void this.openShelf("connectors"); }}
       ></console-sidebar>
 
       <div class="center">
