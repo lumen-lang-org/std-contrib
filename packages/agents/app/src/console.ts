@@ -1800,6 +1800,15 @@ export class AgentConsole extends LitElement {
       .joule-chip:not(.on) { padding: 0 8px; }
       .joule-chip:not(.on):hover span { display: inline; }
       .joule-chip:not(.on):hover { padding: 0 11px 0 8px; }
+      /* Whoever runs out of room, it must not be paid for by drawing over a
+         neighbour. The right-hand group is justify-content: flex-end with a
+         min-width, so content too wide for it overflows to the LEFT — across
+         the chips this sheet just added. Sizing it to its content and letting
+         the chip row be the thing that gives means the failure mode is a
+         clipped chip, which is legible, instead of two labels in one place,
+         which is not. */
+      .action-buttons-right { flex: none; }
+      .action-buttons-left { min-width: 0; overflow: hidden; }
     `);
     root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
   }
