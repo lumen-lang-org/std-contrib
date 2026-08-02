@@ -10,12 +10,12 @@ import { ModelRow, ModelConfigRow } from "./schema.ts";
 import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem, streamProblem, streamDetail } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
-  let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, baseUrl: "", enabled: enabled };
+  let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, baseUrl: "", enabled: enabled, contextTokens: 0 };
   return m;
 }
 
 function gateway(provider: string, baseUrl: string): ModelRow {
-  let m: ModelRow = { id: "m", label: "L", apiName: "x", provider: provider, kind: "chat", dimensions: 0, baseUrl: baseUrl, enabled: true };
+  let m: ModelRow = { id: "m", label: "L", apiName: "x", provider: provider, kind: "chat", dimensions: 0, baseUrl: baseUrl, enabled: true, contextTokens: 0 };
   return m;
 }
 
@@ -141,7 +141,7 @@ test("an anthropic call that takes no input at all is still a call", () => {
 
 test("a refusal tells the reader what to do and leaks nothing about the deployment", () => {
   let m: ModelRow = { id: "m1", label: "Qwen local", apiName: "qwen2.5-7b", provider: "vllm",
-    kind: "chat", dimensions: 0, baseUrl: "http://10.0.0.9:8000/v1", enabled: true };
+    kind: "chat", dimensions: 0, baseUrl: "http://10.0.0.9:8000/v1", enabled: true, contextTokens: 0 };
 
   // The model's LABEL, because that is what a person picked from the menu —
   // and NOT the address, the model id or the provider's own words. A chat

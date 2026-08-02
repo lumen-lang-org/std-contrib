@@ -464,8 +464,7 @@ function router(candidatesJson: string, escalateOnly: bool, enabled: bool): Mode
 function routerModel(): ModelRow {
   let m: ModelRow = {
     id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral",
-    kind: "chat", dimensions: 0, baseUrl: "", enabled: true,
-  };
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   return m;
 }
 
@@ -531,8 +530,7 @@ test("a router whose list will not parse falls back before it calls anything", (
 test("a disabled model is a fallback, not a dead run", () => {
   let off: ModelRow = {
     id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral",
-    kind: "chat", dimensions: 0, baseUrl: "", enabled: false,
-  };
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
   let d = routeTurn(router(twoCandidates(), false, true), off, routerConfig(), ask(), "sk-not-used");
   expect(d.fellBack);
   expect(d.configId == "c-flash");
@@ -647,8 +645,7 @@ test("a note names the model that did not answer, never its address", () => {
   // And it holds where it actually matters: the note a real refusal produces.
   let far: ModelRow = {
     id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral",
-    kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:9/v1", enabled: true,
-  };
+    kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:9/v1", enabled: true, contextTokens: 0 };
   let d = routeTurn(router(twoCandidates(), false, true), far, routerConfig(), ask(), "sk-e2e");
   expect(d.fellBack);
   expect(d.note.indexOf("://") < 0);

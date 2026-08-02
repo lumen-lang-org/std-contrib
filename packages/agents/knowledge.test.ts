@@ -30,11 +30,11 @@ function fresh(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(chat));
-  let embedder: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
+  let embedder: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(embedder));
-  let unsized: ModelRow = { id: "e2", label: "Nameless Embed", apiName: "x", provider: "mistral", kind: "embedding", dimensions: 0, baseUrl: "", enabled: true };
+  let unsized: ModelRow = { id: "e2", label: "Nameless Embed", apiName: "x", provider: "mistral", kind: "embedding", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(unsized));
 }
 

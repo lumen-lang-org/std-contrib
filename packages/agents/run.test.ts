@@ -39,9 +39,16 @@ function seeded(): void {
   dropTable(database, promptsMapping());
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
+  // The tables later migrations ALTER, or a second run of this suite meets a
+  // duplicate column, the plan stops there, and every migration above it —
+  // including the ones this test needs — silently never runs.
+  execute(database, "DROP TABLE IF EXISTS script_images");
+  execute(database, "DROP TABLE IF EXISTS thread_summaries");
+  execute(database, "DROP TABLE IF EXISTS plugins");
+  execute(database, "DROP TABLE IF EXISTS plugin_items");
   migrate(database, schemaPlan(database));
 
-  let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(m));
   let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));

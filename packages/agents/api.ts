@@ -1187,8 +1187,7 @@ class ModelApi {
     let model: ModelRow = {
       id: stored.id, label: stored.label, apiName: stored.apiName,
       provider: stored.provider, kind: stored.kind, dimensions: stored.dimensions,
-      baseUrl: stored.baseUrl, enabled: true,
-    };
+      baseUrl: stored.baseUrl, enabled: true, contextTokens: 0 };
 
     if (model.kind == "embedding") {
       let vector = embedText(model, "a probe from the console", key);
@@ -4194,8 +4193,7 @@ export function modelDestinationProblem(db: Db, row: ModelRow): string {
   let held = findById(db, modelsMapping(), row.id);
   let authorised: ModelRow = {
     id: row.id, label: row.label, apiName: row.apiName, provider: row.provider,
-    kind: row.kind, dimensions: row.dimensions, baseUrl: "", enabled: row.enabled,
-  };
+    kind: row.kind, dimensions: row.dimensions, baseUrl: "", enabled: row.enabled, contextTokens: 0 };
   if (held != "") { authorised = JSON.parse<ModelRow>(held); }
   let move: DestinationMove = {
     subject: "model " + row.id,
@@ -4500,16 +4498,16 @@ export function migrationProblem(db: Db): string {
 
 function seed(db: Db): void {
   if (countWhere(db, agentsMapping(), "", []) > 0) { return; }
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   // Two embedders, exactly one enabled. Retrieval needs an active embedding
   // model to do anything at all, so a seed without one leaves the knowledge
   // base unusable until someone adds a row by hand — and leaves its tests
   // with nothing to look at. Two of them, not one, because "enabling an
   // embedder disables the others" is a rule about a set, and a set of one
   // cannot show it holds.
-  let embed: ModelRow = { id: "m3", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
-  let embedSmall: ModelRow = { id: "m4", label: "Nomic Embed Text", apiName: "nomic-embed-text", provider: "ollama", kind: "embedding", dimensions: 768, baseUrl: "http://127.0.0.1:11434", enabled: false };
+  let embed: ModelRow = { id: "m3", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true, contextTokens: 0 };
+  let embedSmall: ModelRow = { id: "m4", label: "Nomic Embed Text", apiName: "nomic-embed-text", provider: "ollama", kind: "embedding", dimensions: 768, baseUrl: "http://127.0.0.1:11434", enabled: false, contextTokens: 0 };
   persist(db, modelsMapping(), JSON.stringify(opus));
   persist(db, modelsMapping(), JSON.stringify(haiku));
   persist(db, modelsMapping(), JSON.stringify(embed));

@@ -39,7 +39,7 @@ export type DocumentRow = {
 // endpoints, so pointing a corpus at the wrong one should fail here rather
 // than at the provider.
 export function embeddingModel(db: Db, modelId: string): ModelRow {
-  let absent: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, baseUrl: "", enabled: false };
+  let absent: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
   let document = findById(db, modelsMapping(), modelId);
   if (document == "") { return absent; }
   let model: ModelRow = JSON.parse<ModelRow>(document);

@@ -3,7 +3,7 @@
 //   cd packages/agents && lumen test threads.test.ts
 
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
+import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
 import { artifactPlan, putArtifact, listArtifacts, TURN_SEQ_NONE } from "./artifacts.ts";
 import { stepPlan } from "./steps.ts";
@@ -299,6 +299,13 @@ function seededMenu(): void {
   dropTable(database, promptsMapping());
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
+  // The tables later migrations ALTER, or a second run of this suite meets a
+  // duplicate column, the plan stops there, and every migration above it —
+  // including the ones this test needs — silently never runs.
+  execute(database, "DROP TABLE IF EXISTS script_images");
+  execute(database, "DROP TABLE IF EXISTS thread_summaries");
+  execute(database, "DROP TABLE IF EXISTS plugins");
+  execute(database, "DROP TABLE IF EXISTS plugin_items");
   execute(database, "DROP INDEX IF EXISTS chunks_by_thread");
   execute(database, "DROP INDEX IF EXISTS turns_by_thread");
   execute(database, "DROP TABLE IF EXISTS thread_chunks");
@@ -318,8 +325,8 @@ function seededMenu(): void {
   while (s < live.length) { plan.push(live[s]); s = s + 1; }
   migrate(database, plan);
 
-  let own: ModelRow = { id: "m-own", label: "The agent's own", apiName: "own-1", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
-  let picked: ModelRow = { id: "m-picked", label: "Thinking", apiName: "picked-1", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let own: ModelRow = { id: "m-own", label: "The agent's own", apiName: "own-1", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let picked: ModelRow = { id: "m-picked", label: "Thinking", apiName: "picked-1", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(own));
   persist(database, modelsMapping(), JSON.stringify(picked));
 
@@ -936,6 +943,65 @@ test("a remix copies the files, under the new owner, and leaves the source alone
 
   // And Alice still has exactly what she had.
   expect(listArtifacts(database, source).length == 1);
+});
+
+test("what falls out of the replay is summarised, not silently dropped", () => {
+  freshThreads();
+  // A budget small enough that the first rounds cannot fit, and a thread of
+  // four rounds to push against it.
+  let turns: Turn[] = [];
+  let filler = "";
+  let f: int = 0;
+  while (f < 400) { filler = filler + "long ago we agreed the port is 8100. "; f = f + 1; }
+  turns.push(userTurn("Round one: " + filler));
+  turns.push(assistantTurn("Noted.", []));
+  turns.push(userTurn("Round two: " + filler));
+  turns.push(assistantTurn("Also noted.", []));
+  turns.push(userTurn("Round three, the recent one."));
+
+  // Where the cut lands is a round boundary, never mid-round: a tool result
+  // whose call is gone is a request every provider refuses.
+  let cut = cutPoint(turns, 20000);
+  expect(cut > 0);
+  expect(turns[cut].role == "user");
+});
+
+test("a model's own context decides how much it is shown", () => {
+  let small: ModelRow = { id: "m-small", label: "Small", apiName: "s", provider: "mistral",
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 8192 };
+  let big: ModelRow = { id: "m-big", label: "Big", apiName: "b", provider: "mistral",
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 200000 };
+  let unknown: ModelRow = { id: "m-?", label: "Unsaid", apiName: "u", provider: "mistral",
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let cfg: ModelConfigRow = { id: "c", modelId: "m", temperature: 0, maxTokens: 4096, topP: 1,
+    extra: "", thinking: "", label: "", selectable: true, rank: 0 };
+
+  // The answer's own allowance and the prompt's overhead come off the top —
+  // a 32k model handed 28k of history plus a system prompt is the 400 this
+  // arithmetic exists to prevent.
+  expect(budgetFor(small, cfg) < budgetFor(big, cfg));
+  // 8192 - 4096 of answer - 9000 of overhead is already negative: the floor
+  // holds it at 2000 tokens and the round either fits or fails honestly. A
+  // budget that goes to nothing would trim every thread to its last message
+  // and call it memory.
+  expect(budgetFor(small, cfg) == 6000);
+  let roomy: ModelConfigRow = { id: "c", modelId: "m", temperature: 0, maxTokens: 1024, topP: 1,
+    extra: "", thinking: "", label: "", selectable: true, rank: 0 };
+  // 8192 - 1024 of answer - 9000 of overhead is negative, so the floor holds
+  // it: a model this small cannot carry a conversation AND this deployment's
+  // tool schemas, and pretending otherwise is the refused round again.
+  expect(budgetFor(small, roomy) == 6000);
+  // A model that never said falls back to the flat budget rather than
+  // guessing high: guessing low costs a shorter memory, guessing high costs
+  // a refused request.
+  expect(budgetFor(unknown, cfg) == 100000);
+});
+
+test("a summary is bounded, whatever the summariser answers", () => {
+  // A small model handed a repetitive transcript echoes it back — one wrote
+  // 40,000 characters of "the quick brown fox" — and storing that would put
+  // the very bulk compaction exists to remove into every future round.
+  expect(SUMMARY_MAX_CHARS < 2000);
 });
 
 test("a conversation nobody offered cannot be remixed, however the id was found", () => {

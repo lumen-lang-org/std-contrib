@@ -35,6 +35,11 @@ export type ModelRow = {
   // place — a gateway, a proxy, a local server.
   baseUrl: string,
   enabled: bool,
+  // How many tokens this model can hold, prompt and answer together. 0 means
+  // nobody has said — the replay then falls back to a conservative default
+  // rather than guessing high, because guessing high is a refused request and
+  // guessing low is only a shorter memory.
+  contextTokens: int,
 };
 
 // The knobs, separate from the model, because two agents on one model routinely
@@ -379,6 +384,7 @@ export function modelsMapping(): DbRepository {
     // the same wire format at a different host, so it is a column and not a
     // provider of its own.
     field("baseUrl", "base_url", "text"),
+    field("contextTokens", "context_tokens", "int"),
     field("enabled", "enabled", "bool"),
   ];
   return repository("models", "id", "id", fs);
@@ -561,8 +567,7 @@ function noConfigAndModel(why: string): ConfigAndModel {
   };
   let model: ModelRow = {
     id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0,
-    baseUrl: "", enabled: false,
-  };
+    baseUrl: "", enabled: false, contextTokens: 0 };
   let out: ConfigAndModel = { config: config, model: model, problem: why };
   return out;
 }
@@ -766,6 +771,41 @@ export function pluginItemsMapping(): DbRepository {
     field("itemId", "item_id", "text"),
   ];
   return repository("plugin_items", "id", "id", fs);
+}
+
+/* What a conversation had to forget, kept in its own words.
+ *
+ * A thread longer than the model can hold used to lose its beginning
+ * silently: the replay dropped whole rounds off the front and nothing said
+ * so, so an agent asked about something agreed an hour ago answered as if it
+ * had never happened. This is that beginning, summarised once and reused —
+ * one row per thread, extended when more rounds age out, and shown to the
+ * model in front of the turns that survived.
+ *
+ * Its own table rather than a turn in the transcript, because it is not
+ * something anybody said: a synthetic turn would appear in the person's own
+ * history, be replayed as if typed, and be indistinguishable from their words
+ * the next time it was summarised.
+ */
+export type ThreadSummaryRow = {
+  id: string,
+  threadId: string,
+  // The turn index this summary covers up to, exclusive: everything before
+  // `throughSeq` is in `text`, everything from it is replayed verbatim.
+  throughSeq: int,
+  text: string,
+  updatedAt: string,
+};
+
+export function threadSummariesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("threadId", "thread_id", "text"),
+    field("throughSeq", "through_seq", "int"),
+    field("text", "text", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("thread_summaries", "id", "id", fs);
 }
 
 // A starting point a conversation can be opened from — Kimi's "featured
@@ -1828,6 +1868,15 @@ export function schemaPlan(db: Db): Migration[] {
     // a model can choose between "search" and "browser" on more than a name.
     migration("90.5", "an environment says what is inside it",
       "ALTER TABLE script_images ADD COLUMN summary " + db.textType + " NOT NULL DEFAULT ''"),
+    // What a model can hold. The replay budget is derived from this, so a
+    // conversation is trimmed to fit the model actually answering rather than
+    // to one number for every model on the deployment.
+    migration("90.6", "a model says how much it can hold",
+      "ALTER TABLE models ADD COLUMN context_tokens " + db.intType + " NOT NULL DEFAULT 0"),
+    // What fell out of the replay, in words. One row per thread: the summary
+    // covers everything up to `throughSeq`, and grows as more rounds age out.
+    migration("90.7", "a thread remembers what it had to forget",
+      createTableSql(db, threadSummariesMapping())),
   ];
   return plan;
 }
