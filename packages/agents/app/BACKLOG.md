@@ -113,13 +113,11 @@ it. Same shape as the known /api/models/choices 403. Opening those routes to
 signed-in users (owner-scoped where relevant) is one gateway change plus a
 decision about who may author what.
 
-### A token belongs to a person, not the deployment
+### A token belongs to a person, not the deployment — SHIPPED a42c20b (2026-08-02)
 
-A connector's token is stored once, encrypted, under the server's id, and
-every user's calls go out with it. That is right for a company Jira and wrong
-for a GitHub PAT: one person's account, one person's rate limit, one person's
-audit trail. What is missing is a per-user credential — the same encrypted
-store keyed by (server, owner), with the deployment-wide one as a fallback —
-and an OAuth flow so the usual case is signing in rather than pasting a token.
-The "Authorised apps" section in Connectors is the empty space this fills.
+Done: per-user token under mcp:<server>:u:<owner> with deployment fallback,
+runs carry the thread owner's token, /servers/:id/mine routes, Your-access UI
+on the Connectors tab, e2e + unit coverage. Still open: the OAuth half —
+signing in instead of pasting — which waits on the social-login providers
+above (same framework machinery) and on client credentials.
 
