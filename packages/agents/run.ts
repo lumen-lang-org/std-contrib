@@ -25,7 +25,7 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought } from "./steps.ts";
 import { jsonText } from "./scan.ts";
@@ -490,6 +490,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // use_skill.
   let skillLines = skillBriefing(db, agent.id);
   if (skillLines != "") { system = system + "\n\n" + skillLines; }
+  // And what it can run them IN. Beside the skills for the same reason they
+  // are here rather than in a tool description: both answer "what can this
+  // agent do", which a model settles before it picks a tool.
+  let envLines = envBriefing(db);
+  if (envLines != "") { system = system + "\n\n" + envLines; }
   if (threadId != "") {
     // The fence convention rides the system prompt, not a tool description:
     // a model decides how to answer before it considers any particular tool,

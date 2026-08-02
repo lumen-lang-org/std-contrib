@@ -25,7 +25,7 @@ import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
 import { wireView } from "./artifacts-fence.ts";
-import { SCRIPT_OUTPUT_MAX, SCRIPT_RUN_DIR, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptRun } from "./run-script.ts";
+import { SCRIPT_OUTPUT_MAX, SCRIPT_RUN_DIR, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptRun, foldName } from "./run-script.ts";
 
 // One tool, and which server answers it.
 export type MountedTool = {
@@ -998,9 +998,16 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
   // A fresh read every call — the live-rows promise: an operator's edit is
   // what the very next load answers with.
   let rows = agentSkills(db, call.agentId);
+  // Exact first, then the near-miss. A model asking for "search_web" when the
+  // skill is "search-web" has chosen correctly and typed a separator the way
+  // tool names are usually written; refusing that is pedantry with a cost —
+  // observed as six exchanges of a model retrying the same underscore, being
+  // told the right name each time, and finally answering from memory. The
+  // fold is separators only (case, "-", "_", space), so it can never make two
+  // different skills collide into one.
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].skillName == asked) {
+    if (rows[i].skillName == asked || sameName(rows[i].skillName, asked)) {
       let text = rows[i].body;
       let files = skillFiles(db, rows[i].id);
       if (files.length > 0) {
@@ -1037,6 +1044,43 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
     text: "There is no skill named \"" + asked + "\". This agent has: " + names + " — use one of those names exactly.", line: 0, changed: ""
   };
   return missing;
+}
+
+// Two names that differ only in how they separate words. Lowercased, with
+// "-", "_" and spaces removed: "search-web", "search_web", "Search Web" are
+// one name. Nothing else is folded — a fold that reached past separators
+// could quietly load a skill nobody asked for.
+export function sameName(a: string, b: string): bool {
+  return foldName(a) == foldName(b) && foldName(a) != "";
+}
+
+/* The environments, in the system prompt.
+ *
+ * The run_script schema names them too, but a tool description is read when
+ * a model has already decided to call that tool — and the decision this
+ * informs comes earlier: whether a task is even doable here. A model that
+ * does not know a browser environment exists writes requests+BeautifulSoup
+ * into the default image and fails, which is exactly what happened.
+ *
+ * One line per environment: the name it is called by, then what is inside.
+ * Empty when the operator has curated none, because a heading over nothing
+ * is furniture.
+ */
+export function envBriefing(db: Db): string {
+  if (!scriptDockerWorks()) { return ""; }
+  let names = scriptEnvNames(db);
+  if (names.length == 0) { return ""; }
+  let out = "run_script can run in any of these environments — pass the name as \"environment\":";
+  let i: int = 0;
+  while (i < names.length) {
+    out = out + "\n- " + names[i];
+    i = i + 1;
+  }
+  out = out + "\nEach is a container of its own, kept for the conversation, so one conversation"
+    + " can use several. \"main\" is the agent's own image and is what an empty name means."
+    + " Choose by what a task needs — fetching or driving a web page needs the browser one,"
+    + " and the default image has neither a browser nor the libraries for one.";
+  return out;
 }
 
 // How many skills the briefing lists in full. Past the cap the rest appear as
