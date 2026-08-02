@@ -295,10 +295,23 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
       // are a tool result the card never holds.
       const skill = s.name === "use_skill" ? skillFields(s.args) : null;
       if (skill) {
-        body += `<div class="tool-call skill" style="${ROW};${indent}"><span>${mark}</span>`
+        // The row opens, like the script row beside it. A skill's result is
+        // its instructions — what the model was actually told to do — and
+        // with the row closed the only visible account of a turn that went
+        // wrong was "Used skill X", which says nothing about why. Closed by
+        // default: the instructions are long and the summary is the point.
+        const taught = (s.result ?? "").trim();
+        const head = `<span>${mark}</span>`
           + `<span class="tool-name" style="${NAME}">Used skill ${escapeHtml(skill.name)}</span>`
           + `<span style="flex:1"></span>`
-          + `<span class="tool-ms" style="${MS}">${took}</span></div>`;
+          + `<span class="tool-ms" style="${MS}">${took}</span>`;
+        if (taught === "") {
+          body += `<div class="tool-call skill" style="${ROW};${indent}">${head}</div>`;
+        } else {
+          body += `<details class="tool-call skill" style="${indent}">`
+            + `<summary style="${ROW};cursor:pointer;list-style:none">${head}</summary>`
+            + `<div style="${DIFF}">${escapeHtml(taught)}</div></details>`;
+        }
         continue;
       }
       // A script row is a sentence that opens: the summary says what ran and

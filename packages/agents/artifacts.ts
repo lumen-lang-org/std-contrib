@@ -490,6 +490,34 @@ export function putArtifact(db: Db, write: ArtifactWrite): ArtifactWritten {
   return putAttempt(db, write, 1);
 }
 
+
+// A binary artifact whose body is not that format, refused at the door.
+//
+// The bodies of the binary kinds are base64 (see `kindOf`), so the first
+// characters of the text are the first bytes of the file: a ZIP — which every
+// OOXML document is — begins "PK", encoded "UEs"; a PDF begins "%PDF",
+// encoded "JVBER".
+//
+// This exists because of what happens without it. A model told to build a
+// .docx tried a library that was not there, failed three times, and then
+// wrote an artifact whose whole content was the text "<docx>...</docx>" — and
+// reported the document created. The file existed, the version was 1, nothing
+// in the store was wrong; only opening it would ever have said otherwise. A
+// placeholder accepted quietly is worse than a refusal, because the refusal
+// goes back to the model as a tool result it can act on, and the placeholder
+// goes to a person as a document.
+function binaryBodyProblem(path: string, content: string): string {
+  let kind = kindOf(path);
+  if (kind != "office" && kind != "pdf") { return ""; }
+  if (content == "") { return ""; }
+  if (kind == "office" && content.startsWith("UEs")) { return ""; }
+  if (kind == "pdf" && content.startsWith("JVBER")) { return ""; }
+  let want = kind == "pdf" ? "a PDF" : "an Office document (a ZIP, as every .docx, .xlsx and .pptx is)";
+  return "the body of " + path + " is not " + want
+    + ": this artifact's content is base64 of the file's own bytes, and what arrived is not."
+    + " Build the file with a script and let the run land it, rather than writing the content here.";
+}
+
 function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten {
   if (write.threadId == "") { return refusal("an artifact belongs to a thread"); }
   let problem = pathProblem(write.path);
@@ -503,6 +531,8 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
   if (badTitle != "") { return refusal(badTitle); }
   let badNote = labelProblem("note", write.note, ARTIFACT_NOTE_MAX);
   if (badNote != "") { return refusal(badNote); }
+  let badBinary = binaryBodyProblem(write.path, write.content);
+  if (badBinary != "") { return refusal(badBinary); }
   let bytes = utf8Length(write.content);
   if (bytes > ARTIFACT_MAX) {
     return refusal("an artifact is at most " + `${ARTIFACT_MAX}` + " bytes; this one is " + `${bytes}`);
