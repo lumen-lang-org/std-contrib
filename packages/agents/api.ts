@@ -44,6 +44,7 @@ import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trac
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw} from "./scan.ts";
 import { toolListing } from "./mcp.ts";
+import { userTokenKey } from "./tools.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
@@ -2146,6 +2147,11 @@ function manifestJson(m: Manifest, clash: string): string {
   return out + "]}";
 }
 
+// The one member PUT /servers/:id/mine reads.
+type MineAsk = {
+  token: string,
+};
+
 @controller("/servers")
 class ServerApi {
   db: Db;
@@ -2173,7 +2179,15 @@ class ServerApi {
     let server: McpServerRow = JSON.parse<McpServerRow>(document);
     let token = "";
     if (server.authKind != "" && server.authKind != "none") {
-      token = credentialFor(this.db, "mcp:" + server.id, this.master);
+      // The caller's own token when they stored one — the listing should see
+      // the same tools a run on their conversation will mount.
+      let owner = owningTag(callerTags(req));
+      if (owner != "") {
+        token = credentialFor(this.db, userTokenKey(server.id, owner), this.master);
+      }
+      if (token == "") {
+        token = credentialFor(this.db, "mcp:" + server.id, this.master);
+      }
     }
     let listed = toolListing(server, token);
     let out = "{\"serverId\":" + JSON.stringify(server.id)
@@ -2241,6 +2255,63 @@ class ServerApi {
       apiKey: body.token, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
     return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+  }
+
+  // The caller's OWN token for this server — the per-person half of auth.
+  //
+  // The deployment's token (PUT /:id/auth above) is one credential everybody
+  // rides, which is right for a company Jira and wrong for a personal GitHub:
+  // one account, one rate limit, one audit trail, shared by every user. This
+  // pair of routes lets a signed-in person store a token that is theirs —
+  // used for THEIR conversations, fallback to the shared one for everyone
+  // else. Keyed by (server, owner) in the same encrypted store, and never
+  // read back, exactly like every other credential here.
+  //
+  // No :owner in the path, ever: the owner is whoever the verified header
+  // says is asking. A route that took the owner as a parameter would be a
+  // route for writing other people's credentials.
+  @put("/:id/mine")
+  setMine(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    let owner = owningTag(callerTags(req));
+    if (owner == "") {
+      return badRequest("a personal token needs a signed-in person — this deployment saw nobody");
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let asked: MineAsk = JSON.parse<MineAsk>(req.body);
+    if (asked.token == "") {
+      return badRequest("a token is required — to stop using your own, DELETE this route instead");
+    }
+    let stored = storeCredential(this.db, { provider: userTokenKey(param(req, "id"), owner),
+      apiKey: asked.token, masterKey: this.master, now: stamp() });
+    if (stored != "") { return badRequest(stored); }
+    return ok("{\"stored\":true}");
+  }
+
+  // Whether the caller has one stored — true/false and nothing else, because
+  // the token itself can never be read back.
+  @get("/:id/mine")
+  mine(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    let owner = owningTag(callerTags(req));
+    if (owner == "") { return ok("{\"stored\":false}"); }
+    let has = hasCredential(this.db, userTokenKey(param(req, "id"), owner));
+    return ok("{\"stored\":" + (has ? "true" : "false") + "}");
+  }
+
+  @del("/:id/mine")
+  forgetMine(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    let owner = owningTag(callerTags(req));
+    if (owner == "") { return badRequest("nobody is signed in, so there is nothing of theirs to forget"); }
+    forgetCredential(this.db, userTokenKey(param(req, "id"), owner));
+    return noContent();
   }
 
   @put("/:id")

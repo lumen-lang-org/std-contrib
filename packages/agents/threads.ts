@@ -1590,7 +1590,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
     // Runs against an agent that does not exist, which reports "no agent " and
     // is the truth: this thread names nothing runnable.
     let noChunks: string[] = [];
-    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE });
+    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "" });
     let noNotes: string[] = [];
     // Nothing was chosen because nothing was asked: a thread that names no
     // runnable agent has no round for a choice to apply to, and remembering an
@@ -1655,7 +1655,9 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
   // same number `appendTurns` below files the round's turns from.
   // `chosen.configId` is "" whenever nothing was chosen, which is what every
   // run before this feature passed and what run.ts reads as "the agent's own".
-  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, modelConfigId: chosen.configId, baseSeq: held.length });
+  // The thread's owner rides the context so a connector the person gave
+  // their own token calls out as them — threadOwner is already this file's.
+  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, modelConfigId: chosen.configId, baseSeq: held.length, owner: threadOwner(db, threadId) });
 
   // What this run added: everything in its context past what was replayed.
   // Stored under the thread's own numbering, which continues from what is

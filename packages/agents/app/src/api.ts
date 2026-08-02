@@ -975,6 +975,18 @@ export const serverTools = (id: string) =>
 export const createServer = (row: ServerRow) =>
   call<ServerRow>("/servers", { method: "POST", body: JSON.stringify(row) });
 
+// Your own token for a connector — stored for the caller the gateway
+// verified, never anyone else, and never readable back. `stored` is the whole
+// of what can be known afterwards.
+export const serverMine = (id: string) =>
+  call<{ stored: boolean }>(`/servers/${encodeURIComponent(id)}/mine`);
+export const setServerMine = (id: string, token: string) =>
+  call<{ stored: boolean }>(`/servers/${encodeURIComponent(id)}/mine`, {
+    method: "PUT", body: JSON.stringify({ token }),
+  });
+export const forgetServerMine = (id: string) =>
+  call<unknown>(`/servers/${encodeURIComponent(id)}/mine`, { method: "DELETE" });
+
 // --- plugins ------------------------------------------------------------------
 //
 // The third noun. A skill is instructions, a connector is a service you can

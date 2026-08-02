@@ -10,9 +10,10 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
+import { storeCredential } from "./credentials.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing , userTokenKey } from "./tools.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
 import { scriptProbeReset } from "./run-script.ts";
@@ -56,7 +57,7 @@ function skill(id: string, name: string, description: string, body: string): voi
   // attachment, and a 'public' row would answer use_skill for an agent that
   // never linked it — which is exactly what "only the skills linked to this
   // agent are offered" below is asserting does not happen.
-  let k: SkillRow = { id: id, skillName: name, description: description, body: body, updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let k: SkillRow = { id: id, skillName: name, description: description, body: body, updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   persist(database, skillsMapping(), JSON.stringify(k));
 }
 
@@ -66,7 +67,7 @@ function linkSkill(agentId: string, skillId: string): void {
 
 test("an agent with no servers has no tools and nothing to report", () => {
   seeded();
-  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
   expect(mounted.servers.length == 0);
   expect(mounted.problems.length == 0);
@@ -86,7 +87,7 @@ test("a disabled server is named, not silently skipped", () => {
   seeded();
   server("s1", "filesystem", "http", "http://127.0.0.1:1", false);
   link("a1", "s1");
-  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
   expect(mounted.problems.length == 1);
   expect(mounted.problems[0].indexOf("filesystem") >= 0);
@@ -97,7 +98,7 @@ test("a stdio server says what is missing, rather than failing to connect", () =
   seeded();
   server("s1", "local-fs", "stdio", "mcp-fs", true);
   link("a1", "s1");
-  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
   expect(mounted.problems[0].indexOf("subprocess") >= 0);
 });
@@ -107,7 +108,7 @@ test("an unreachable server leaves the agent short a tool, and says so", () => {
   seeded();
   server("s1", "github", "http", "http://127.0.0.1:1", true);
   link("a1", "s1");
-  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
   expect(mounted.problems.length == 1);
   expect(mounted.problems[0].indexOf("github") >= 0);
@@ -115,7 +116,7 @@ test("an unreachable server leaves the agent short a tool, and says so", () => {
 
 test("a tool the model invented is refused in words it can act on", () => {
   seeded();
-  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef");
+  let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   let answered = callMounted(mounted, "delete_everything", "{}");
   expect(!answered.ok);
   // The text goes back to the model, so it has to read as an instruction
@@ -127,9 +128,9 @@ test("a tool the model invented is refused in words it can act on", () => {
 
 test("nothing is mounted, so nothing is described", () => {
   seeded();
-  expect(toolSpecs(mountTools(database, "a1", "0123456789abcdef0123456789abcdef")).length == 0);
-  expect(mountedIndex(mountTools(database, "a1", "0123456789abcdef0123456789abcdef").tools, "anything") < 0);
-  expect(serverOf(mountTools(database, "a1", "0123456789abcdef0123456789abcdef"), "anything") == "");
+  expect(toolSpecs(mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "")).length == 0);
+  expect(mountedIndex(mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "").tools, "anything") < 0);
+  expect(serverOf(mountTools(database, "a1", "0123456789abcdef0123456789abcdef", ""), "anything") == "");
 });
 
 // --- the artifact door ------------------------------------------------------------
@@ -597,6 +598,24 @@ test("editing a skill row is visible to the next use_skill, with nothing reloade
   expect(callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"mine\"}" }).text == "old body");
   skill("k1", "mine", "d", "new body");
   expect(callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"mine\"}" }).text == "new body");
+});
+
+test("a person's own token outranks the deployment's, and absence falls back", () => {
+  seeded();
+  // A bearer server, with both a shared token and one the person stored.
+  let s: McpServerRow = { id: "s9", serverName: "gh", transport: "http", endpoint: "https://mcp.example/mcp", authKind: "bearer", authHeader: "", enabled: true };
+  persist(database, mcpServersMapping(), JSON.stringify(s));
+  link("a1", "s9");
+  let master = "0123456789abcdef0123456789abcdef";
+  storeCredential(database, { provider: "mcp:s9", apiKey: "shared-pat", masterKey: master, now: "t" });
+  storeCredential(database, { provider: userTokenKey("s9", "u-ana"), apiKey: "anas-pat", masterKey: master, now: "t" });
+
+  // Ana's runs carry Ana's token; a stranger's carry the deployment's; and a
+  // bare run — no owner at all — is the deployment's too, which is what every
+  // run before this feature was.
+  expect(mountTools(database, "a1", master, "u-ana").tokens[0] == "anas-pat");
+  expect(mountTools(database, "a1", master, "u-ben").tokens[0] == "shared-pat");
+  expect(mountTools(database, "a1", master, "").tokens[0] == "shared-pat");
 });
 
 test("the suite leaves nothing behind", () => {

@@ -33,6 +33,7 @@ import {
   createRouter, deleteRouter, listRouters, updateRouter,
   TemplateRow, listTemplates, deleteTemplate,
   PluginRow, PluginItem, PluginPreview, listPlugins, pluginItems, inspectPlugin, installPlugin, removePlugin,
+  serverMine, setServerMine, forgetServerMine,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
   Me, isAdmin,
@@ -452,6 +453,8 @@ export class ConsoleSettings extends LitElement {
   @state() private pluginUrl = "";
   @state() private preview: PluginPreview | null = null;
   @state() private pluginBusy = false;
+  /* Which connectors carry a token of the caller's own — id to stored. */
+  @state() private mine = new Map<string, boolean>();
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
@@ -516,6 +519,7 @@ export class ConsoleSettings extends LitElement {
         ]);
       await this.readMenu();
       await this.loadPlugins();
+      await this.loadMine();
       const t = this.tracing;
       if (t !== null) {
         this.trace = {
@@ -1943,6 +1947,32 @@ export class ConsoleSettings extends LitElement {
             </tr>`)}
           </tbody></table>`}
 
+      ${this.group("Your access")}
+      <p class="note">A connector that authenticates can carry a token that is
+      <em>yours</em>: your conversations call out as you, everybody else keeps
+      using the deployment's token, and neither can ever be read back out.</p>
+      ${this.servers.filter((s) => s.authKind !== "" && s.authKind !== "none").length === 0
+        ? html`<p class="empty">No connector here needs a token.</p>`
+        : html`<table><tbody>
+            ${this.servers.filter((s) => s.authKind !== "" && s.authKind !== "none").map((s) => html`<tr>
+              <td class="name">${s.serverName}</td>
+              <td>${this.mine.get(s.id) === true
+                ? html`<span class="tag">your token</span>`
+                : html`<span class="tag off">deployment's</span>`}</td>
+              <td class="fill"><nr-input id=${"mine-" + s.id} type="password"
+                placeholder=${this.mine.get(s.id) === true ? "unchanged" : "paste a token"}></nr-input></td>
+              ${this.rowActions([
+                { icon: "check", title: `Save your ${s.serverName} token`,
+                  run: () => this.saveMine(s.id) },
+                { icon: "trash", title: `Forget your ${s.serverName} token`, danger: true,
+                  run: () => this.act(async () => {
+                    await forgetServerMine(s.id);
+                    await this.loadMine();
+                  }) },
+              ])}
+            </tr>`)}
+          </tbody></table>`}
+
       ${this.group("Authorised apps")}
       <p class="empty">Nothing yet. This is where an app you signed in to with
         OAuth will appear — authorised rather than configured, with no endpoint
@@ -2059,6 +2089,25 @@ export class ConsoleSettings extends LitElement {
       await this.refresh();
     } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
     finally { this.pluginBusy = false; }
+  }
+
+  private async loadMine() {
+    const held = new Map<string, boolean>();
+    for (const s of this.servers) {
+      if (s.authKind === "" || s.authKind === "none") continue;
+      try { held.set(s.id, (await serverMine(s.id)).stored); } catch { held.set(s.id, false); }
+    }
+    this.mine = held;
+  }
+
+  private async saveMine(id: string) {
+    const box = this.renderRoot.querySelector(`#mine-${CSS.escape(id)}`) as unknown as { value?: string } | null;
+    const token = (box?.value ?? "").trim();
+    if (token === "") { this.problem = "paste a token first — an empty save would mean forget, and Forget is its own button"; return; }
+    await this.act(async () => {
+      await setServerMine(id, token);
+      await this.loadMine();
+    });
   }
 
   private async loadPlugins() {
