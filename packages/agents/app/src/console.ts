@@ -465,10 +465,7 @@ export class AgentConsole extends LitElement {
        and pulled the eye away from the conversation under it. */
     .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; flex: 1; }
-    .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px;
-            border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px;
-            color: var(--muted); background: var(--bg-card); }
-    .chip .bolt { color: var(--accent); }
+
     select { background: var(--bg-card); border: 1px solid var(--border); color: inherit;
              border-radius: 8px; padding: 4px 8px; font: inherit; }
     /* An icon, not a button that contains one.
@@ -503,6 +500,20 @@ export class AgentConsole extends LitElement {
             transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .icon:hover { background: var(--bg-sunken); }
     .icon[aria-pressed="true"] { background: var(--bg-sunken); }
+    /* The header's own little menu — the artifact panel's kebab, one floor
+       up. Anchored to the header (sticky is positioned, so absolute children
+       measure against it); the scrim is what makes a click anywhere else a
+       close instead of a click-through. */
+    .hmenu-scrim { position: fixed; inset: 0; z-index: 44; }
+    .hmenu { position: absolute; right: 14px; top: calc(100% - 4px); z-index: 45;
+             min-width: 224px; background: var(--bg-card);
+             border: 1px solid var(--border); border-radius: 12px; padding: 5px;
+             box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+    .hmenu button { display: flex; align-items: center; gap: 10px; width: 100%;
+                    padding: 9px 11px; border: 0; border-radius: 8px;
+                    background: none; font: inherit; font-size: 13.5px;
+                    color: var(--fg); cursor: pointer; text-align: left; }
+    .hmenu button:hover { background: var(--bg-sunken); }
     main { flex: 1; min-height: 0; }
     /* The cards live in this element's own DOM, below the chat — never inside
        the component's messages. Its artifact mode re-extracts fences from the
@@ -618,7 +629,6 @@ export class AgentConsole extends LitElement {
       .title { font-size: 15px; }
       /* The model chip is the first thing to go: it names a choice you make
          rarely, and the picker beside it still says which agent is answering. */
-      .chip { display: none; }
       /* No width rule for the panel here any more. It used to be pinned to
          100vw at both breakpoints; the sheet above sizes from its own inset,
          and a width would fight it and win. */
@@ -1116,6 +1126,8 @@ export class AgentConsole extends LitElement {
   /* Which agent the graph view opens selected on — set by the card that
      opened it, cleared by nothing: the canvas ignores it after first load. */
   @state() private canvasFocus = "";
+  /* The header's three-dot menu. */
+  @state() private hmenu = false;
   @state() private pluginOf = new Map<string, string>();
 
   /* Seeding happens here and not in connectedCallback, and that is the whole
@@ -2464,27 +2476,37 @@ export class AgentConsole extends LitElement {
             <nr-icon name="square-pen" size="medium"></nr-icon>
           </button>
           <span class="title">${this.threadTitle()}</span>
-          <span class="chip"><nr-icon class="bolt" name="zap" size="small"></nr-icon>
-            ${this.threadId === "" ? html`
-              <select @change=${(e: Event) => { this.agentId = (e.target as HTMLSelectElement).value; }}>
-                ${this.agents.map((a) => html`
-                  <option value=${a.id} ?selected=${a.id === this.agentId}>${a.agentName}</option>`)}
-              </select>` : this.agentName()}
-          </span>
+          <!-- No agent chip. Who answers is said three times already — the
+               composer's "Ask <agent>" placeholder, the directory's Agents
+               tab, the slash menu — and the bolt glyph beside a name in the
+               header read as a stray Z in a place that is about the
+               conversation, not its wiring. -->
           <!-- Offer this conversation as a starting point. Only on a
                conversation that exists — there is nothing to offer before the
                first message — and pressed when it is already on offer, so the
                control reports the state rather than only changing it. -->
           ${this.threadId === "" ? nothing : html`
-            <button class="icon" aria-pressed=${this.offered}
-              title=${this.offered
-                ? "Offered as a starting point — press to withdraw"
-                : "Offer this conversation as a starting point"}
-              @click=${() => { void this.toggleOffer(); }}>
-              <nr-icon name="share" size="medium"></nr-icon>
+            <!-- A three-dot menu, not a bare share button. A share arrow loose
+                 in the header read as an upload control that did nothing;
+                 named in a menu, the same action says what it is. The share
+                 GLYPH stays — inside the row, where it is the same mark the
+                 rail's Starting points row wears, which is the pairing that
+                 makes both legible. -->
+            <button class="icon" title="More" aria-expanded=${this.hmenu}
+              @click=${() => { this.hmenu = !this.hmenu; }}>
+              <nr-icon name="more-vertical" size="medium"></nr-icon>
             </button>`}
           <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
             @click=${() => this.show("artifacts")}><nr-icon name="folder" size="medium"></nr-icon></button>
+          ${!this.hmenu ? nothing : html`
+            <div class="hmenu-scrim" @click=${() => { this.hmenu = false; }}></div>
+            <div class="hmenu" role="menu">
+              <button role="menuitem"
+                @click=${() => { this.hmenu = false; void this.toggleOffer(); }}>
+                <nr-icon name="share" size="small"></nr-icon>
+                ${this.offered ? "Withdraw starting point" : "Offer as starting point"}
+              </button>
+            </div>`}
         </header>
         <main class=${this.session.getState().messages.length === 0
           ? (this.starts.length > 0 ? "empty has-starts" : "empty") : ""}>

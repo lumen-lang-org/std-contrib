@@ -76,7 +76,12 @@ export async function open(page: Page, path = "/"): Promise<void> {
 export async function loaded(page: Page): Promise<void> {
   await ready(page);
   await expect(sidebar(page).locator(".thread, .none").first()).toBeVisible();
-  await expect(shell(page).locator("header select option").first()).toBeAttached();
+  // The agents fetch, proven through the composer's placeholder — "Ask
+  // <agent>…" replaces the fallback the moment the list lands. The header
+  // select this used to wait on left with the agent chip; the placeholder is
+  // the surface that still says the same fact.
+  await expect(shell(page).locator("nr-chatbot"))
+    .not.toHaveAttribute("placeholder", "Ask agent…");
 }
 
 // The conversation the console is on, read off the element rather than guessed

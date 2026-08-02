@@ -45,13 +45,14 @@ What matters more than the grid: the write path. An edit has to land as an
 artifact version the way a document edit does, or two people editing produce a
 last-writer-wins mess. Read EDIT-DIFF.md before choosing.
 
-### Tooltips with their keyboard shortcut
+### Tooltips with their keyboard shortcut (asked again 2026-08-02 — next up)
 
 Kimi and Claude both label an icon button on hover with a dark tooltip that
 carries the shortcut as key chips — "Hide Sidebar ⌘ B". Ours have `title`
 attributes, which are slow, unstyled, and never show the shortcut. Wanted: one
-tooltip element, used by every icon button in the rail and the composer, with
-the chips rendered from a key list rather than typed into the string.
+tooltip element, used by every icon button in the rail, the header (New
+conversation, the three-dot menu, Artifacts) and the composer, with the chips
+rendered from a key list rather than typed into the string.
 
 ### Plugins that update
 
@@ -60,6 +61,30 @@ again. Re-install is remove-then-add, which throws away a connector's token.
 Wanted: a re-read that diffs the manifest against the receipts — new skills
 added, removed ones deleted, changed bodies updated, connectors left alone
 because their tokens are the operator's.
+
+### Social sign-in: Google, LinkedIn, GitHub (investigated 2026-08-02)
+
+LumenJS auth supports it natively for two of the three. Its `providers` array
+takes `NativeProvider` (today's email/password) plus any number of
+`OIDCProvider`s, resolved through OIDC discovery (`/.well-known/
+openid-configuration`) — and it ships a pre-built `googleProvider`.
+
+- **Google**: first-class. `googleProvider({ clientId })` in lumenjs.auth.ts.
+- **LinkedIn**: works through the generic OIDC shape — LinkedIn publishes a
+  discovery document ("Sign In with LinkedIn using OpenID Connect", issuer
+  `https://www.linkedin.com/oauth`).
+- **GitHub**: NOT expressible today. GitHub is plain OAuth2 — no discovery
+  document, no id_token — and the framework's client resolves everything
+  through discovery (auth/oidc-client.js). Needs a framework extension
+  (custom endpoints on the provider type) or a small proxy that speaks OIDC
+  in front of GitHub.
+
+Where it lands: prod signs in through the nuraly social app behind the
+gateway (`/__nk_auth/*`), so the provider config belongs in THAT app's
+lumenjs.auth.ts (nuraly repo — no-commit rule) and the sign-in card grows
+provider buttons. Blocked on: OAuth client id/secret for each provider from
+their consoles, with callback `https://lumen-agents.the-agent.dev/__nk_auth/
+callback/<provider>` (exact route per framework config).
 
 ## Known and waiting on a decision
 
