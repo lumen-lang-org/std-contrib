@@ -2306,10 +2306,17 @@ export class AgentConsole extends LitElement {
 
   private async paintThumbs(): Promise<void> {
     await this.updateComplete;
-    for (const t of this.starts) {
+    // Every card at once, not one after another. The engine's conversion is
+    // cached and the client keeps painted canvases, but this loop used to
+    // await each card's fetch AND its pdf.js render before starting the
+    // next — so a row of four cached thumbnails still popped in one by one,
+    // each a round-trip plus a render late. Concurrent, the row fills in the
+    // time the slowest single card takes. Each card still lands on its own
+    // the moment it is ready; nothing waits for the whole set.
+    await Promise.all(this.starts.map(async (t) => {
       const port = () => this.renderRoot.querySelector(`.start-thumb[data-tpl="${t.id}"]`);
       const held = this.thumbs.get(t.id);
-      if (held !== undefined) { port()?.replaceChildren(held); continue; }
+      if (held !== undefined) { port()?.replaceChildren(held); return; }
       try {
         // A site template has no document to convert — the office path runs
         // LibreOffice, which does not take HTML — so its own first page is
@@ -2318,21 +2325,21 @@ export class AgentConsole extends LitElement {
         // the page, laid out by the same engine that will lay it out later.
         if (t.kind === "site") {
           const frame = await this.siteThumb(t.id);
-          if (frame === null) { continue; }
+          if (frame === null) { return; }
           this.thumbs.set(t.id, frame);
           port()?.replaceChildren(frame);
-          continue;
+          return;
         }
         const { pdf } = await templatePdf(t.id);
         const { renderPdfThumb } = await import("./office-view.js");
         const canvas = await renderPdfThumb(pdf, 208);
-        if (canvas === null) { continue; }
+        if (canvas === null) { return; }
         this.thumbs.set(t.id, canvas);
         port()?.replaceChildren(canvas);
       } catch {
         // No thumbnail is a fine card; see the stylesheet note.
       }
-    }
+    }));
   }
 
   /* A template starts the conversation: its files land as version 1, and the
