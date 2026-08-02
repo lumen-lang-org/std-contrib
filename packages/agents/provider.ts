@@ -547,6 +547,27 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
 // budget below `max_tokens`. Both are enforced here rather than left for the
 // provider to refuse: a 400 at the first conversation is a bad way to learn it.
 export function thinkingJson(provider: string, config: ModelConfigRow): string {
+  // "off" is a turn that asked NOT to think, which is different from a config
+  // that never asks: a reasoning model reasons by default, and the only way to
+  // stop it is to say so. vLLM reads the switch off the chat template, so it
+  // travels as chat_template_kwargs rather than a field of its own; providers
+  // that have no such switch simply send nothing, which is what they already
+  // did. Sent for every OpenAI-compatible provider, not only vLLM: an unknown
+  // member is ignored by the ones that do not have it, and naming the vendor
+  // here would mean this stops working the day the model moves.
+  if (config.thinking == "off") {
+    // vLLM and ollama only. The switch lives in the model's chat template, so
+    // it is these two — the servers that HAVE one — that read it; a hosted API
+    // has no template to parameterise and answers 400 to a member it does not
+    // know, which is how Mistral stopped answering the first time this was
+    // sent to everybody. Silence is the right "do not think" for the rest:
+    // none of them think unless a config asks, and "off" is that config not
+    // asking.
+    if (provider == "vllm" || provider == "ollama") {
+      return ",\"chat_template_kwargs\":{\"enable_thinking\":false}";
+    }
+    return "";
+  }
   if (config.thinking == "") { return ""; }
   if (provider == "anthropic") {
     let budget = parseInt(config.thinking, 10) ?? 0;

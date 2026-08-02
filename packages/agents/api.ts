@@ -2885,6 +2885,10 @@ class ThreadApi {
     // disagree the first time a rule was added to only one of them.
     let answered = runInThreadWith(this.db, param(req, "id"), {
       userText: text, master: this.master, tracer: tracer, pick: pick,
+      // The composer's Think toggle, per message like the picker beside it.
+      // Absent — every caller written before the toggle — reads as false,
+      // which is the same request those callers were already making.
+      think: jsonText(req.body, "think") == "true",
     });
     let run = answered.run;
     // The run log keeps the RAW reply — `run.text`, fences and bodies intact —
