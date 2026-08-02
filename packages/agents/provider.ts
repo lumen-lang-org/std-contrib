@@ -252,53 +252,59 @@ export function vectorFrom(body: string): Embedding {
 // Where a provider's chat endpoint lives. A column would be better still —
 // this is the one thing here that is not a row — but a provider's URL shape is
 // closer to code than to configuration, and there are three of them.
-/* Why a call failed, in words a person can act on.
+/* Why a call failed, said to the person in the conversation.
  *
- * "the provider refused the stream: -1" told a reader nothing: not which
- * model, not whether the fault was ours, theirs or the network's, and not
- * what to do next. Every one of those is knowable here — the model row is in
- * hand and the status says which kind of failure it is — so the sentence
- * says them.
+ * Two audiences, and this is the wrong place for one of them. A reader of a
+ * chat needs to know that the answer did not happen, whether waiting or
+ * switching models helps, and nothing else. An operator needs the address,
+ * the status and the provider's own words — and those belong in the log,
+ * where `streamDetail` sends them, not in a transcript that a person may
+ * screenshot, paste or share. An internal hostname in a chat bubble is an
+ * infrastructure leak with a plausible excuse.
  *
- * The provider's own body is appended when it sent one, because a message
- * written by the thing that refused beats any paraphrase of it. It is
- * trimmed: some providers answer a page of HTML.
+ * So: no addresses, no model ids, no provider bodies here. The model's LABEL
+ * only, because a person picked it from a menu by that name and needs to know
+ * which choice failed.
  */
 export function streamProblem(model: ModelRow, status: int, body: string): string {
-  let who = model.label == "" ? model.apiName : model.label;
-  let said = "";
-  if (body != "") {
-    let cut = body.length > 300 ? body.slice(0, 300) + "…" : body;
-    said = " It said: " + cut;
-  }
-  // Below 100 is not an HTTP status at all — nothing answered. For a model on
-  // someone's own machine that is the common case and the fix is theirs.
+  let who = model.label == "" ? "This model" : model.label;
+  // Below 100 is not an HTTP status at all — nothing answered.
   if (status < 100) {
-    let where = model.baseUrl == "" ? "its provider" : model.baseUrl;
-    return who + " did not answer at all — nothing is listening at " + where
-      + ". If it runs on your own machine, check it is still up.";
+    return who + " is not responding. If it runs on your own machine, check it is"
+      + " still up; otherwise pick another model from the menu beside the composer.";
   }
   if (status == 400) {
-    return who + " refused the request (400). The usual cause is a conversation"
-      + " longer than the model's context, or a feature it does not support." + said;
+    return who + " would not take this request. The usual cause is a conversation"
+      + " that has grown longer than the model can hold — start a new one, or pick"
+      + " a model with more room.";
   }
   if (status == 401 || status == 403) {
-    return who + " rejected the credential (" + `${status}` + "). Check the key stored"
-      + " for " + model.provider + " under Providers." + said;
+    return who + " is not configured correctly: its credential was rejected."
+      + " An operator needs to set it up.";
   }
   if (status == 404) {
-    return who + " answered 404 — the address or the model name is wrong."
-      + " It is asking " + chatEndpointFor(model) + " for \"" + model.apiName + "\"." + said;
+    return who + " is not configured correctly: the deployment is asking for a model"
+      + " that host does not have. An operator needs to correct it.";
   }
   if (status == 429) {
-    return who + " is rate-limited (429). Wait, or pick another model from the"
-      + " menu beside the composer." + said;
+    return who + " is busy right now. Wait a moment and retry, or pick another"
+      + " model from the menu beside the composer.";
   }
   if (status >= 500) {
-    return who + " failed on its side (" + `${status}` + "). That is the provider's"
-      + " fault, not this conversation's — retry, or pick another model." + said;
+    return who + " failed on its own side — nothing to do with this conversation."
+      + " Retry, or pick another model.";
   }
-  return who + " refused the request (" + `${status}` + ")." + said;
+  return who + " could not answer this one. Retry, or pick another model.";
+}
+
+/* The same failure for the log: everything the sentence above deliberately
+ * withholds. One line, so an operator greps it out of the engine log with the
+ * status, the address it used and what the provider actually said. */
+export function streamDetail(model: ModelRow, status: int, body: string): string {
+  let cut = body.length > 300 ? body.slice(0, 300) + "…" : body;
+  return "provider failure: model=" + model.id + " (" + model.apiName + ")"
+    + " provider=" + model.provider + " status=" + `${status}`
+    + " endpoint=" + chatEndpointFor(model) + " said=" + cut;
 }
 
 export function chatEndpoint(provider: string): string {
@@ -865,6 +871,10 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       drained = drained + line;
     }
     s.close();
+    // The operator's half goes to the log; the person's half goes back as the
+    // error. Both derived from the same failure, neither leaking into the
+    // other's audience.
+    console.error(streamDetail(model, status, drained));
     let refused: Completion = { ok: false, text: drained, status: status, error: streamProblem(model, status, drained), inputTokens: 0, outputTokens: 0, counted: false };
     return refused;
   }

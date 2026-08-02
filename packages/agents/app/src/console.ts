@@ -336,10 +336,20 @@ function dressChat(root: ParentNode) {
  * cited, to a company that already saw the search. `onerror` hides the image
  * rather than leaving a broken glyph, so a host with no icon degrades to text.
  */
+/* A host worth citing: a real domain, not a machine on somebody's network.
+   Anything with no dot is a bare hostname; a final label of digits is an IP;
+   localhost and .local are the same story with friendlier spelling. */
+const PUBLIC_HOST = /^(?!localhost$)(?!.*\.local$)(?!.*\.internal$)[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i;
+
 function citeSources(root: ShadowRoot) {
   for (const msg of root.querySelectorAll(".message.bot .message__content")) {
     const holder = msg as HTMLElement & { cited?: boolean };
     if (holder.cited === true) { continue; }
+    // Never a failed turn. A failure line is not an answer, so nothing in it
+    // is a source — and the address in one is the deployment's own, which is
+    // exactly what should not become a link a reader can press or a chip a
+    // screenshot can carry.
+    if (msg.closest(".message.error, .message--error") !== null) { continue; }
     // The text, not the anchors. The transcript renders a model's urls as
     // plain words — there is no linkifier in the component and the console
     // escapes what it stores — so a pass that lifted <a href> found nothing on
@@ -354,6 +364,11 @@ function citeSources(root: ShadowRoot) {
       const href = raw.replace(/[.,;:!?)]+$/, "");
       let host = "";
       try { host = new URL(href).hostname.replace(/^www\./, ""); } catch { continue; }
+      // Public names only. A bare IP, a localhost, a .local or a private
+      // range is somewhere inside this deployment: it cannot be a citation
+      // for anybody reading, and a chip for one publishes an address that was
+      // never meant to leave the machine.
+      if (!PUBLIC_HOST.test(host)) { continue; }
       // One entry per SITE. An answer citing four pages of one doc set is
       // citing one source, and four identical favicons say less than one.
       if (host === "" || seen.has(host)) { continue; }
