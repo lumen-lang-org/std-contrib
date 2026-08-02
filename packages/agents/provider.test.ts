@@ -7,7 +7,7 @@
 //   cd packages/agents && lumen test provider.test.ts
 
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem, streamProblem, streamDetail } from "./provider.ts";
+import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem, streamProblem, streamDetail, assistantThinking, replyText } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
   let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, baseUrl: "", enabled: enabled, contextTokens: 0 };
@@ -182,4 +182,27 @@ test("a refusal never carries the key", () => {
   let unknown = complete(model("nobody", "x", true), config(), "", "hi", secret);
   expect(unknown.error.indexOf(secret) < 0);
   expect(unknown.text.indexOf(secret) < 0);
+});
+
+test("a reasoning model served without its parser has its thought taken out of the answer", () => {
+  // vLLM fills reasoning_content only when started with --reasoning-parser;
+  // without one a Qwen3 reply carries the whole block inline, and it used to
+  // be printed to the reader as the answer.
+  let body = "{\"choices\":[{\"message\":{\"content\":\"<think>\\nweigh it up\\n</think>\\n\\nTwo words.\"}}]}";
+  expect(assistantThinking("vllm", body) == "weigh it up");
+  expect(replyText("vllm", body) == "Two words.");
+
+  // A structured reasoning_content still wins, and the content is left alone.
+  let split = "{\"choices\":[{\"message\":{\"reasoning_content\":\"thought\",\"content\":\"Answer.\"}}]}";
+  expect(assistantThinking("vllm", split) == "thought");
+  expect(replyText("vllm", split) == "Answer.");
+
+  // Prose that merely mentions the tag is text: only a LEADING block is a thought.
+  let prose = "{\"choices\":[{\"message\":{\"content\":\"Write <think> to open a block.\"}}]}";
+  expect(assistantThinking("vllm", prose) == "");
+  expect(replyText("vllm", prose) == "Write <think> to open a block.");
+
+  // An unclosed block is not a thought either — nothing is removed.
+  let open = "{\"choices\":[{\"message\":{\"content\":\"<think>never closed\"}}]}";
+  expect(replyText("vllm", open) == "<think>never closed");
 });
