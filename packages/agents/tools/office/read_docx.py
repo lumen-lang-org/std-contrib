@@ -17,6 +17,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from artifact_path import resolve_input  # noqa: E402
+
 
 def markdown(path: Path) -> str:
     out = subprocess.run(
@@ -38,7 +41,7 @@ def main(argv: list[str]) -> int:
     if not rest:
         print(__doc__)
         return 2
-    path = Path(rest[0])
+    path = Path(resolve_input(rest[0]))
     text = markdown(path)
     if holders:
         # pandoc escapes markdown punctuation and rewrites typography — a

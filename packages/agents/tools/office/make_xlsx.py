@@ -25,6 +25,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from artifact_path import resolve_output  # noqa: E402
+
 
 def build(spec: dict, out: Path) -> int:
     from openpyxl import Workbook
@@ -72,7 +75,7 @@ def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(__doc__)
         return 2
-    spec_path, out = Path(argv[1]), Path(argv[2])
+    spec_path, out = Path(argv[1]), Path(resolve_output(argv[2]))
     try:
         spec = json.loads(spec_path.read_text("utf8"))
     except FileNotFoundError:
