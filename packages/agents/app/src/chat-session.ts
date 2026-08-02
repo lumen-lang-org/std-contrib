@@ -27,6 +27,7 @@
 // a clean check.
 import { LiveStep, RoundSteps, Thought, TranscriptTurn, TurnArtifactRef, WireRef, artifactsByTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
+import { renderWithCards } from "./cards.js";
 import * as live from "./live.js";
 import { diffLines } from "./diff.js";
 import hljs from "highlight.js/lib/core";
@@ -655,7 +656,7 @@ export class ChatSession {
         id: reply.runId,
         sender: "bot",
         text: stepsCard(this.live, this.thoughts)
-          + renderMarkdown(escapeHtml(reply.ok ? reply.text : reply.error))
+          + renderWithCards(reply.ok ? reply.text : reply.error, (s) => renderMarkdown(escapeHtml(s)))
           + refCards(saved),
         refs: reply.refs,
         error: !reply.ok,
@@ -903,7 +904,7 @@ export class ChatSession {
         id: `t${i}`,
         sender: t.role === "user" ? "user" : "bot" as const,
         text: t.role === "user" ? escapeHtml(t.text)
-          : card + renderMarkdown(escapeHtml(t.text)) + refCards(saved),
+          : card + renderWithCards(t.text, (s) => renderMarkdown(escapeHtml(s))) + refCards(saved),
         refs: t.refs,
         timestamp: new Date().toISOString(),
       };
