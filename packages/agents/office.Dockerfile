@@ -54,6 +54,22 @@ RUN pip install --no-cache-dir \
     lxml==5.3.0 \
     pypdf==5.1.0
 
+# The helpers, at a fixed path every run can rely on.
+#
+# In the image and not only as skill files, because a model reaches for the
+# environment before it reaches for a skill: it sees "office" in the system
+# prompt with a summary saying these exist, and can call them without loading
+# anything. Twice on prod a model asked to fill a template wrote its own
+# python-docx script instead — it had no idea a working one was already here.
+COPY tools/office/ /opt/office/
+# Executable, and every path a model might type. A run that answers
+# "Permission denied" for a helper the environment advertises is worse than
+# not advertising it — the model spends the round chmod-ing.
+RUN chmod +x /opt/office/*.py \
+ && ln -sf /opt/office/read_docx.py /usr/local/bin/read-docx \
+ && ln -sf /opt/office/fill_docx.py /usr/local/bin/fill-docx \
+ && ln -sf /opt/office/merge_runs.py /usr/local/bin/merge-runs
+
 # The docx npm library, for BUILDING a document from nothing — it produces
 # cleaner OOXML than python-docx and is what the published guidance uses. A
 # global install so a script can require() it without a package.json.

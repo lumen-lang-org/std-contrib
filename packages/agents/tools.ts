@@ -740,10 +740,34 @@ function envSentence(envs: string[]): string {
   let i: int = 0;
   while (i < envs.length) {
     if (i > 0) { names = names + (i == envs.length - 1 ? " and " : ", "); }
-    names = names + envs[i];
+    names = names + jsonSafe(envs[i]);
     i = i + 1;
   }
   return "This deployment offers, by name: " + names + ".";
+}
+
+/* Operator text, safe to concatenate into a JSON string literal.
+ *
+ * The schema below is BUILT BY CONCATENATION, not by a serialiser — so a
+ * summary containing a double quote closes the description early and the
+ * whole request body becomes invalid JSON. That is not theoretical: an image
+ * summary was edited to include an example command with quotes in it, and
+ * every conversation on the deployment failed with "The input data is not
+ * valid json" until it was found. Anything an operator can type has to come
+ * through here.
+ */
+export function jsonSafe(text: string): string {
+  let out = "";
+  let i: int = 0;
+  while (i < text.length) {
+    let ch = text.charAt(i);
+    if (ch == "\"") { out = out + "\\\""; }
+    else if (ch == "\\") { out = out + "\\\\"; }
+    else if (ch == "\n" || ch == "\r" || ch == "\t") { out = out + " "; }
+    else { out = out + ch; }
+    i = i + 1;
+  }
+  return out;
 }
 
 export function scriptTools(db: Db): ToolSpec[] {

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Coalesce Word's fragmented text runs so the text can be found at all.
 
 Word splits a sentence across many <w:r> elements for reasons that have
