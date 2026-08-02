@@ -177,6 +177,9 @@ export class ArtifactPanel extends LitElement {
        the nav rail (pages or sheets) and the document. */
     .office { flex: 1; display: flex; min-height: 0; margin: 0 12px; background: #fff; color: #111;
               border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    /* A workbook stacks tabs over the grid; documents and decks stay a row of
+       rail beside pages. */
+    .office.sheet-mode { flex-direction: column; }
     .office .office-nav { flex: none; width: 116px; overflow-y: auto; padding: 8px;
               display: flex; flex-direction: column; gap: 8px; align-items: center;
               background: #f7f7f6; border-right: 1px solid #e5e5e3; }
@@ -246,6 +249,18 @@ export class ArtifactPanel extends LitElement {
     .office td[contenteditable]:focus { outline: 2px solid var(--focus, #2563EB);
                                         outline-offset: -2px; }
     .office td.cell-dirty { background: color-mix(in srgb, var(--focus, #2563EB) 12%, transparent); }
+    /* Sheet tabs where a workbook expects them — a strip, not a side panel.
+       Hidden entirely for a one-sheet file, where a tab is furniture. */
+    .office .sheet-tabs { display: flex; gap: 4px; padding: 6px 8px 0;
+                          overflow-x: auto; scrollbar-width: none;
+                          border-bottom: 1px solid var(--border, #e5e5ea); }
+    .office .sheet-tabs::-webkit-scrollbar { display: none; }
+    .office .sheet-tabs button { font: 12.5px var(--sans, sans-serif); flex: none;
+                                 padding: 6px 12px; border: 0; cursor: pointer;
+                                 border-radius: 8px 8px 0 0; background: none;
+                                 color: var(--muted, #667); }
+    .office .sheet-tabs button[aria-current] { background: var(--bg-sunken, #f0f0f2);
+                                               color: var(--fg, #17171A); font-weight: 600; }
     .office .sheet-savebar { position: sticky; bottom: 0; display: flex;
                              align-items: center; justify-content: space-between;
                              gap: 12px; padding: 9px 12px;
