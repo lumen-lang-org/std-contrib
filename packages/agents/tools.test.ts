@@ -664,6 +664,21 @@ test("a skill called by its own name is a use_skill call", () => {
   expect(!made_up.handled);
 });
 
+test("a text edit on a binary document is refused with the route to the right tool", () => {
+  seeded();
+  let call: ArtifactToolCall = { threadId: "t1", agentId: "a1", name: "edit_artifact",
+    args: "{\"path\":\"/meeting-notes.docx\",\"old\":\"<DATE>\",\"new\":\"2 August\"}",
+    turnSeq: 0, now: "t" };
+  let out = callArtifactTool(database, call);
+  expect(out.handled);
+  expect(!out.ok);
+  // Names the reason and the route. "not found" was true and useless — the
+  // body is a zip — and a model that reads it tells the person their template
+  // is missing a placeholder that is plainly in it.
+  expect(out.text.indexOf("binary") >= 0);
+  expect(out.text.indexOf("make-doc") >= 0);
+});
+
 test("the suite leaves nothing behind", () => {
   seeded();
   expect(dropTable(database, agentsMapping()).ok);
