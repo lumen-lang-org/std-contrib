@@ -64,7 +64,10 @@ export class LoginOverlay extends LitElement {
        chat's empty-state dot does; filter-driven rather than a JS interval,
        because this card renders before the app's modules and must not wait
        for them. Ambient, so it respects a reduced-motion ask. */
-    .mark { font: 650 38px var(--display, inherit); letter-spacing: -.02em;
+    /* The hero's own numbers (chatbot empty-state: 700, -0.02em), scaled
+       down — same face, same weight, so the card and the empty page read as
+       one mark and not two logos. */
+    .mark { font: 700 40px var(--display, inherit); letter-spacing: -0.02em;
             text-align: center; }
     .mark .dot { color: hsl(340 72% 58%); display: inline-block;
                  animation: login-dot 8s linear infinite; }
