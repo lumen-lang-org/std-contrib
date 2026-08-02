@@ -239,6 +239,23 @@ export class ArtifactPanel extends LitElement {
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .office tr:first-child td { background: #f7f7f7; font-weight: 600; position: sticky; top: 0; }
     .office .sheet-cut { padding: 8px; color: #777; font: 11.5px var(--sans, sans-serif); }
+    /* Editing a workbook. The cell you changed says so until it is saved —
+       ink, not a toast — and the bar exists only while there is something to
+       save, which is what makes it impossible to forget. */
+    .office td[contenteditable] { cursor: text; }
+    .office td[contenteditable]:focus { outline: 2px solid var(--focus, #2563EB);
+                                        outline-offset: -2px; }
+    .office td.cell-dirty { background: color-mix(in srgb, var(--focus, #2563EB) 12%, transparent); }
+    .office .sheet-savebar { position: sticky; bottom: 0; display: flex;
+                             align-items: center; justify-content: space-between;
+                             gap: 12px; padding: 9px 12px;
+                             background: var(--bg-card, #fff);
+                             border-top: 1px solid var(--border, #e5e5ea);
+                             font: 12.5px var(--sans, sans-serif); color: var(--muted, #667); }
+    .office .sheet-save { font: inherit; padding: 6px 14px; cursor: pointer;
+                          border: 0; border-radius: 999px;
+                          background: var(--accent, #17171A); color: var(--accent-fg, #fff); }
+    .office .sheet-save:disabled { opacity: .55; cursor: default; }
     .pre .r { display: flex; align-items: baseline; }
     .pre .t { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; padding-right: 10px; }
     .diff .r.add { background: rgba(47, 138, 76, 0.10); }
@@ -464,8 +481,26 @@ export class ArtifactPanel extends LitElement {
       // The version is pinned rather than left to the server: the panel
       // already knows which one it is showing, and an unpinned request would
       // race a save and could answer with a page the reader is not looking at.
-      await renderOffice(host, kind, v.content,
-        { threadId: this.threadId, slot: a.slot, version: v.version });
+      await renderOffice(host, kind, v.content, {
+        threadId: this.threadId, slot: a.slot, version: v.version,
+        // A workbook is editable in place — values only, into a NEW version
+        // through the same door an upload uses, so the history keeps both
+        // sides whole and the diff view stays derivable (EDIT-DIFF.md). The
+        // panel owns the write because the panel knows the path and is the
+        // thing that has to show the new version afterwards.
+        saveSheet: kind !== "xlsx" ? undefined : async (b64: string) => {
+          const { createArtifact } = await import("./api.js");
+          await createArtifact(this.threadId, {
+            path: a.path, title: a.title, content: b64,
+            note: "edited in the console",
+          });
+          // The cached render is for the OLD version; drop it or the panel
+          // re-shows the numbers from before the save.
+          this.officeDrawn.delete(key);
+          this.officeShown = "";
+          await this.refresh();
+        },
+      });
       this.officeDrawn.set(key, { pages: Array.from(host.children) as HTMLElement[], scrollTop: 0 });
     } catch (e) {
       this.officeShown = "";
