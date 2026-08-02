@@ -808,6 +808,43 @@ export function threadSummariesMapping(): DbRepository {
   return repository("thread_summaries", "id", "id", fs);
 }
 
+/* A way of signing in that is not a password.
+ *
+ * The client id is a row; the client SECRET is not — it goes through the same
+ * encrypted store as a provider key and a connector token, under
+ * "oauth:<id>", because a secret sitting beside the thing it authenticates is
+ * decoration. Nothing here can read it back, which is the point.
+ *
+ * `issuer` is what makes this a table rather than an enum: OIDC discovery
+ * means a provider is an address plus a client, so a deployment can add one
+ * this package has never heard of without a release. Google and LinkedIn both
+ * publish discovery documents; GitHub does not, which is why it needs more
+ * than a row (see BACKLOG.md).
+ */
+export type AuthProviderRow = {
+  id: string,
+  // What the button says: "Google", "LinkedIn", "Acme SSO".
+  label: string,
+  // The OIDC issuer, from which every endpoint is discovered.
+  issuer: string,
+  clientId: string,
+  // Space-separated extras beyond openid/profile/email, or "".
+  scopes: string,
+  enabled: bool,
+};
+
+export function authProvidersMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("issuer", "issuer", "text"),
+    field("clientId", "client_id", "text"),
+    field("scopes", "scopes", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("auth_providers", "id", "id", fs);
+}
+
 // A starting point a conversation can be opened from — Kimi's "featured
 // cases". A template is its files; the row is the label on the card.
 //
@@ -1877,6 +1914,10 @@ export function schemaPlan(db: Db): Migration[] {
     // covers everything up to `throughSeq`, and grows as more rounds age out.
     migration("90.7", "a thread remembers what it had to forget",
       createTableSql(db, threadSummariesMapping())),
+    // Signing in with something other than a password. The client id is here;
+    // the secret is in the encrypted store under "oauth:<id>".
+    migration("90.8", "ways of signing in that are not a password",
+      createTableSql(db, authProvidersMapping())),
   ];
   return plan;
 }

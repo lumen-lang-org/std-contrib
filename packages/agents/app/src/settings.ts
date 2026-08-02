@@ -34,6 +34,7 @@ import {
   TemplateRow, listTemplates, deleteTemplate,
   PluginRow, PluginItem, PluginPreview, listPlugins, pluginItems, inspectPlugin, installPlugin, removePlugin,
   serverMine, setServerMine, forgetServerMine,
+  AuthProviderRow, listAuthProviders, saveAuthProvider, setAuthProviderSecret, deleteAuthProvider,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
   Me, isAdmin,
@@ -75,6 +76,7 @@ const TABS = [
   // the same rows; this is the one with transports and auth headers on it,
   // which is operator work even when the row began as somebody's browse.
   { name: "MCP", icon: "code", zone: "admin" },
+  { name: "Sign-in", icon: "log-in", zone: "admin" },
   { name: "Tracing", icon: "layers", zone: "admin" },
 ] as const;
 type Tab = typeof TABS[number]["name"];
@@ -116,7 +118,8 @@ type View =
   | { kind: "skill"; row: SkillRow; fresh: boolean; files: SkillFileRow[] }
   | { kind: "server"; row: ServerRow & { token: string }; fresh: boolean }
   | { kind: "image"; row: ScriptImageRow }
-  | { kind: "key"; row: { provider: string; apiKey: string } };
+  | { kind: "key"; row: { provider: string; apiKey: string } }
+  | { kind: "authp"; row: AuthProviderRow; fresh: boolean };
 
 const NEW_AGENT: AgentRow = {
   id: "", agentName: "", description: "", modelConfigId: "", promptId: "",
@@ -232,6 +235,20 @@ export class ConsoleSettings extends LitElement {
     .seg button:hover { color: var(--fg); }
     .seg button.on { background: var(--bg-card); color: var(--fg);
                      font-weight: 550; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    /* The ready-made shelf on the Sign-in tab. The same card mcp-gallery
+       draws, restated here because that component owns its own shadow root
+       and its styles do not reach a card rendered in this one. */
+    .cards { display: grid; gap: 10px; margin-top: 4px;
+             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    .cards .card { display: flex; flex-direction: column; gap: 6px; padding: 14px;
+                   border: 1px solid var(--border); border-radius: 12px;
+                   background: var(--bg-card); }
+    .cards .top { display: flex; align-items: center; gap: 8px; }
+    .cards .name { font-size: 14px; font-weight: 600; color: var(--fg); }
+    .cards .what { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+    .cards .needs { font-size: 12px; color: var(--faint); line-height: 1.4; }
+    .cards .foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .cards .have { font-size: 13px; color: var(--ok, #157F4D); }
     .who { display: flex; align-items: center; gap: 11px; }
     .avatar { display: grid; place-items: center; width: 34px; height: 34px;
               border-radius: 999px; background: var(--fg); color: var(--bg);
@@ -455,6 +472,7 @@ export class ConsoleSettings extends LitElement {
   @state() private pluginBusy = false;
   /* Which connectors carry a token of the caller's own — id to stored. */
   @state() private mine = new Map<string, boolean>();
+  @state() private authProviders: AuthProviderRow[] = [];
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
@@ -520,6 +538,7 @@ export class ConsoleSettings extends LitElement {
       await this.readMenu();
       await this.loadPlugins();
       await this.loadMine();
+      this.authProviders = await listAuthProviders().catch(() => []);
       const t = this.tracing;
       if (t !== null) {
         this.trace = {
@@ -717,6 +736,11 @@ export class ConsoleSettings extends LitElement {
       case "Plugins": return this.pluginsTab();
       case "Images": return this.imagesTab();
       case "Providers": return this.providersTab();
+      case "Sign-in": {
+        const v = this.view;
+        if (v.kind === "authp") { return this.authProviderForm(v.row, v.fresh); }
+        return this.signInTab();
+      }
       case "Tracing": return this.tracingTab();
     }
   }
@@ -1968,6 +1992,7 @@ export class ConsoleSettings extends LitElement {
                   run: () => this.act(async () => {
                     await forgetServerMine(s.id);
                     await this.loadMine();
+      this.authProviders = await listAuthProviders().catch(() => []);
                   }) },
               ])}
             </tr>`)}
@@ -2107,6 +2132,7 @@ export class ConsoleSettings extends LitElement {
     await this.act(async () => {
       await setServerMine(id, token);
       await this.loadMine();
+      this.authProviders = await listAuthProviders().catch(() => []);
     });
   }
 
@@ -2253,6 +2279,117 @@ export class ConsoleSettings extends LitElement {
   // --- tracing ------------------------------------------------------------------------
 
   // A panel rather than a list: there is one row and it is always the same one.
+  /* Signing in with something that is not a password.
+   *
+   * The same auth module answers both: LumenJS takes a native provider and
+   * any number of OIDC ones, and discovers every endpoint from the issuer. So
+   * a provider is a row plus a secret rather than a deploy — which is the
+   * whole reason this screen exists.
+   *
+   * Two shelves, like Connectors: ready-made issuers for the ones people
+   * actually ask for, and the list of what this deployment offers. Adding
+   * from a card fills the form in; it does not own the result. */
+  private signInTab() {
+    const ready = [
+      { id: "google", label: "Google", issuer: "https://accounts.google.com",
+        note: "Console: APIs & Services → Credentials → OAuth client ID (Web application)" },
+      { id: "linkedin", label: "LinkedIn", issuer: "https://www.linkedin.com/oauth",
+        note: "LinkedIn Developers → your app → Auth → Sign In with LinkedIn using OpenID Connect" },
+    ];
+    const have = new Set(this.authProviders.map((p) => p.id));
+    return html`
+      ${this.head("Sign-in", "log-in")}
+      <div class="banner">How people get into this console. The password form is
+        always there; each provider added here becomes a button beside it. A
+        provider is an <strong>issuer</strong> and a <strong>client</strong> —
+        the endpoints are discovered from the issuer, so anything publishing an
+        OpenID configuration works, not only the two below. The client secret is
+        stored encrypted and never read back.</div>
+
+      ${this.group("Ready-made")}
+      <div class="cards">
+        ${ready.map((r) => html`
+          <div class="card">
+            <div class="top"><span class="name">${r.label}</span></div>
+            <div class="what"><span class="slug">${r.issuer}</span></div>
+            <div class="needs">${r.note}</div>
+            <div class="foot">
+              ${have.has(r.id)
+                ? html`<span class="have">Added</span>`
+                : html`<button class="act" @click=${() => this.open({ kind: "authp", fresh: true,
+                    row: { id: r.id, label: r.label, issuer: r.issuer, clientId: "",
+                           scopes: "", enabled: false } })}>Add</button>`}
+            </div>
+          </div>`)}
+      </div>
+
+      ${this.group("Yours", this.authProviders.length)}
+      ${this.authProviders.length === 0
+        ? html`<p class="empty">None yet — people sign in with a password.</p>`
+        : html`<table><tbody>
+            ${this.authProviders.map((p) => html`<tr>
+              <td class="name">${p.label}</td>
+              <td class="fill"><span class="slug">${p.issuer}</span></td>
+              <td>${p.configured === true
+                ? html`<span class="tag">secret stored</span>`
+                : html`<span class="tag off">no secret</span>`}</td>
+              <td>${p.enabled ? "" : html`<span class="tag off">off</span>`}</td>
+              ${this.rowActions([
+                { icon: "edit", title: `Edit ${p.label}`,
+                  run: () => this.open({ kind: "authp", row: { ...p }, fresh: false }) },
+                { icon: "trash", title: `Remove ${p.label}`, danger: true,
+                  run: () => this.act(async () => {
+                    await deleteAuthProvider(p.id);
+                    this.authProviders = await listAuthProviders();
+                  }) },
+              ])}
+            </tr>`)}
+          </tbody></table>
+          <p class="note">A provider with no secret is never offered: its button
+          would be a dead end. The callback this deployment registers is
+          <span class="slug">${location.origin}/__nk_auth/callback</span> — paste
+          that into the provider's console.</p>`}`;
+  }
+
+  private authProviderForm(row: AuthProviderRow, fresh: boolean) {
+    return html`
+      ${this.formHead(fresh ? "New sign-in provider" : `Edit ${row.label}`)}
+      <div class="grid">
+        ${this.text({ id: "ap-id", label: "Id", value: row.id, required: true, disabled: !fresh,
+          placeholder: "google",
+          help: "Lowercase, no spaces — it appears in the callback URL.",
+          on: (v) => this.patch({ id: v }) })}
+        ${this.text({ id: "ap-label", label: "Button label", value: row.label, required: true,
+          placeholder: "Google", on: (v) => this.patch({ label: v }) })}
+        ${this.text({ id: "ap-issuer", label: "Issuer", value: row.issuer, required: true, wide: true,
+          placeholder: "https://accounts.google.com",
+          help: "Its /.well-known/openid-configuration is what describes every endpoint.",
+          on: (v) => this.patch({ issuer: v }) })}
+        ${this.text({ id: "ap-client", label: "Client id", value: row.clientId, required: true, wide: true,
+          on: (v) => this.patch({ clientId: v }) })}
+        ${this.text({ id: "ap-secret", label: "Client secret", type: "password", value: "",
+          placeholder: row.configured === true ? "unchanged" : "",
+          help: "Stored encrypted under the provider's id and never read back. Leave blank to keep the one already stored.",
+          on: () => undefined })}
+        ${this.text({ id: "ap-scopes", label: "Extra scopes", value: row.scopes, wide: true,
+          placeholder: "openid profile email are always requested",
+          on: (v) => this.patch({ scopes: v }) })}
+        ${this.check({ id: "ap-enabled", label: "Offer this provider", checked: row.enabled,
+          on: (v) => this.patch({ enabled: v }) })}
+      </div>
+      ${this.formActions(() => this.act(async () => {
+        await saveAuthProvider(row, fresh);
+        // Only when one was typed: an empty save would replace a working
+        // secret with an unreadable envelope, and it can never be read back
+        // to notice — the same rule the server form keeps.
+        const box = this.renderRoot.querySelector("#ap-secret") as unknown as { value?: string } | null;
+        const secret = (box?.value ?? "").trim();
+        if (secret !== "") { await setAuthProviderSecret(row.id, secret); }
+        this.authProviders = await listAuthProviders();
+      }))}
+    `;
+  }
+
   private tracingTab() {
     const t = this.tracing;
     const state = t === null ? "…"

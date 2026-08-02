@@ -987,6 +987,35 @@ export const setServerMine = (id: string, token: string) =>
 export const forgetServerMine = (id: string) =>
   call<unknown>(`/servers/${encodeURIComponent(id)}/mine`, { method: "DELETE" });
 
+// --- ways of signing in --------------------------------------------------------
+//
+// The client id is a row; the secret is never returned — `configured` is all
+// that can be known about it, the same contract a provider key and a
+// connector token keep.
+export type AuthProviderRow = {
+  id: string;
+  label: string;
+  issuer: string;
+  clientId: string;
+  scopes: string;
+  enabled: boolean;
+  configured?: boolean;
+};
+
+export const listAuthProviders = () => call<AuthProviderRow[]>("/auth-providers");
+export const saveAuthProvider = (row: AuthProviderRow, fresh: boolean) =>
+  call<AuthProviderRow>(fresh ? "/auth-providers" : `/auth-providers/${encodeURIComponent(row.id)}`, {
+    method: fresh ? "POST" : "PUT",
+    body: JSON.stringify({ id: row.id, label: row.label, issuer: row.issuer,
+      clientId: row.clientId, scopes: row.scopes, enabled: row.enabled }),
+  });
+export const setAuthProviderSecret = (id: string, clientSecret: string) =>
+  call<unknown>(`/auth-providers/${encodeURIComponent(id)}/secret`, {
+    method: "PUT", body: JSON.stringify({ clientSecret }),
+  });
+export const deleteAuthProvider = (id: string) =>
+  call<unknown>(`/auth-providers/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 // --- plugins ------------------------------------------------------------------
 //
 // The third noun. A skill is instructions, a connector is a service you can
