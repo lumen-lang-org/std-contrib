@@ -198,6 +198,18 @@ export class ArtifactPanel extends LitElement {
               box-shadow: 0 0 0 1px #e0e0de; border-radius: 3px; }
     .office .thumb-tag { position: absolute; right: 3px; bottom: 3px; background: #111c;
               color: #fff; font: 10px/1 var(--sans, sans-serif); padding: 2px 5px; border-radius: 6px; }
+    /* On a phone the page rail is not worth its width. 116px of a 390px
+       screen is a third of the document, spent on a miniature too small to
+       read, and everything it navigates to is reachable by scrolling the
+       pages themselves.
+
+       Only the page rail. A workbook's nav is its SHEET TABS, and no amount
+       of scrolling reaches another sheet — hiding those would strand every
+       tab but the first. Those already stack above the grid (.sheet-mode),
+       which is the right shape on a narrow screen anyway. */
+    @media (max-width: 640px) {
+      .office:not(.sheet-mode) .office-nav { display: none; }
+    }
     .office .office-doc { flex: 1; min-width: 0; overflow: auto; padding: 10px; }
     /* A page of a converted document. The canvas inside already carries its
        own width and height — pdf.js was told the column's width and drew to
