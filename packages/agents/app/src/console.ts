@@ -1586,10 +1586,15 @@ export class AgentConsole extends LitElement {
     if (!this.hasSearchSkill()) return;
     const left = chat.shadowRoot?.querySelector(".action-buttons-left") ?? null;
     if (left === null) return;
-    let globe = left.querySelector(".joule-search") as HTMLElement | null;
+    let globe = left.querySelector(".joule-globe") as HTMLElement | null;
     if (globe === null) {
       globe = document.createElement("button");
-      globe.className = "joule-search";
+      // Two classes: `joule-chip` is the shared look, `joule-globe` is
+      // this control's own identity. They were one class, and the Think
+      // button added later shared it — so this lookup found THAT button,
+      // decided the globe already existed, and search silently lost its
+      // control while Think wore search's on-state.
+      globe.className = "joule-chip joule-globe";
       // setAttribute, not .type: the variable is an HTMLElement (the query
       // above cannot know it found a button), and a cast for one attribute is
       // noise where an attribute call says the same thing.
@@ -1641,7 +1646,7 @@ export class AgentConsole extends LitElement {
     let bulb = left.querySelector(".joule-think") as HTMLElement | null;
     if (bulb === null) {
       bulb = document.createElement("button");
-      bulb.className = "joule-search joule-think";
+      bulb.className = "joule-chip joule-think";
       bulb.setAttribute("type", "button");
       // Inline SVG for the reason the globe is one: an nr-icon adopted into
       // another component's shadow root loses the tokens it styles from.
@@ -1709,16 +1714,16 @@ export class AgentConsole extends LitElement {
     already.jouleSearchStyled = true;
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(`
-      .joule-search { display: inline-flex; align-items: center; gap: 6px;
+      .joule-chip { display: inline-flex; align-items: center; gap: 6px;
         height: 28px; margin-left: 2px; padding: 0 11px 0 8px;
         border: 0; border-radius: 999px; background: none; cursor: pointer;
         font: inherit; font-size: 13px; line-height: 1;
         color: var(--nuraly-chatbot-placeholder, rgba(0,0,0,.45));
         transition: background-color .15s ease, color .15s ease; }
-      .joule-search svg { flex: none; }
-      .joule-search:hover { color: var(--nuraly-chatbot-brand-fg, #17171A);
+      .joule-chip svg { flex: none; }
+      .joule-chip:hover { color: var(--nuraly-chatbot-brand-fg, #17171A);
         background: var(--bg-sunken, rgba(0,0,0,.05)); }
-      .joule-search.on { color: var(--focus, #2563EB);
+      .joule-chip.on { color: var(--focus, #2563EB);
         background: var(--bg-user, rgba(37,99,235,.10)); }
     `);
     root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
