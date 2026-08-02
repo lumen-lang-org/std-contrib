@@ -46,7 +46,9 @@ def call(path, method="GET", body=None):
 # as a second artifact; the output name is dashed because an unquoted space
 # splits the command; and no briefing carries realistic sample output,
 # because a model shown one parrots it instead of running anything.
-def brief(what, command, ext, out_dir, spec, sample_name, closing, fill):
+def brief(what, command, ext, out_dir, spec, sample_name, closing, fill, source_name="spec.json"):
+    # /artifacts/docs/ as the artifact path the run knows it by: /docs/.
+    out_dir_short = out_dir.replace("/artifacts", "", 1)
     return f"""run_script with environment "office" — never "main". The document tools only
 exist in office; in main every one of them fails.
 
@@ -68,12 +70,43 @@ run_script({{
   source: <the script below, with your spec filled in>,
 }})
 
-cat > /tmp/spec.json <<'EOF'
+cat > /tmp/{source_name} <<'EOF'
 {spec}
 EOF
-{command} /tmp/spec.json {out_dir}<name>.{ext}
+{command} /tmp/{source_name} {out_dir}<name>.{ext}
+
+The source goes in /tmp and nowhere else. Anything written under /artifacts
+becomes an artifact with a card of its own, and a stray {source_name} sitting
+beside the document is noise the reader has to work out.
 
 {closing}
+
+CHANGING one you built earlier — adding a section, fixing a title, dropping
+a bullet — is the same command again, with one difference that the run
+enforces: `paths` must name the file you are replacing.
+
+  paths: ["{out_dir_short}<name>.{ext}"]
+
+That is the ARTIFACT path — no /artifacts in front of it. Writing over an
+existing artifact that was not named in `paths` is refused, and so is naming
+a path that does not exist, so copy the path from the file you made and
+change nothing about it. The command still writes to {out_dir}<name>.{ext},
+the same path as the first time.
+
+Write the WHOLE source: everything the finished {ext} should contain, the
+earlier content exactly as it was plus the change. Re-read what you wrote
+before, and carry every section across — a rebuild that answers the new
+request and drops the old content has destroyed the thing you were asked to
+add to.
+
+Changing a TITLE does not change the FILE NAME. The path stays what it was,
+whatever the document is now called: a new path is a new document, and the
+reader is left holding a link to the old one.
+
+Do not try to edit the file in place. A .{ext} is a zip; sed, grep and a
+shell loop over it produce nothing, and repeating a script that just failed
+produces nothing twice. If a run fails, change what you are doing rather
+than running it again.
 
 The output path must start {out_dir} and the file name is lowercase with
 dashes — {sample_name}, never a name with spaces; a space in an unquoted
@@ -194,7 +227,12 @@ match."""
 SKILLS = [
     {
         "name": "fill-doc",
-        "rank": 4,
+        # NOT featured, deliberately. featured_rank > 0 is what puts a skill in
+        # the composer's chip row, and that row is starting points — "make me a
+        # document". fill-doc acts on a document that is already in the
+        # conversation, so as a chip it offers something there is nothing to do
+        # yet. Public, so every agent still reaches it by name.
+        "rank": 0,
         "files": [],
         "description": "Fill the placeholders in a Word document that already exists, in place",
         "body": FILL_DOC_BODY,
@@ -206,17 +244,18 @@ SKILLS = [
         "description": "Write a Word document (.docx) from a title and blocks of headings, paragraphs and bullets",
         "body": brief(
             "document", "make-doc", "docx", "/artifacts/docs/",
-            """{"title": "<the document title>",
- "blocks": [
-  {"style": "h1", "text": "<a section heading>"},
-  {"style": "p",  "text": "<a paragraph of real content>"},
-  {"style": "li", "text": "<a bullet>"}
- ]}""",
+            """# <the document title>
+## <a section heading>
+<a paragraph of real content, written normally — no quoting, no escaping>
+- <a bullet>""",
             "project-brief.docx",
-            "Styles are h1, h2, p, li, in the order you list them. Headings carry the\n"
-            "structure — never fake one with a bold paragraph. Write real content into\n"
-            "the spec yourself; make-doc formats, it does not think.",
+            "The source is markdown: # is the title, ## a section, ### a sub-section,\n"
+            "- a bullet, and every other line a paragraph. Nothing needs quoting, and\n"
+            "an apostrophe or a comma in a sentence cannot break the run. Headings\n"
+            "carry the structure — never fake one with a bold paragraph. Write real\n"
+            "content yourself; make-doc formats, it does not think.",
             DOC_FILL,
+            source_name="brief.md",
         ),
     },
     {
