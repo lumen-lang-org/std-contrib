@@ -426,6 +426,16 @@ export type TrayFile = {
   uploadProgress: number;
 };
 
+/* What this turn's tools printed, for the cards to read numbers out of.
+   Only run_script results: a skill's result is a briefing the model was
+   given, not evidence of anything, and a search result is prose. See
+   CardEvidence in cards.ts — the model names the card, the tool supplies
+   what is long or numeric. */
+function toolEvidence(steps: readonly LiveStep[]): string[] {
+  return steps.filter((s) => s.name === "run_script" && !s.running && s.ok)
+    .map((s) => s.result ?? "").filter((t) => t !== "");
+}
+
 export class ChatSession {
   private listeners = new Map<string, Set<Listener>>();
   private threadId = "";
@@ -677,7 +687,8 @@ export class ChatSession {
         id: reply.runId,
         sender: "bot",
         text: stepsCard(this.live, this.thoughts)
-          + renderWithCards(reply.ok ? reply.text : reply.error, (s) => renderMarkdown(escapeHtml(s)))
+          + renderWithCards(reply.ok ? reply.text : reply.error, (s) => renderMarkdown(escapeHtml(s)),
+                            toolEvidence(this.live))
           + refCards(saved),
         refs: reply.refs,
         error: !reply.ok,
@@ -911,10 +922,13 @@ export class ChatSession {
 
     this.setMessages(turns.map((t, i) => {
       let card = "";
+      // Hoisted out of the branch below: the step rows draw the card AND
+      // feed the cards their numbers, so both need them (see toolEvidence).
+      let steps: LiveStep[] = [];
       if (t.role !== "user") {
         const mine: number[] = [];
         while (pending.length > 0 && pending[0] < t.seq) mine.push(pending.shift()!);
-        const steps = mine.flatMap((s) => rounds.get(s)!.steps);
+        steps = mine.flatMap((s) => rounds.get(s)!.steps);
         const thoughts = mine.flatMap((s) => rounds.get(s)!.thoughts);
         card = stepsCard(steps, thoughts);
       }
@@ -931,7 +945,8 @@ export class ChatSession {
         id: `t${i}`,
         sender: t.role === "user" ? "user" : "bot" as const,
         text: t.role === "user" ? escapeHtml(t.text)
-          : card + renderWithCards(t.text, (s) => renderMarkdown(escapeHtml(s))) + refCards(saved),
+          : card + renderWithCards(t.text, (s) => renderMarkdown(escapeHtml(s)), toolEvidence(steps))
+            + refCards(saved),
         refs: t.refs,
         timestamp: new Date().toISOString(),
       };

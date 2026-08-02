@@ -15,10 +15,25 @@
 // like the LumenUI plugin (htmlTags + renderHtmlBlock), so a future plugin
 // bundle can add card types without touching this file.
 
+/** What the tools in this turn printed — the card's second source.
+ *
+ *  A block is what the MODEL said; evidence is what a TOOL returned. The
+ *  difference decides which one a number should come from: the currency
+ *  script fetched a 10-point history on every run measured, and the model
+ *  copied it into its block on none of them — six pairs, six empty charts.
+ *  A model is being asked to transcribe fourteen numbers through prose, and
+ *  it will not do it reliably at any size worth running locally.
+ *
+ *  So the model's job shrinks to naming the card and its few short strings,
+ *  and anything long or numeric is read back out of the tool result it came
+ *  from. Nothing here is trusted as markup: it is parsed as JSON, and only
+ *  numbers and short strings are taken. */
+export type CardEvidence = readonly string[];
+
 export type CardPlugin = {
   id: string;
   htmlTags?: { name: string; open: string; close: string }[];
-  renderHtmlBlock?(name: string, content: string): string;
+  renderHtmlBlock?(name: string, content: string, evidence?: CardEvidence): string;
   /** Whether this plugin claims a block whose marker is NOT one of its own —
    *  judged from the parsed payload alone. See `renderWithCards`. */
   claimsShape?(data: Record<string, unknown>): boolean;
@@ -51,7 +66,8 @@ export function cardTagsBriefing(): string {
  * escape+markdown). indexOf walk, no RegExp — house style, and an unclosed
  * tag simply stays visible text.
  */
-export function renderWithCards(raw: string, renderText: (segment: string) => string): string {
+export function renderWithCards(raw: string, renderText: (segment: string) => string,
+                                evidence: CardEvidence = []): string {
   type Hit = { open: number; contentStart: number; contentEnd: number; end: number; plugin: CardPlugin; name: string };
 
   let out = "";
@@ -80,7 +96,13 @@ export function renderWithCards(raw: string, renderText: (segment: string) => st
       // name (tools.ts): the intent is not ambiguous, so refusing it is
       // pedantry that costs the whole card. So one more pass, claiming a
       // bracketed block by the SHAPE of its JSON rather than by its name.
-      const strayed = strayBlock(raw, pos);
+      const strayed = strayBlock(raw, pos, evidence)
+        // Third pass, anchored on the CLOSING marker. Observed: the model
+        // wrote the closer correctly and replaced the opener with a bare
+        // currency code — `USD{…}[/CURRENCY]` — so neither the exact match
+        // nor the paired stray block claims it, and a card that was one
+        // character from correct rendered as JSON in the reader's face.
+        ?? closedBlock(raw, pos, evidence);
       if (strayed !== null) {
         if (strayed.open > pos) out += renderText(raw.slice(pos, strayed.open));
         out += strayed.html;
@@ -94,7 +116,7 @@ export function renderWithCards(raw: string, renderText: (segment: string) => st
     const content = raw.slice(best.contentStart, best.contentEnd);
     let html = "";
     try {
-      html = best.plugin.renderHtmlBlock!(best.name, content) ?? "";
+      html = best.plugin.renderHtmlBlock!(best.name, content, evidence) ?? "";
     } catch {
       html = "";
     }
@@ -110,7 +132,7 @@ export function renderWithCards(raw: string, renderText: (segment: string) => st
 /** A `[WORD]{…json…}[/WORD]` block whose payload a plugin claims by shape, or
  *  null. The marker is only accepted as a pair — an opening [X] with the
  *  matching [/X] — so ordinary bracketed prose is never mistaken for one. */
-function strayBlock(raw: string, from: number):
+function strayBlock(raw: string, from: number, evidence: CardEvidence):
   { open: number; end: number; html: string } | null {
   let at = from;
   while (at < raw.length) {
@@ -137,11 +159,84 @@ function strayBlock(raw: string, from: number):
         if (!plugin.claimsShape(data)) continue;
         const tag = (plugin.htmlTags ?? [])[0];
         let html = "";
-        try { html = plugin.renderHtmlBlock(tag ? tag.name : name, body) ?? ""; } catch { html = ""; }
+        try { html = plugin.renderHtmlBlock(tag ? tag.name : name, body, evidence) ?? ""; } catch { html = ""; }
         if (html !== "") return { open, end: close + closer.length, html };
       }
     }
     at = open + 1;
+  }
+  return null;
+}
+
+/** A block whose CLOSING marker is a registered one, whatever its opener.
+ *
+ *  The payload is what decides it, exactly as in `strayBlock`: the JSON
+ *  immediately before a known closer, claimed only if a plugin recognises
+ *  its shape. Whatever the model put where the opening marker belonged —
+ *  `USD`, `[USD]`, nothing at all — is swallowed with the block rather than
+ *  left as a word stranded above the card. */
+function closedBlock(raw: string, from: number, evidence: CardEvidence):
+  { open: number; end: number; html: string } | null {
+  for (const plugin of REGISTRY) {
+    if (typeof plugin.claimsShape !== "function") continue;
+    if (typeof plugin.renderHtmlBlock !== "function") continue;
+    for (const tag of plugin.htmlTags ?? []) {
+      const close = raw.indexOf(tag.close, from);
+      if (close === -1) continue;
+      // The JSON ends at the closer; it starts at the last brace before it
+      // that parses. Scanning back from the first brace after `from` keeps
+      // this linear in the reply rather than quadratic.
+      const first = raw.indexOf("{", from);
+      if (first === -1 || first > close) continue;
+      let at = first;
+      while (at !== -1 && at < close) {
+        const body = raw.slice(at, close).trim();
+        let data: Record<string, unknown> | null = null;
+        try { data = JSON.parse(body) as Record<string, unknown>; } catch { data = null; }
+        if (data !== null && plugin.claimsShape(data)) {
+          let html = "";
+          try { html = plugin.renderHtmlBlock(tag.name, body, evidence) ?? ""; } catch { html = ""; }
+          if (html !== "") {
+            // Back over a mangled opener: an optional "]", a short word, an
+            // optional "[". Bounded, so ordinary prose before the card is
+            // never eaten.
+            let open = at;
+            if (open > from && raw[open - 1] === "]") open -= 1;
+            let word = 0;
+            while (open > from && word < 16 && /[A-Za-z0-9_-]/.test(raw[open - 1])) { open -= 1; word += 1; }
+            if (open > from && raw[open - 1] === "[") open -= 1;
+            return { open, end: close + tag.close.length, html };
+          }
+        }
+        at = raw.indexOf("{", at + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/** A rate history out of what a tool printed this turn, or null.
+ *
+ *  The scripts print one JSON object on a line of their own, so this looks
+ *  for exactly that and never tries to parse prose. Only two members are
+ *  read, and only numbers and short strings survive — a tool result is not
+ *  markup and is never treated as any. */
+function historyFromEvidence(evidence: CardEvidence):
+  { history: number[]; labels: string[] } | null {
+  for (const text of evidence) {
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (!line.startsWith("{") || !line.endsWith("}")) continue;
+      let data: Record<string, unknown>;
+      try { data = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+      const points = data.history;
+      if (!Array.isArray(points)) continue;
+      const history = points.filter((n): n is number => typeof n === "number" && isFinite(n));
+      if (history.length < 2) continue;
+      const named = Array.isArray(data.historyLabels) ? data.historyLabels : [];
+      const labels = named.map((l) => String(l).slice(0, 24));
+      return { history, labels };
+    }
   }
   return null;
 }
@@ -179,7 +274,7 @@ export const currencyCard: CardPlugin = {
   claimsShape(d: Record<string, unknown>): boolean {
     return typeof d.rate === "number" && typeof d.from === "string" && typeof d.to === "string";
   },
-  renderHtmlBlock(name: string, content: string): string {
+  renderHtmlBlock(name: string, content: string, evidence: CardEvidence = []): string {
     if (name !== "currency") return "";
     let d: CurrencyData;
     try { d = JSON.parse(content) as CurrencyData; } catch { return ""; }
@@ -202,11 +297,19 @@ export const currencyCard: CardPlugin = {
     // from the parsed floats — nothing model-written lands in the attribute —
     // and the labels are escaped like every other string here.
     let spark = "";
-    const hist = (d.history ?? []).filter((n) => typeof n === "number" && isFinite(n)).slice(0, 120);
+    // The model's copy first, the script's output when it has none — which
+    // is every measured run. See CardEvidence.
+    let series = d.history ?? [];
+    let seriesLabels = d.historyLabels ?? [];
+    if (series.length < 2) {
+      const found = historyFromEvidence(evidence);
+      if (found !== null) { series = found.history; seriesLabels = found.labels; }
+    }
+    const hist = series.filter((n) => typeof n === "number" && isFinite(n)).slice(0, 120);
     if (hist.length >= 2) {
       // Sliced only: the attribute as a whole is escaped below, and the element
       // renders labels as Lit text, which cannot become markup.
-      const labels = (d.historyLabels ?? []).slice(0, hist.length).map((l) => String(l).slice(0, 24));
+      const labels = seriesLabels.slice(0, hist.length).map((l) => String(l).slice(0, 24));
       spark = `<nr-sparkline style="margin-top:10px" points="${JSON.stringify(hist)}"`
         + ` labels="${esc(JSON.stringify(labels))}" unit="${to}"></nr-sparkline>`;
     }
