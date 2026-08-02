@@ -57,6 +57,9 @@ function wipe(): void {
   connect();
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS provider_credentials");
+  // auth_providers carries an ALTER (90.9 adds `kind`); left standing, the
+  // column survives the wipe and that migration fails as a duplicate next run.
+  execute(database, "DROP TABLE IF EXISTS auth_providers");
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
   execute(database, "DROP TABLE IF EXISTS agent_skills");
@@ -151,19 +154,19 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Fifty-five: ten tables from mappings, the plugins pair (a bundle's
+  // Fifty-seven: ten tables from mappings, the plugins pair (a bundle's
   // receipt and what it brought — migrations 90.3 and 90.4), three link
-  // tables, the credentials table, the index, the eleven ALTERs that add
+  // tables, the credentials table, the index, the twelve ALTERs that add
   // columns those tables did not have when they were first created (the
-  // newest two being a skill's source and sourceUrl, 90.1 and 90.2 — this
-  // count sat at 48 while both were already in the plan, which is exactly
-  // the "canary nobody updates" failure the healthz test warns about), the
-  // twelve statements of the named seed, the four of the derived seed, and
-  // the three that repair what those four wrote where they did find rows.
-  // Every one of them changes nothing on an empty database, which is the
-  // point of the empty case. Asserting the number rather than "some" is what
-  // catches a migration silently dropped from the plan.
-  expect(r.applied == 55);
+  // newest being auth_providers.kind, 90.9; before it a skill's source and
+  // sourceUrl, 90.1 and 90.2 — this count sat at 48 while both were already
+  // in the plan, which is exactly the "canary nobody updates" failure the
+  // healthz test warns about), the twelve statements of the named seed, the
+  // four of the derived seed, and the three that repair what those four wrote
+  // where they did find rows. Every one of them changes nothing on an empty
+  // database, which is the point of the empty case. Asserting the number
+  // rather than "some" is what catches a migration silently dropped.
+  expect(r.applied == 57);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -171,7 +174,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 55);
+  expect(migrate(database, schemaPlan(database)).applied == 57);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

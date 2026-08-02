@@ -2175,6 +2175,7 @@ class AuthProviderApi {
       if (i > 0) { out = out + ","; }
       out = out + "{\"id\":" + JSON.stringify(rows[i].id)
         + ",\"label\":" + JSON.stringify(rows[i].label)
+        + ",\"kind\":" + JSON.stringify(rows[i].kind == "" ? "oidc" : rows[i].kind)
         + ",\"issuer\":" + JSON.stringify(rows[i].issuer)
         + ",\"clientId\":" + JSON.stringify(rows[i].clientId)
         + ",\"scopes\":" + JSON.stringify(rows[i].scopes)
@@ -2203,7 +2204,8 @@ class AuthProviderApi {
         if (out.length > 1) { out = out + ","; }
         out = out + "{\"id\":" + JSON.stringify(rows[i].id)
           + ",\"label\":" + JSON.stringify(rows[i].label)
-          + ",\"issuer\":" + JSON.stringify(rows[i].issuer)
+          + ",\"kind\":" + JSON.stringify(rows[i].kind == "" ? "oidc" : rows[i].kind)
+        + ",\"issuer\":" + JSON.stringify(rows[i].issuer)
           + ",\"clientId\":" + JSON.stringify(rows[i].clientId)
           + ",\"clientSecret\":" + JSON.stringify(secret)
           + ",\"scopes\":" + JSON.stringify(rows[i].scopes) + "}";
@@ -2267,7 +2269,11 @@ class AuthProviderApi {
 export function authProviderProblem(row: AuthProviderRow): string {
   if (row.id.trim() == "") { return "a provider needs an id — it is what the callback URL carries"; }
   if (row.label.trim() == "") { return "a provider needs a label — it is what the sign-in button says"; }
-  if (!row.issuer.startsWith("https://")) {
+  let kind = row.kind == "" ? "oidc" : row.kind;
+  if (kind != "oidc" && kind != "github") { return "kind is 'oidc' or 'github'"; }
+  // github's endpoints are the framework's, not the row's — it carries no
+  // issuer. Only an OIDC provider is discovered from one.
+  if (kind == "oidc" && !row.issuer.startsWith("https://")) {
     return "the issuer is an https address whose /.well-known/openid-configuration describes the provider";
   }
   if (row.clientId.trim() == "") { return "a client id is required"; }

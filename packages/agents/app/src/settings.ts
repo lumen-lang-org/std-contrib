@@ -2291,10 +2291,12 @@ export class ConsoleSettings extends LitElement {
    * from a card fills the form in; it does not own the result. */
   private signInTab() {
     const ready = [
-      { id: "google", label: "Google", issuer: "https://accounts.google.com",
+      { id: "google", label: "Google", kind: "oidc", issuer: "https://accounts.google.com",
         note: "Console: APIs & Services → Credentials → OAuth client ID (Web application)" },
-      { id: "linkedin", label: "LinkedIn", issuer: "https://www.linkedin.com/oauth",
+      { id: "linkedin", label: "LinkedIn", kind: "oidc", issuer: "https://www.linkedin.com/oauth",
         note: "LinkedIn Developers → your app → Auth → Sign In with LinkedIn using OpenID Connect" },
+      { id: "github", label: "GitHub", kind: "github", issuer: "",
+        note: "GitHub → Settings → Developer settings → OAuth Apps → New OAuth App" },
     ];
     const have = new Set(this.authProviders.map((p) => p.id));
     return html`
@@ -2317,7 +2319,7 @@ export class ConsoleSettings extends LitElement {
               ${have.has(r.id)
                 ? html`<span class="have">Added</span>`
                 : html`<button class="act" @click=${() => this.open({ kind: "authp", fresh: true,
-                    row: { id: r.id, label: r.label, issuer: r.issuer, clientId: "",
+                    row: { id: r.id, label: r.label, kind: r.kind, issuer: r.issuer, clientId: "",
                            scopes: "", enabled: false } })}>Add</button>`}
             </div>
           </div>`)}
@@ -2329,7 +2331,7 @@ export class ConsoleSettings extends LitElement {
         : html`<table><tbody>
             ${this.authProviders.map((p) => html`<tr>
               <td class="name">${p.label}</td>
-              <td class="fill"><span class="slug">${p.issuer}</span></td>
+              <td class="fill"><span class="slug">${p.kind === "github" ? "github.com (OAuth2)" : p.issuer}</span></td>
               <td>${p.configured === true
                 ? html`<span class="tag">secret stored</span>`
                 : html`<span class="tag off">no secret</span>`}</td>
@@ -2361,7 +2363,7 @@ export class ConsoleSettings extends LitElement {
           on: (v) => this.patch({ id: v }) })}
         ${this.text({ id: "ap-label", label: "Button label", value: row.label, required: true,
           placeholder: "Google", on: (v) => this.patch({ label: v }) })}
-        ${this.text({ id: "ap-issuer", label: "Issuer", value: row.issuer, required: true, wide: true,
+        ${(row.kind || "oidc") === "github" ? "" : this.text({ id: "ap-issuer", label: "Issuer", value: row.issuer, required: true, wide: true,
           placeholder: "https://accounts.google.com",
           help: "Its /.well-known/openid-configuration is what describes every endpoint.",
           on: (v) => this.patch({ issuer: v }) })}

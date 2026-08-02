@@ -34,11 +34,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Dependencies first, so a source edit does not reinstall them. BOTH vendored
-# tarballs are part of this layer — the framework and LumenUI — because
-# package.json names each by path and `npm ci` cannot run without them. See
-# MIGRATION-LUMENJS.md, "How the nuraly libraries are vendored today", for what
-# is in each and how to refresh it.
+# Dependencies first, so a source edit does not reinstall them. The framework
+# @nuraly/lumenjs now installs from npm (package.json pins ^0.17.0); LumenUI is
+# still vendored (its overlay/dark-token build is not on npm), so its tarball is
+# part of this layer because package.json names it by path and `npm ci` cannot
+# run without it. See MIGRATION-LUMENJS.md for what is vendored and why.
 COPY package.json package-lock.json ./
 COPY vendor ./vendor
 # --omit=dev: the devDependencies are the test kit and the type checker,
@@ -51,9 +51,8 @@ COPY vendor ./vendor
 # no `overlay` component at all. It built on a laptop only because someone had
 # copied the directory into node_modules by hand, and `npm ci` starts from the
 # lockfile and can fetch nothing that is not published. LumenUI is therefore
-# vendored the same way the framework is, and this install is a clean one from
-# the lockfile in every environment — which is the only kind of install an
-# image gets.
+# vendored, and this install is a clean one from the lockfile in every
+# environment — which is the only kind of install an image gets.
 RUN npm ci --omit=dev
 
 COPY tsconfig.json lumenjs.config.ts lumenjs.plugins.js lumenjs.server.js head.html ./
