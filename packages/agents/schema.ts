@@ -269,6 +269,8 @@ export type ScriptImageRow = {
   // The reference docker is handed: agents-runtime:1, ghcr.io/x/y@sha256:...
   image: string,
   enabled: bool,
+  // What is inside, for the tool description the model reads.
+  summary: string,
 };
 
 // A named set of instructions an agent can load mid-run. The description is
@@ -616,12 +618,31 @@ export function credentialsMapping(): DbRepository {
   return repository("provider_credentials", "id", "id", fs);
 }
 
+// Migration 65's shape, frozen — a migration's SQL is checksummed at apply
+// time, so this cannot grow. See skillsMappingV1 for the rule.
+export function scriptImagesMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("image", "image", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("script_images", "id", "id", fs);
+}
+
 export function scriptImagesMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("label", "label", "text"),
     field("image", "image", "text"),
     field("enabled", "enabled", "bool"),
+    // What is inside it, in the model's own reading: "python 3.12, playwright
+    // and chromium, requests, beautifulsoup4". The name alone says nothing —
+    // a model choosing between "search" and "browser" is guessing unless
+    // something says which one carries a browser, and guessing wrong costs a
+    // container start and a failed import. Empty is fine and means the tool
+    // offers the name without a claim about its contents.
+    field("summary", "summary", "text"),
   ];
   return repository("script_images", "id", "id", fs);
 }
@@ -1333,7 +1354,7 @@ export function schemaPlan(db: Db): Migration[] {
     // The images an operator will run scripts in, and the agent's choice among
     // them. Two migrations because they are two facts: the table is new, the
     // column is an ALTER on a table whose CREATE was checksummed long ago.
-    migration("65", "curated script images", createTableSql(db, scriptImagesMapping())),
+    migration("65", "curated script images", createTableSql(db, scriptImagesMappingV1())),
     migration("66", "an agent chooses its script image",
       "ALTER TABLE agents ADD COLUMN script_image_id " + db.textType + " NOT NULL DEFAULT ''"),
     // Skills and what they ship. Three migrations because they are three
@@ -1803,6 +1824,10 @@ export function schemaPlan(db: Db): Migration[] {
       createTableSql(db, pluginsMapping())),
     migration("90.4", "what a plugin brought, so removing it can take it back",
       createTableSql(db, pluginItemsMapping())),
+    // What an environment carries, so run_script's description can say it and
+    // a model can choose between "search" and "browser" on more than a name.
+    migration("90.5", "an environment says what is inside it",
+      "ALTER TABLE script_images ADD COLUMN summary " + db.textType + " NOT NULL DEFAULT ''"),
   ];
   return plan;
 }

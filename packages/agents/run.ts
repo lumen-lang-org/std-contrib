@@ -341,7 +341,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     // per process and returns nothing when it is absent or broken, so the
     // tool is never offered where it could only fail — a model cannot call a
     // tool it was never told about (RUN-SCRIPT.md's last rule).
-    let scripts = scriptTools();
+    let scripts = scriptTools(db);
     let sc: int = 0;
     while (sc < scripts.length) {
       specs.push(scripts[sc]);

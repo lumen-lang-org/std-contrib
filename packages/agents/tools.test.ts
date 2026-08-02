@@ -12,8 +12,8 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
 import { storeCredential } from "./credentials.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, PromptRow, AgentRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing , userTokenKey } from "./tools.ts";
+import { ModelRow, ModelConfigRow, PromptRow, AgentRow, ScriptImageRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing , userTokenKey } from "./tools.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
 import { scriptProbeReset } from "./run-script.ts";
@@ -409,19 +409,44 @@ function dockerEmulated(): void {
 test("run_script is offered only where docker answers, and not offered at all otherwise", () => {
   dockerEmulated();
   scriptProbeReset();
-  let offered = scriptTools();
+  let offered = scriptTools(database);
   expect(offered.length == 1);
   expect(offered[0].name == "run_script");
   // A broken docker means the tool is absent — no refusing stub, no name the
   // model could ever call (RUN-SCRIPT.md's last rule).
   fakeDocker("#!/bin/sh\nexit 1\n");
   scriptProbeReset();
-  expect(scriptTools().length == 0);
+  expect(scriptTools(database).length == 0);
   scriptProbeReset();
 });
 
+test("the tool names the environments an operator enabled", () => {
+  seeded();
+  let img: ScriptImageRow = { id: "img-search", label: "Search", image: "agents-search:1", enabled: true, summary: "python, playwright, ddg and bing fallbacks" };
+  persist(database, scriptImagesMapping(), JSON.stringify(img));
+  let off: ScriptImageRow = { id: "img-old", label: "Retired", image: "old:1", enabled: false, summary: "" };
+  persist(database, scriptImagesMapping(), JSON.stringify(off));
+
+  // Lowercased, because that is what scriptImageForEnv matches on — a model
+  // told "Search" and a resolver comparing "search" is a name that never
+  // resolves. The disabled row is absent: the list is what an operator
+  // currently offers, not what they once did.
+  let names = scriptEnvNames(database);
+  expect(names.length == 1);
+  // Name, then what is inside — the second half is what makes a choice
+  // between two environments informed rather than a coin toss.
+  expect(names[0] == "search (python, playwright, ddg and bing fallbacks)");
+
+  // And the description says so, so a model can pick one without a skill
+  // body having to teach it the name.
+  let spec = scriptTool(names);
+  expect(spec.schema.indexOf("search") >= 0);
+  expect(spec.schema.indexOf("playwright") >= 0);
+});
+
 test("the tool tells the model what only telling can teach", () => {
-  let spec = scriptTool();
+  let none: string[] = [];
+  let spec = scriptTool(none);
   expect(spec.name == "run_script");
   expect(spec.description.indexOf("persists between runs") >= 0);
   expect(spec.description.indexOf("pip install and npm install work") >= 0);

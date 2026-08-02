@@ -619,7 +619,31 @@ function searchAnswer(found: ArtifactSearch): string {
 // propagates, and what the reply names. All of that is invisible in a single
 // successful call, so — like SELF_CONTAINED above — it has to be said up
 // front.
-export function scriptTool(): ToolSpec {
+// The environments an operator has enabled, as the names run_script takes:
+// each image row's label, lowercased, which is exactly what
+// scriptImageForEnv matches on. Read from the database rather than listed in
+// prose, so an operator adding an image makes it reachable the same minute.
+export function scriptEnvNames(db: Db): string[] {
+  let out: string[] = [];
+  let held = listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]);
+  if (held == "" || held == "[]") { return out; }
+  let rows: ScriptImageRow[] = JSON.parse<ScriptImageRow[]>(held);
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].label != "" && rows[i].image != "") {
+      // Name first, then what is inside it. A model choosing between "search"
+      // and "browser" on the names alone is guessing; the summary is what
+      // makes the choice informed, and an image with none still offers its
+      // name rather than being hidden.
+      let name = rows[i].label.toLowerCase();
+      out.push(rows[i].summary == "" ? name : name + " (" + rows[i].summary + ")");
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+export function scriptTool(envs: string[]): ToolSpec {
   return toolSpec("run_script",
     "Run a program against this conversation's artifacts when tool calls alone would take too many steps — "
     + "transform hundreds of entries at once, validate with a real library, compute before deciding what to write. "
@@ -656,14 +680,34 @@ export function scriptTool(): ToolSpec {
     + "\"mayCreate\":{\"type\":\"boolean\",\"description\":\"Whether files the script creates beyond paths are saved "
     + "as new artifacts. Default false: a created file is reported and dropped.\"},"
     + "\"environment\":{\"type\":\"string\",\"description\":\"Which of this conversation's environments runs it; "
-    + "empty means main. A new name creates another container.\"}},"
+    + "empty means main, the agent's own image. " + envSentence(envs)
+    + " Each name is a container of its own, created on first use and kept for the "
+    + "conversation, so one conversation can use several — install in one without "
+    + "disturbing another. A name that is not on the list refuses rather than falling "
+    + "back, because a script running without the libraries it expects fails later and "
+    + "less clearly.\"}},"
     + "\"required\":[\"language\",\"source\",\"paths\"]}");
 }
 
-export function scriptTools(): ToolSpec[] {
+// The names, as a sentence the model reads — or nothing at all when the
+// operator has curated no images, where naming an empty list would be worse
+// than saying nothing.
+function envSentence(envs: string[]): string {
+  if (envs.length == 0) { return ""; }
+  let names = "";
+  let i: int = 0;
+  while (i < envs.length) {
+    if (i > 0) { names = names + (i == envs.length - 1 ? " and " : ", "); }
+    names = names + envs[i];
+    i = i + 1;
+  }
+  return "This deployment offers, by name: " + names + ".";
+}
+
+export function scriptTools(db: Db): ToolSpec[] {
   let out: ToolSpec[] = [];
   if (!scriptDockerWorks()) { return out; }
-  out.push(scriptTool());
+  out.push(scriptTool(scriptEnvNames(db)));
   return out;
 }
 
