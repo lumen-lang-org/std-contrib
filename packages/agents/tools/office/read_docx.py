@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Read a document as markdown, so a model can see what it is editing.
 
 pandoc, not a python binding: it is the reference implementation of what
@@ -31,9 +32,15 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__)
         return 2
-    path = Path(argv[1])
+    # Flags anywhere: the file is the first argument that is not a flag.
+    holders = "--holders" in argv
+    rest = [a for a in argv[1:] if not a.startswith("-")]
+    if not rest:
+        print(__doc__)
+        return 2
+    path = Path(rest[0])
     text = markdown(path)
-    if "--holders" in argv:
+    if holders:
         # pandoc escapes markdown punctuation and rewrites typography — a
         # placeholder comes back as "<name --- role\\>". Undo both, or the
         # names printed here do not match the ones in the document and a

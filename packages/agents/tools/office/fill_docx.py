@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Fill a Word document by replacing its placeholders, whatever Word did to them.
 
 Two paths, chosen by what the template actually contains:
@@ -121,7 +122,11 @@ def main(argv: list[str]) -> int:
     if len(argv) < 4:
         print(__doc__)
         return 2
-    src, dst, spec = Path(argv[1]), Path(argv[2]), argv[3]
+    rest = [a for a in argv[1:] if not a.startswith("--")]
+    if len(rest) < 3:
+        print(__doc__)
+        return 2
+    src, dst, spec = Path(rest[0]), Path(rest[1]), rest[2]
     fills = json.loads(Path(spec).read_text()) if Path(spec).exists() else json.loads(spec)
     result = fill_jinja(src, dst, fills) if _looks_jinja(src) else fill_angle(src, dst, fills)
     result["still_unfilled"] = remaining(dst)

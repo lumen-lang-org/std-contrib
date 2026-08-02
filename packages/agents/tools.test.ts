@@ -13,7 +13,7 @@ import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts"
 import { storeCredential } from "./credentials.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, ScriptImageRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing , userTokenKey } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing , userTokenKey } from "./tools.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
 import { scriptProbeReset } from "./run-script.ts";
@@ -442,6 +442,24 @@ test("the tool names the environments an operator enabled", () => {
   let spec = scriptTool(names);
   expect(spec.schema.indexOf("search") >= 0);
   expect(spec.schema.indexOf("playwright") >= 0);
+});
+
+test("a quote in an operator's summary cannot break the request body", () => {
+  seeded();
+  // The schema is built by concatenation, so an unescaped quote closes the
+  // description early and the whole body becomes invalid JSON. Observed on
+  // prod: a summary gained an example command with quotes in it and EVERY
+  // conversation failed with "The input data is not valid json".
+  let img: ScriptImageRow = { id: "img-q", label: "office", image: "x:1", enabled: true,
+    summary: "run fill-docx in.docx out.docx '{\"<KEY>\":\"value\"}' first" };
+  persist(database, scriptImagesMapping(), JSON.stringify(img));
+  let spec = scriptTool(scriptEnvNames(database));
+  // Parses. That is the whole assertion — a schema that does not is a
+  // deployment where nothing answers.
+  let back: ToolSpec = JSON.parse<ToolSpec>("{\"name\":\"x\",\"description\":\"y\",\"schema\":"
+    + JSON.stringify(spec.schema) + "}");
+  expect(back.schema.length > 0);
+  expect(jsonSafe("a \" b").indexOf("\\") >= 0);
 });
 
 test("the tool tells the model what only telling can teach", () => {
