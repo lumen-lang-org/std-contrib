@@ -792,6 +792,21 @@ test("an environment name is refused before anything exists: bytes counted as by
   expect(argvLines().length == 0);
 });
 
+test("a source that is the run_script(...) call itself is refused before the shell sees it", () => {
+  fresh();
+  dockerEmulated();
+  // What a weak model emits: the whole call re-wrapped into `source`. Run as-is
+  // the shell reports "word unexpected" on the `(`; caught here it names the fix.
+  let ran = running("sh",
+    "run_script(environment=\"search\", language=\"sh\", source='python /skills/x.py \"q\"')",
+    [], false, "1785200000000");
+  expect(!ran.ok);
+  expect(ran.problem.includes("run_script(...) call itself"));
+  // Nothing ran: no row minted, docker untouched.
+  expect(envList(database, "t1").length == 0);
+  expect(argvLines().length == 0);
+});
+
 test("an install-only run has no paths, and mayCreate still gates what it leaves behind", () => {
   fresh();
   dockerEmulated();

@@ -1033,6 +1033,13 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   if (run.source == "") {
     return scriptRefused("there is no script to run: source is empty");
   }
+  // A weaker model sometimes fills `source` with the whole run_script(...) call
+  // instead of the script — the shell then chokes on the `(` with a cryptic
+  // "word unexpected". Caught here so the reply names the mistake the model can
+  // fix, rather than a dash parse error it cannot.
+  if (run.source.trim().startsWith("run_script(")) {
+    return scriptRefused("source is the run_script(...) call itself, not a script: pass only the command to run — e.g. source=\"python skill.py 'query'\", not source=\"run_script(...)\"");
+  }
   // An empty paths list is an install-only run: nothing materialised, nothing
   // to reconcile against, and mayCreate still gates anything the script
   // leaves behind. Refusing this cost a real model two steps of its budget
