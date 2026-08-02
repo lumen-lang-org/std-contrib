@@ -95,9 +95,15 @@ export class ModelPicker extends LitElement {
        model answers is a setting, the chevron still says it is changeable, and
        one tap shows the name in the menu. 40vw of a 390px screen spent on
        "Qwen 3 8B (local vLL…" is 40vw spent on a truncation. */
+    /* One label or the other, never both. */
+    .trigger .short { display: none; }
     @media (max-width: 640px) {
-      .trigger span { display: none; }
-      .trigger { padding: 5px 7px; }
+      .trigger .long { display: none; }
+      .trigger .short { display: inline; }
+      /* Bounded, so it can never be the thing that overflows the row again:
+         the group it sits in cannot shrink, so anything too wide paints over
+         the chips to its left rather than clipping. */
+      .trigger { padding: 5px 6px 5px 8px; max-width: 33vw; }
     }
 
     /* Upwards, because the composer sits at the bottom of the window and a
@@ -168,6 +174,26 @@ export class ModelPicker extends LitElement {
     return this.defaultLabel === "" ? "Default" : this.defaultLabel;
   }
 
+  /** The same answer, short enough for a phone.
+   *
+   *  Which model is answering has to stay READABLE — a lone chevron says
+   *  something is changeable without saying what it is set to, which is the
+   *  one thing this control exists to say. But the full label does not fit:
+   *  "Qwen 3 8B (local vLLM)" in a strip that also holds two chips and a send
+   *  button is a truncation at best, and at worst it overflows its own group
+   *  and paints across the chips.
+   *
+   *  So the label is cut at its first bracket or dash — the parenthetical is
+   *  where a label keeps its deployment detail ("(local vLLM)", "— fast"),
+   *  and the head is the name a person actually chose. "Auto" and "Default"
+   *  are already short and come through untouched. */
+  private showingShort(): string {
+    const full = this.showing();
+    const head = full.split(/[(\u2014-]/)[0].trim();
+    const short = head === "" ? full : head;
+    return short.length > 14 ? short.slice(0, 13).trimEnd() + "\u2026" : short;
+  }
+
   /** Concatenated rather than interpolated: a nested template literal inside
    *  an html`` literal is legal and is also exactly the shape that has ended
    *  the outer literal by accident four times in this app. */
@@ -233,7 +259,8 @@ export class ModelPicker extends LitElement {
       <nr-dropdown trigger="click" placement="top-end" animation="scale"
         title="The model for the next message">
         <button slot="trigger" class="trigger" aria-haspopup="menu">
-          <span>${this.showing()}</span>
+          <span class="long">${this.showing()}</span>
+          <span class="short">${this.showingShort()}</span>
           <nr-icon name="chevron-down" size="small"></nr-icon>
         </button>
         <div slot="content" class="menu" role="menu">

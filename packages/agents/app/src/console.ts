@@ -1809,6 +1809,16 @@ export class AgentConsole extends LitElement {
          which is not. */
       .action-buttons-right { flex: none; }
       .action-buttons-left { min-width: 0; overflow: hidden; }
+      /* A shorter box on a phone. The component opens with two lines of
+         writing room (3.5rem), which is right on a desktop home screen and
+         is a lot of a 390x844 window once the keyboard has taken half of it
+         — 132px of composer over a transcript you are trying to read. One
+         line and a half at rest, still growing to the same max as you type,
+         and the padding comes in with it. */
+      @media (max-width: 640px) {
+        .input-box__input { min-height: 2.25rem; }
+        .input-container { padding-top: 4px; padding-bottom: 4px; }
+      }
     `);
     root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
   }
@@ -2953,7 +2963,14 @@ export class AgentConsole extends LitElement {
             welcome-message=${WORDMARK}
             placeholder="Ask ${this.agentName()}…"
             attach-icon="plus"
-            .i18n=${{ input: { attachButton: "" } }}
+            <!-- Labels blanked, marks kept. The attach button was already
+                 wordless; Send and Stop join it, because the composer's row
+                 is the tightest strip on a phone and a mark that everyone
+                 knows does not need naming twice. The ARIA names live in
+                 separate keys (sendMessageLabel / stopQueryLabel) and are
+                 untouched, so a screen reader still hears the verb. -->
+            .i18n=${{ input: { attachButton: "" },
+                      send: { sendButton: "", stopButton: "" } }}
             .attachItems=${this.attachMenu()}
           ></nr-chatbot>
           ${this.session.getState().messages.length > 0 ? "" : this.capabilityRow()}
