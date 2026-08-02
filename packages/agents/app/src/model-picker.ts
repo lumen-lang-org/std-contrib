@@ -84,6 +84,22 @@ export class ModelPicker extends LitElement {
     .trigger[aria-expanded="true"] { background: var(--bg-sunken); color: var(--fg); }
     .trigger span { overflow: hidden; text-overflow: ellipsis; }
 
+    /* On a phone the name goes and the chevron stays.
+       Two reasons, and the first is a real bug rather than a preference: the
+       composer's right-hand group is justify-content: flex-end and cannot
+       shrink, so anything too wide for it spills LEFTWARD, out of its own box
+       and straight over the Search chip — "SearchDefault" in one line of
+       overlapping text. It is worst mid-run, when the send button becomes
+       "Stop" and takes the room with it.
+       The second is that the name is the least urgent thing in the row: which
+       model answers is a setting, the chevron still says it is changeable, and
+       one tap shows the name in the menu. 40vw of a 390px screen spent on
+       "Qwen 3 8B (local vLL…" is 40vw spent on a truncation. */
+    @media (max-width: 640px) {
+      .trigger span { display: none; }
+      .trigger { padding: 5px 7px; }
+    }
+
     /* Upwards, because the composer sits at the bottom of the window and a
        menu below it would open off the screen. It escapes the composer because
        .input-container is overflow:visible and position:relative — the same
