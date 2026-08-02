@@ -84,15 +84,27 @@ write_artifact: a .{ext} is a zip, not text, and the engine refuses a body
 that is not really one."""
 
 
-DOC_FILL = """To fill it: one run to see its placeholders, one to fill them. Both are
+# The two names one file has, and the sentence every fill briefing has to
+# carry. An artifact's path is /docs/notes.docx; a run materialises it at
+# /artifacts/docs/notes.docx, which is the only one that opens. The old
+# fill-doc briefing showed the artifact path in both `paths` and the command,
+# and the run that followed it read a file that was not there and told the
+# person their upload was missing.
+PREFIX_RULE = """The path in `paths` is the ARTIFACT path (/docs/notes.docx). The path in the
+command is where the run puts it: /artifacts + that (/artifacts/docs/notes.docx).
+They are two names for one file and only the second one opens."""
+
+DOC_FILL = f"""To fill it: one run to see its placeholders, one to fill them. Both are
 language "sh", environment "office", with the document named in paths and
 mayCreate false.
+
+{PREFIX_RULE}
 
   read-docx /artifacts/<its path> --holders
 
 then, with real values for the placeholders it printed:
 
-  fill-docx /artifacts/<its path> /artifacts/<its path> '{"<TITLE>": "...", "<PERIOD>": "..."}'
+  fill-docx /artifacts/<its path> /artifacts/<its path> '{{"<TITLE>": "...", "<PERIOD>": "..."}}'
 
 Same path in and out, so the run appends a version to the document they
 chose. Leave a placeholder you cannot answer as it is — unanswered should
@@ -119,7 +131,74 @@ fill("/artifacts/<the template's path>",
      {"Problem": ["...", "..."]})"""
 
 
+FILL_DOC_BODY = f"""Fill a Word document (.docx) that already exists — a template the
+conversation started from, or one somebody uploaded.
+
+run_script with environment "office" — never "main". The document tools only
+exist in office; in main every one of them fails.
+
+{PREFIX_RULE}
+
+DO IT IN THIS ORDER. Skipping step 1 is how a run invents placeholder names
+that are not in the document and then tells the person their template is
+broken.
+
+1. READ IT FIRST. Never guess what the placeholders are called:
+
+    run_script(environment="office", language="sh", paths=["<the artifact path>"], source=
+      'read-docx "/artifacts/<the artifact path>" --holders')
+
+   It prints every <PLACEHOLDER> the document actually contains. Use those
+   names exactly — they are usually not the words the person said.
+
+2. FILL IT, saving over the same path so the run appends a version to the
+   document they are looking at rather than making a second one:
+
+    run_script(environment="office", language="sh", paths=["<the artifact path>"], mayCreate=false, source=
+      'fill-docx "/artifacts/<the artifact path>" "/artifacts/<the same path>" \\'{{"<TITLE>": "...", "<DATE>": "..."}}\\'')
+
+   It answers JSON: {{how, filled, left, still_unfilled}}. `filled` counts each
+   replacement, `left` is keys that matched nothing — a key in `left` is YOUR
+   mistake, not the document's — and `still_unfilled` lists the placeholders a
+   reader will still see.
+
+3. SAY WHAT IS STILL EMPTY. Report `still_unfilled` to the person rather than
+   claiming the document is done. An unanswered placeholder is left visible on
+   purpose: it should look unanswered, not become a blank line.
+
+CORRECTING something you already filled is the same call with different
+keys. The placeholder is GONE — your own fill replaced it — so passing it
+again matches nothing, and a non-empty `left` means you are NOT FINISHED:
+run it again in the same turn rather than telling the person it failed. Any
+string is a valid key, so use the value you filled in earlier:
+
+    fill-docx "/artifacts/<path>" "/artifacts/<path>" '{{"<the text as it reads now>": "<the new text>"}}'
+
+The document gains another version; you are never starting over.
+
+Why a script and not python-docx by hand: Word splits text across runs — a
+revision id, a spell-check marker, a language switch — so "<MEETING>" is
+commonly three separate runs, and the placeholder is stored XML-escaped as
+&lt;MEETING&gt; inside word/document.xml. Any find-and-replace that walks
+paragraph.runs finds nothing and reports the document is missing a
+placeholder that is plainly on the page. These scripts merge the runs first
+and search the escaped form, which is what makes the edit work at all.
+
+A .dotx or a template written with {{{{ jinja }}}} tags is handled by the same
+call — fill_docx.py picks the right path itself.
+
+NEVER use edit_artifact on a .docx. It is a zip; there is no text in it to
+match."""
+
+
 SKILLS = [
+    {
+        "name": "fill-doc",
+        "rank": 4,
+        "files": [],
+        "description": "Fill the placeholders in a Word document that already exists, in place",
+        "body": FILL_DOC_BODY,
+    },
     {
         "name": "make-doc",
         "rank": 1,
@@ -185,6 +264,11 @@ SKILLS = [
 # model finds when it goes looking for something to import.
 OBSOLETE_FILES = {
     "sk-make-doc": ["sk-make-doc-builder", "sk-make-doc-editor"],
+    # fill-doc staged copies of the three helpers that are now on PATH in the
+    # office image. Two copies of one script is the drift that produced the
+    # build_doc.py/make_doc mismatch; the image is the source of truth.
+    "sk-fill-doc": ["sk-fill-doc:fill_docx.py", "sk-fill-doc:merge_runs.py",
+                    "sk-fill-doc:read_docx.py"],
     "sk-make-sheet": ["sk-make-sheet-builder"],
     "sk-make-deck": ["sk-make-deck-builder"],
 }
