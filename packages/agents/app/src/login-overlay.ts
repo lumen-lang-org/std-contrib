@@ -70,8 +70,6 @@ export class LoginOverlay extends LitElement {
                  animation: login-dot 8s linear infinite; }
     @keyframes login-dot { to { filter: hue-rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .mark .dot { animation: none; } }
-    h1 { margin: 0; font: 600 21px var(--display, inherit); letter-spacing: -.01em;
-         text-align: center; }
     p.lede { margin: -6px 0 4px; color: var(--muted, #667); font-size: 13.5px;
              text-align: center; }
     nr-input { display: block; width: 100%; }
@@ -129,8 +127,9 @@ export class LoginOverlay extends LitElement {
   render() {
     return html`
       <div class="card" @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter") { void this.submit(); } }}>
+        <!-- The wordmark IS the heading. "Sign in" under it said what the
+             button already says, twice on one small card. -->
         <div class="mark">${BRAND}<span class="dot">.</span></div>
-        <h1>Sign in</h1>
         <p class="lede">Your conversations are private to your account.</p>
         <nr-input id="email" type="email" placeholder="Email" autocomplete="username"></nr-input>
         <nr-input id="password" type="password" placeholder="Password"
