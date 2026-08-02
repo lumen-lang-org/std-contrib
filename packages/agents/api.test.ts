@@ -25,7 +25,7 @@ import { RecordedSpan } from "../tracing/tracing.ts";
 import { putFile, getFile, listFiles } from "./workspace.ts";
 import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
-import { migrationProblem, modelProblem, modelDestinationProblem, serverDestinationProblem, traceDestinationProblem, forgetServer, forgetAgent, skillProblem, skillFileProblem, bearerRefused, healthJson, choicesJson, askedChoice, askedPick, choiceProblem, configInUse, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { migrationProblem, modelProblem, modelDestinationProblem, serverDestinationProblem, traceDestinationProblem, forgetServer, forgetAgent, skillProblem, skillFileProblem, bearerRefused, healthJson, choicesJson, askedChoice, askedPick, choiceProblem, configInUse, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu, guestTag, guestQuotaJson } from "./api.ts";
 
 let database: Db = sqlite();
 
@@ -71,6 +71,10 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS thread_summaries");
   execute(database, "DROP TABLE IF EXISTS plugins");
   execute(database, "DROP TABLE IF EXISTS plugin_items");
+  // Same rule again: auth_providers gained `kind` at 90.9, and a table left
+  // standing fails that ALTER as a duplicate column on the second fresh() —
+  // which stops the plan and reads, tests later, as a scoping bug.
+  execute(database, "DROP TABLE IF EXISTS auth_providers");
   // Skills, for the same reason as the rest of this list and with a worse
   // symptom: nothing here dropped them, so a second run of this suite met
   // migration 77 adding `visibility` to a table that already had it, the plan
@@ -497,6 +501,37 @@ test("turning the gate on does not hand the pre-gateway history to whoever logs 
   expect(ownedThread(database, nobodys, ["u-alice"]) == "a1");
 });
 
+// --- the guest gate ------------------------------------------------------------
+//
+// Who counts as a guest is a decision about the tag list `callerTags` built,
+// and the refusal body is a free function — both asked here directly; the
+// windowed count itself is usage.test.ts's subject.
+
+test("a guest is exactly one tag with the guest prefix, and nobody else is", () => {
+  expect(guestTag(["guest:0123abcd"]) == "guest:0123abcd");
+  // A real user, the unowned tag, no tags, and a set that merely contains a
+  // guest: none of these get the ceiling.
+  expect(guestTag(["u-alice"]) == "");
+  expect(guestTag([""]) == "");
+  expect(guestTag(unscoped) == "");
+  expect(guestTag(["guest:0123abcd", "u-alice"]) == "");
+  // End to end through the door: the gateway's minted document reads as a
+  // guest; untrusted, the same header is never read at all, so the community
+  // deployment has no guests and no gate.
+  let minted = "{\"uuid\":\"guest:0123abcd\",\"username\":\"guest\",\"email\":\"\",\"anonymous\":true,\"roles\":[]}";
+  expect(guestTag(tagsFromHeader(true, minted)) == "guest:0123abcd");
+  expect(guestTag(tagsFromHeader(false, minted)) == "");
+});
+
+test("the guest refusal names the limit, zero remaining, and when it resets", () => {
+  let said = guestQuotaJson(10, "2026-08-02T00:00:00Z");
+  expect(said.indexOf("\"error\":\"guest_quota\"") >= 0);
+  expect(said.indexOf("\"limit\":10") >= 0);
+  expect(said.indexOf("\"used\":10") >= 0);
+  expect(said.indexOf("\"remaining\":0") >= 0);
+  expect(said.indexOf("\"resetsAt\":\"2026-08-02T00:00:00Z\"") >= 0);
+});
+
 // --- the bearer lock -------------------------------------------------------------
 //
 // Off unless an operator sets AGENTS_API_TOKEN, and this process has not — so
@@ -555,7 +590,7 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"90.7\"") >= 0);
+  expect(said.indexOf("\"migration\":\"90.9\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);

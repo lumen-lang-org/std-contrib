@@ -332,6 +332,12 @@ export type SayReply = {
   outputTokens: number;
   traceId: string;
   error: string;
+  // For a guest caller only: how many free messages remain today, re-counted
+  // server-side after this run was recorded. Absent for everyone signed in —
+  // the strip that reads it is only drawn for guests, and a number that is
+  // sometimes missing is better than a 0 that means "unlimited" here and
+  // "spent" there.
+  guestRemaining?: number;
 };
 
 const BASE = "/api";
@@ -346,6 +352,15 @@ const BASE = "/api";
 // An event, not a direct render, because `call` is used from every component
 // and must not know which one is holding the shell.
 export const SIGNED_OUT = "agents:signed-out";
+
+// Raised when the engine refuses a send with the guest quota's 429 — the
+// body says `error: "guest_quota"`, which is the only 429 the console treats
+// as anything but a generic error. Same shape as SIGNED_OUT and for the same
+// reason: `call` cannot know which component holds the shell. Deliberately
+// NOT latched the way SIGNED_OUT is: a guest who dismisses the overlay and
+// tries again meets the wall again, and that second event is the truth.
+// detail: { resetsAt: string; limit: number; used: number }.
+export const QUOTA_SPENT = "agents:quota-spent";
 
 // A 401 is not an error to render — it means nobody is signed in, and the only
 // useful response is to go and sign in. Without this the console drew an empty
@@ -368,6 +383,12 @@ export type Me = {
   username: string;
   email: string;
   roles: string[];
+  // True when the gateway minted this caller a guest identity rather than
+  // verifying a login. A guest is a real 200 from /whoami — NOT a 401, so the
+  // login overlay never rises on first paint — and holds no roles, so every
+  // admin gate already answers no. Optional because two of the three
+  // deployments (community, builtin) never say it at all.
+  anonymous?: boolean;
 };
 
 // `null` means no front door — a community deployment, where there is no auth
@@ -400,6 +421,9 @@ function injectedUser(): Me | null {
       username: u.username ?? u.email ?? "",
       email: u.email ?? "",
       roles: Array.isArray(u.roles) ? u.roles : [],
+      // Carried through, never defaulted to false: `undefined` is what the
+      // deployments that have no guests say, and it must stay distinguishable.
+      ...(u.anonymous === true ? { anonymous: true } : {}),
     };
   } catch { return null; }
 }
@@ -433,6 +457,19 @@ export async function whoami(): Promise<Me | null> {
   } catch { return null; }
 }
 
+// The guest ration, asked once at boot and never polled: every send's reply
+// carries `guestRemaining`, so this is only the number the strip first paints.
+// `limit: 0` means unlimited — the signed-in answer and the community one —
+// and the other members only travel when there is a ration to describe.
+export type QuotaStatus = {
+  limit: number;
+  used?: number;
+  remaining?: number;
+  resetsAt?: string;
+};
+
+export const getQuota = () => call<QuotaStatus>("/quota");
+
 export const isAdmin = (me: Me | null): boolean =>
   me === null ? true : me.roles.includes("admin");
 
@@ -447,6 +484,26 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     // The redirect is not instant, and every caller still awaits this. Throwing
     // keeps a half-authenticated render from happening in the meantime.
     throw new Error("not signed in");
+  }
+  // The guest quota's refusal, and only that one: any other 429 falls through
+  // to the generic path below. No redirect and no overlay from here — the
+  // event is the announcement, and the shell decides what stands in front of
+  // the conversation. The thrown sentence is what lands in the transcript, so
+  // it is written for a person, not a log.
+  if (res.status === 429) {
+    type QuotaBody = { error?: string; resetsAt?: string; limit?: number; used?: number };
+    let said: QuotaBody | null = null;
+    try { said = JSON.parse(body) as QuotaBody; } catch { /* not JSON */ }
+    if (said?.error === "guest_quota") {
+      window.dispatchEvent(new CustomEvent(QUOTA_SPENT, {
+        detail: {
+          resetsAt: said.resetsAt ?? "",
+          limit: said.limit ?? 10,
+          used: said.used ?? said.limit ?? 10,
+        },
+      }));
+      throw new Error("You have used your free messages for today. Sign in to keep chatting.");
+    }
   }
   if (!res.ok) {
     // The API answers errors as {"error": "..."} — surface that sentence,

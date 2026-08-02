@@ -17,7 +17,7 @@ import { AgentRun, AgentStep } from "./run.ts";
 import { Turn } from "./provider.ts";
 import { Retrieved } from "./knowledge.ts";
 import { RecordedSpan } from "../tracing/tracing.ts";
-import { ownerUsage, usageJson } from "./usage.ts";
+import { ownerUsage, usageJson, runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
 
 let database: Db = sqlite();
 
@@ -145,6 +145,47 @@ test("the reply carries numbers a client can add up without unquoting them", () 
   expect(out.indexOf("\"bytes\":100") >= 0);
   expect(out.indexOf("\"inputTokens\":30") >= 0);
   expect(out.indexOf("\"outputTokens\":7") >= 0);
+});
+
+// A run's created_at is written as `Date.now()` millis text; the window tests
+// need rows at chosen moments, so they are moved there after the fact.
+function backdate(question: string, createdAt: string): void {
+  executeWith(database, "UPDATE runs SET created_at = " + placeholderAt(database, 1)
+    + " WHERE question = " + placeholderAt(database, 2), [createdAt, question]);
+}
+
+test("runsSince counts one owner's runs after the cutoff, failed ones included", () => {
+  fresh();
+  spent("guest:aa", "one", 10, 1, 1);
+  spent("guest:aa", "two", 10, 1, 1);
+  spent("guest:aa", "old", 10, 1, 1);
+  spent("guest:bb", "other", 10, 1, 1);
+  // The moments: the cutoff is 2024-02-01T00:00:00Z as millis text, "old" is
+  // the millisecond before it, the rest fall inside the day.
+  backdate("about old", "1706745599999");
+  backdate("about one", "1706745600000");
+  backdate("about two", "1706795999999");
+  backdate("about other", "1706795999999");
+  // A failed run spent a provider call too, so it counts the same.
+  executeWith(database, "UPDATE runs SET ok = 0 WHERE question = " + placeholderAt(database, 1), ["about two"]);
+
+  expect(runsSince(database, "guest:aa", "1706745600000") == 2);
+  expect(runsSince(database, "guest:bb", "1706745600000") == 1);
+  expect(runsSince(database, "guest:cc", "1706745600000") == 0);
+  // The cutoff a caller inside that day would compute lands on the same edge.
+  expect(utcDayStartText(1706795999999) == "1706745600000");
+  expect(runsSince(database, "guest:aa", utcDayStartText(1706795999999)) == 2);
+});
+
+test("the guest day starts at UTC midnight and says when the next one is", () => {
+  // 2024-02-01T13:59:59.999Z: the day started at 00:00 and resets at the
+  // 2nd's midnight — a leap-year February, so the calendar math is exercised.
+  expect(utcDayStartText(1706795999999) == "1706745600000");
+  expect(nextUtcMidnightIso(1706795999999) == "2024-02-02T00:00:00Z");
+  // 36000001ms to midnight: Retry-After rounds up, never down.
+  expect(secondsToUtcMidnight(1706795999999) == 36001);
+  // A year boundary, and the zero-padding both fields need in January.
+  expect(nextUtcMidnightIso(1735689500000) == "2025-01-01T00:00:00Z");
 });
 
 test("a database that answers nonsense reports zero rather than broken JSON", () => {

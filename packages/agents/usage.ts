@@ -76,6 +76,68 @@ function artifactBytes(db: Db, owner: string): string {
   return digitsOrZero(db.value(0, 0));
 }
 
+// How many runs an owner has filed since a moment — the guest gate's question,
+// asked just before a send is allowed to spend a provider call (api.ts).
+//
+// `since` is epoch-millis digit text, the exact format `runs.created_at`
+// holds (runlog.ts): both sides are 13-digit strings until the year 2286, so
+// the text comparison the database does is the numeric one. Failed runs count
+// too — they spent a provider call, and a quota that only counts successes is
+// an invitation to spend eleven failures.
+//
+// Served by the `runs_by_owner` index (runlog.ts, 86.3); without it this is a
+// scan of every tenant's runs on every guest send.
+export function runsSince(db: Db, owner: string, since: string): int {
+  let sql = "SELECT COUNT(*) FROM runs WHERE owner = " + placeholderAt(db, 1)
+    + " AND created_at >= " + placeholderAt(db, 2);
+  if (!db.query(sql, [owner, since]) || db.rows() == 0) { return 0; }
+  return parseInt(digitsOrZero(db.value(0, 0)), 10) ?? 0;
+}
+
+// One UTC day of milliseconds. The guest window is the calendar UTC day — it
+// resets at a moment the reply can name honestly — not a rolling 24 hours.
+const DAY_MILLIS: number = 86400000;
+
+// The start of the UTC day `now` falls in, as the same epoch-millis digit
+// text `runs.created_at` holds — what `runsSince` takes as its cutoff. The
+// epoch is a UTC midnight, so the remainder into the day is the one subtraction.
+export function utcDayStartText(now: number): string {
+  return `${now - (now % DAY_MILLIS)}`;
+}
+
+// Whole seconds until the window resets — a Retry-After value. Rounded up:
+// telling a client to come back a second early re-earns the same 429.
+export function secondsToUtcMidnight(now: number): int {
+  let start = now - (now % DAY_MILLIS);
+  let wait = Math.floor((start + DAY_MILLIS - now) / 1000) + 1;
+  return parseInt(`${wait}`, 10) ?? 0;
+}
+
+// The next UTC midnight after `now`, as an ISO instant — the `resetsAt` a
+// client shows a person. Always a midnight, so only the date is computed:
+// days-since-epoch to a civil date by integer math (the standard
+// era/day-of-era conversion), because this runtime has `Date.now()` and no
+// calendar.
+export function nextUtcMidnightIso(now: number): string {
+  let days = parseInt(`${(now - (now % DAY_MILLIS) + DAY_MILLIS) / DAY_MILLIS}`, 10) ?? 0;
+  let z = days + 719468;
+  let era = z / 146097;
+  let doe = z - era * 146097;
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  let y = yoe + era * 400;
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  let mp = (5 * doy + 2) / 153;
+  let d = doy - (153 * mp + 2) / 5 + 1;
+  let m = mp + (mp < 10 ? 3 : -9);
+  if (m <= 2) { y = y + 1; }
+  return `${y}` + "-" + pad2(m) + "-" + pad2(d) + "T00:00:00Z";
+}
+
+function pad2(n: int): string {
+  if (n < 10) { return "0" + `${n}`; }
+  return `${n}`;
+}
+
 // A sum as the database gave it, or "0". SUM over no rows is NULL, which
 // arrives as empty text; anything else that is not a plain number would be
 // interpolated straight into a JSON reply, so it is refused here rather than

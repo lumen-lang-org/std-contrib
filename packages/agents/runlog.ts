@@ -199,6 +199,16 @@ export function runLogPlan(db: Db): Migration[] {
       "ALTER TABLE runs ADD COLUMN model_choice_id " + db.textType + " NOT NULL DEFAULT ''"),
     migration("86.2", "a run says what the routing decided",
       "ALTER TABLE runs ADD COLUMN route_note " + db.textType + " NOT NULL DEFAULT ''"),
+    // "how many runs has this owner filed since midnight" is asked on every
+    // guest send (usage.ts, `runsSince`), and without this it is a scan of
+    // every tenant's runs to count one tenant's day.
+    //
+    // 91, not 86.3: the deployed history's high-water is 90.9 (schema.ts), and
+    // the boot-time migrate() refuses any unrecorded version below it — an
+    // 86.3 here reads as two branches merging and stops the engine from
+    // serving at all. Same trap schema.ts documents at its own 88/9 note.
+    migration("91", "runs are found by owner",
+      "CREATE INDEX IF NOT EXISTS runs_by_owner ON runs (owner, created_at)"),
   ];
   return plan;
 }
