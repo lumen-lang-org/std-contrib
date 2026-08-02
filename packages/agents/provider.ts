@@ -735,7 +735,34 @@ export function assistantThinking(provider: string, body: string): string {
   if (reasoned.found && reasoned.text != "") { return reasoned.text; }
   let plain = jsonStringMember(body, "reasoning");
   if (plain.found) { return plain.text; }
+  // Nothing structured: a reasoning model served without its parser leaves the
+  // block inline instead, and the thought is still a thought.
+  let inline = assistantText(provider, body);
+  if (inline.found) { return inlineThinking(inline.text); }
   return "";
+}
+
+// A `<think>…</think>` block a reply opens with, and "" for everything else.
+//
+// vLLM only fills `reasoning_content` when it is started with a reasoning
+// parser (`--reasoning-parser qwen3` and kin); without one, a Qwen3 answer
+// arrives with the whole thought inline at the front of `content`, and the
+// console printed it to the reader as if it were the answer. Only a LEADING
+// block is treated this way — prose that happens to discuss `<think>` later in
+// a sentence is text, not a thought.
+export function inlineThinking(text: string): string {
+  let open = text.indexOf("<think>");
+  if (open < 0 || text.slice(0, open).trim() != "") { return ""; }
+  let close = text.indexOf("</think>", open);
+  if (close < 0) { return ""; }
+  return text.slice(open + 7, close).trim();
+}
+
+// The same reply with that leading block removed.
+export function withoutInlineThinking(text: string): string {
+  if (inlineThinking(text) == "") { return text; }
+  let close = text.indexOf("</think>");
+  return text.slice(close + 8).trim();
 }
 
 // The assistant's text out of a provider's reply.
@@ -748,7 +775,10 @@ export function assistantThinking(provider: string, body: string): string {
 export function replyText(provider: string, body: string): string {
   let found = assistantText(provider, body);
   if (!found.found) { return body; }
-  return found.text;
+  // The thought a reasoning model inlined is not the answer: assistantThinking
+  // has already taken it, and leaving it here printed it twice — once as the
+  // reply, once as the thinking the console draws above it.
+  return withoutInlineThinking(found.text);
 }
 
 
