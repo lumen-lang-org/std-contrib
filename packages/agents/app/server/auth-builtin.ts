@@ -116,13 +116,69 @@ function sessionSecret(): string {
  *  like it configured something and configure nothing. The route paths below
  *  are `auth/config.ts`'s `ROUTE_DEFAULTS` verbatim — pages/auth/*.ts posts to
  *  them, and the two lists have to agree. */
-function authConfig(): any {
+/* The OIDC providers an operator configured, from the engine.
+ *
+ * The same auth module answers both kinds — LumenJS's `providers` array takes
+ * a native provider and any number of OIDC ones, and its OIDC client resolves
+ * every endpoint from the issuer's discovery document. So "sign in with
+ * Google" is a row in the engine plus a secret in its encrypted store, not a
+ * deploy: this fetches them and hands them to the same `handleAuthRoutes`
+ * that already serves the password form.
+ *
+ * Cached for a minute rather than per request: sign-in is not a hot path, but
+ * the session reader runs on every request and must not make a network call
+ * to do it. A minute is short enough that an operator adding a provider sees
+ * it without a restart.
+ *
+ * Failure is silent and deliberate: if the engine cannot be reached, the
+ * console still signs people in with a password. A social button that is
+ * missing is a smaller outage than a login page that will not load.
+ */
+type OidcRow = {
+  id: string; label: string; issuer: string;
+  clientId: string; clientSecret: string; scopes: string;
+};
+
+let socialCache: { at: number; rows: OidcRow[] } = { at: 0, rows: [] };
+const SOCIAL_TTL_MS = 60_000;
+
+export async function socialProviders(): Promise<OidcRow[]> {
+  const now = Date.now();
+  if (now - socialCache.at < SOCIAL_TTL_MS) { return socialCache.rows; }
+  const engine = (process.env.AGENTS_API ?? "http://127.0.0.1:8100").replace(/\/$/, "");
+  try {
+    const res = await fetch(engine + "/auth-providers/resolved", {
+      headers: { "content-type": "application/json" },
+    });
+    if (!res.ok) { throw new Error(String(res.status)); }
+    const rows = (await res.json()) as OidcRow[];
+    socialCache = { at: now, rows: Array.isArray(rows) ? rows : [] };
+  } catch {
+    // Keep whatever was last known rather than dropping to none: a blip in
+    // the engine should not take the buttons off the page mid-session.
+    socialCache = { at: now, rows: socialCache.rows };
+  }
+  return socialCache.rows;
+}
+
+function authConfig(social: OidcRow[] = []): any {
   const secure =
     process.env.NODE_ENV === "production" &&
     process.env.INSECURE_SESSION_COOKIE !== "1";
 
   return {
-    providers: [{
+    providers: [...social.map((p) => ({
+      // The framework's own OIDC shape: an issuer, a client, and scopes. It
+      // discovers the endpoints itself, which is why a provider this package
+      // has never heard of works as long as it publishes a discovery
+      // document.
+      type: "oidc",
+      name: p.id,
+      issuer: p.issuer,
+      clientId: p.clientId,
+      clientSecret: p.clientSecret,
+      scopes: p.scopes.trim() === "" ? undefined : p.scopes.trim().split(/\s+/),
+    })), {
       type: "native",
       name: "local",
       minPasswordLength: 8,
@@ -189,7 +245,14 @@ function sqliteDialect(db: any): any {
 
 let booting: Promise<Booted> | null = null;
 
-/** Opened once, on the first request that needs it. */
+/** Opened once, on the first request that needs it.
+ *
+ *  The DATABASE is what is memoised — opening it twice is the cost this
+ *  avoids. The CONFIG is rebuilt per call from `socialProviders()`, which has
+ *  its own one-minute cache, because a memoised config would freeze the
+ *  provider list at whatever it was when the process started: an operator who
+ *  adds Google in the admin area would see nothing until a restart, and would
+ *  reasonably conclude the screen does not work. */
 export function builtin(): Promise<Booted> {
   return (booting ??= start());
 }
@@ -213,7 +276,7 @@ async function start(): Promise<Booted> {
   const { ensureUsersTable } = await import("@nuraly/lumenjs/dist/auth/native-auth.js");
   await ensureUsersTable(db);
 
-  return { config: authConfig(), db };
+  return { config: authConfig(await socialProviders()), db };
 }
 
 // --- reading the session -----------------------------------------------------
@@ -226,7 +289,8 @@ async function start(): Promise<Booted> {
  *  is that middleware's `url.includes('.')` skip: see the note at the top of
  *  the file, and do not add it back. */
 export async function readSession(req: IncomingMessage): Promise<AuthUser | null> {
-  const { config, db } = await builtin();
+  const { db } = await builtin();
+  const config = authConfig(await socialProviders());
   const secret = config.session.secret as string;
 
   const bearer = req.headers.authorization;
@@ -360,7 +424,8 @@ export async function handleAuth(
   res: ServerResponse,
   user: AuthUser | null,
 ): Promise<boolean> {
-  const { config, db } = await builtin();
+  const { db } = await builtin();
+  const config = authConfig(await socialProviders());
   (req as any).nkAuth = user ? { user } : null;
   const { handleAuthRoutes } = await import("@nuraly/lumenjs/dist/auth/routes.js");
   return handleAuthRoutes(config, req, res, db);

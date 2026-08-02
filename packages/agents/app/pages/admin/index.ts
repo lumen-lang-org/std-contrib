@@ -46,6 +46,7 @@ const TAB_OF: Record<string, string> = {
   "providers": "Providers",
   "images": "Images",
   "mcp": "MCP",
+  "sign-in": "Sign-in",
   "tracing": "Tracing",
 };
 
