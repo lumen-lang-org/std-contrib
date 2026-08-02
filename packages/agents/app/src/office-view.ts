@@ -475,6 +475,29 @@ async function renderInBrowser(nav: HTMLElement, doc: HTMLElement, kind: "docx" 
   }
   const XLSX = await import("xlsx");
   const wb = XLSX.read(bytes, { type: "array" });
+  // No side panel for a workbook. The rail earns its column for a document's
+  // pages and a deck's slides — miniatures you scan — but for sheets it was a
+  // list of names stealing a third of a panel that is already narrow, and a
+  // workbook's own idiom is tabs along an edge. So: tabs above the grid, the
+  // full width under them, and no strip at all for a single-sheet file.
+  nav.remove();
+  // The office box lays nav and doc out as a ROW; with the nav gone and tabs
+  // above the grid this file becomes a column, and the class is what flips it.
+  doc.parentElement?.classList.add("sheet-mode");
+  const tabs = document.createElement("div");
+  tabs.className = "sheet-tabs";
+  if (wb.SheetNames.length > 1) { doc.before(tabs); }
+  const navEntrySheet = (name: string, show: () => void) => {
+    const b = document.createElement("button");
+    b.textContent = name;
+    b.addEventListener("click", () => {
+      for (const el of Array.from(tabs.children)) el.removeAttribute("aria-current");
+      b.setAttribute("aria-current", "true");
+      show();
+    });
+    tabs.append(b);
+    return b;
+  };
   const canEdit = save !== undefined && content !== undefined;
   const original = content ?? "";
   /* Edits across every sheet, keyed sheet\u0000ref so switching tabs loses
@@ -560,9 +583,9 @@ async function renderInBrowser(nav: HTMLElement, doc: HTMLElement, kind: "docx" 
       doc.append(note);
     }
   };
-  for (const name of wb.SheetNames) navEntry(nav, name, () => draw(name));
+  for (const name of wb.SheetNames) navEntrySheet(name, () => draw(name));
   if (wb.SheetNames.length > 0) {
-    nav.children[0]?.setAttribute("aria-current", "true");
+    tabs.children[0]?.setAttribute("aria-current", "true");
     draw(wb.SheetNames[0]);
   }
 }
