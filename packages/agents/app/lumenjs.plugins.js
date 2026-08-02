@@ -190,6 +190,10 @@ const consoleViteConfig = {
           process.env.AGENTS_CONSOLE_HOST ?? "",
           process.env.AGENTS_PREVIEW_HOST ?? "",
         ]
+          // Each var may name more than one host, space- or comma-separated —
+          // one console reached through several names (joule.sh beside the
+          // the-agent.dev name it launched under).
+          .flatMap((h) => h.split(/[\s,]+/))
           .map((h) => h.replace(/^[a-z]+:\/\//, "").split(":")[0].trim())
           .filter((h) => h !== ""),
       },
