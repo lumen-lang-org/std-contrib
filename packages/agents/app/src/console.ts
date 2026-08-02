@@ -692,8 +692,23 @@ export class AgentConsole extends LitElement {
     /* Starting points: somebody else's conversations, offered. Cards rather
        than rows because each is a thing you choose, and the only action on one
        is Remix — see startsPage for why there is no way to open the source. */
-    .starts-page { padding: 28px 24px; max-width: 900px; margin: 0 auto;
+    .starts-page { padding: 28px 24px; max-width: 1240px; margin: 0 auto;
                    overflow-y: auto; }
+    /* Desktop is where this page had never been designed: 900px of column on
+       a 1900px window, one card adrift in it. The width above is most of the
+       fix; the rest is air — this is a browsing page, and it gets the same
+       generosity the directory got. */
+    @media (min-width: 1025px) {
+      .starts-page { padding: 40px 48px; }
+      .starts-page h2 { font-size: 24px; }
+      .starts-intro { margin-bottom: 28px; }
+      .offer-grid { gap: 16px;
+                    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+      .offer { padding: 18px; border-radius: 14px;
+               transition: border-color .15s cubic-bezier(.23,1,.32,1),
+                           background-color .15s cubic-bezier(.23,1,.32,1); }
+      .offer:hover { border-color: var(--muted); background: var(--bg-sunken); }
+    }
     /* The skills gallery. A sheet on a phone and a centred card above it —
        the artifact panel's shape, because a person has met it already and a
        third way of showing a temporary surface is a third thing to learn. */
@@ -1098,6 +1113,9 @@ export class AgentConsole extends LitElement {
      as an ordinary repo-sourced skill, so without the receipts there is no way
      to tell one that came from a bundle from one somebody synced by hand. */
   @state() private plugins: PluginRow[] = [];
+  /* Which agent the graph view opens selected on — set by the card that
+     opened it, cleared by nothing: the canvas ignores it after first load. */
+  @state() private canvasFocus = "";
   @state() private pluginOf = new Map<string, string>();
 
   /* Seeding happens here and not in connectedCallback, and that is the whole
@@ -2049,6 +2067,18 @@ export class AgentConsole extends LitElement {
                        a click this one stops: without stopPropagation, copying
                        would also pin the original and close the gallery, which
                        is two things nobody asked for. -->
+                  ${shelf !== "agents" ? nothing : html`
+                    <span class="pick-act"
+                      role="button" tabindex="0"
+                      title="See this agent's sub-agents, connectors and tools"
+                      @click=${(e: Event) => { e.stopPropagation();
+                        this.canvasFocus = r.key; this.gallery = "";
+                        this.view = "canvas"; }}
+                      @keydown=${(e: KeyboardEvent) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault(); e.stopPropagation();
+                        this.canvasFocus = r.key; this.gallery = "";
+                        this.view = "canvas"; }}>View graph</span>`}
                   ${r.source !== "repo" ? nothing : html`
                     <span class="pick-act"
                       role="button" tabindex="0"
@@ -2405,7 +2435,7 @@ export class AgentConsole extends LitElement {
 
       <div class="center">
         ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
-          : this.view === "canvas" ? html`<agent-canvas></agent-canvas>`
+          : this.view === "canvas" ? html`<agent-canvas .focusAgent=${this.canvasFocus}></agent-canvas>`
           : this.view === "starts" ? this.startsPage() : html`
         <header>
           <button class="icon nav" title="Conversations"

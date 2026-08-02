@@ -15,6 +15,8 @@
 
 import { LitElement, css, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
+// Plain constants, so this stays within the rule below: no component imports.
+import { BRAND } from "./brand.js";
 // No component imports here on purpose. `src/ui.ts` holds the one combination
 // of LumenUI bundles that can coexist, and adding a per-component entry beside
 // them registers a tag twice — or, as happened here, pulls in a component whose
@@ -57,8 +59,21 @@ export class LoginOverlay extends LitElement {
       box-shadow: 0 4px 12px rgba(0,0,0,.04), 0 12px 32px -8px rgba(0,0,0,.16);
       display: flex; flex-direction: column; gap: 14px;
     }
-    h1 { margin: 0; font: 600 21px var(--display, inherit); letter-spacing: -.01em; }
-    p.lede { margin: -6px 0 4px; color: var(--muted, #667); font-size: 13.5px; }
+    /* The wordmark, dot and all — the first surface a person meets was the
+       one place the product went unnamed. The dot cycles hue the way the
+       chat's empty-state dot does; filter-driven rather than a JS interval,
+       because this card renders before the app's modules and must not wait
+       for them. Ambient, so it respects a reduced-motion ask. */
+    .mark { font: 650 38px var(--display, inherit); letter-spacing: -.02em;
+            text-align: center; }
+    .mark .dot { color: hsl(340 72% 58%); display: inline-block;
+                 animation: login-dot 8s linear infinite; }
+    @keyframes login-dot { to { filter: hue-rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .mark .dot { animation: none; } }
+    h1 { margin: 0; font: 600 21px var(--display, inherit); letter-spacing: -.01em;
+         text-align: center; }
+    p.lede { margin: -6px 0 4px; color: var(--muted, #667); font-size: 13.5px;
+             text-align: center; }
     nr-input { display: block; width: 100%; }
     .row { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
     .row nr-button { flex: 1; }
@@ -114,6 +129,7 @@ export class LoginOverlay extends LitElement {
   render() {
     return html`
       <div class="card" @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter") { void this.submit(); } }}>
+        <div class="mark">${BRAND}<span class="dot">.</span></div>
         <h1>Sign in</h1>
         <p class="lede">Your conversations are private to your account.</p>
         <nr-input id="email" type="email" placeholder="Email" autocomplete="username"></nr-input>

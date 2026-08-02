@@ -188,9 +188,15 @@ export async function openKnowledge(page: Page) {
 // Whether the API is backed by PostgreSQL. The document routes answer a plain
 // sentence when it is not, and the knowledge specs skip on that rather than
 // reporting a failure for behaviour that is correct.
+// Through an agent's card, because that is the only door now: the rail row
+// is gone — the graph is a view OF an agent, not a place beside Knowledge.
+// Any enabled agent's card will do for specs that only need the canvas open.
 export async function openCanvas(page: Page) {
   await openRail(page);
-  await sidebar(page).locator('.item[data-nav="canvas"]').click();
+  await sidebar(page).locator('.item[data-nav="agents"]').click();
+  const gallery = shell(page).locator(".gallery");
+  await expect(gallery).toBeVisible();
+  await gallery.locator(".pick-act", { hasText: "View graph" }).first().click();
   await expect(canvas(page)).toBeVisible();
 }
 

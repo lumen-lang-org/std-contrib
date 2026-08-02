@@ -63,9 +63,9 @@ because their tokens are the operator's.
 
 ## Known and waiting on a decision
 
-- **Non-admin 403 on `/api/models/choices`** — an ordinary user gets an empty
-  model picker. One gateway location block in the nuraly repo plus a container
-  recreate; the recreate is the risky half.
+- ~~Non-admin 403s~~ — fixed 2026-08-02: signed-in users can read
+  /models/choices and the five user-zone tables; writes still admin until
+  authorship is scoped per owner.
 - **Five live/live-fanout e2e failures** — socket answers, polling fallback and
   fan-out broken. Untriaged.
 - **SSR serves stale CSS until a restart** — unexplained.
@@ -98,18 +98,3 @@ store keyed by (server, owner), with the deployment-wide one as a fallback —
 and an OAuth flow so the usual case is signing in rather than pasting a token.
 The "Authorised apps" section in Connectors is the empty space this fills.
 
-### Starting points is a phone page on a desktop screen
-
-The Starting points list draws one narrow column down the middle of a 1900px
-window: one card, acres of white either side, the lede wrapping at phone
-width. It was built on a phone and never given a desktop layout. It should
-use the width — the same auto-fill card grid the directory uses, a wider
-measure on the lede — and keep the single column only where there is no room
-for two.
-
-### The wordmark, with its dot, on the sign-in card
-
-The sign-in card says "Sign in" over a blank white box. The console's own
-wordmark — Joule with the hue-cycling dot — belongs at the top of it: it is
-the first surface a person meets, it is the one place the product is not
-named, and the animation is already written (`startDot()` in console.ts).
