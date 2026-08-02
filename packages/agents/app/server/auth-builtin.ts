@@ -135,7 +135,7 @@ function sessionSecret(): string {
  * missing is a smaller outage than a login page that will not load.
  */
 type OidcRow = {
-  id: string; label: string; issuer: string;
+  id: string; label: string; kind?: string; issuer: string;
   clientId: string; clientSecret: string; scopes: string;
 };
 
@@ -161,24 +161,37 @@ export async function socialProviders(): Promise<OidcRow[]> {
   return socialCache.rows;
 }
 
-function authConfig(social: OidcRow[] = []): any {
+/** The configured social rows as framework provider objects.
+ *
+ * An OIDC row is discovered from its issuer; a github row is OAuth2 with no
+ * discovery document and a mapper that is CODE, not data, so it is built
+ * through the framework's githubProvider factory rather than from the row
+ * alone. This is the seam the engine's `kind` column feeds. */
+async function redirectProviders(social: OidcRow[]): Promise<any[]> {
+  const scopesOf = (p: OidcRow) => p.scopes.trim() === "" ? undefined : p.scopes.trim().split(/\s+/);
+  const out: any[] = [];
+  for (const p of social) {
+    if ((p.kind ?? "oidc") === "github") {
+      const { githubProvider } = await import("@nuraly/lumenjs/dist/auth/providers/github.js");
+      const prov = githubProvider({ clientId: p.clientId, clientSecret: p.clientSecret, scopes: scopesOf(p), appName: "Joule" });
+      out.push({ ...prov, name: p.id });   // keep the row's id as the provider name
+    } else {
+      out.push({
+        type: "oidc", name: p.id, issuer: p.issuer,
+        clientId: p.clientId, clientSecret: p.clientSecret, scopes: scopesOf(p),
+      });
+    }
+  }
+  return out;
+}
+
+function authConfig(providers: any[] = []): any {
   const secure =
     process.env.NODE_ENV === "production" &&
     process.env.INSECURE_SESSION_COOKIE !== "1";
 
   return {
-    providers: [...social.map((p) => ({
-      // The framework's own OIDC shape: an issuer, a client, and scopes. It
-      // discovers the endpoints itself, which is why a provider this package
-      // has never heard of works as long as it publishes a discovery
-      // document.
-      type: "oidc",
-      name: p.id,
-      issuer: p.issuer,
-      clientId: p.clientId,
-      clientSecret: p.clientSecret,
-      scopes: p.scopes.trim() === "" ? undefined : p.scopes.trim().split(/\s+/),
-    })), {
+    providers: [...providers, {
       type: "native",
       name: "local",
       minPasswordLength: 8,
@@ -276,7 +289,7 @@ async function start(): Promise<Booted> {
   const { ensureUsersTable } = await import("@nuraly/lumenjs/dist/auth/native-auth.js");
   await ensureUsersTable(db);
 
-  return { config: authConfig(await socialProviders()), db };
+  return { config: authConfig(await redirectProviders(await socialProviders())), db };
 }
 
 // --- reading the session -----------------------------------------------------
@@ -290,7 +303,7 @@ async function start(): Promise<Booted> {
  *  the file, and do not add it back. */
 export async function readSession(req: IncomingMessage): Promise<AuthUser | null> {
   const { db } = await builtin();
-  const config = authConfig(await socialProviders());
+  const config = authConfig(await redirectProviders(await socialProviders()));
   const secret = config.session.secret as string;
 
   const bearer = req.headers.authorization;
@@ -425,7 +438,7 @@ export async function handleAuth(
   user: AuthUser | null,
 ): Promise<boolean> {
   const { db } = await builtin();
-  const config = authConfig(await socialProviders());
+  const config = authConfig(await redirectProviders(await socialProviders()));
   (req as any).nkAuth = user ? { user } : null;
   const { handleAuthRoutes } = await import("@nuraly/lumenjs/dist/auth/routes.js");
   return handleAuthRoutes(config, req, res, db);

@@ -815,28 +815,49 @@ export function threadSummariesMapping(): DbRepository {
  * "oauth:<id>", because a secret sitting beside the thing it authenticates is
  * decoration. Nothing here can read it back, which is the point.
  *
- * `issuer` is what makes this a table rather than an enum: OIDC discovery
+ * `issuer` is what makes an OIDC row a table rather than an enum: discovery
  * means a provider is an address plus a client, so a deployment can add one
- * this package has never heard of without a release. Google and LinkedIn both
- * publish discovery documents; GitHub does not, which is why it needs more
- * than a row (see BACKLOG.md).
+ * this package has never heard of without a release. `kind` widens that past
+ * OIDC: "github" is OAuth2, which has no discovery document and whose identity
+ * mapping is code, not data — so a github row carries no issuer and the
+ * console resolves it through a named factory (githubProvider) rather than
+ * from the row alone.
  */
 export type AuthProviderRow = {
   id: string,
   // What the button says: "Google", "LinkedIn", "Acme SSO".
   label: string,
-  // The OIDC issuer, from which every endpoint is discovered.
+  // "oidc" (issuer-discovered) or "github" (OAuth2, endpoints and mapper from
+  // the framework's githubProvider). Empty reads as "oidc" for every row that
+  // predates this column.
+  kind: string,
+  // The OIDC issuer, from which every endpoint is discovered. "" for github.
   issuer: string,
   clientId: string,
-  // Space-separated extras beyond openid/profile/email, or "".
+  // Space-separated extras beyond the kind's defaults, or "".
   scopes: string,
   enabled: bool,
 };
+
+// Migration 90.8's shape, frozen — its CREATE is checksummed, so kind is an
+// ALTER at 90.9, never an edit here.
+export function authProvidersMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("issuer", "issuer", "text"),
+    field("clientId", "client_id", "text"),
+    field("scopes", "scopes", "text"),
+    field("enabled", "enabled", "bool"),
+  ];
+  return repository("auth_providers", "id", "id", fs);
+}
 
 export function authProvidersMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("label", "label", "text"),
+    field("kind", "kind", "text"),
     field("issuer", "issuer", "text"),
     field("clientId", "client_id", "text"),
     field("scopes", "scopes", "text"),
@@ -1917,7 +1938,10 @@ export function schemaPlan(db: Db): Migration[] {
     // Signing in with something other than a password. The client id is here;
     // the secret is in the encrypted store under "oauth:<id>".
     migration("90.8", "ways of signing in that are not a password",
-      createTableSql(db, authProvidersMapping())),
+      createTableSql(db, authProvidersMappingV1())),
+    // A sign-in provider that is not OIDC — github is OAuth2, no issuer.
+    migration("90.9", "an auth provider has a kind",
+      "ALTER TABLE auth_providers ADD COLUMN kind " + db.textType + " NOT NULL DEFAULT 'oidc'"),
   ];
   return plan;
 }

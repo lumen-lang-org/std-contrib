@@ -995,6 +995,8 @@ export const forgetServerMine = (id: string) =>
 export type AuthProviderRow = {
   id: string;
   label: string;
+  // "oidc" (issuer-discovered) or "github" (OAuth2, no issuer).
+  kind: string;
   issuer: string;
   clientId: string;
   scopes: string;
@@ -1006,7 +1008,7 @@ export const listAuthProviders = () => call<AuthProviderRow[]>("/auth-providers"
 export const saveAuthProvider = (row: AuthProviderRow, fresh: boolean) =>
   call<AuthProviderRow>(fresh ? "/auth-providers" : `/auth-providers/${encodeURIComponent(row.id)}`, {
     method: fresh ? "POST" : "PUT",
-    body: JSON.stringify({ id: row.id, label: row.label, issuer: row.issuer,
+    body: JSON.stringify({ id: row.id, label: row.label, kind: row.kind || "oidc", issuer: row.issuer,
       clientId: row.clientId, scopes: row.scopes, enabled: row.enabled }),
   });
 export const setAuthProviderSecret = (id: string, clientSecret: string) =>
