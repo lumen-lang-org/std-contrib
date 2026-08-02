@@ -1725,6 +1725,15 @@ export class AgentConsole extends LitElement {
         background: var(--bg-sunken, rgba(0,0,0,.05)); }
       .joule-chip.on { color: var(--focus, #2563EB);
         background: var(--bg-user, rgba(37,99,235,.10)); }
+      /* Off, the word goes and the mark stays: two labelled chips side by side
+         read as a toolbar competing with the composer, and the one that is ON
+         is the only one saying something about this send. The word comes back
+         on hover, so a mark nobody can name is still nameable — and it is
+         always in the title attribute for a screen reader either way. */
+      .joule-chip:not(.on) span { display: none; }
+      .joule-chip:not(.on) { padding: 0 8px; }
+      .joule-chip:not(.on):hover span { display: inline; }
+      .joule-chip:not(.on):hover { padding: 0 11px 0 8px; }
     `);
     root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
   }
