@@ -102,6 +102,8 @@ ENV NODE_ENV=production
 COPY --from=build /build/lumenjs.config.ts /build/package.json ./
 COPY --from=build /build/.lumenjs ./.lumenjs
 COPY --from=build /build/node_modules ./node_modules
+# The favicon set and the share card, read by server/static-assets.ts.
+COPY assets ./assets
 # Compiled, and under the name the framework looks for. The .ts source is
 # deliberately not in this image: two files answering to one convention, one of
 # which silently disables the proxy, is not a thing to leave lying about.

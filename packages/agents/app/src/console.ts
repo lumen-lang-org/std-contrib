@@ -525,7 +525,8 @@ export class AgentConsole extends LitElement {
        at the body weight. At 600 it was the heaviest mark on a phone screen
        and pulled the eye away from the conversation under it. */
     .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
-             white-space: nowrap; flex: 1; }
+             white-space: nowrap; min-width: 0; }
+    .bar-space { flex: 1; }
 
     select { background: var(--bg-card); border: 1px solid var(--border); color: inherit;
              border-radius: 8px; padding: 4px 8px; font: inherit; }
@@ -1809,15 +1810,16 @@ export class AgentConsole extends LitElement {
          which is not. */
       .action-buttons-right { flex: none; }
       .action-buttons-left { min-width: 0; overflow: hidden; }
-      /* A shorter box on a phone. The component opens with two lines of
-         writing room (3.5rem), which is right on a desktop home screen and
-         is a lot of a 390x844 window once the keyboard has taken half of it
-         — 132px of composer over a transcript you are trying to read. One
-         line and a half at rest, still growing to the same max as you type,
-         and the padding comes in with it. */
+      /* A shorter box on a phone — IN A CONVERSATION. The component opens
+         with two lines of writing room (3.5rem); over a transcript on a
+         390x844 screen that is composer eating reading room, so it drops to
+         a line and a half there. The HOME SCREEN keeps the full height: the
+         composer is the page there, and shrinking it read as the product
+         getting smaller. .talking is the class the console already stamps
+         when messages exist. */
       @media (max-width: 640px) {
-        .input-box__input { min-height: 2.25rem; }
-        .input-container { padding-top: 4px; padding-bottom: 4px; }
+        :host(.talking) .input-box__input { min-height: 2.25rem; }
+        :host(.talking) .input-container { padding-top: 4px; padding-bottom: 4px; }
       }
     `);
     root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
@@ -1968,7 +1970,13 @@ export class AgentConsole extends LitElement {
   }
 
   private agentName(): string {
-    return this.agents.find((a) => a.id === this.agentId)?.agentName ?? "agent";
+    const a = this.agents.find((x) => x.id === this.agentId);
+    // The default agent speaks as the product. "Ask assistant…" names an
+    // implementation detail; "Ask Joule…" names the thing on the sign. A
+    // NON-default agent keeps its own name — a person who chose docflow
+    // deserves to see which mouth they are talking into.
+    if (a === undefined || a.isDefault) { return BRAND; }
+    return a.agentName;
   }
 
   // A message may not be wider than the conversation it is in.
@@ -2890,11 +2898,19 @@ export class AgentConsole extends LitElement {
                a wrong guess here prints the word in the header.
                (No backticks in this comment: it lives inside an html
                template literal, where one ends the literal.) -->
+          ${this.threadId === "" ? nothing : html`
           <button class="icon" title="New conversation"
             @click=${() => { this.view = "chat"; this.nav = false; this.fresh(); }}>
             <nr-icon name="square-pen" size="medium"></nr-icon>
           </button>
-          <span class="title">${this.threadTitle()}</span>
+          <span class="title">${this.threadTitle()}</span>`}
+          <!-- Always present, even when the title above is not: the title was
+               the header's only flexible element, so on the home screen —
+               where there is no conversation to name — everything after it
+               packed against the drawer toggle and the artifacts folder sat
+               mid-header. The spacer owns the stretch; the title goes back to
+               being a label. -->
+          <span class="bar-space"></span>
           ${this.guestStrip()}
           <!-- No agent chip. Who answers is said three times already — the
                composer's "Ask <agent>" placeholder, the directory's Agents
