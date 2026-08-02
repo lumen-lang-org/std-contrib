@@ -569,6 +569,27 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       };
       return unnamed;
     }
+    // A .docx is not text, and a text edit on one is not a small mistake.
+    //
+    // Observed: a model asked to change a placeholder in a meeting-notes
+    // template called edit_artifact, was told the text was not found — which
+    // is true and useless, because the body is a zip — and then told the
+    // person their template was missing the placeholder that is plainly in
+    // it. The refusal has to name the reason and the route, or the model
+    // spends the round arguing with a binary.
+    if (binaryKind(kindOf(normalScope(jsonText(call.args, "path"))))) {
+      let wrongTool: FileToolResult = {
+        handled: true, ok: false,
+        text: "That artifact is a binary document, not text — its bytes are a zip, so"
+          + " there is nothing here to find or replace. Edit it with a script instead:"
+          + " load the skill for its kind (make-doc for .docx, make-sheet for .xlsx,"
+          + " make-deck for .pptx), name the file in run_script's paths, and change it"
+          + " in the office environment. Never tell the person a placeholder is absent"
+          + " on the strength of this tool — it cannot see inside the document.",
+        line: 0, changed: ""
+      };
+      return wrongTool;
+    }
     // The wire says old/new; the record says oldText/newText, because `new`
     // is a reserved word. This unpacking is what decouples the spellings.
     let edited = editArtifact(db, {
