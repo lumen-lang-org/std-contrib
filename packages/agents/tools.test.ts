@@ -30,6 +30,11 @@ function seeded(): void {
   execute(database, "DROP TABLE IF EXISTS agent_skills");
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
+  // Curated images too: two tests here write rows, and a suite that shares a
+  // database shares them — the environment-naming test counted the other
+  // test's image and failed on a number that was correct for the database it
+  // had, not the one it arranged.
+  execute(database, "DROP TABLE IF EXISTS script_images");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
   dropTable(database, credentialsMapping());
   dropTable(database, agentsMapping());

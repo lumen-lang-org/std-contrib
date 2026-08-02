@@ -65,7 +65,7 @@ function seeded(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(m));
   let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));

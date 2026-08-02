@@ -63,6 +63,16 @@ function wipe(): void {
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
+  // Every table the plan creates, or a column an ALTER adds survives the wipe
+  // and the migration that adds it fails as a duplicate on the next run —
+  // which reads as "the plan is broken" and is really "the fixture is stale".
+  // These four were missing and cost an afternoon between them.
+  execute(database, "DROP TABLE IF EXISTS script_images");
+  execute(database, "DROP TABLE IF EXISTS templates");
+  execute(database, "DROP TABLE IF EXISTS template_files");
+  execute(database, "DROP TABLE IF EXISTS plugins");
+  execute(database, "DROP TABLE IF EXISTS plugin_items");
+  execute(database, "DROP TABLE IF EXISTS thread_summaries");
   dropTable(database, modelChoicesMapping());
   dropTable(database, modelRoutersMapping());
   dropTable(database, agentsMapping());
@@ -76,8 +86,8 @@ function seeded(): void {
   wipe();
   migrate(database, schemaPlan(database));
 
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
 
@@ -141,7 +151,7 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Fifty-two: ten tables from mappings, the plugins pair (a bundle's
+  // Fifty-five: ten tables from mappings, the plugins pair (a bundle's
   // receipt and what it brought — migrations 90.3 and 90.4), three link
   // tables, the credentials table, the index, the eleven ALTERs that add
   // columns those tables did not have when they were first created (the
@@ -153,7 +163,7 @@ test("the plan creates every table, from the mappings", () => {
   // Every one of them changes nothing on an empty database, which is the
   // point of the empty case. Asserting the number rather than "some" is what
   // catches a migration silently dropped from the plan.
-  expect(r.applied == 52);
+  expect(r.applied == 55);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -161,7 +171,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 52);
+  expect(migrate(database, schemaPlan(database)).applied == 55);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 
@@ -414,8 +424,8 @@ function runMenu(): bool {
 function liveShaped(flashEnabled: bool): bool {
   wipe();
   migrate(database, schemaPlan(database));
-  let flash: ModelRow = { id: "m-gemini-flash", label: "Gemini 2.5 Flash", apiName: "gemini-2.5-flash", provider: "vertex", kind: "chat", dimensions: 0, baseUrl: "https://example.invalid/openapi", enabled: flashEnabled };
-  let pro: ModelRow = { id: "m-gemini-pro", label: "Gemini 2.5 Pro", apiName: "gemini-2.5-pro", provider: "vertex", kind: "chat", dimensions: 0, baseUrl: "https://example.invalid/openapi", enabled: true };
+  let flash: ModelRow = { id: "m-gemini-flash", label: "Gemini 2.5 Flash", apiName: "gemini-2.5-flash", provider: "vertex", kind: "chat", dimensions: 0, baseUrl: "https://example.invalid/openapi", enabled: flashEnabled, contextTokens: 0 };
+  let pro: ModelRow = { id: "m-gemini-pro", label: "Gemini 2.5 Pro", apiName: "gemini-2.5-pro", provider: "vertex", kind: "chat", dimensions: 0, baseUrl: "https://example.invalid/openapi", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(flash));
   persist(database, modelsMapping(), JSON.stringify(pro));
   // Unlabelled, unoffered, unranked: the state every config in a live
@@ -634,7 +644,7 @@ function communityShaped(second: bool): bool {
   wipe();
   migrate(database, schemaPlan(database));
 
-  let llama: ModelRow = { id: "m-llama", label: "Llama 3.1", apiName: "llama3.1", provider: "ollama", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434", enabled: true };
+  let llama: ModelRow = { id: "m-llama", label: "Llama 3.1", apiName: "llama3.1", provider: "ollama", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(llama));
   // Unlabelled, unoffered, unranked — the state migration 82 leaves every
   // config a deployment already had, and what the seed has to work from.
@@ -642,7 +652,7 @@ function communityShaped(second: bool): bool {
   persist(database, modelConfigsMapping(database), JSON.stringify(onLlama));
 
   if (second) {
-    let mistral: ModelRow = { id: "m-small", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+    let mistral: ModelRow = { id: "m-small", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
     persist(database, modelsMapping(), JSON.stringify(mistral));
     let onMistral: ModelConfigRow = { id: "cfg-small", modelId: "m-small", temperature: 0.3, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
     persist(database, modelConfigsMapping(database), JSON.stringify(onMistral));
@@ -653,9 +663,9 @@ function communityShaped(second: bool): bool {
   // saw. An embedding model is not something a person picks to talk to; a
   // switched-off one is a dead menu row; and the fake provider is the argument
   // MODEL-CHOICE.md makes for a curated table existing at all.
-  let embed: ModelRow = { id: "m-embed", label: "Nomic Embed", apiName: "nomic-embed-text", provider: "ollama", kind: "embedding", dimensions: 768, baseUrl: "http://127.0.0.1:11434", enabled: true };
-  let retired: ModelRow = { id: "m-retired", label: "Mistral Retired", apiName: "mistral-tiny", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: false };
-  let fake: ModelRow = { id: "m-fake", label: "Double", apiName: "double-1", provider: "double", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true };
+  let embed: ModelRow = { id: "m-embed", label: "Nomic Embed", apiName: "nomic-embed-text", provider: "ollama", kind: "embedding", dimensions: 768, baseUrl: "http://127.0.0.1:11434", enabled: true, contextTokens: 0 };
+  let retired: ModelRow = { id: "m-retired", label: "Mistral Retired", apiName: "mistral-tiny", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
+  let fake: ModelRow = { id: "m-fake", label: "Double", apiName: "double-1", provider: "double", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(embed));
   persist(database, modelsMapping(), JSON.stringify(retired));
   persist(database, modelsMapping(), JSON.stringify(fake));
@@ -809,7 +819,7 @@ test("a derived row lands after a curated menu rather than inside it", () => {
   expect(liveShaped(true));
   // A model the operator added later and never published — the ordinary case on
   // any deployment that has been running a while.
-  let opus: ModelRow = { id: "m-opus", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let opus: ModelRow = { id: "m-opus", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(opus));
   let onOpus: ModelConfigRow = { id: "cfg-opus", modelId: "m-opus", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(database, modelConfigsMapping(database), JSON.stringify(onOpus));
@@ -849,8 +859,8 @@ test("a derived row lands after a curated menu rather than inside it", () => {
 function freshInstall(): bool {
   wipe();
   migrate(database, schemaPlan(database));
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
   let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "Careful", selectable: true, rank: 1 };
@@ -900,7 +910,7 @@ test("a model added after the install is on the menu at the next boot", () => {
   // The operator adds a second model in the settings tab, months later. No
   // migration will ever run again on this database, so the menu either grows
   // here or it never does.
-  let mistral: ModelRow = { id: "m-small", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let mistral: ModelRow = { id: "m-small", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(mistral));
   let onMistral: ModelConfigRow = { id: "cfg-small", modelId: "m-small", temperature: 0.3, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   persist(database, modelConfigsMapping(database), JSON.stringify(onMistral));
@@ -932,7 +942,7 @@ test("a model added after the install is on the menu at the next boot", () => {
 function twoBudgetsOneModel(): bool {
   wipe();
   migrate(database, schemaPlan(database));
-  let solo: ModelRow = { id: "m-solo", label: "Local Llama", apiName: "llama-local", provider: "ollama", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434", enabled: true };
+  let solo: ModelRow = { id: "m-solo", label: "Local Llama", apiName: "llama-local", provider: "ollama", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434", enabled: true, contextTokens: 0 };
   persist(database, modelsMapping(), JSON.stringify(solo));
   let small: ModelConfigRow = { id: "cfg-a", modelId: "m-solo", temperature: 0.3, maxTokens: 4096, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
   let big: ModelConfigRow = { id: "cfg-b", modelId: "m-solo", temperature: 0.3, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };

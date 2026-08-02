@@ -62,6 +62,15 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS workspace_files");
   execute(database, "DROP TABLE IF EXISTS run_steps");
   execute(database, "DROP TABLE IF EXISTS runs");
+  // Same rule, the newest arrivals: models gained context_tokens (90.6),
+  // script_images gained summary (90.5), and thread_summaries is new (90.7).
+  // A table left standing here fails the ALTER that adds its column, and a
+  // stopped plan takes every migration above it with it.
+  execute(database, "DROP TABLE IF EXISTS models");
+  execute(database, "DROP TABLE IF EXISTS script_images");
+  execute(database, "DROP TABLE IF EXISTS thread_summaries");
+  execute(database, "DROP TABLE IF EXISTS plugins");
+  execute(database, "DROP TABLE IF EXISTS plugin_items");
   // Skills, for the same reason as the rest of this list and with a worse
   // symptom: nothing here dropped them, so a second run of this suite met
   // migration 77 adding `visibility` to a table that already had it, the plan
@@ -91,8 +100,7 @@ function modelRow(id: string, provider: string, kind: string, baseUrl: string): 
   let m: ModelRow = {
     id: id, label: "L " + id, apiName: "some-model", provider: provider,
     kind: kind, dimensions: kind == "embedding" ? 1024 : 0,
-    baseUrl: baseUrl, enabled: true,
-  };
+    baseUrl: baseUrl, enabled: true, contextTokens: 0 };
   return m;
 }
 
@@ -151,8 +159,7 @@ test("an edit that leaves the address alone is allowed", () => {
   storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
   let renamed: ModelRow = {
     id: "m1", label: "A better label", apiName: "mistral-small-latest", provider: "mistral",
-    kind: "chat", dimensions: 0, baseUrl: "", enabled: false,
-  };
+    kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
   expect(modelDestinationProblem(database, renamed) == "");
 });
 
@@ -548,7 +555,7 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"90.4\"") >= 0);
+  expect(said.indexOf("\"migration\":\"90.7\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);
