@@ -273,6 +273,29 @@ const CHAT_BUTTON = `
                  background: var(--bg-sunken, rgba(0,0,0,.045)) !important; }
 `;
 
+/* Retry, quietly.
+ *
+ * The library draws type="secondary" as a filled near-black — its own
+ * definition, not a token this console sets — so the one control on a FAILED
+ * turn was the heaviest mark on the screen, louder than any answer above it.
+ * A retry is a recovery, not a call to action: it belongs in the same outline
+ * register as the composer's own controls, and the failure line beside it is
+ * what should carry the weight.
+ *
+ * Adopted into the nr-button's own shadow root because the colours live on
+ * its inner button element: a part exposes the host, and the host is not
+ * where the background is. Same mechanism as CHAT_BUTTON above, on the
+ * elements that carry the retry class. */
+const RETRY_BUTTON = `
+  button { background: transparent !important;
+           border: 1px solid var(--border, rgba(0,0,0,.14)) !important;
+           color: var(--muted, rgba(0,0,0,.55)) !important;
+           font-weight: 500 !important; border-radius: 999px !important; }
+  button:hover:not(:disabled) { background: var(--bg-sunken, rgba(0,0,0,.045)) !important;
+           border-color: var(--muted, rgba(0,0,0,.35)) !important;
+           color: var(--fg, rgba(0,0,0,.9)) !important; }
+`;
+
 /* Dress the chat component and only the chat component. Same `dressed` latch
    as softenFocusRings, under a second flag so the two passes do not cancel
    each other out on a root that both visit. */
@@ -284,7 +307,12 @@ function dressChat(root: ParentNode) {
   adopt(chat.shadowRoot, CHAT_SKIN, "skinned");
   adopt(chat.shadowRoot, CHAT_SOURCES, "sourced");
   for (const el of chat.shadowRoot.querySelectorAll("nr-button")) {
-    if (el.shadowRoot !== null) { adopt(el.shadowRoot, CHAT_BUTTON, "skinned"); }
+    if (el.shadowRoot === null) { continue; }
+    // The retry gets its own quieter sheet; every other button in here keeps
+    // the transcript skin. Two flags, so a root that takes one is still
+    // eligible for the other.
+    if (el.classList.contains("message__retry")) { adopt(el.shadowRoot, RETRY_BUTTON, "retried"); }
+    else { adopt(el.shadowRoot, CHAT_BUTTON, "skinned"); }
   }
   citeSources(chat.shadowRoot);
 }
