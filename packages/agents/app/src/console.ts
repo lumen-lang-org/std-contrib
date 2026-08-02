@@ -1371,6 +1371,7 @@ export class AgentConsole extends LitElement {
       (Element & { updateComplete?: Promise<unknown> }) | null;
     if (chatEl !== null) {
       await chatEl.updateComplete;
+      this.defaultSearchOn();
       this.dockSearch(chatEl);
     }
     if (this.choices.length === 0) { return; }
@@ -1428,7 +1429,11 @@ export class AgentConsole extends LitElement {
         + 'stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle>'
         + '<path d="M2 12h20"></path>'
         + '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 '
-        + '15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+        + '15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>'
+        // The word, because a lone glyph is a guess. Kimi and Claude both
+        // label this control; ours was a circle nobody could name, and the
+        // label is also what makes the on-state legible without hovering.
+        + '<span>Search</span>';
       // The mark is inline SVG and not <nr-icon>, which the rest of this
       // console uses without exception. The reason is the boundary: this
       // element is adopted into another component's shadow root, and a custom
@@ -1449,6 +1454,25 @@ export class AgentConsole extends LitElement {
     globe.classList.toggle("on", on);
   }
 
+  /* Search on by default.
+   *
+   * It was a switch that started off, so every conversation that wanted a
+   * current fact needed a press first — and the press is invisible until you
+   * know the globe means search. On is the better default: the skill only
+   * costs a tool the model may ignore, and the control is right there to turn
+   * it off. Once per boot, and never against a person's own choice: if
+   * something is already pinned (a capability chip, a slash command, a
+   * template) that pin wins.
+   */
+  private searchDefaulted = false;
+  private defaultSearchOn() {
+    if (this.searchDefaulted) return;
+    if (!this.hasSearchSkill()) return;
+    this.searchDefaulted = true;
+    if (this.pinned !== "") return;
+    void this.pin(SEARCH_SKILL);
+  }
+
   private hasSearchSkill(): boolean {
     return this.capabilities.some((s) => s.skillName === SEARCH_SKILL)
       || this.allSkills.some((s) => s.skillName === SEARCH_SKILL);
@@ -1466,11 +1490,13 @@ export class AgentConsole extends LitElement {
     already.jouleSearchStyled = true;
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(`
-      .joule-search { display: inline-grid; place-items: center;
-        width: 28px; height: 28px; margin-left: 2px; padding: 0;
+      .joule-search { display: inline-flex; align-items: center; gap: 6px;
+        height: 28px; margin-left: 2px; padding: 0 11px 0 8px;
         border: 0; border-radius: 999px; background: none; cursor: pointer;
+        font: inherit; font-size: 13px; line-height: 1;
         color: var(--nuraly-chatbot-placeholder, rgba(0,0,0,.45));
         transition: background-color .15s ease, color .15s ease; }
+      .joule-search svg { flex: none; }
       .joule-search:hover { color: var(--nuraly-chatbot-brand-fg, #17171A);
         background: var(--bg-sunken, rgba(0,0,0,.05)); }
       .joule-search.on { color: var(--focus, #2563EB);
