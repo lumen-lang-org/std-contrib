@@ -64,29 +64,49 @@ Wanted: a re-read that diffs the manifest against the receipts — new skills
 added, removed ones deleted, changed bodies updated, connectors left alone
 because their tokens are the operator's.
 
-### Social sign-in: Google, LinkedIn, GitHub (investigated 2026-08-02)
+### Joule's own sign-in — built 2026-08-02 (adaab0e), NOT yet cut over
 
-LumenJS auth supports it natively for two of the three. Its `providers` array
-takes `NativeProvider` (today's email/password) plus any number of
-`OIDCProvider`s, resolved through OIDC discovery (`/.well-known/
-openid-configuration`) — and it ships a pre-built `googleProvider`.
+What exists: auth_providers + an encrypted client secret, a Sign-in tab in
+/admin, and server/auth-builtin.ts handing the configured OIDC providers to
+the same LumenJS auth module that already serves the password form. Google and
+LinkedIn work through generic OIDC. Verified end to end on prod's engine.
 
-- **Google**: first-class. `googleProvider({ clientId })` in lumenjs.auth.ts.
-- **LinkedIn**: works through the generic OIDC shape — LinkedIn publishes a
-  discovery document ("Sign In with LinkedIn using OpenID Connect", issuer
-  `https://www.linkedin.com/oauth`).
-- **GitHub**: NOT expressible today. GitHub is plain OAuth2 — no discovery
-  document, no id_token — and the framework's client resolves everything
-  through discovery (auth/oidc-client.js). Needs a framework extension
-  (custom endpoints on the provider type) or a small proxy that speaks OIDC
-  in front of GitHub.
+What is NOT done, in the order it blocks going live:
 
-Where it lands: prod signs in through the nuraly social app behind the
-gateway (`/__nk_auth/*`), so the provider config belongs in THAT app's
-lumenjs.auth.ts (nuraly repo — no-commit rule) and the sign-in card grows
-provider buttons. Blocked on: OAuth client id/secret for each provider from
-their consoles, with callback `https://lumen-agents.the-agent.dev/__nk_auth/
-callback/<provider>` (exact route per framework config).
+1. **The cutover, and it is the real one.** Prod runs AUTH=proxy, so every
+   conversation is owned by a nuraly user id — 845 of them belong to one
+   uuid. Flipping to AUTH=builtin mints new identities and those conversations
+   stop being anybody's. Needs: create the builtin account carrying the SAME
+   uuid (the users table takes an id, so this is possible), or a one-off
+   owner remap in the engine. Rehearse on a second console instance before
+   prod. Nothing else here matters until this is decided.
+
+2. **No mailer, so no password reset.** authConfig sets
+   requireEmailVerification: false precisely because nothing can send mail.
+   A social-only account (password_hash '') has no password to reset either.
+   For a real user base that is a lockout waiting to happen. The nuraly app
+   solved this with system-mailer.js and an onEvent hook; this app needs the
+   same, or SMTP settings on the Sign-in tab.
+
+3. **Client credentials.** A client id and secret from each provider's
+   console, with the callback the tab prints. Ours to ask for, not to build.
+
+Then the quality-of-life half:
+
+4. **Identity records and a profile screen.** The framework links accounts by
+   VERIFIED EMAIL only (linkOidcUser): same email, same account, roles merged;
+   unverified email never links, which is the anti-takeover rule. But there is
+   no identities table — the users row is id/email/name/password_hash/roles —
+   so nothing can say which providers an account has used, nothing can unlink
+   one, and a personal Gmail beside a work address is silently two accounts
+   with two sets of conversations. A profile needs: an identities table
+   (user, provider, subject, linked_at), writes to it in the OIDC callback, and
+   a Preferences section listing them with add/unlink. That is a real feature,
+   not a screen over existing data.
+
+5. **GitHub.** Plain OAuth2, no discovery document, so the framework's OIDC
+   client cannot express it. Needs a small provider shim (authorize/token/user
+   endpoints by hand) or a proxy that speaks OIDC in front of it.
 
 ## Known and waiting on a decision
 
