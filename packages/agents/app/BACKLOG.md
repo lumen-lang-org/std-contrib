@@ -74,21 +74,19 @@ because their tokens are the operator's.
 
 ## Asked for, not started
 
-### Split the overlay in two: my settings, and the deployment's
+### The user zone's engine routes are still admin-gated (shipped 2026-08-02: the three-surface split)
 
-One overlay currently holds both "what I prefer" and "how this deployment is
-wired", and most of its tabs are the second kind. Tracing is the clearest case
-— an operator's OTLP endpoint and secret key have nothing to do with a person
-using the console — and Models, Providers, Images and MCP are the same.
+Settings now splits by whose setting it is: Preferences (theme, account) and
+the user Settings overlay (Agents, Prompts, Skills, Templates, Connectors,
+Plugins) for people; `/admin/<tab>` (Models, Model menu, Providers, Images,
+MCP, Tracing) for the operator, admin-gated at the gateway.
 
-Wanted: an admin area as a standalone route (`/admin/...`) for everything that
-configures the deployment, with a URL per tab that can be linked and reloaded
-and browser back between tabs, and a small user-facing overlay for the handful
-of things that are actually a person's own.
-
-The directory — Skills / Connectors / Plugins — stays an overlay whatever
-happens here: it is opened mid-conversation from the composer, and a page
-there would lose the conversation behind it.
+What remains is the gateway: the engine routes the USER zone calls —
+/skills, /servers, /agents writes, /prompts, /templates, /plugins — still fall
+to the admin catch-all, so a non-admin sees the overlay but gets 403s inside
+it. Same shape as the known /api/models/choices 403. Opening those routes to
+signed-in users (owner-scoped where relevant) is one gateway change plus a
+decision about who may author what.
 
 ### A token belongs to a person, not the deployment
 

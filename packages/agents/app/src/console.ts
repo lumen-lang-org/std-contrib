@@ -9,11 +9,11 @@ import { customElement, property, state } from "lit/decorators.js";
 import "./ui.js";
 import "./sidebar.js";
 import "./artifact-panel.js";
-import "./settings.js";
 import "./knowledge.js";
 import "./canvas.js";
 import "./login-overlay.js";
 import "./model-picker.js";
+import "./settings.js";
 import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
@@ -2377,6 +2377,17 @@ export class AgentConsole extends LitElement {
         @pick-choice=${(e: CustomEvent) => { this.choiceId = e.detail.id as string; }}
       ></model-picker>
       <div class="scrim nav" @click=${() => { this.nav = false; }}></div>
+      <!-- The account menu raises two different things and the rail knows the
+           difference: "Preferences" is this event, a person's own panel, and
+           "Deployment settings" navigates to /admin from the rail itself. It
+           was briefly one event doing the second job, which is why pressing
+           Preferences opened the operator's page.
+
+           And this comment lives HERE, above the tag, because a comment among
+           the attributes is not a comment: lit parses the template as HTML, an
+           HTML comment cannot open inside a start tag, and every binding after
+           it silently stops being an attribute. That is what "left menu link
+           stop working" was — one comment, six dead event handlers. -->
       <console-sidebar
         .threads=${this.threads}
         .activeId=${this.threadId}
@@ -2517,7 +2528,15 @@ export class AgentConsole extends LitElement {
             .ensureThread=${() => this.session.ensureThread()}></artifact-panel>` : ""}
       ${this.slashMenu()}
       ${this.pickerPanel()}
-      ${this.settings ? html`<console-settings @close=${() => {
+      <!-- Two surfaces, split by whose setting it is. Settings is the user
+           zone of the tabbed element — Preferences (theme, account) first,
+           then what people author: agents, prompts, skills, templates,
+           connectors, plugins. The admin zone of the same element is not
+           here at all; it is /admin, its own route, behind the gateway's
+           check. There was briefly a third, separate Preferences panel;
+           merged, because two gears beside each other in one menu is a
+           choice nobody should have to make. -->
+      ${this.settings ? html`<console-settings .me=${this.me} @close=${() => {
         this.settings = false;
         // The settings tab says a change takes effect on the next message with
         // no restart. That was only true of the server: the header, the agent

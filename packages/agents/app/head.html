@@ -114,8 +114,17 @@
      surfaces by removing light from the ground, dark separates them by
      adding it. Following the light theme's direction literally would have
      put the composer at #111 on a #181818 page, which reads as a hole. */
-  @media (prefers-color-scheme: dark) {
-    :root {
+  /* Selected by an attribute, not by a media query, and the attribute is
+     always present: the inline script below stamps data-theme on <html>
+     before first paint, resolving "system" through matchMedia itself.
+
+     The reason is that a person may now choose. With the palette behind
+     @media the OS had the only vote, and honouring a chosen theme would mean
+     writing every token twice — once in the media block, once under an
+     attribute — which is the arrangement that produces a half-dark console
+     the day somebody edits one copy. One block, one selector, and the OS
+     preference reaches it through the script. */
+  :root[data-theme="dark"] {
       --bg: #181818;          /* the content sheet, Kimi's page, de-warmed */
       --bg-rail: #141414;     /* the ground, one step BELOW the sheet */
       --bg-card: #1F1F1F;     /* raised: cards, panels, menus */
@@ -194,7 +203,6 @@
       --focus: #7AA7FF;
       --danger: #FF8A80;
       --ok: #5DD39E;
-    }
   }
   /* svh, and the three values are a ladder rather than indecision: a browser
      takes the last unit it understands, so this is 100% where nothing else is
@@ -411,6 +419,39 @@
      resize AND scroll: iOS reports the toolbar collapsing as a scroll, not
      always as a resize. requestAnimationFrame coalesces the burst that a
      single gesture produces into one write. -->
+<!-- Which palette, decided before the first pixel.
+     Inline and synchronous on purpose: a theme applied from a module after
+     hydration is a white flash on a dark console, every load. This is the one
+     thing that has to run before paint, so it is eleven lines in the head
+     rather than a feature of the app.
+
+     Three values, one of which is not a palette: "system" means follow the OS
+     and keep following it, which is why the media query is read here and
+     listened to rather than left in the stylesheet. A stored "light" or
+     "dark" is a person overruling their OS, and it must survive their OS
+     changing its mind. -->
+<script>
+  (function () {
+    var KEY = "joule-theme";
+    var root = document.documentElement;
+    var dark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    function paint() {
+      var want = "system";
+      try { want = localStorage.getItem(KEY) || "system"; } catch (e) { /* private mode */ }
+      var resolved = want === "system" ? (dark && dark.matches ? "dark" : "light") : want;
+      root.setAttribute("data-theme", resolved);
+      root.setAttribute("data-theme-choice", want);
+    }
+    paint();
+    // The OS flipping while the console is open should move a "system"
+    // console with it; a chosen one must not budge, which `paint` handles by
+    // reading the choice again rather than by this listener knowing about it.
+    if (dark && dark.addEventListener) { dark.addEventListener("change", paint); }
+    // The panel writes localStorage and fires this; one repaint path for both
+    // "the OS changed" and "the person chose".
+    window.addEventListener("joule-theme", paint);
+  })();
+</script>
 <script>
   (function () {
     var vv = window.visualViewport;

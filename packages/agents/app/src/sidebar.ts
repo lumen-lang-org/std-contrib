@@ -165,8 +165,13 @@ export class ConsoleSidebar extends LitElement {
 
       <footer>
         ${this.menu ? html`<div class="menu">
+          <!-- One Settings for a person — it opens on Preferences and holds
+               the authoring tabs beside it — and the operator's page for the
+               people the gateway will admit; a row that answers 403 is worse
+               than no row. -->
+          <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>
           ${isAdmin(this.me) ? html`
-            <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>
+            <div @click=${() => { this.menu = false; location.assign("/admin/models"); }}>Deployment settings</div>
           ` : ""}
           ${this.me !== null ? html`
             <div @click=${() => { location.assign("/logout"); }}>Sign out</div>

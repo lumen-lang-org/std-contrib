@@ -35,38 +35,49 @@ import {
   PluginRow, PluginItem, PluginPreview, listPlugins, pluginItems, inspectPlugin, installPlugin, removePlugin,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
+  Me, isAdmin,
 } from "./api.js";
 
 // Each tab, with the mark that stands for it in the rail. The icons are the
 // ones nr-icon carries — a name it does not have is drawn as the name itself.
+// Every tab, and WHOSE it is. Two zones, one element: the user zone is what
+// people author — agents, prompts, skills, templates, and the connectors and
+// plugins they browse in the directory — and it renders in the overlay the
+// account menu opens. The admin zone is what makes the deployment run at all:
+// model rows, provider keys, script images, tracing, the raw MCP table. It
+// renders at /admin, behind the gateway's admin check.
+//
+// The split is by ownership rather than by screen, because the first cut of
+// this got it wrong in exactly that way: settings became a page and the page
+// was all twelve tabs, so "user configuration" and "what makes Joule work"
+// were still one surface with one audience. A models row is not something a
+// person configures about themselves; a prompt is not infrastructure.
+//
+// On the three acquisition nouns (skills you write, connectors you address,
+// plugins you install) — the note that used to live mid-list — see the
+// directory in console.ts, which is their browsing surface.
 const TABS = [
-  { name: "Agents", icon: "message-square" },
-  { name: "Models", icon: "zap" },
-  { name: "Model menu", icon: "list" },
-  { name: "Prompts", icon: "file-text" },
-  { name: "Skills", icon: "sticky-note" },
-  { name: "Templates", icon: "file-text" },
-  { name: "MCP", icon: "code" },
-  // Three nouns, three tabs, and the split is about how a thing is ACQUIRED.
-  //
-  //   Skills      you write.
-  //   Connectors  you address — a service that already exists, reached over
-  //               MCP, whether from the ready-made shelf or typed by hand.
-  //   Plugins     you install — a bundle somebody else published, which
-  //               arrives carrying skills and connectors of its own.
-  //
-  // "Connectors" was called "Plugins" here for a month, which made the shelf
-  // of ready-made MCP servers and the idea of an installable bundle the same
-  // word — so there was no way to say "this connector came from that plugin".
-  // MCP stays its own tab underneath: it is the raw table, for the operator
-  // who is editing an endpoint rather than browsing for one.
-  { name: "Connectors", icon: "plug" },
-  { name: "Plugins", icon: "cube" },
-  { name: "Images", icon: "box" },
-  { name: "Providers", icon: "cloud" },
-  { name: "Tracing", icon: "layers" },
+  // First and the overlay's opening tab: what a person came to change is
+  // usually their own — the deployment's authoring tabs are one click right.
+  { name: "Preferences", icon: "settings", zone: "user" },
+  { name: "Agents", icon: "message-square", zone: "user" },
+  { name: "Prompts", icon: "file-text", zone: "user" },
+  { name: "Skills", icon: "sticky-note", zone: "user" },
+  { name: "Templates", icon: "file-text", zone: "user" },
+  { name: "Connectors", icon: "plug", zone: "user" },
+  { name: "Plugins", icon: "cube", zone: "user" },
+  { name: "Models", icon: "zap", zone: "admin" },
+  { name: "Model menu", icon: "list", zone: "admin" },
+  { name: "Providers", icon: "cloud", zone: "admin" },
+  { name: "Images", icon: "box", zone: "admin" },
+  // The raw server table. The Connectors tab above is the browsing face of
+  // the same rows; this is the one with transports and auth headers on it,
+  // which is operator work even when the row began as somebody's browse.
+  { name: "MCP", icon: "code", zone: "admin" },
+  { name: "Tracing", icon: "layers", zone: "admin" },
 ] as const;
 type Tab = typeof TABS[number]["name"];
+type Zone = typeof TABS[number]["zone"];
 
 // "vertex" authenticates with a whole service-account JSON pasted as the
 // key; the server mints short-lived OAuth tokens from it per request.
@@ -158,10 +169,25 @@ export class ConsoleSettings extends LitElement {
        that asks, from a test to a screen reader. So the host stays a layer of
        its own and the overlay fills it. */
     :host { position: fixed; inset: 0; z-index: 40; }
+    /* As a page it is not a layer over anything: it fills the route's box and
+       scrolls inside it, so there is no fixed positioning to fight with and
+       nothing to close. The body below needs a height to divide between its
+       rail and its content, which on a page is the viewport rather than the
+       overlay's card. */
+    :host([page]) { position: static; inset: auto; z-index: auto;
+                    display: block; height: 100%; }
+    :host([page]) .body { height: 100%; }
 
     /* The surface, its scrim, its header and its dismissal all belong to
        nr-overlay. What is left here is the settings layout itself. */
     nr-overlay {
+      /* Wider and taller than the component's default card. The user zone
+         holds tables — skills with descriptions, connector endpoints — and at
+         1040px the description column was the one doing all the truncating.
+         Height rises with it: a wide short card is a letterbox. Both stay
+         viewport-bounded, so a laptop gets the margins it always had. */
+      --nuraly-overlay-width: min(1320px, 96vw);
+      --nuraly-overlay-height: min(860px, 92vh);
       --nuraly-color-overlay-surface: var(--bg);
       --nuraly-color-overlay-border: var(--border);
       --nuraly-color-overlay-text: var(--fg);
@@ -170,6 +196,11 @@ export class ConsoleSettings extends LitElement {
     }
 
     .body { flex: 1; display: flex; min-height: 0; width: 100%; }
+    /* A page has the whole window, so the content column stops sprawling: a
+       table measured across 1900px is a table nobody can follow from one
+       column to the next. Wider than the overlay ever was, bounded well short
+       of the screen. */
+    :host([page]) main { max-width: 1180px; }
 
     /* Left rail. Each item is an icon and a word; the active one is a filled
        pill rather than a coloured word, so the eye finds it by shape. */
@@ -185,6 +216,27 @@ export class ConsoleSettings extends LitElement {
     aside .item .ic { width: 16px; display: grid; place-items: center; opacity: 0.8; }
 
     main { flex: 1; overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
+    /* Preferences: the theme picker is three buttons in one track, the choice
+       filled rather than ticked — the capability chips' shape, not a new
+       control. Bounded: a segmented control the width of a settings page
+       reads as three toolbar buttons. */
+    .seg { display: flex; gap: 4px; padding: 4px; border-radius: 12px;
+           background: var(--bg-sunken); max-width: 420px; }
+    .seg button { flex: 1; display: flex; align-items: center; justify-content: center;
+                  gap: 7px; padding: 8px 6px; border: 0; border-radius: 9px;
+                  background: none; font: inherit; font-size: 13.5px;
+                  color: var(--muted); cursor: pointer;
+                  transition: background-color .15s cubic-bezier(.23,1,.32,1),
+                              color .15s cubic-bezier(.23,1,.32,1); }
+    .seg button:hover { color: var(--fg); }
+    .seg button.on { background: var(--bg-card); color: var(--fg);
+                     font-weight: 550; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    .who { display: flex; align-items: center; gap: 11px; }
+    .avatar { display: grid; place-items: center; width: 34px; height: 34px;
+              border-radius: 999px; background: var(--fg); color: var(--bg);
+              font-weight: 650; font-size: 14px; flex: none; }
+    .who .mail { min-width: 0; font-size: 14px; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
 
     /* On a phone the two-column shell does not fit, and pretending it does is
        what the screenshot showed: a 216px rail plus content squeezed into
@@ -371,7 +423,7 @@ export class ConsoleSettings extends LitElement {
     :focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   `;
 
-  @property() tab: Tab = "Agents";
+  @property() tab: Tab = "Preferences";
   @state() private agents: AgentFull[] = [];
   @state() private models: ModelRow[] = [];
   @state() private configs: ModelConfigRow[] = [];
@@ -404,6 +456,19 @@ export class ConsoleSettings extends LitElement {
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
   @state() private view: View = { kind: "list" };
+  /* Drawn as a page rather than inside an overlay. A property, not a second
+     element: the difference is a frame and a navigation, and everything else
+     — every tab, every form, every refusal — is the same code. */
+  @property({ type: Boolean }) page = false;
+  /* Which zone's tabs this instance offers. The overlay is the user zone; the
+     /admin route sets "admin". A zone, not a tab list: the caller should not
+     be able to compose a surface the split does not describe. */
+  @property({ type: String }) zone: Zone = "user";
+  /* Who is signed in — the Preferences tab shows it. Handed down rather than
+     fetched: the console already asked /whoami, and a second ask can only
+     agree with the first. */
+  @property({ attribute: false }) me: Me | null = null;
+  @state() private themeChoice: "system" | "light" | "dark" = "system";
   // What the last Test said, so the answer appears where the button is.
   @state() private probed = "";
   // The tracing panel is a form with no list, so its draft lives here.
@@ -415,6 +480,9 @@ export class ConsoleSettings extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    let held = "system";
+    try { held = localStorage.getItem("joule-theme") ?? "system"; } catch { /* private mode */ }
+    this.themeChoice = held === "light" || held === "dark" ? held : "system";
     await this.refresh();
   }
 
@@ -516,7 +584,30 @@ export class ConsoleSettings extends LitElement {
     this.view = { ...v, row: { ...v.row, ...fields } } as View;
   }
 
+  /* The same element, two frames.
+     As an overlay it is something you opened over your conversation and will
+     close again. As a page it is where you went — its own address, its own
+     back button, a tab per URL, and room for forms that were cramped inside a
+     centred card. Everything below the frame is identical, which is the point:
+     one settings UI, and the page did not become a second copy that drifts. */
   render() {
+    const body = html`
+      <div class="body">
+        <aside>
+          <div class="label">${this.zone === "admin" ? "Deployment" : "Settings"}</div>
+          ${TABS.filter((t) => t.zone === this.zone).map((t) => html`
+            <div class="item ${t.name === this.tab ? "on" : ""}" data-tab=${t.name}
+              @click=${() => this.goTab(t.name)}>
+              <span class="ic"><nr-icon name=${t.icon} size="small"></nr-icon></span>
+              <span>${t.name}</span>
+            </div>`)}
+        </aside>
+        <main>
+          ${this.renderTab()}
+          ${this.problem === "" ? "" : html`<p class="err" role="alert">${this.problem}</p>`}
+        </main>
+      </div>`;
+    if (this.page) { return body; }
     return html`
       <nr-overlay
         open
@@ -524,27 +615,93 @@ export class ConsoleSettings extends LitElement {
         allow-fullscreen
         @nr-close=${() => this.dispatchEvent(new CustomEvent("close"))}
       >
-        <div class="body">
-          <aside>
-            <div class="label">Settings</div>
-            ${TABS.map((t) => html`
-              <div class="item ${t.name === this.tab ? "on" : ""}" data-tab=${t.name}
-                @click=${() => { this.tab = t.name; this.close(); }}>
-                <span class="ic"><nr-icon name=${t.icon} size="small"></nr-icon></span>
-                <span>${t.name}</span>
-              </div>`)}
-          </aside>
-          <main>
-            ${this.renderTab()}
-            ${this.problem === "" ? "" : html`<p class="err" role="alert">${this.problem}</p>`}
-          </main>
-        </div>
+        ${body}
       </nr-overlay>
     `;
   }
 
+  /* Choosing a tab. On a page it is a navigation — the URL is the tab, so the
+     address bar, the back button and a pasted link all agree — and the
+     history entry is replaced rather than pushed only for the tab the page
+     opened on. In the overlay it is what it always was: state. */
+  private goTab(name: Tab) {
+    this.tab = name;
+    this.close();
+    if (!this.page) { return; }
+    const slug = name.toLowerCase().replace(/ /g, "-");
+    history.pushState({}, "", `/admin/${slug}`);
+  }
+
+  /* The person's own tab, absorbed from what was briefly a separate panel.
+     One entry point for a person ("Settings"), whichever kind of setting they
+     came for — the merge the user asked for by name. Theme is the whole of it
+     today, plus who you are; it should grow slowly, because a row here that
+     only an operator can act on is the mistake the zones exist to prevent.
+
+     The head script in head.html owns resolving a choice into a palette —
+     including "system", which keeps following the OS. This tab only writes
+     the choice and rings the bell; repainting from here would be a second
+     copy of that rule, and the two would disagree the first time either
+     changed. */
+  private preferencesTab() {
+    const choices = [
+      { id: "system" as const, label: "System", icon: "cpu" },
+      { id: "light" as const, label: "Light", icon: "eye" },
+      { id: "dark" as const, label: "Dark", icon: "circle" },
+    ];
+    const mail = this.me?.email ?? "";
+    return html`
+      ${this.head("Preferences", "settings")}
+
+      ${this.group("Appearance")}
+      <div class="seg" role="radiogroup" aria-label="Theme">
+        ${choices.map((c) => html`
+          <button class=${c.id === this.themeChoice ? "on" : ""} role="radio"
+            aria-checked=${c.id === this.themeChoice ? "true" : "false"}
+            @click=${() => this.chooseTheme(c.id)}>
+            <nr-icon name=${c.icon} size="small"></nr-icon>${c.label}
+          </button>`)}
+      </div>
+      <p class="note">System follows your device, and keeps following it if it
+      changes while the console is open.</p>
+
+      ${this.me === null ? "" : html`
+        ${this.group("Account")}
+        <div class="who">
+          <span class="avatar">${(mail.trim()[0] ?? "?").toUpperCase()}</span>
+          <span class="mail">${mail}</span>
+        </div>
+        <div class="bar">
+          <button class="act" @click=${() => { location.assign("/logout"); }}>
+            <nr-icon name="log-out" size="small"></nr-icon> Sign out</button>
+        </div>`}
+
+      ${!isAdmin(this.me) ? "" : html`
+        ${this.group("Deployment")}
+        <p class="note">Models, providers, images, MCP and tracing are how this
+        deployment is wired, and they live on their own page.</p>
+        <div class="bar">
+          <button class="act" @click=${() => { location.assign("/admin/models"); }}>
+            <nr-icon name="settings" size="small"></nr-icon> Open deployment settings</button>
+        </div>`}
+    `;
+  }
+
+  private chooseTheme(next: "system" | "light" | "dark") {
+    this.themeChoice = next;
+    try { localStorage.setItem("joule-theme", next); } catch { /* private mode */ }
+    window.dispatchEvent(new Event("joule-theme"));
+  }
+
   private renderTab() {
+    // A tab from the other zone — a stale URL, a caller passing the old
+    // default — falls to this zone's first tab rather than rendering a
+    // surface the rail cannot show as selected.
+    if (!TABS.some((t) => t.name === this.tab && t.zone === this.zone)) {
+      this.tab = TABS.find((t) => t.zone === this.zone)?.name ?? "Agents";
+    }
     switch (this.tab) {
+      case "Preferences": return this.preferencesTab();
       case "Agents": return this.agentsTab();
       case "Models": return this.modelsTab();
       case "Model menu": return this.menuTab();
