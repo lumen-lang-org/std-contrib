@@ -19,6 +19,9 @@ export type CardPlugin = {
   id: string;
   htmlTags?: { name: string; open: string; close: string }[];
   renderHtmlBlock?(name: string, content: string): string;
+  /** Whether this plugin claims a block whose marker is NOT one of its own —
+   *  judged from the parsed payload alone. See `renderWithCards`. */
+  claimsShape?(data: Record<string, unknown>): boolean;
 };
 
 const REGISTRY: CardPlugin[] = [];
@@ -70,6 +73,20 @@ export function renderWithCards(raw: string, renderText: (segment: string) => st
       }
     }
     if (best === null) {
+      // Nothing registered matched. A weak model reliably writes the marker it
+      // is thinking about rather than the one it was given — [TND]…[/TND] for
+      // a Tunisian dinar, [EUR] for a euro — and the payload inside is exactly
+      // right. The engine already takes this view of a skill called by its own
+      // name (tools.ts): the intent is not ambiguous, so refusing it is
+      // pedantry that costs the whole card. So one more pass, claiming a
+      // bracketed block by the SHAPE of its JSON rather than by its name.
+      const strayed = strayBlock(raw, pos);
+      if (strayed !== null) {
+        if (strayed.open > pos) out += renderText(raw.slice(pos, strayed.open));
+        out += strayed.html;
+        pos = strayed.end;
+        continue;
+      }
       out += renderText(raw.slice(pos));
       break;
     }
@@ -87,6 +104,46 @@ export function renderWithCards(raw: string, renderText: (segment: string) => st
     pos = best.end;
   }
   return out;
+}
+
+
+/** A `[WORD]{…json…}[/WORD]` block whose payload a plugin claims by shape, or
+ *  null. The marker is only accepted as a pair — an opening [X] with the
+ *  matching [/X] — so ordinary bracketed prose is never mistaken for one. */
+function strayBlock(raw: string, from: number):
+  { open: number; end: number; html: string } | null {
+  let at = from;
+  while (at < raw.length) {
+    const open = raw.indexOf("[", at);
+    if (open === -1) return null;
+    const shut = raw.indexOf("]", open + 1);
+    if (shut === -1) return null;
+    const name = raw.slice(open + 1, shut);
+    // A marker is a short word: letters, digits, dash or underscore. Anything
+    // else is a sentence that happens to contain a bracket.
+    const plain = name !== "" && name.length <= 16
+      && [...name].every((c) => /[A-Za-z0-9_-]/.test(c));
+    if (!plain) { at = open + 1; continue; }
+    const closer = `[/${name}]`;
+    const close = raw.indexOf(closer, shut + 1);
+    if (close === -1) { at = open + 1; continue; }
+    const body = raw.slice(shut + 1, close).trim();
+    let data: Record<string, unknown> | null = null;
+    try { data = JSON.parse(body) as Record<string, unknown>; } catch { data = null; }
+    if (data !== null) {
+      for (const plugin of REGISTRY) {
+        if (typeof plugin.claimsShape !== "function") continue;
+        if (typeof plugin.renderHtmlBlock !== "function") continue;
+        if (!plugin.claimsShape(data)) continue;
+        const tag = (plugin.htmlTags ?? [])[0];
+        let html = "";
+        try { html = plugin.renderHtmlBlock(tag ? tag.name : name, body) ?? ""; } catch { html = ""; }
+        if (html !== "") return { open, end: close + closer.length, html };
+      }
+    }
+    at = open + 1;
+  }
+  return null;
 }
 
 // --- the currency card -------------------------------------------------------
@@ -119,6 +176,9 @@ const money = (n: number): string =>
 export const currencyCard: CardPlugin = {
   id: "currency-card",
   htmlTags: [{ name: "currency", open: "[CURRENCY]", close: "[/CURRENCY]" }],
+  claimsShape(d: Record<string, unknown>): boolean {
+    return typeof d.rate === "number" && typeof d.from === "string" && typeof d.to === "string";
+  },
   renderHtmlBlock(name: string, content: string): string {
     if (name !== "currency") return "";
     let d: CurrencyData;
