@@ -19,6 +19,7 @@ import {
   SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
   ServerRow, listServers, listSkills, copySkillLocally,
+  PluginRow, listPlugins, pluginItems,
 } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
@@ -93,7 +94,22 @@ type SlashRow = {
 type GalleryRow = {
   key: string; name: string; why: string; on: boolean; icon: string;
   source: string; id: string;
+  /* Where this came from, in the words a person reads on the card: "From you",
+     "From a plugin", "From github.com". Kimi puts the same line under every
+     name in its skills gallery ("From Kimi"), and it earns its space here for
+     a reason theirs does not have to carry — provenance decides what you can
+     do with the thing. Yours is editable, a repository's is not, and a
+     plugin's disappears when the plugin does. */
+  from: string;
 };
+
+/* What the directory holds. Three of the four are acquired three different
+   ways — a skill you write, a connector you address, a plugin you install —
+   and Claude splits its own directory on the same seam; ours called two of
+   them "Plugins" and had no word left for the third. Agents joined them
+   because the rail needed somewhere to send "who am I talking to", and it is
+   the same shape: a shelf of cards, one of which you pick. */
+type Shelf = "" | "skills" | "agents" | "connectors" | "plugins";
 
 /* How many rows the slash menu will ever draw. Six is about a third of a phone
    screen: enough that a match is usually visible without the menu becoming the
@@ -681,11 +697,26 @@ export class AgentConsole extends LitElement {
     /* The skills gallery. A sheet on a phone and a centred card above it —
        the artifact panel's shape, because a person has met it already and a
        third way of showing a temporary surface is a third thing to learn. */
+    /* Its own backdrop, at every width. The files scrim it used to borrow is
+       displayed only inside the 1024px media block — it was written for the
+       files sheet, which only exists there — so on a desktop this panel
+       floated over a fully lit page with nothing behind it: no dimming, and a
+       click on the page underneath went to the page. This one is the
+       directory's own, always drawn, and it is what makes the panel read as
+       being in front of the conversation rather than pasted onto it. */
+    .scrim.shelves { display: block; position: fixed; inset: 0; z-index: 39;
+                     background: rgba(0,0,0,.32); backdrop-filter: blur(2px); }
+    /* Wide enough to be a directory. At 560px the card grid fell to two
+       columns on a 1500px screen and the panel read as a menu that had been
+       stretched; a directory is something you browse, and browsing wants the
+       width. Still bounded — a panel edge to edge is a page, and this one is
+       deliberately not a page. */
     .gallery { position: fixed; z-index: 40; background: var(--bg-card);
-              border: 1px solid var(--border); border-radius: 14px;
+              border: 1px solid var(--border); border-radius: 16px;
+              box-shadow: 0 24px 60px -12px rgba(0,0,0,.35);
               display: flex; flex-direction: column; overflow: hidden;
-              left: 50%; transform: translateX(-50%); top: 10vh; bottom: 10vh;
-              width: min(560px, calc(100% - 24px)); }
+              left: 50%; transform: translateX(-50%); top: 8vh; bottom: 8vh;
+              width: min(980px, calc(100% - 48px)); }
     .gallery-head { display: flex; align-items: center; justify-content: space-between;
                    padding: 12px 10px 12px 16px; font-weight: 600;
                    border-bottom: 1px solid var(--border); }
@@ -708,20 +739,39 @@ export class AgentConsole extends LitElement {
        is tall. */
     .gallery-list { overflow-y: auto; overscroll-behavior: contain;
                     -webkit-overflow-scrolling: touch; min-height: 0;
-                    padding: 12px; display: grid; gap: 8px;
-                    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+                    padding: 14px 16px 16px; display: grid; gap: 10px;
+                    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
                     align-content: start; }
     /* Under a heading the grid stops being the scroller — the column of
        headings and grids is. Two grids each with their own scrollbar is two
        lists in one panel. */
-    .gallery-list.flat { overflow: visible; padding: 0 12px 12px; }
+    .gallery-list.flat { overflow: visible; padding: 0 16px 14px; }
     .gallery-scroll { overflow-y: auto; overscroll-behavior: contain;
                       -webkit-overflow-scrolling: touch; min-height: 0; }
     .gallery-group { font-size: 12px; font-weight: 600; letter-spacing: .04em;
                      text-transform: uppercase; color: var(--faint);
-                     padding: 14px 12px 8px;
+                     padding: 16px 16px 8px;
                      display: flex; align-items: center; gap: 7px; }
     .gallery-title { display: flex; align-items: center; gap: 8px; }
+    /* Tabs where the title used to be. Text and a count, separated by nothing
+       but weight and ink — a pill or a border per tab would make three of them
+       heavier than the cards underneath, which are the actual subject. */
+    .gallery-tabs { display: flex; align-items: center; gap: 4px;
+                    min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .gallery-tabs::-webkit-scrollbar { display: none; }
+    .gallery-tab { display: flex; align-items: center; gap: 7px; flex: none;
+                   padding: 6px 10px; border: 0; border-radius: 9px;
+                   background: none; font: inherit; font-weight: 600;
+                   font-size: 14.5px; color: var(--faint); cursor: pointer;
+                   transition: color .15s cubic-bezier(.23,1,.32,1),
+                               background-color .15s cubic-bezier(.23,1,.32,1); }
+    .gallery-tab:hover { color: var(--muted); background: var(--bg-sunken); }
+    .gallery-tab.on { color: var(--fg); background: var(--fill-1); }
+    /* One line saying what this shelf is. Three nouns that sound alike need
+       it once, where somebody is looking at them. */
+    .gallery-lede { margin: 12px 16px 0; color: var(--muted);
+                    font-size: 13px; line-height: 1.45; }
+    .pick-from { font-size: 12px; color: var(--faint); }
     /* How many, beside the name. Both references carry the number rather than
        making you count the cards, and it is the fastest way to see that a
        filter is hiding most of them. */
@@ -730,7 +780,7 @@ export class AgentConsole extends LitElement {
                      border: 1px solid var(--border); border-radius: 999px;
                      padding: 1px 7px; text-transform: none; }
     .gallery-find { display: flex; align-items: center; gap: 8px;
-                    margin: 12px 12px 0; padding: 7px 11px; border-radius: 10px;
+                    margin: 12px 16px 0; padding: 8px 12px; border-radius: 10px;
                     border: 1px solid var(--border); color: var(--faint); }
     .gallery-find:focus-within { border-color: var(--focus); }
     .gallery-find input { flex: 1; min-width: 0; border: 0; background: none;
@@ -1022,8 +1072,11 @@ export class AgentConsole extends LitElement {
   /* Starting points for the pinned capability, shown as cards under the
      composer once one is picked. */
   @state() private starts: TemplateRow[] = [];
-  /* Which gallery the + menu opened, or "" for none. */
-  @state() private gallery: "" | "skills" | "plugins" = "";
+  /* Which shelf of the directory is open, or "" for closed. It is also the
+     active tab: the overlay is one surface with three tabs rather than three
+     surfaces, which is Kimi's shape — you go there to browse, and browsing
+     means moving between them without closing anything. */
+  @state() private gallery: Shelf = "";
   /* What is typed into the gallery's filter. Cleared when it opens, because a
      filter left over from last time is a gallery that looks empty. */
   @state() private galleryFind = "";
@@ -1040,6 +1093,12 @@ export class AgentConsole extends LitElement {
      menu knows whether to offer the row at all — the alternative is a row that
      opens an empty panel. */
   @state() private servers: ServerRow[] = [];
+  /* Installed bundles, and what each one brought. The directory needs the
+     second to say "From <plugin>" on a skill card: a plugin's skill is stored
+     as an ordinary repo-sourced skill, so without the receipts there is no way
+     to tell one that came from a bundle from one somebody synced by hand. */
+  @state() private plugins: PluginRow[] = [];
+  @state() private pluginOf = new Map<string, string>();
 
   /* Seeding happens here and not in connectedCallback, and that is the whole
      reason the conversation can be server-rendered at all.
@@ -1586,8 +1645,15 @@ export class AgentConsole extends LitElement {
       { id: "upload-file", label: "Add files & photos", icon: "paperclip" },
       { id: "pick:skills", label: "Skills", icon: "zap" },
     ];
+    // Connectors, not "Plugins" — the row opens the list of MCP servers, and
+    // calling that Plugins left no word for a bundle you install. Each row
+    // opens the directory on its own tab; the tabs are how you get to the
+    // other two once it is open.
     if (this.servers.length > 0) {
-      items.push({ id: "pick:plugins", label: "Plugins", icon: "share" });
+      items.push({ id: "pick:connectors", label: "Connectors", icon: "share" });
+    }
+    if (this.plugins.length > 0) {
+      items.push({ id: "pick:plugins", label: "Plugins", icon: "cube" });
     }
     return items;
   }
@@ -1728,16 +1794,9 @@ export class AgentConsole extends LitElement {
      ids fall through on purpose — the component may grow rows of its own. */
   private async onAttachPick(e: Event) {
     const id = (e as CustomEvent).detail?.item?.id as string | undefined;
-    if (id === "pick:skills") {
-      this.galleryFind = "";
-      this.gallery = "skills";
-      if (this.allSkills.length === 0) {
-        this.allSkills = await listSkills().catch(() => []);
-      }
-    } else if (id === "pick:plugins") {
-      this.galleryFind = "";
-      this.gallery = "plugins";
-    }
+    if (id === "pick:skills") { await this.openShelf("skills"); }
+    else if (id === "pick:connectors") { await this.openShelf("connectors"); }
+    else if (id === "pick:plugins") { await this.openShelf("plugins"); }
   }
 
   /* The slash menu, over the composer.
@@ -1774,21 +1833,97 @@ export class AgentConsole extends LitElement {
       </div>`;
   }
 
-  /* Skills and plugins, as a gallery rather than a menu.
-     A skill is chosen the same way a capability chip is — pin() — so this adds
-     a way in rather than a second mechanism. Plugins are shown and not chosen:
-     an MCP server is attached to an agent in Settings, and a picker that
-     looked like it could attach one from here would be lying. */
+  /* The directory: skills, connectors and plugins, as a gallery rather than a
+     menu.
+
+     One overlay with three tabs, which is Kimi's shape and not an arbitrary
+     one — you arrive to browse, and browsing means moving between the three
+     without closing anything. The tabs are also the only place in the console
+     that says out loud what the three ARE, so the wording under each title is
+     doing real work: a skill you write, a connector you address, a plugin you
+     install.
+
+     A skill is chosen here the way a capability chip is — pin() — so this adds
+     a way in rather than a second mechanism. Connectors and plugins are shown
+     and not chosen: a connector is attached to an agent in Settings and a
+     plugin is installed there, and a card that looked like it could do either
+     from here would be lying about what a press does. */
+  private openShelf(shelf: Shelf) {
+    this.galleryFind = "";
+    this.gallery = shelf;
+    return this.loadShelves();
+  }
+
+  /* What the directory draws, fetched the first time it is opened. Skills were
+     already lazy for the reason the comment on the field gives; plugins join
+     them because most deployments have none and a list of none is not worth a
+     request on every page load. */
+  private async loadShelves() {
+    if (this.allSkills.length === 0) {
+      this.allSkills = await listSkills().catch(() => []);
+    }
+    if (this.plugins.length === 0) {
+      this.plugins = await listPlugins().catch(() => []);
+      const owner = new Map<string, string>();
+      for (const p of this.plugins) {
+        const items = await pluginItems(p.id).catch(() => []);
+        for (const it of items) { owner.set(it.itemId, p.pluginName); }
+      }
+      this.pluginOf = owner;
+    }
+  }
+
+  private shelfRows(shelf: Shelf): GalleryRow[] {
+    if (shelf === "skills") {
+      return this.allSkills.map((s) => ({
+        key: s.skillName, name: s.skillName, why: s.description,
+        on: this.pinned === s.skillName, icon: capIcon(s.skillName),
+        source: s.source, id: s.id, from: this.provenance(s.id, s.source, s.sourceUrl),
+      }));
+    }
+    if (shelf === "agents") {
+      // Choosing one is choosing who answers, which is the same act the slash
+      // menu performs — so it goes through the same field rather than a second
+      // way of saying it.
+      return this.agents.map((a) => ({
+        key: a.id, name: a.agentName, why: a.description,
+        on: this.agentId === a.id, icon: "message-square",
+        source: "local", id: a.id,
+        from: a.isDefault ? "Answers by default" : "",
+      }));
+    }
+    if (shelf === "connectors") {
+      return this.servers.map((s) => ({
+        key: s.id, name: s.serverName === "" ? s.id : s.serverName,
+        why: s.enabled ? s.endpoint : "Disabled · " + s.endpoint,
+        on: false, icon: serverIcon(s), source: "local", id: s.id,
+        from: this.provenance(s.id, "local", ""),
+      }));
+    }
+    return this.plugins.map((p) => ({
+      key: p.id, name: p.pluginName, why: p.description, on: false,
+      icon: "cube", source: "repo", id: p.id,
+      from: p.version === "" ? "Installed" : "Installed · v" + p.version,
+    }));
+  }
+
+  /* The line under a card's name. A plugin's receipt wins over the row's own
+     source, because "From the web-search plugin" is the answer to both "can I
+     edit this" and "what happens if I remove that", and "From
+     raw.githubusercontent.com" answers neither well. */
+  private provenance(id: string, source: string, sourceUrl: string): string {
+    const bundle = this.pluginOf.get(id);
+    if (bundle !== undefined) { return "From the " + bundle + " plugin"; }
+    if (source !== "repo") { return "From you"; }
+    if (sourceUrl === "") { return "From a repository"; }
+    try { return "From " + new URL(sourceUrl).hostname; }
+    catch { return "From a repository"; }
+  }
+
   private pickerPanel() {
     if (this.gallery === "") return nothing;
-    const skills = this.gallery === "skills";
-    const rows = skills
-      ? this.allSkills.map((s) => ({ key: s.skillName, name: s.skillName,
-          why: s.description, on: this.pinned === s.skillName,
-          icon: capIcon(s.skillName), source: s.source, id: s.id }))
-      : this.servers.map((s) => ({ key: s.id, name: s.serverName === "" ? s.id : s.serverName,
-          why: s.enabled ? s.endpoint : "Disabled · " + s.endpoint, on: false,
-          icon: serverIcon(s), source: "local", id: s.id }));
+    const shelf = this.gallery;
+    const rows = this.shelfRows(shelf);
     // Filtered on both halves, because half of what you remember about a skill
     // is what it does rather than what it is called — "spreadsheet" should
     // find make-sheet. Case-folded on one side only would fail every capital.
@@ -1796,16 +1931,45 @@ export class AgentConsole extends LitElement {
     const shown = find === ""
       ? rows
       : rows.filter((r) => (r.name + " " + r.why).toLowerCase().includes(find));
+    const lede = shelf === "skills"
+      ? "Instructions the agent can follow. Pick one to pin it to this conversation."
+      : shelf === "agents"
+        ? "Who answers. Picking one changes who this conversation is with."
+        : shelf === "connectors"
+          ? "Services this deployment can call. Attach one to an agent in Settings."
+          : "Bundles installed from a manifest, each carrying its own skills and connectors.";
+    const empty = shelf === "skills"
+      ? "This deployment has no skills yet."
+      : shelf === "agents"
+        ? "No agents are enabled."
+        : shelf === "connectors"
+          ? "No connectors are configured."
+          : "No plugins are installed.";
+    const one = shelf === "skills" ? "skill" : shelf === "agents" ? "agent"
+      : shelf === "connectors" ? "connector" : "plugin";
     return html`
-      <div class="scrim files" @click=${() => { this.gallery = ""; }}></div>
-      <div class="gallery" role="dialog" aria-label=${skills ? "Skills" : "Plugins"}>
+      <div class="scrim shelves" @click=${() => { this.gallery = ""; }}></div>
+      <div class="gallery" role="dialog" aria-label="Directory">
         <div class="gallery-head">
-          <span class="gallery-title">${skills ? "Skills" : "Plugins"}
-            <span class="gallery-count">${rows.length}</span></span>
+          <!-- Tabs, not a title. The heading is the thing you are looking at,
+               and with four shelves the heading has to be pressable or the
+               only way between them is closing this and reopening it from a
+               menu two levels down. -->
+          <div class="gallery-tabs" role="tablist">
+            ${(["skills", "agents", "connectors", "plugins"] as const).map((t) => html`
+              <button class=${t === shelf ? "gallery-tab on" : "gallery-tab"}
+                role="tab" aria-selected=${t === shelf ? "true" : "false"}
+                @click=${() => { this.galleryFind = ""; this.gallery = t; }}>
+                ${t === "skills" ? "Skills" : t === "agents" ? "Agents"
+                  : t === "connectors" ? "Connectors" : "Plugins"}
+                <span class="gallery-count">${this.shelfRows(t).length}</span>
+              </button>`)}
+          </div>
           <button class="icon" title="Close" @click=${() => { this.gallery = ""; }}>
             <nr-icon name="x" size="medium"></nr-icon>
           </button>
         </div>
+        <p class="gallery-lede">${lede}</p>
         <!-- A filter, because fourteen is past the number you can find one in
              by reading. Kimi and Claude both put one above a list this long.
              Hidden under five rows, where it would be furniture. -->
@@ -1813,58 +1977,71 @@ export class AgentConsole extends LitElement {
           <div class="gallery-find">
             <nr-icon name="search" size="small"></nr-icon>
             <input type="text" .value=${this.galleryFind}
-              placeholder=${skills ? "Find a skill" : "Find a plugin"}
-              aria-label=${skills ? "Find a skill" : "Find a plugin"}
+              placeholder=${"Find a " + one}
+              aria-label=${"Find a " + one}
               @input=${(e: Event) => {
                 this.galleryFind = (e.target as HTMLInputElement).value; }}>
           </div>`}
         ${rows.length === 0
-          ? html`<p class="gallery-none">${skills
-              ? "This deployment has no skills yet."
-              : "No servers are configured."}</p>`
+          ? html`<p class="gallery-none">${empty}</p>`
           : shown.length === 0
             ? html`<p class="gallery-none">Nothing matches
                 “${this.galleryFind.trim()}”.</p>`
-            : html`${this.galleryGroups(shown, skills)}`}
+            : html`${this.galleryGroups(shown, shelf)}`}
       </div>`;
   }
 
   /* Yours, then everybody else's.
      The split is the point of the heading, not decoration: a skill this
-     deployment wrote is one you can change, and a skill a repository owns is
-     one you cannot — the engine refuses the write. Showing them in one
-     undifferentiated grid meant the only way to find out which kind you were
-     looking at was to try to edit it. A section that has nothing in it is not
-     drawn, so a deployment with no repository skills sees no headings at all
-     and the grid looks exactly as it did. */
-  private galleryGroups(rows: GalleryRow[], skills: boolean) {
-    if (!skills) return this.galleryGrid(rows, false);
+     deployment wrote is one you can change, and a skill a repository or a
+     plugin owns is one you cannot — the engine refuses the write. Showing them
+     in one undifferentiated grid meant the only way to find out which kind you
+     were looking at was to try to edit it. A section that has nothing in it is
+     not drawn, so a deployment with no repository skills sees no headings at
+     all and the grid looks exactly as it did. */
+  private galleryGroups(rows: GalleryRow[], shelf: Shelf) {
+    const skills = shelf === "skills";
+    if (!skills) return this.galleryGrid(rows, shelf);
     const mine = rows.filter((r) => r.source !== "repo");
     const theirs = rows.filter((r) => r.source === "repo");
-    if (theirs.length === 0) return this.galleryGrid(mine, true);
-    if (mine.length === 0) return this.galleryGrid(theirs, true);
+    if (theirs.length === 0) return this.galleryGrid(mine, shelf);
+    if (mine.length === 0) return this.galleryGrid(theirs, shelf);
     return html`
       <div class="gallery-scroll">
         <div class="gallery-group">Yours
           <span class="gallery-count">${mine.length}</span></div>
-        ${this.galleryGrid(mine, true, false)}
-        <div class="gallery-group">From a repository
+        ${this.galleryGrid(mine, shelf, false)}
+        <div class="gallery-group">Installed and synced
           <span class="gallery-count">${theirs.length}</span></div>
-        ${this.galleryGrid(theirs, true, false)}
+        ${this.galleryGrid(theirs, shelf, false)}
       </div>`;
   }
 
-  private galleryGrid(rows: GalleryRow[], skills: boolean, scrolls = true) {
+  /* A card is pressable only where pressing it means something. A skill pins,
+     an agent becomes the one you are talking to — both are choices this
+     surface can make. A connector is attached to an agent in Settings and a
+     plugin is installed there, so their cards are disabled rather than absent:
+     the list is the answer to "what can this reach", and hiding it to avoid a
+     dead press would be answering a different question. */
+  private galleryGrid(rows: GalleryRow[], shelf: Shelf, scrolls = true) {
+    const choosable = shelf === "skills" || shelf === "agents";
     return html`<div class=${scrolls ? "gallery-list" : "gallery-list flat"}>
               ${rows.map((r) => html`
                 <button class=${r.on ? "pick on" : "pick"}
-                  ?disabled=${!skills} title=${r.why}
-                  @click=${() => { if (skills) { void this.pin(r.key); this.gallery = ""; } }}>
+                  ?disabled=${!choosable} title=${r.why}
+                  @click=${() => {
+                    if (shelf === "skills") { void this.pin(r.key); this.gallery = ""; }
+                    else if (shelf === "agents") { this.agentId = r.key; this.gallery = ""; }
+                  }}>
                   <span class="pick-top">
                     <span class="pick-tile"><nr-icon name=${r.icon}
                       size="small"></nr-icon></span>
                     <span class="pick-name">${r.name}</span>
                   </span>
+                  <!-- Provenance under the name, above the description, which
+                       is where Kimi puts "From Kimi". It reads as a byline
+                       there rather than as another line of prose. -->
+                  ${r.from === "" ? nothing : html`<span class="pick-from">${r.from}</span>`}
                   ${r.why === "" ? nothing : html`<span class="pick-why">${r.why}</span>`}
                   <!-- The way out of read-only, on the card that is read-only
                        rather than in a menu somewhere else. A nested button
@@ -2211,6 +2388,8 @@ export class AgentConsole extends LitElement {
         @open-knowledge=${() => { this.view = "knowledge"; }}
         @open-canvas=${() => { this.view = "canvas"; }}
         @open-starts=${() => { void this.openStarts(); }}
+        @open-agents=${() => { void this.openShelf("agents"); }}
+        @open-connectors=${() => { void this.openShelf("connectors"); }}
       ></console-sidebar>
 
       <div class="center">

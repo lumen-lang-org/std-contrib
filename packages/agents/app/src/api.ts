@@ -975,6 +975,53 @@ export const serverTools = (id: string) =>
 export const createServer = (row: ServerRow) =>
   call<ServerRow>("/servers", { method: "POST", body: JSON.stringify(row) });
 
+// --- plugins ------------------------------------------------------------------
+//
+// The third noun. A skill is instructions, a connector is a service you can
+// call, and a plugin is a bundle somebody else published that arrives carrying
+// some of each — so the only thing typed here is where it came from.
+//
+// Nothing else in the console learns a new concept: an installed plugin's
+// skills come back from `/skills` and its connectors from `/servers`, as
+// ordinary rows. These calls are about acquiring and removing, which is the
+// whole of what makes a plugin different from the two things it installs.
+export type PluginRow = {
+  id: string;
+  pluginName: string;
+  description: string;
+  sourceUrl: string;
+  version: string;
+  installedAt: string;
+};
+
+// What a manifest would install, read without installing it. `problem` is the
+// engine's answer to "would this land cleanly" — a name already taken, most
+// often — and is empty when it would.
+export type PluginPreview = {
+  name: string;
+  description: string;
+  version: string;
+  problem: string;
+  skills: { name: string; description: string; files: number }[];
+  connectors: { name: string; endpoint: string; authKind: string }[];
+};
+
+export type PluginItem = { kind: string; itemId: string; name: string };
+
+export const listPlugins = () => call<PluginRow[]>("/plugins");
+export const pluginItems = (id: string) =>
+  call<PluginItem[]>(`/plugins/${encodeURIComponent(id)}/items`);
+export const inspectPlugin = (sourceUrl: string) =>
+  call<PluginPreview>("/plugins/inspect", {
+    method: "POST", body: JSON.stringify({ sourceUrl }),
+  });
+export const installPlugin = (sourceUrl: string) =>
+  call<PluginRow>("/plugins/install", {
+    method: "POST", body: JSON.stringify({ sourceUrl }),
+  });
+export const removePlugin = (id: string) =>
+  call<unknown>(`/plugins/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 export const listProviders = () => call<string[]>("/providers");
 export const storeProviderKey = (provider: string, apiKey: string) =>
   call<unknown>(`/providers/${encodeURIComponent(provider)}/key`, {

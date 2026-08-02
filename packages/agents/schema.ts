@@ -675,6 +675,78 @@ export function skillFilesMapping(): DbRepository {
   return repository("skill_files", "id", "id", fs);
 }
 
+// A bundle somebody else assembled, installed here whole.
+//
+// The third noun, and the reason it is not either of the other two: a skill is
+// instructions, a connector is a service you can call, and a plugin is neither
+// — it is a *package* that arrives carrying some of each. Claude's directory
+// draws the same three, and the split matters because the three are acquired
+// differently. You write a skill. You address a connector. A plugin you
+// install, from a manifest somebody else publishes, and the only thing this
+// deployment types is where it came from.
+//
+// What a plugin is NOT is a second kind of skill or a second kind of server.
+// Installing one writes ordinary rows into `skills` and `mcp_servers` — the
+// same tables, one writer, everything downstream (use_skill, the tool loop,
+// the settings forms) unchanged and unaware. The plugin row is the receipt.
+export type PluginRow = {
+  id: string,
+  // What it calls itself in its manifest, held to the same charset as a skill
+  // name because it is shown in the same places.
+  pluginName: string,
+  description: string,
+  // The manifest this was read from — the only thing a person typed, and what
+  // a re-install reads again.
+  sourceUrl: string,
+  // The manifest's own version string, opaque here. Shown so somebody can tell
+  // whether the copy they have is the one they read about; never parsed.
+  version: string,
+  installedAt: string,
+};
+
+export function pluginsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("pluginName", "plugin_name", "text"),
+    field("description", "description", "text"),
+    field("sourceUrl", "source_url", "text"),
+    field("version", "version", "text"),
+    field("installedAt", "installed_at", "text"),
+  ];
+  return repository("plugins", "id", "id", fs);
+}
+
+// One row per thing an install created.
+//
+// A separate table rather than a plugin_id column on skills and on
+// mcp_servers, and the reason is what it costs to add that column: SkillRow
+// and ServerRow are constructed in a dozen places — the console's forms, the
+// copy route, every test fixture — and each becomes a compile error for a
+// field none of them care about. Ownership is a fact about the install, not
+// about the skill, so it lives with the install.
+//
+// It also makes the uninstall honest. Removing a plugin deletes exactly the
+// ids recorded here: a skill somebody copied to local afterwards is a
+// different row with no receipt, and it survives, which is what a person who
+// took a copy expects.
+export type PluginItemRow = {
+  id: string,
+  pluginId: string,
+  // "skill" or "connector" — which table itemId points into.
+  kind: string,
+  itemId: string,
+};
+
+export function pluginItemsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("pluginId", "plugin_id", "text"),
+    field("kind", "kind", "text"),
+    field("itemId", "item_id", "text"),
+  ];
+  return repository("plugin_items", "id", "id", fs);
+}
+
 // A starting point a conversation can be opened from — Kimi's "featured
 // cases". A template is its files; the row is the label on the card.
 //
@@ -1727,6 +1799,10 @@ export function schemaPlan(db: Db): Migration[] {
       "ALTER TABLE skills ADD COLUMN source " + db.textType + " NOT NULL DEFAULT 'local'"),
     migration("90.2", "and a sourced skill knows where from",
       "ALTER TABLE skills ADD COLUMN source_url " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("90.3", "plugins: a bundle installed from somewhere else",
+      createTableSql(db, pluginsMapping())),
+    migration("90.4", "what a plugin brought, so removing it can take it back",
+      createTableSql(db, pluginItemsMapping())),
   ];
   return plan;
 }
