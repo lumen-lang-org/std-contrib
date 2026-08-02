@@ -224,13 +224,20 @@ export type RunContext = {
   // writes belong to the round that delegated. TURN_SEQ_NONE for a run no
   // thread holds, where the artifact tools are not offered anyway.
   baseSeq: int,
+  // Whose conversation this run answers — the thread's owner tag, "" for a
+  // bare run or an unowned deployment. What it buys is per-person connector
+  // tokens: a server whose caller stored their own credential calls out as
+  // that person rather than as the deployment. Set by threads.ts, which is
+  // the door that knows; a delegated child inherits it, because the child is
+  // doing the same person's work on the same person's connectors.
+  owner: string,
 };
 
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE };
+  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "" };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -242,7 +249,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE };
+  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "" };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -307,7 +314,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // Only now, once the run is going to happen: mounting asks every linked
   // server what it offers, and a refused run should not have made a network
   // call to work out what it was refusing.
-  let mounted = mountTools(db, agent.id, master);
+  let mounted = mountTools(db, agent.id, master, where.owner);
   let specs = toolSpecs(mounted);
 
   // In a thread, the conversation's files are tools like any others: a write
@@ -710,6 +717,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             // to the round that delegated, which is what lets the round join
             // see them.
             baseSeq: where.baseSeq,
+            owner: where.owner,
           };
           let asked = runAgentAt(db, child.id, question, master, below2);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }

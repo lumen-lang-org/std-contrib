@@ -275,20 +275,20 @@ test("a migration that fails stops the server rather than being logged", () => {
 // --- the skill door's guards ---------------------------------------------------
 
 test("a skill is refused at the door for each way of being unusable, by name", () => {
-  let good: SkillRow = { id: "k1", skillName: "read-proto-enums", description: "compute enum values", body: "run enums.py", updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let good: SkillRow = { id: "k1", skillName: "read-proto-enums", description: "compute enum values", body: "run enums.py", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   expect(skillProblem(good) == "");
 
-  let unnamed: SkillRow = { id: "k1", skillName: " ", description: "d", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let unnamed: SkillRow = { id: "k1", skillName: " ", description: "d", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   expect(skillProblem(unnamed).indexOf("needs a name") >= 0);
   // The name becomes /skills/<name>/ in a container, so the environment-name
   // charset holds here too.
-  let pathy: SkillRow = { id: "k1", skillName: "a/b", description: "d", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let pathy: SkillRow = { id: "k1", skillName: "a/b", description: "d", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   expect(skillProblem(pathy).indexOf("container path") >= 0);
-  let mute: SkillRow = { id: "k1", skillName: "ok", description: " ", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let mute: SkillRow = { id: "k1", skillName: "ok", description: " ", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   expect(skillProblem(mute).indexOf("cannot be chosen") >= 0);
-  let tall: SkillRow = { id: "k1", skillName: "ok", description: "two\nlines", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let tall: SkillRow = { id: "k1", skillName: "ok", description: "two\nlines", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   expect(skillProblem(tall).indexOf("one line") >= 0);
-  let empty: SkillRow = { id: "k1", skillName: "ok", description: "d", body: "  ", updatedAt: "t", visibility: "private", featuredRank: 0 };
+  let empty: SkillRow = { id: "k1", skillName: "ok", description: "d", body: "  ", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   expect(skillProblem(empty).indexOf("not an instruction") >= 0);
 });
 
@@ -548,7 +548,7 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"89\"") >= 0);
+  expect(said.indexOf("\"migration\":\"90.4\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);
