@@ -16,7 +16,19 @@
      two rounds of "fixing" it. The insets are only reported to a page that
      has said it will draw into them.
 
-     A second <meta name="viewport"> rather than an edit to the first: the
+     A second <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:title" content="Joule">
+<meta property="og:description" content="Ask. Search. Make documents.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://joule.sh/">
+<meta property="og:image" content="https://joule.sh/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://joule.sh/og.png">
+<meta name="viewport"> rather than an edit to the first: the
      first is emitted by LumenJS itself (dist/dev-server/index-html.js), so
      there is no app file holding it. The later tag wins, and this file is
      read into the head after the framework's own tags — verified against the
