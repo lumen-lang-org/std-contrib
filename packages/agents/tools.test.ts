@@ -643,6 +643,27 @@ test("a person's own token outranks the deployment's, and absence falls back", (
   expect(mountTools(database, "a1", master, "").tokens[0] == "shared-pat");
 });
 
+test("a skill called by its own name is a use_skill call", () => {
+  seeded();
+  skill("k9", "search-web", "search the web", "Run websearch.py.");
+  execute(database, "INSERT INTO agent_skills VALUES ('a1','k9')");
+
+  // The shape every model reaches for first — the skill's own name, with the
+  // separator tool names usually use. Answered with the body rather than
+  // refused: the intent is not ambiguous, and refusing it killed whole rounds
+  // on smaller models.
+  let direct = callSkillTool(database, { agentId: "a1", name: "search_web", args: "{\"query\":\"x\"}" });
+  expect(direct.handled);
+  expect(direct.ok);
+  expect(direct.text.indexOf("websearch.py") >= 0);
+
+  // An invented name still falls through to the caller, which refuses it by
+  // listing the real tools — a skill this agent does not carry must not
+  // resolve to anything.
+  let made_up = callSkillTool(database, { agentId: "a1", name: "browse_internet", args: "{}" });
+  expect(!made_up.handled);
+});
+
 test("the suite leaves nothing behind", () => {
   seeded();
   expect(dropTable(database, agentsMapping()).ok);

@@ -981,19 +981,35 @@ export type SkillToolCall = {
 
 export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (call.name != "use_skill") { return not; }
   if (call.agentId == "") { return not; }
 
-  // Presence-checked before anything else, the search_artifacts idiom: a
-  // refusal must name the member that was absent, not complain about "".
-  if (jsonFind(call.args, "name") < 0) {
-    let unnamed: FileToolResult = {
-      handled: true, ok: false,
-      text: "use_skill needs a member named \"name\" — the skill to load, exactly as your briefing lists it.", line: 0, changed: ""
-    };
-    return unnamed;
+  // A skill called by its own name IS a use_skill call.
+  //
+  // Models reach for `search_web(query=...)` — the shape every tool they have
+  // ever seen has — rather than `use_skill(name="search-web")`. Told there is
+  // no such tool, a weak one repeats it: observed three times out of three on
+  // a 7B, every round dead. The intent is not ambiguous, so refusing it is
+  // pedantry that costs the whole answer.
+  //
+  // Only when the name matches a skill THIS agent carries: nothing invented
+  // resolves, and a real tool never reaches here — the dispatch tries the
+  // mounted tools first, so a server offering "search_web" keeps it.
+  let asked = "";
+  if (call.name == "use_skill") {
+    // Presence-checked before anything else, the search_artifacts idiom: a
+    // refusal must name the member that was absent, not complain about "".
+    if (jsonFind(call.args, "name") < 0) {
+      let unnamed: FileToolResult = {
+        handled: true, ok: false,
+        text: "use_skill needs a member named \"name\" — the skill to load, exactly as your briefing lists it.", line: 0, changed: ""
+      };
+      return unnamed;
+    }
+    asked = jsonText(call.args, "name");
+  } else {
+    if (!skillNamed(db, call.agentId, call.name)) { return not; }
+    asked = call.name;
   }
-  let asked = jsonText(call.args, "name");
 
   // A fresh read every call — the live-rows promise: an operator's edit is
   // what the very next load answers with.
@@ -1050,6 +1066,20 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
 // "-", "_" and spaces removed: "search-web", "search_web", "Search Web" are
 // one name. Nothing else is folded — a fold that reached past separators
 // could quietly load a skill nobody asked for.
+/* Whether this agent carries a skill by that name, folding separators. The
+   guard on treating a tool call as a skill load: it has to be one of ITS
+   skills, or an invented name would silently resolve to nothing useful. */
+export function skillNamed(db: Db, agentId: string, name: string): bool {
+  if (name == "") { return false; }
+  let rows = agentSkills(db, agentId);
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].skillName == name || sameName(rows[i].skillName, name)) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
 export function sameName(a: string, b: string): bool {
   return foldName(a) == foldName(b) && foldName(a) != "";
 }
