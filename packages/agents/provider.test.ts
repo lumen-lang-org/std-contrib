@@ -7,7 +7,7 @@
 //   cd packages/agents && lumen test provider.test.ts
 
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem } from "./provider.ts";
+import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem, streamProblem } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
   let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, baseUrl: "", enabled: enabled };
@@ -137,6 +137,31 @@ test("an anthropic call that takes no input at all is still a call", () => {
   let calls = toolCallsFrom("anthropic", reply);
   expect(calls.length == 1);
   expect(calls[0].args == "{}");
+});
+
+test("a refusal says which model, what kind of failure, and what to do", () => {
+  let m: ModelRow = { id: "m1", label: "Qwen local", apiName: "qwen2.5-7b", provider: "vllm",
+    kind: "chat", dimensions: 0, baseUrl: "http://10.0.0.9:8000/v1", enabled: true };
+
+  // Nothing answered: the address is the actionable part, and for a model on
+  // somebody's own machine the fix is theirs.
+  let dead = streamProblem(m, -1, "");
+  expect(dead.indexOf("Qwen local") >= 0);
+  expect(dead.indexOf("http://10.0.0.9:8000/v1") >= 0);
+
+  // A refusal with a body quotes the body — the thing that refused says it
+  // better than any paraphrase.
+  let long = streamProblem(m, 400, "context length exceeded");
+  expect(long.indexOf("400") >= 0);
+  expect(long.indexOf("context length exceeded") >= 0);
+
+  // A credential problem points at where the credential is kept.
+  let auth = streamProblem(m, 401, "");
+  expect(auth.indexOf("Providers") >= 0);
+
+  // And the provider's own outage is named as theirs.
+  let theirs = streamProblem(m, 503, "");
+  expect(theirs.indexOf("provider's") >= 0);
 });
 
 test("a refusal never carries the key", () => {
