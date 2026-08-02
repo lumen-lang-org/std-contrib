@@ -1160,6 +1160,14 @@ export function skillBriefing(db: Db, agentId: string): string {
     out = out + "\n…and also, one line each was too many: " + names + " — use_skill loads any of them.";
   }
   out = out + "\nEach line is for choosing, not for doing: when a task matches one, load the skill before starting the work.";
+  // The failure this sentence exists to stop, observed twice on prod: asked
+  // to fill a Word template, a model skipped the skill, wrote its own
+  // python-docx script against placeholder names it had invented, changed
+  // nothing, and reported success. The skill it ignored reads the document's
+  // real placeholders first. A skill is not documentation about a task — it
+  // is the procedure that was debugged for it.
+  out = out + " If a skill covers what you are about to do, load it INSTEAD of writing your own"
+    + " script: the skill's procedure has already met the failures yours is about to.";
   // Spelled out because the failure it prevents is common and expensive: a
   // model that wants to search invents a tool called search_web, is told
   // there is no such tool, and answers from memory — confidently, about a
