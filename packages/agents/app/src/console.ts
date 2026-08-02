@@ -1397,6 +1397,12 @@ export class AgentConsole extends LitElement {
   private async loadChoices(): Promise<void> {
     this.choices = await modelChoices().catch(() => []);
     if (this.choices.length === 0) { return; }
+    // Not for a guest: `/models` is the operator's list and carries every
+    // provider's base URL — a GCP project path, a private address for a local
+    // runtime — so it stays closed to anonymous callers rather than being
+    // opened for a label. The picker degrades to "Agent default", which is
+    // what it already shows wherever a model has no label.
+    if (this.me?.anonymous === true) { return; }
     this.models = await listModels().catch(() => []);
   }
 

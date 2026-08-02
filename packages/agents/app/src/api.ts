@@ -368,7 +368,21 @@ export const QUOTA_SPENT = "agents:quota-spent";
 // apparently containing nothing. `returnTo` is a path, never a full URL, so a
 // crafted link cannot use this to bounce anyone off-site.
 let announced = false;
+// Set once /whoami has answered, so a 401 can be read in the light of who is
+// asking. A guest is signed in as far as the front door is concerned; a 401
+// for them means "this route needs an account", which is a fact about the
+// route and not about their session.
+let callerIsGuest = false;
+export function noteGuestCaller(anonymous: boolean): void { callerIsGuest = anonymous; }
+
 function toLogin(): void {
+  // A guest is never bounced to the login by a background call. Every
+  // guest-closed route (the operator's model list, the admin surfaces, the
+  // socket) answers 401 to them by design, and treating that as a lost session
+  // put the login overlay over a console that was working — the first paint
+  // this whole feature exists to avoid. The soft wall on a spent quota, and a
+  // gated action a person actually clicked, are the two ways in from here.
+  if (callerIsGuest) { return; }
   // Once per page: several calls fail together on a cold load, and the shell
   // needs one signal, not one per request in flight.
   if (announced) { return; }
@@ -453,6 +467,9 @@ export async function whoami(): Promise<Me | null> {
   if (body === "" || body === "null") { return null; }
   try {
     const me = JSON.parse(body) as Me;
+    // Before any caller reads it: the boot calls fan out immediately after
+    // this resolves, and several of them are closed to guests.
+    noteGuestCaller(me.anonymous === true);
     return { ...me, roles: Array.isArray(me.roles) ? me.roles : [] };
   } catch { return null; }
 }
