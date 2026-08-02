@@ -64,10 +64,16 @@ export class LoginOverlay extends LitElement {
        chat's empty-state dot does; filter-driven rather than a JS interval,
        because this card renders before the app's modules and must not wait
        for them. Ambient, so it respects a reduced-motion ask. */
-    /* The hero's own numbers (chatbot empty-state: 700, -0.02em), scaled
-       down — same face, same weight, so the card and the empty page read as
-       one mark and not two logos. */
-    .mark { font: 700 40px var(--display, inherit); letter-spacing: -0.02em;
+    /* The hero's own numbers AND its own family, copied verbatim from the
+       chatbot host rule rather than routed through --display: the two tokens
+       resolve to different faces on some platforms (system-ui vs
+       -apple-system picks a different J), and "matching" through a different
+       variable is how the card kept reading as a second logo. If the
+       component's stack ever changes, change this with it — the price of the
+       card rendering before the component exists. */
+    .mark { font-weight: 700; font-size: 40px; letter-spacing: -0.02em;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                         'Roboto', 'Helvetica Neue', Arial, sans-serif;
             text-align: center; }
     .mark .dot { color: hsl(340 72% 58%); display: inline-block;
                  animation: login-dot 8s linear infinite; }
