@@ -27,16 +27,18 @@ async function reopened(page: Parameters<typeof openSettings>[0]) {
   await openSettings(page);
 }
 
-// visibility and featuredRank on every arranged skill, and they are not
-// decoration: the engine's SkillRow requires both, so a create without them is
-// refused with "invalid JSON (MissingField)". These five tests were failing on
-// that — and so was the console's own New skill button, which is the bug they
-// were built to catch and did.
+// visibility, featuredRank — and now source and sourceUrl — on every arranged
+// skill, and they are not decoration: the engine's SkillRow requires all of
+// them, so a create that omits one is refused with "invalid JSON
+// (MissingField)". This suite has now been broken twice by a column landing
+// without these fixtures learning it, and both times the symptom was the
+// same: four tests timing out on a row that was never created, hours after
+// the change that did it. When a field joins SkillRow, it joins these bodies.
 test("the skills tab lists every skill with its description", async ({ page }) => {
   const name = `e2e-list-${Date.now()}`;
   await page.request.post("/api/skills", { data: {
     id: `k-${name}`, skillName: name, description: "how to fold the report", body: "Fold it.", updatedAt: "t",
-    visibility: "private", featuredRank: 0,
+    visibility: "private", featuredRank: 0, source: "local", sourceUrl: "",
   } });
 
   await reopened(page);
@@ -75,7 +77,7 @@ test("editing a skill replaces its body rather than growing a version", async ({
   const name = `e2e-edit-${Date.now()}`;
   await page.request.post("/api/skills", { data: {
     id: `k-${name}`, skillName: name, description: "d", body: "First body.", updatedAt: "t",
-    visibility: "private", featuredRank: 0,
+    visibility: "private", featuredRank: 0, source: "local", sourceUrl: "",
   } });
 
   await reopened(page);
@@ -99,7 +101,7 @@ test("assigning a skill to an agent survives the round trip", async ({ page }) =
   const name = `e2e-link-${Date.now()}`;
   await page.request.post("/api/skills", { data: {
     id: `k-${name}`, skillName: name, description: "attach me", body: "b", updatedAt: "t",
-    visibility: "private", featuredRank: 0,
+    visibility: "private", featuredRank: 0, source: "local", sourceUrl: "",
   } });
   // A throwaway agent, so the link touches nothing anyone else uses.
   const agentId = `a-${name}`;
@@ -135,7 +137,7 @@ test("a skill's files are added and edited from its form", async ({ page }) => {
   const name = `e2e-file-${Date.now()}`;
   await page.request.post("/api/skills", { data: {
     id: `k-${name}`, skillName: name, description: "ships a file", body: "run it", updatedAt: "t",
-    visibility: "private", featuredRank: 0,
+    visibility: "private", featuredRank: 0, source: "local", sourceUrl: "",
   } });
 
   await reopened(page);

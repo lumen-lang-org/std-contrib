@@ -102,8 +102,10 @@ export function canvas(page: Page): Locator {
   return shell(page).locator("agent-canvas");
 }
 
+// Not scoped to the console shell any more: settings is its own route, and on
+// /admin there is no <agent-console> to be inside of.
 export function settings(page: Page): Locator {
-  return shell(page).locator("console-settings");
+  return page.locator("console-settings");
 }
 
 // The Starting points page. It is a region of the console's own root rather
@@ -149,13 +151,26 @@ export async function openRail(page: Page) {
   if (!already) await toggle.click();
 }
 
-// Open Settings the way a person does: the account block, then the item.
+// Open user Settings the way a person does: the account block, then the row.
+// This is the USER zone — agents, prompts, skills, templates, connectors,
+// plugins. The admin zone is a route, /admin/<tab>, and has its own helper.
 export async function openSettings(page: Page) {
   await openRail(page);
   await sidebar(page).locator(".me").click();
-  await sidebar(page).locator(".menu div", { hasText: "Settings" }).click();
+  await sidebar(page).locator(".menu div", { hasText: /^Settings$/ }).click();
   await expect(settings(page)).toBeVisible();
 }
+
+// The operator's page. Arrive hydrated, for the reason `open` exists: the
+// route is server-rendered and a click before the module runs is dropped.
+export async function openAdmin(page: Page, path = "/admin/models") {
+  await page.goto(path);
+  await page.waitForFunction(() => customElements.get("admin-page") !== undefined);
+  await expect(settings(page)).toBeVisible();
+}
+
+// Preferences is the Settings overlay's first tab now, not a panel — open
+// Settings and you are on it.
 
 export async function openTab(page: Page, name: string) {
   // By name, not by text. An item is an icon beside a word, and the template
