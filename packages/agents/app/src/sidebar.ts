@@ -127,6 +127,18 @@ export class ConsoleSidebar extends LitElement {
       <div class="item" data-nav="canvas" @click=${() => this.dispatchEvent(new CustomEvent("open-canvas"))}>
         <nr-icon name="git-fork" size="small"></nr-icon><span>Agent graph</span>
       </div>
+      <!-- The two directory shelves that are worth a standing place. They were
+           reachable only from the composer's + menu, which is a menu you open
+           mid-sentence — fine for pinning a skill while you write, wrong for
+           "who am I talking to" and "what can this reach", which are questions
+           you ask before you start. Both open the same overlay the + menu
+           opens, on their own tab. -->
+      <div class="item" data-nav="agents" @click=${() => this.dispatchEvent(new CustomEvent("open-agents"))}>
+        <nr-icon name="users" size="small"></nr-icon><span>Agents</span>
+      </div>
+      <div class="item" data-nav="connectors" @click=${() => this.dispatchEvent(new CustomEvent("open-connectors"))}>
+        <nr-icon name="plug" size="small"></nr-icon><span>Connectors</span>
+      </div>
       <!-- What other people have offered to start from. Under the three that
            are about your own work, because it is somebody else's. -->
       <div class="item" data-nav="starts" @click=${() => this.dispatchEvent(new CustomEvent("open-starts"))}>

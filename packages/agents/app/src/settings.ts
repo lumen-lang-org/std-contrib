@@ -32,6 +32,7 @@ import {
   createModelChoice, deleteModelChoice, listModelChoices, rankChoice, updateModelChoice,
   createRouter, deleteRouter, listRouters, updateRouter,
   TemplateRow, listTemplates, deleteTemplate,
+  PluginRow, PluginItem, PluginPreview, listPlugins, pluginItems, inspectPlugin, installPlugin, removePlugin,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
 } from "./api.js";
@@ -46,13 +47,21 @@ const TABS = [
   { name: "Skills", icon: "sticky-note" },
   { name: "Templates", icon: "file-text" },
   { name: "MCP", icon: "code" },
-  // Plugins is not a second MCP tab. MCP is the servers an operator RUNS —
-  // an endpoint they host, a transport, a credential they hold. Plugins is
-  // what somebody INSTALLS: a curated shelf, and (when they land) apps
-  // authorised over OAuth rather than configured by hand. Two different acts
-  // by two different people, so two tabs; putting the shelf inside MCP made
-  // browsing look like an advanced form.
-  { name: "Plugins", icon: "plug" },
+  // Three nouns, three tabs, and the split is about how a thing is ACQUIRED.
+  //
+  //   Skills      you write.
+  //   Connectors  you address — a service that already exists, reached over
+  //               MCP, whether from the ready-made shelf or typed by hand.
+  //   Plugins     you install — a bundle somebody else published, which
+  //               arrives carrying skills and connectors of its own.
+  //
+  // "Connectors" was called "Plugins" here for a month, which made the shelf
+  // of ready-made MCP servers and the idea of an installable bundle the same
+  // word — so there was no way to say "this connector came from that plugin".
+  // MCP stays its own tab underneath: it is the raw table, for the operator
+  // who is editing an endpoint rather than browsing for one.
+  { name: "Connectors", icon: "plug" },
+  { name: "Plugins", icon: "cube" },
   { name: "Images", icon: "box" },
   { name: "Providers", icon: "cloud" },
   { name: "Tracing", icon: "layers" },
@@ -382,6 +391,15 @@ export class ConsoleSettings extends LitElement {
   // stored links on save — the canvas's diff-apply idea, in form clothes.
   @state() private skillDraft: string[] = [];
   @state() private servers: ServerRow[] = [];
+  // Bundles, and what each one brought — the second is a map rather than a
+  // field on the row because the engine keeps the receipts in their own table
+  // and a plugin row that carried its items would be a join the list view
+  // pays for whether or not anybody expands anything.
+  @state() private plugins: PluginRow[] = [];
+  @state() private pluginBrought = new Map<string, PluginItem[]>();
+  @state() private pluginUrl = "";
+  @state() private preview: PluginPreview | null = null;
+  @state() private pluginBusy = false;
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
@@ -429,6 +447,7 @@ export class ConsoleSettings extends LitElement {
         listTemplates(),
         ]);
       await this.readMenu();
+      await this.loadPlugins();
       const t = this.tracing;
       if (t !== null) {
         this.trace = {
@@ -533,6 +552,7 @@ export class ConsoleSettings extends LitElement {
       case "Skills": return this.skillsTab();
       case "Templates": return this.templatesTab();
       case "MCP": return this.mcpTab();
+      case "Connectors": return this.connectorsTab();
       case "Plugins": return this.pluginsTab();
       case "Images": return this.imagesTab();
       case "Providers": return this.providersTab();
@@ -1704,34 +1724,196 @@ export class ConsoleSettings extends LitElement {
     let name = ask.serverName;
     let n = 2;
     while (taken.has(name)) { name = ask.serverName + "-" + String(n); n = n + 1; }
-    void this.act(() => createServer({ ...NEW_SERVER, ...ask, serverName: name }));
+    // And an id, which the shelf has to invent because the form asks a person
+    // to type one. Without this, every Add on this page answered `an "id" is
+    // required` in red at the bottom of the shelf and added nothing — the row
+    // spread from NEW_SERVER, whose id is "" precisely because the form fills
+    // it in. Derived from the name rather than a UUID: an id is in the URL of
+    // every route about this server and in the key its token is stored under,
+    // and "github-2" reads better than a hex block in both places.
+    const ids = new Set(this.servers.map((s) => s.id));
+    let id = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    if (id === "") { id = "connector"; }
+    const stem = id;
+    let k = 2;
+    while (ids.has(id)) { id = stem + "-" + String(k); k = k + 1; }
+    // Field by field, and never a spread of NEW_SERVER — that draft carries a
+    // `token`, which is the console's own field for the form's password box
+    // and is NOT on the engine's row. JSON.parse<McpServerRow> refuses a
+    // document with a member it does not declare, so every Add on this shelf
+    // answered "invalid JSON (UnknownField)". The save path in serverForm
+    // builds its row the same explicit way, for the same reason.
+    void this.act(() => createServer({
+      id, serverName: name, transport: ask.transport, endpoint: ask.endpoint,
+      authKind: ask.authKind, authHeader: ask.authHeader, enabled: ask.enabled,
+    }));
   }
 
-  /* Things you install, as opposed to servers you run.
+  /* Services you can reach, as opposed to bundles you install.
      The shelf lives here rather than in MCP for the reason the tab list gives.
-     A plugin added from a card still becomes an ordinary MCP server row — one
-     writer for that table, whichever door you came through — which is why the
-     count below reads off `servers` and why an entry already configured shows
-     as Added rather than being hidden. */
-  private pluginsTab() {
+     A connector added from a card still becomes an ordinary MCP server row —
+     one writer for that table, whichever door you came through — which is why
+     the count below reads off `servers` and why an entry already configured
+     shows as Added rather than being hidden. */
+  private connectorsTab() {
     return html`
-      ${this.head("Plugins", "plug")}
-      <div class="banner">Ready-made connections. Adding one writes an MCP server
-        row you can then edit under <strong>MCP</strong> — the shelf fills the form
-        in, it does not own the result. Entries arrive switched off: adding
-        something from a shelf is interest, not trust, and one that needs a token
-        would otherwise fail every call until somebody noticed.</div>
+      ${this.head("Connectors", "plug")}
+      <div class="banner">A connector is a service this deployment can call, over
+        MCP. Adding one from the shelf writes a server row you can then edit under
+        <strong>MCP</strong> — the shelf fills the form in, it does not own the
+        result. Entries arrive switched off: adding something from a shelf is
+        interest, not trust, and one that needs a token would otherwise fail every
+        call until somebody noticed.</div>
 
-      ${this.group("Available")}
+      ${this.group("Ready-made")}
       <mcp-gallery
         .taken=${this.servers.map((s) => s.endpoint)}
         @add-server=${(e: CustomEvent) => this.addFromGallery(e.detail)}></mcp-gallery>
+
+      ${this.group("Yours", this.servers.length)}
+      ${this.servers.length === 0
+        ? html`<p class="empty">None yet.</p>`
+        : html`<table><tbody>
+            ${this.servers.map((s) => html`<tr>
+              <td class="name">${s.serverName}</td>
+              <td class="fill"><span class="slug">${s.endpoint}</span></td>
+              <td><span class="tag">${s.authKind === "none" ? "no auth" : s.authKind}</span></td>
+              <td>${s.enabled ? "" : html`<span class="tag off">off</span>`}</td>
+              ${this.rowActions([
+                { icon: "edit", title: `Edit ${s.serverName}`,
+                  run: () => this.open({ kind: "server", row: { ...s, token: "" }, fresh: false }) },
+              ])}
+            </tr>`)}
+          </tbody></table>`}
 
       ${this.group("Authorised apps")}
       <p class="empty">Nothing yet. This is where an app you signed in to with
         OAuth will appear — authorised rather than configured, with no endpoint
         or token to paste. Until one lands, everything above is a server you add
         by address.</p>`;
+  }
+
+  /* Bundles, installed from a manifest somebody else publishes.
+     What makes this a tab of its own rather than a section of Connectors: a
+     plugin is not a thing you configure, it is a thing you acquire, and what
+     it leaves behind is ordinary skills and ordinary connectors that the other
+     two tabs already own. So there is no edit form here — only install, what
+     it brought, and remove. */
+  private pluginsTab() {
+    return html`
+      ${this.head("Plugins", "cube")}
+      <div class="banner">A plugin is a bundle: one manifest that installs a set of
+        skills and connectors together, from a URL rather than a form. What it
+        installs shows up under <strong>Skills</strong> and
+        <strong>Connectors</strong> as ordinary rows — its skills are read-only
+        here, because they are edited where they are published, and removing the
+        plugin takes back exactly what it brought.</div>
+
+      <div class="grid">
+        ${this.text({ id: "pl-url", label: "Manifest URL", value: this.pluginUrl, wide: true,
+          placeholder: "https://raw.githubusercontent.com/owner/repo/main/joule-plugin.json",
+          help: "A GitHub page URL works too — it is rewritten to the raw one.",
+          on: (v) => { this.pluginUrl = v; } })}
+      </div>
+      <div class="bar">
+        <button class="act" data-new="plugin-inspect" ?disabled=${this.pluginBusy}
+          @click=${() => void this.inspect()}>
+          <nr-icon name="search" size="small"></nr-icon>
+          ${this.pluginBusy ? "Reading…" : "Read the manifest"}</button>
+        ${this.preview === null || this.preview.problem !== "" ? "" : html`
+          <button class="primary" data-new="plugin-install" ?disabled=${this.pluginBusy}
+            @click=${() => void this.installPreviewed()}>
+            <nr-icon name="download" size="small"></nr-icon> Install ${this.preview.name}</button>`}
+      </div>
+
+      <!-- Read before installed, always. A manifest is somebody else's path
+           into this deployment's skill table, and an Install button with no
+           preview does an unknown number of unknown things. It is also where a
+           name collision surfaces while it is still free to fix. -->
+      ${this.preview === null ? "" : html`
+        ${this.group("This manifest installs")}
+        ${this.preview.problem === "" ? "" : html`
+          <p class="why">${this.preview.problem}</p>`}
+        <table><tbody>
+          ${this.preview.skills.map((s) => html`<tr>
+            <td><span class="tag">skill</span></td>
+            <td class="name">${s.name}</td>
+            <td class="fill">${s.description}</td>
+            <td>${s.files === 0 ? "" : html`<span class="tag">${s.files} file${s.files === 1 ? "" : "s"}</span>`}</td>
+          </tr>`)}
+          ${this.preview.connectors.map((c) => html`<tr>
+            <td><span class="tag">connector</span></td>
+            <td class="name">${c.name}</td>
+            <td class="fill"><span class="slug">${c.endpoint}</span></td>
+            <td><span class="tag">${c.authKind === "none" ? "no auth" : c.authKind}</span></td>
+          </tr>`)}
+        </tbody></table>
+        <p class="note">Skills arrive private and connectors arrive switched off —
+        the same rule the connector shelf keeps. Turn on what you meant to use.</p>`}
+
+      ${this.group("Installed", this.plugins.length)}
+      ${this.plugins.length === 0
+        ? html`<p class="empty">None yet. A plugin is the only one of the three
+            that you do not write or address — you install it, and this is where
+            the ones you installed are listed.</p>`
+        : html`<table><tbody>
+            ${this.plugins.map((p) => html`<tr>
+              <td class="name">${p.pluginName}</td>
+              <td class="fill">${p.description}</td>
+              <td>${p.version === "" ? "" : html`<span class="tag">v${p.version}</span>`}</td>
+              <td><span class="slug">${(this.pluginBrought.get(p.id) ?? []).length} item${(this.pluginBrought.get(p.id) ?? []).length === 1 ? "" : "s"}</span></td>
+              ${this.rowActions([
+                { icon: "trash", title: `Remove ${p.pluginName} and what it installed`, danger: true,
+                  run: () => this.act(async () => {
+                    await removePlugin(p.id);
+                    await this.loadPlugins();
+                  }) },
+              ])}
+            </tr>`)}
+          </tbody></table>
+          <p class="note">Removing a plugin deletes the skills and connectors it
+          installed — a copy you took of one of its skills is your own row and
+          stays.</p>`}`;
+  }
+
+  // Read a manifest without installing it.
+  private async inspect() {
+    this.problem = "";
+    this.preview = null;
+    const url = this.pluginUrl.trim();
+    if (url === "") { this.problem = "a plugin is installed from a manifest URL"; return; }
+    this.pluginBusy = true;
+    try {
+      this.preview = await inspectPlugin(url);
+    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+    finally { this.pluginBusy = false; }
+  }
+
+  private async installPreviewed() {
+    this.pluginBusy = true;
+    try {
+      await installPlugin(this.pluginUrl.trim());
+      this.preview = null;
+      this.pluginUrl = "";
+      // Both lists, because an install writes into both tables — leaving the
+      // Skills tab showing the old set until a reload is how you get somebody
+      // reporting that a plugin installed nothing.
+      await this.loadPlugins();
+      await this.refresh();
+    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+    finally { this.pluginBusy = false; }
+  }
+
+  private async loadPlugins() {
+    this.plugins = await listPlugins();
+    const brought = new Map<string, PluginItem[]>();
+    // Sequential rather than Promise.all: this is a settings tab with a
+    // handful of rows, and a burst of parallel calls to the same engine buys
+    // nothing a person could perceive.
+    for (const p of this.plugins) {
+      try { brought.set(p.id, await pluginItems(p.id)); } catch { brought.set(p.id, []); }
+    }
+    this.pluginBrought = brought;
   }
 
   private mcpTab() {
