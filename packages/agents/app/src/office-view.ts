@@ -185,7 +185,14 @@ function navEntry(nav: HTMLElement, label: string, onPick: () => void): HTMLButt
 // Where a converted PDF comes from. The panel knows the artifact it is
 // showing; this file knows nothing about threads, so the identity is passed
 // in rather than looked up.
-export type OfficeSource = { threadId: string; slot: number; version: number };
+export type OfficeSource = {
+  threadId: string; slot: number; version: number;
+  /** When set, a workbook's cells are editable and Save hands the whole
+   *  patched file (base64) here — the panel writes the new version, because
+   *  the panel is what knows the path and refreshes the list. Absent, the
+   *  sheet renders read-only exactly as it always did. */
+  saveSheet?: (b64: string) => Promise<void>;
+};
 
 // How wide a page is drawn, in CSS pixels of the column, and how much more
 // than that is rendered so it stays sharp. A canvas rendered at CSS size is
@@ -429,12 +436,12 @@ export async function renderOffice(host: HTMLElement, kind: "docx" | "xlsx" | "p
     }
   }
   const { nav, doc } = skeleton(host);
-  return renderInBrowser(nav, doc, kind, bytes);
+  return renderInBrowser(nav, doc, kind, bytes, content, source?.saveSheet);
 }
 
 // The original renderers, kept as the fallback for a machine with no
 // converter — and, for .xlsx, as the only path.
-async function renderInBrowser(nav: HTMLElement, doc: HTMLElement, kind: "docx" | "xlsx" | "pptx", bytes: Uint8Array): Promise<void> {
+async function renderInBrowser(nav: HTMLElement, doc: HTMLElement, kind: "docx" | "xlsx" | "pptx", bytes: Uint8Array, content?: string, save?: (b64: string) => Promise<void>): Promise<void> {
   if (kind === "docx") {
     const { renderAsync } = await import("docx-preview");
     // docx-preview appends both the styles and the pages to the container,
@@ -468,25 +475,88 @@ async function renderInBrowser(nav: HTMLElement, doc: HTMLElement, kind: "docx" 
   }
   const XLSX = await import("xlsx");
   const wb = XLSX.read(bytes, { type: "array" });
+  const canEdit = save !== undefined && content !== undefined;
+  const original = content ?? "";
+  /* Edits across every sheet, keyed sheet\u0000ref so switching tabs loses
+     nothing. The value is what was typed; the original text sits beside it so
+     typing something back to what it was un-dirties the cell. */
+  const edits = new Map<string, { sheet: string; ref: string; value: string; was: string }>();
+  let bar: HTMLElement | null = null;
+  const dirtyBar = () => {
+    if (!canEdit) return;
+    if (edits.size === 0) { bar?.remove(); bar = null; return; }
+    if (bar === null) {
+      bar = document.createElement("div");
+      bar.className = "sheet-savebar";
+      const count = document.createElement("span");
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "sheet-save";
+      saveBtn.textContent = "Save as new version";
+      saveBtn.addEventListener("click", () => {
+        void (async () => {
+          saveBtn.disabled = true;
+          saveBtn.textContent = "Saving…";
+          try {
+            const { patchWorkbook } = await import("./xlsx-patch.js");
+            const out = await patchWorkbook(original, Array.from(edits.values()));
+            await save!(out);
+          } catch (e) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "Save as new version";
+            count.textContent = e instanceof Error ? e.message : String(e);
+          }
+        })();
+      });
+      bar.append(count, saveBtn);
+      doc.parentElement?.append(bar);
+    }
+    const n = edits.size;
+    (bar.firstChild as HTMLElement).textContent =
+      `${n} cell${n === 1 ? "" : "s"} changed`;
+  };
   const draw = (name: string) => {
     doc.textContent = "";
     const ws = wb.Sheets[name];
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    // By reference, not through sheet_to_json: an editable cell has to know
+    // its own address to be saveable, and the json shape throws that away.
+    const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1:A1");
+    const rows = Math.min(range.e.r - range.s.r + 1, SHEET_ROW_CAP);
+    const cols = Math.min(range.e.c - range.s.c + 1, SHEET_COL_CAP);
     const table = document.createElement("table");
-    for (const r of rows.slice(0, SHEET_ROW_CAP)) {
+    for (let r = 0; r < rows; r++) {
       const tr = document.createElement("tr");
-      for (const c of r.slice(0, SHEET_COL_CAP)) {
+      for (let c = 0; c < cols; c++) {
+        const ref = XLSX.utils.encode_cell({ r: range.s.r + r, c: range.s.c + c });
+        const cell = ws[ref] as { v?: unknown; w?: string; f?: string } | undefined;
         const td = document.createElement("td");
-        td.textContent = String(c);
+        const key = name + "\u0000" + ref;
+        const shown = edits.get(key)?.value
+          ?? cell?.w ?? (cell?.v === undefined ? "" : String(cell.v));
+        td.textContent = shown;
+        if (canEdit) {
+          td.contentEditable = "plaintext-only";
+          td.dataset.ref = ref;
+          // A formula cell says so before it is typed over: the edit replaces
+          // the formula with the literal, which is what typing over a formula
+          // means, and it should not be a surprise.
+          if (cell?.f !== undefined) td.title = "= " + cell.f + " — typing here replaces the formula with your value";
+          const was = cell?.w ?? (cell?.v === undefined ? "" : String(cell.v));
+          td.addEventListener("input", () => {
+            const now = td.textContent ?? "";
+            if (now === was) { edits.delete(key); td.classList.remove("cell-dirty"); }
+            else { edits.set(key, { sheet: name, ref, value: now, was }); td.classList.add("cell-dirty"); }
+            dirtyBar();
+          });
+        }
         tr.append(td);
       }
       table.append(tr);
     }
     doc.append(table);
-    if (rows.length > SHEET_ROW_CAP || rows.some((r) => r.length > SHEET_COL_CAP)) {
+    if (range.e.r - range.s.r + 1 > SHEET_ROW_CAP || range.e.c - range.s.c + 1 > SHEET_COL_CAP) {
       const note = document.createElement("div");
       note.className = "sheet-cut";
-      note.textContent = `showing the first ${Math.min(rows.length, SHEET_ROW_CAP)} rows — download the file for the rest`;
+      note.textContent = `showing the first ${rows} rows — download the file for the rest`;
       doc.append(note);
     }
   };

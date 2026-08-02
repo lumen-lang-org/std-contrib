@@ -27,23 +27,25 @@ the reason ids are derived from the name now.
 
 ## Features
 
-### A live spreadsheet editor
+### A live spreadsheet editor — v1 SHIPPED (2026-08-02); grid library still open
 
-Today a workbook is read-only: SheetJS renders it and edits go through the
-model. Editing cells in the browser needs a real grid. Candidates to evaluate,
-in the order they look promising:
+Shipped: the panel's workbook table is editable in place. Cells are
+contenteditable, dirty cells carry ink, a save bar appears with the count,
+and Save patches ONLY the changed cells inside the original zip
+(src/xlsx-patch.ts) before landing the file as a new artifact version through
+the upload door — so styles, charts and conditional formatting survive
+byte-identical (asserted by e2e/sheet-edit.spec.ts), and the version history
+keeps both whole bodies the way EDIT-DIFF.md wants. Typing over a formula
+replaces it with the literal and drops calcChain, which Excel rebuilds.
 
-- **Univer** (Apache-2.0, the Luckysheet team's rewrite) — formulas, formats,
-  a docs/sheets/slides suite, actively developed. Heaviest, closest to Excel.
-- **x-spreadsheet** (MIT) — small, canvas grid, no formula engine to speak of.
-  Fine for typing values, not for a model.
-- **Handsontable** — excellent grid, but non-free for commercial use; the
-  license is the whole decision.
-- **Jspreadsheet CE** (MIT core) — middle weight, formulas via formula.js.
-
-What matters more than the grid: the write path. An edit has to land as an
-artifact version the way a document edit does, or two people editing produce a
-last-writer-wins mess. Read EDIT-DIFF.md before choosing.
+Still open, in order of value:
+- **A wide mode for editing.** The artifact rail is ~300px of table; editing
+  wants most of the window while it lasts.
+- **A real grid** (Univer was the strongest candidate — Apache-2.0, formulas,
+  closest to Excel) if in-cell formulas/recalc are ever wanted. Its own xlsx
+  export is lossy the same way SheetJS's is, so the zip-patch write path
+  stays regardless of grid.
+- Column widths and number formats in the table (the grid draws raw values).
 
 ### Tooltips with their keyboard shortcut (asked again 2026-08-02 — next up)
 
