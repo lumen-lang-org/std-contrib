@@ -687,12 +687,21 @@ export function scriptImage(): string {
 // fallback would be a skill silently running without the libraries its
 // briefing promised. "main" keeps the agent's own image, which is the whole
 // pre-environment behaviour unchanged.
+export function foldName(n: string): string {
+  return n.toLowerCase().replaceAll("-", "").replaceAll("_", "").replaceAll(" ", "").replaceAll("+", "");
+}
+
 export function scriptImageForEnv(db: Db, agentId: string, envName: string): string {
   if (envName == "" || envName == "main") { return scriptImageFor(db, agentId); }
   let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].label.toLowerCase() == envName && rows[i].image != "") { return rows[i].image; }
+    // Separator-insensitive, the same fold use_skill applies to a skill name
+    // and for the same reason: "python + node" is a label a person wrote and
+    // "python+node" is what a model types back. Defined here rather than
+    // imported from tools.ts, which already imports THIS file — a cycle the
+    // compiler refuses, and a four-line helper is cheaper than breaking it.
+    if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") { return rows[i].image; }
     i = i + 1;
   }
   return "";
