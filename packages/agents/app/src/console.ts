@@ -557,6 +557,41 @@ export class AgentConsole extends LitElement {
     .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; min-width: 0; }
     .bar-space { flex: 1; }
+    /* The link reader — the artifact sheet's shape, for the web. A sheet
+       from the bottom on a phone, a centred card above 641px; the scrim is
+       what dismisses it. Reading typography inside, same serif the answers
+       wear, because it IS reading. */
+    .link-scrim { display: block; position: fixed; inset: 0; z-index: 60;
+                  background: rgba(0,0,0,.45); }
+    .link-sheet { position: fixed; z-index: 61; background: var(--bg-card);
+                  display: flex; flex-direction: column;
+                  inset: auto 0 0 0; max-height: 82svh;
+                  border-radius: 16px 16px 0 0;
+                  border: 1px solid var(--border); border-bottom: 0; }
+    @media (min-width: 641px) {
+      .link-sheet { inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+                    width: min(680px, 92vw); max-height: 80vh;
+                    border-radius: 16px; border-bottom: 1px solid var(--border); }
+    }
+    .link-head { display: flex; align-items: center; gap: 10px;
+                 padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .link-host { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; font-size: 13px; color: var(--muted); }
+    .link-open { display: inline-flex; align-items: center; gap: 5px; flex: none;
+                 font-size: 13px; font-weight: 600; color: var(--fg);
+                 text-decoration: none; border: 1px solid var(--border);
+                 border-radius: 999px; padding: 5px 12px; }
+    .link-open:hover { background: var(--bg-sunken); }
+    .link-body { overflow-y: auto; overscroll-behavior: contain;
+                 padding: 16px 18px 22px;
+                 font-family: "Iowan Old Style", "Palatino Linotype", Palatino,
+                              Georgia, serif;
+                 font-size: 16.5px; line-height: 1.6; }
+    .link-body p { margin: 0 0 12px; }
+    .link-title { font-size: 20px; line-height: 1.3; margin: 0 0 12px;
+                  font-weight: 650; }
+    .link-note { color: var(--muted); font-family: var(--sans, sans-serif);
+                 font-size: 14px; }
     /* The announcement. One line that pushes content down rather than
        floating over it — a banner that covers the composer is an ad. */
     .notice { display: flex; align-items: center; gap: 10px;
@@ -1294,6 +1329,11 @@ export class AgentConsole extends LitElement {
      life, dismissible per TAB (sessionStorage): an announcement should not
      reappear on every navigation, and should reappear tomorrow. */
   @state() private banner = "";
+  /* The link being read in the overlay, and what the reader answered. null
+     when closed. A link tap in a reply opens THIS instead of leaving the
+     conversation — the artifact panel's move, applied to the web. */
+  @state() private linkView: { url: string; host: string; title: string;
+    paragraphs: string[]; note: string; loading: boolean } | null = null;
   @state() private skillFiles: SkillFileRow[] = [];
   /* What is typed into the gallery's filter. Cleared when it opens, because a
      filter left over from last time is a gallery that looks empty. */
@@ -2839,8 +2879,62 @@ export class AgentConsole extends LitElement {
       + `Ask me for anything you need before you start.`);
   }
 
+  private async openLink(url: string): Promise<void> {
+    let host = "";
+    try { host = new URL(url).hostname; } catch { /* shown as-is */ }
+    this.linkView = { url, host, title: "", paragraphs: [], note: "", loading: true };
+    try {
+      const r = await fetch("/reader?u=" + encodeURIComponent(url));
+      const d = await r.json() as { title?: string; host?: string; paragraphs?: string[]; note?: string; error?: string };
+      if (this.linkView === null || this.linkView.url !== url) return;
+      this.linkView = { url, host: d.host || host, title: d.title ?? "",
+        paragraphs: d.paragraphs ?? [], note: d.note ?? d.error ?? "", loading: false };
+    } catch {
+      if (this.linkView === null || this.linkView.url !== url) return;
+      this.linkView = { url, host, title: "", paragraphs: [],
+        note: "The page could not be read from here.", loading: false };
+    }
+  }
+
+  private linkOverlay() {
+    const v = this.linkView;
+    if (v === null) return nothing;
+    return html`
+      <div class="scrim link-scrim" @click=${() => { this.linkView = null; }}></div>
+      <div class="link-sheet" role="dialog" aria-label="Link preview">
+        <div class="link-head">
+          <span class="link-host">${v.host || v.url}</span>
+          <a class="link-open" href=${v.url} target="_blank" rel="noopener noreferrer">
+            Open <nr-icon name="external-link" size="small"></nr-icon></a>
+          <button class="icon" title="Close" @click=${() => { this.linkView = null; }}>
+            <nr-icon name="x" size="medium"></nr-icon>
+          </button>
+        </div>
+        <div class="link-body">
+          ${v.loading ? html`<p class="link-note">Reading…</p>` : nothing}
+          ${v.title === "" ? nothing : html`<h3 class="link-title">${v.title}</h3>`}
+          ${v.paragraphs.map((t) => html`<p>${t}</p>`)}
+          ${!v.loading && v.paragraphs.length === 0
+            ? html`<p class="link-note">${v.note !== "" ? v.note
+                : "This page keeps its text to itself — open it in the browser."}</p>`
+            : nothing}
+        </div>
+      </div>`;
+  }
+
   private async chipClick(e: Event) {
     const path = e.composedPath() as HTMLElement[];
+    // A web link in a reply opens the reading overlay, not another tab: on a
+    // phone, navigating away IS losing the conversation. Only true external
+    // links — anchors inside this origin (artifact cards, previews) keep
+    // their own behaviour.
+    const anchor = path.find((el) => el?.tagName === "A") as HTMLAnchorElement | undefined;
+    if (anchor && /^https?:\/\//.test(anchor.getAttribute("href") ?? "")
+        && !(anchor.getAttribute("href") ?? "").startsWith(location.origin)) {
+      e.preventDefault();
+      void this.openLink(anchor.getAttribute("href") ?? "");
+      return;
+    }
     const diff = path.find((el) => el?.getAttribute?.("data-diff-path"));
     const card = path.find((el) => el?.getAttribute?.("data-open-path"));
     if (!diff && !card) return;
@@ -2927,6 +3021,7 @@ export class AgentConsole extends LitElement {
         ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
           : this.view === "canvas" ? html`<agent-canvas .focusAgent=${this.canvasFocus}></agent-canvas>`
           : this.view === "starts" ? this.startsPage() : html`
+        ${this.linkOverlay()}
         ${this.banner === "" ? nothing : html`
         <div class="notice" role="status">
           <span>${this.banner}</span>

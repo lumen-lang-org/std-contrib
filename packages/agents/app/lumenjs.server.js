@@ -27,7 +27,8 @@ import { previewFrameCsp } from "./server/csp.ts";
 import { authChain } from "./pages/_middleware.ts";
 import { apiProxy } from "./server/api-proxy.ts";
 import { staticAssets } from "./server/static-assets.ts";
+import { reader } from "./server/reader.ts";
 
 // Assets first: /favicon.ico and /og.png carry no identity and proxy nowhere,
 // so nothing earlier in the chain has anything to say about them.
-export default [staticAssets(), previewFrameCsp(), ...authChain, apiProxy()];
+export default [staticAssets(), reader(), previewFrameCsp(), ...authChain, apiProxy()];

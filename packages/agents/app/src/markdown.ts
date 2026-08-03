@@ -26,6 +26,14 @@ function inline(text: string): string {
   // form because the scheme is anchored.
   out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  // Bare URLs become links too. The models this console runs cite sources as
+  // naked addresses more often than as [text](url) — a citation nobody can
+  // tap is not a citation. Only outside the anchors made above: the guard is
+  // "not already preceded by =" or quote", which is what an href looks like
+  // from here. Trailing punctuation stays outside the link — a URL at the
+  // end of a sentence is not a URL ending in a period.
+  out = out.replace(/(^|[^"'=\]\)])(https?:\/\/[^\s<>"']+?)([.,;:!?]?)(?=\s|$|<)/gm,
+    '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>$3');
   return out;
 }
 
