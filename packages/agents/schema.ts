@@ -10,7 +10,7 @@
 //   cd packages/agents && lumen test schema.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, hasManyThrough, asc, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, hasManyThrough, asc, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 // --- rows --------------------------------------------------------------------
@@ -1942,6 +1942,97 @@ export function schemaPlan(db: Db): Migration[] {
     // A sign-in provider that is not OIDC — github is OAuth2, no issuer.
     migration("90.9", "an auth provider has a kind",
       "ALTER TABLE auth_providers ADD COLUMN kind " + db.textType + " NOT NULL DEFAULT 'oidc'"),
+    // 91 is runlog's, 92 is threadPlan's — the numbering is global across
+    // plans, and a migration lives with the plan that creates its table:
+    // an ALTER here on a table threadPlan makes would fail any migrate that
+    // runs this plan alone, which is exactly what schema.test does.
+    //
+    // One row per named deployment setting — today the announcement banner,
+    // and the shape is deliberately a K/V so the next setting is a row, not
+    // a migration.
+    migration("93", "deployment settings",
+      "CREATE TABLE IF NOT EXISTS settings ("
+      + "id " + db.textType + " PRIMARY KEY, "
+      + "value " + db.textType + " NOT NULL)"),
   ];
   return plan;
+}
+
+
+// --- stopping a running turn ---------------------------------------------------
+//
+// These live here, beside the migration, and NOT in threads.ts: threads.ts
+// imports run.ts, and run.ts is the caller that has to ask "was I asked to
+// stop?" mid-round — helpers in threads.ts would close the cycle. A private
+// two-field view of the threads table keeps them off threadsMapping, whose
+// persist would otherwise have to carry the column everywhere.
+
+function cancelColumn(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("cancelAsked", "cancel_asked", "text"),
+  ];
+  return repository("threads", "id", "id", fs);
+}
+
+type CancelRow = {
+  id: string,
+  cancelAsked: string,
+};
+
+export function askCancel(db: Db, threadId: string): string {
+  let wrote = executeWith(db,
+    "UPDATE threads SET cancel_asked = " + placeholderAt(db, 1)
+    + " WHERE id = " + placeholderAt(db, 2),
+    [`${Date.now()}`, threadId]);
+  if (wrote.ok) { return ""; }
+  return wrote.error;
+}
+
+export function clearCancel(db: Db, threadId: string): void {
+  executeWith(db,
+    "UPDATE threads SET cancel_asked = '' WHERE id = " + placeholderAt(db, 1),
+    [threadId]);
+}
+
+export function cancelAsked(db: Db, threadId: string): bool {
+  if (threadId == "") { return false; }
+  let held = findById(db, cancelColumn(), threadId);
+  if (held == "") { return false; }
+  let row: CancelRow = JSON.parse<CancelRow>(held);
+  return row.cancelAsked != "";
+}
+
+// --- deployment settings -------------------------------------------------------
+//
+// A named string the operator can change at runtime — the announcement
+// banner is the first. Read by everyone, written through the API; "" and
+// "no row" mean the same thing, which is what lets a setting be cleared by
+// writing nothing.
+
+export type SettingRow = {
+  id: string,
+  value: string,
+};
+
+export function settingsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("value", "value", "text"),
+  ];
+  return repository("settings", "id", "id", fs);
+}
+
+export function readSetting(db: Db, key: string): string {
+  let held = findById(db, settingsMapping(), key);
+  if (held == "") { return ""; }
+  let row: SettingRow = JSON.parse<SettingRow>(held);
+  return row.value;
+}
+
+export function writeSetting(db: Db, key: string, value: string): string {
+  let row: SettingRow = { id: key, value: value };
+  let written = persist(db, settingsMapping(), JSON.stringify(row));
+  if (written.ok) { return ""; }
+  return written.error;
 }

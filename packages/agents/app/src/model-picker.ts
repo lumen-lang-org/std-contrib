@@ -64,9 +64,6 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { ModelChoice } from "./api.js";
 
-// The shelf of what is not for sale yet. Display only — see the menu note.
-const COMING = ["Opus 5", "Haiku 4.5", "Mistral Large"];
-
 @customElement("model-picker")
 export class ModelPicker extends LitElement {
   static styles = css`
@@ -176,6 +173,15 @@ export class ModelPicker extends LitElement {
 
   /** The trigger's word. The chosen row's label, or the agent's own model when
    *  nothing is chosen — the control says what will answer, never "none". */
+  /* The rows a person can actually pick, and the priced shelf under them. */
+  private offered(): ModelChoice[] {
+    return this.choices.filter((c) => c.tier !== "premium");
+  }
+
+  private premium(): ModelChoice[] {
+    return this.choices.filter((c) => c.tier === "premium");
+  }
+
   private showing(): string {
     const chosen = this.choices.find((c) => c.id === this.choiceId);
     if (chosen !== undefined) { return chosen.label; }
@@ -272,19 +278,18 @@ export class ModelPicker extends LitElement {
           <nr-icon name="chevron-down" size="small"></nr-icon>
         </button>
         <div slot="content" class="menu" role="menu">
-          ${this.choices.map((c) => this.row(c))}
-          ${COMING.length === 0 ? nothing : html`
+          ${this.offered().map((c) => this.row(c))}
+          ${this.premium().length === 0 ? nothing : html`
           <hr />
-          <!-- Announced, not offered. These are display rows: no click, no
-               role, dimmed — a padlocked pickable row would promise a refusal
-               the engine never performs, and an enabled one would let any
-               crafted POST run the expensive model with no billing anywhere.
-               When tiers become enforceable this list moves to the engine as
-               tier rows; until then it is what it looks like: a sign. -->
+          <!-- Announced, not offered — and now the ENGINE's rows, not a list
+               here: tier "premium" rows ride the same wire as the menu, the
+               messages POST refuses them with "coming soon", and this just
+               draws that truth. Display-only so nobody is offered a press
+               that can only end in a refusal. -->
           <div class="soon-head">Coming soon</div>
-          ${COMING.map((m) => html`
+          ${this.premium().map((c) => html`
             <div class="row soon">
-              <div class="body"><div class="name"><span>${m}</span>
+              <div class="body"><div class="name"><span>${c.label}</span>
                 <nr-icon class="tier" name="diamond" size="small"></nr-icon></div></div>
             </div>`)}`}
           <hr />

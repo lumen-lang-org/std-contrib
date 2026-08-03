@@ -705,6 +705,15 @@ export const say = (id: string, text: string, modelChoiceId = "", think = false)
     body: JSON.stringify({ text, modelChoiceId, think }),
   });
 
+export const readBanner = () => call<{ text: string }>("/banner");
+export const writeBanner = (text: string) =>
+  call<{ text: string }>("/banner", { method: "PUT", body: JSON.stringify({ text }) });
+
+/* Ask the running turn to stop. 200 means heard, not stopped: the turn ends
+   at its next boundary and the in-flight messages POST reports how. */
+export const cancelTurn = (threadId: string) =>
+  call<{ asked: boolean }>(`/threads/${encodeURIComponent(threadId)}/cancel`, { method: "POST" });
+
 // --- workspace ------------------------------------------------------------------------
 
 export const listFiles = (threadId: string) =>

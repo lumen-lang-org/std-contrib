@@ -35,7 +35,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
 import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere, jsonMember } from "../plume/plume.ts";
 import { migrate, appliedHighWater } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, enabledChoices, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, AuthProviderRow, authProvidersMapping, PluginRow, PluginItemRow, pluginsMapping, pluginItemsMapping, schemaPlan, derivedMenuStatements } from "./schema.ts";
+import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, enabledChoices, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, AuthProviderRow, authProvidersMapping, PluginRow, PluginItemRow, pluginsMapping, pluginItemsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel, readSetting, writeSetting } from "./schema.ts";
 import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
 import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText } from "./provider.ts";
@@ -2820,6 +2820,23 @@ class ThreadApi {
   }
 
   // Ask the thread. The reply is this turn's answer; the transcript is a GET.
+  // Ask the running turn to stop. It stops at the next boundary — before
+  // the next provider call or the next tool call — because a model cannot be
+  // interrupted mid-sentence and pretending otherwise would just hide where
+  // the money went. Answering 200 does not mean stopped; it means asked. The
+  // messages POST already in flight is what reports how the turn ended (its
+  // reply says "Stopped at your request"), so this route has nothing more to
+  // say than "heard".
+  @post("/:id/cancel")
+  cancel(req: Request): Reply {
+    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
+      return notFound("thread " + param(req, "id"));
+    }
+    let problem = askCancel(this.db, param(req, "id"));
+    if (problem != "") { return badRequest(problem); }
+    return ok("{\"asked\":true}");
+  }
+
   @post("/:id/messages")
   say(req: Request): Reply {
     let tags = callerTags(req);
@@ -2827,6 +2844,9 @@ class ThreadApi {
     if (agentId == "") {
       return notFound("thread " + param(req, "id"));
     }
+    // A stop asked during the LAST turn must not kill this one: the flag is
+    // per-thread, so each turn starts by wiping what an earlier finger left.
+    clearCancel(this.db, param(req, "id"));
     if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
     // Member by member, never `JSON.parse<{ text: string }>`: the console's
     // send always carries `modelChoiceId` too, and a record refuses a document
@@ -2858,6 +2878,21 @@ class ThreadApi {
     // chosen row, and if its tier is "premium" and this caller's edition does
     // not include it, refuse HERE — which is before the turn below applies it,
     // remembers it, and spends a provider call on it.
+
+    // The slot's second occupant: a choice priced "premium" is announced in
+    // the menu and refused at the door — the row exists so the console can
+    // say what is coming, and nothing anywhere bills for it yet, so applying
+    // it would spend the expensive model on any caller who typed the id. The
+    // sentence says "coming soon" because that is the truth of the row.
+    if (pick.choiceId != "") {
+      let pickedRow = findById(this.db, modelChoicesMapping(), pick.choiceId);
+      if (pickedRow != "") {
+        let picked: ModelChoiceRow = JSON.parse<ModelChoiceRow>(pickedRow);
+        if (picked.tier == "premium") {
+          return badRequest(picked.label + " is coming soon — it is announced, not offered yet");
+        }
+      }
+    }
 
     // The slot's first occupant, and the same shape that check will have: a
     // guest — a caller the gateway minted an anonymous identity for — gets
@@ -4190,6 +4225,41 @@ class RunApi {
 // and the one the gateway leaves public, because a probe that needs the
 // secret cannot tell "the engine is down" from "the secret is wrong" — and
 // those are different pages of the runbook.
+// The announcement banner: one sentence the operator can put above every
+// visitor's page — maintenance tonight, a new capability, a holiday notice —
+// and take down again, all without a deploy.
+@controller("/banner")
+class BannerApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  // Public in the same sense the healthz is: it is one string the operator
+  // wrote for everyone to read, and a guest sees the banner too — the
+  // gateway lists this route among the guest-readable ones.
+  @get("/")
+  show(req: Request): Reply {
+    return ok("{\"text\":" + JSON.stringify(readSetting(this.db, "banner")) + "}");
+  }
+
+  // Writing goes through the gateway's authenticated tier like every other
+  // operator surface. "" takes the banner down — same row, empty value —
+  // so there is no delete route to keep in step.
+  @put("/")
+  change(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
+    let text = jsonText(req.body, "text");
+    if (utf8Length(text) > 500) {
+      return badRequest("a banner is at most 500 bytes — it is a sentence, not a page");
+    }
+    let problem = writeSetting(this.db, "banner", text);
+    if (problem != "") { return badRequest(problem); }
+    return ok("{\"text\":" + JSON.stringify(text) + "}");
+  }
+}
+
 @controller("/healthz")
 class HealthApi {
   db: Db;
@@ -4863,6 +4933,7 @@ function main(): void {
     new PluginApi(db),
     new ArtifactApi(db),
     new PreviewApi(db),
+    new BannerApi(db),
     new HealthApi(db),
     new UsageApi(db),
     new QuotaApi(db),

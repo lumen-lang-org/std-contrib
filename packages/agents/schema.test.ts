@@ -158,7 +158,9 @@ test("the plan creates every table, from the mappings", () => {
   // receipt and what it brought — migrations 90.3 and 90.4), three link
   // tables, the credentials table, the index, the twelve ALTERs that add
   // columns those tables did not have when they were first created (the
-  // newest being auth_providers.kind, 90.9; before it a skill's source and
+  // newest being the settings table, 93 (92, the cancel flag, is
+  // threadPlan's); before
+  // them auth_providers.kind, 90.9; before it a skill's source and
   // sourceUrl, 90.1 and 90.2 — this count sat at 48 while both were already
   // in the plan, which is exactly the "canary nobody updates" failure the
   // healthz test warns about), the twelve statements of the named seed, the
@@ -166,7 +168,7 @@ test("the plan creates every table, from the mappings", () => {
   // where they did find rows. Every one of them changes nothing on an empty
   // database, which is the point of the empty case. Asserting the number
   // rather than "some" is what catches a migration silently dropped.
-  expect(r.applied == 57);
+  expect(r.applied == 58);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -174,7 +176,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 57);
+  expect(migrate(database, schemaPlan(database)).applied == 58);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 
