@@ -451,8 +451,11 @@ export function searchProxy(): Middleware {
           // read "<route> timed out; /stats and /analytics may still be fine",
           // which hedges twice and contradicts itself outright when the route
           // that timed out IS /stats.
+          // `Math.round(3500/1000)` is 4, so this said "did not respond
+          // within 4s" about a budget of 3.5 — a number a reader would then
+          // fail to find anywhere in the code.
           detail: timedOut
-            ? `${route.path} did not respond within ${Math.round(WAIT_LIVE / 1000)}s`
+            ? `${route.path} did not respond within ${WAIT_LIVE / 1000}s`
             : raw.slice(0, 200),
           upstream: BASE,
         });
