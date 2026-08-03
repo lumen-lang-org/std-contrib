@@ -256,6 +256,31 @@ const CHAT_SKIN = `
 `;
 
 const CHAT_SOURCES = `
+  /* The answer reads like an article, Perplexity's move: a serif reading
+     face at reading size for the MODEL's prose, while the person's own
+     bubble and every control stay in the interface sans. System serifs
+     only — the CSP forbids font CDNs, and Iowan/Palatino/Georgia are the
+     stacks the reading apps themselves ship. Content rules arrive after
+     hydration by nature; a font swap on the answer text is a reflow the eye
+     forgives, unlike the composer jump the CHAT_SKIN note bans. */
+  .message.bot .message__content {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+                 "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+    letter-spacing: .003em;
+  }
+  /* The working parts inside an answer stay instrumental: step cards, code,
+     file chips are telemetry, not prose. */
+  .message.bot .message__content pre,
+  .message.bot .message__content code,
+  .message.bot .message__content .tool-call,
+  .message.bot .message__content details { font-family: var(--mono, ui-monospace, monospace); }
+  .message.bot .message__content .tool-call * { font-family: inherit; }
+  @media (max-width: 640px) {
+    .message.bot .message__content { font-size: 16.5px; }
+  }
+
   .joule-sources { display: flex; flex-wrap: wrap; gap: 6px;
                    margin: 10px 0 2px; }
   .joule-source { display: inline-flex; align-items: center; gap: 6px;
