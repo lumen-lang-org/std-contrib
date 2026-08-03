@@ -704,6 +704,45 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       };
       let startedMs = Date.now();
       if (threadId != "") { beginStep(db, live); }
+      // The loop guard. A model that gets the same result for the same call
+      // makes the same call again — observed as use_skill("make-site")
+      // fifteen times in one round, and eighteen identical run_scripts in
+      // another, each burning a step to learn nothing. Re-executing an
+      // identical call cannot help; what breaks the attractor is a DIFFERENT
+      // answer. use_skill is refused on its first repeat (the briefing is
+      // already in context, rereading it is worth nothing); every other tool
+      // gets one honest retry — a flaky call retried identically is
+      // legitimate — and is refused on the second.
+      let sameBefore: int = 0;
+      let priorStep: int = 0;
+      while (priorStep < steps.length) {
+        if (steps[priorStep].tool == calls[i].name && steps[priorStep].args == calls[i].args) {
+          sameBefore = sameBefore + 1;
+        }
+        priorStep = priorStep + 1;
+      }
+      let repeatCap: int = 2;
+      if (calls[i].name == "use_skill") { repeatCap = 1; }
+      if (sameBefore >= repeatCap) {
+        let stuck = "You already made this exact call this turn"
+          + (sameBefore > 1 ? " " + `${sameBefore}` + " times" : "")
+          + ", and the result has not changed. Do not repeat it. Act on the result you"
+          + " already have: follow the instructions above, or answer the person with"
+          + " what you know. If the call failed, change something about it before"
+          + " trying again.";
+        let stuckStep: AgentStep = { index: steps.length, tool: calls[i].name,
+          server: "loop-guard", args: calls[i].args, result: stuck, ok: false };
+        steps.push(stuckStep);
+        if (threadId != "") {
+          let stuckTook = parseInt(`${Date.now() - startedMs}`, 10) ?? -1;
+          let stuckClose: StepClose = { ok: false, endedAt: stamp(),
+            millis: stuckTook, line: 0, changed: "", result: stuck };
+          endStepAt(db, live, stuckClose);
+        }
+        context.push(toolTurn(calls[i].id, calls[i].name, stuck));
+        i = i + 1;
+        continue;
+      }
       let fileAnswer = callWorkspaceTool(db, threadId, calls[i].name,
         jsonText(calls[i].args, "name"), jsonText(calls[i].args, "content"), now);
       // Artifacts beside the workspace and ahead of MCP, for the same reason.
