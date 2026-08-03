@@ -37,6 +37,8 @@
 // playground) and gated instead.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 type Next = (err?: unknown) => void;
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: Next) => void;
@@ -197,18 +199,107 @@ function trim(body: string, fields: string[]): string {
 interface Hit { at: number; status: number; body: string }
 const cache = new Map<string, Hit>();
 
-async function upstream(path: string, search: string): Promise<Hit> {
+/** The aggregates, on disk.
+ *
+ *  The console is redeployed by replacing its container, which empties an
+ *  in-memory cache every time — and an empty cache during an index outage is a
+ *  public page with an error where its numbers should be. A file survives the
+ *  restart, so the worst case becomes numbers with an age on them. Mounted at
+ *  JOULE_CACHE_FILE; unset or unwritable, everything below still works and
+ *  only the restart case gets worse. */
+const CACHE_FILE = process.env.JOULE_CACHE_FILE || "/var/cache/joule/aggregates.json";
+
+function loadCache(): void {
+  try {
+    const saved = JSON.parse(readFileSync(CACHE_FILE, "utf8")) as Record<string, Hit>;
+    for (const [key, hit] of Object.entries(saved)) {
+      if (typeof hit?.body === "string") cache.set(key, hit);
+    }
+  } catch {
+    /* no file yet, or nothing readable in it — the warmer fills it */
+  }
+}
+
+function saveCache(): void {
+  try {
+    mkdirSync(dirname(CACHE_FILE), { recursive: true });
+    writeFileSync(CACHE_FILE, JSON.stringify(Object.fromEntries(cache)));
+  } catch {
+    /* read-only filesystem, no volume — the memory cache is unaffected */
+  }
+}
+
+/** Two budgets, because two callers.
+ *
+ *  A person waiting on a page gets 3.5s: the index answers its own queries in
+ *  tens of milliseconds, so anything past that is a network or a box in
+ *  trouble, and making somebody watch a spinner for ten seconds to be told so
+ *  is the worst of both. The background warmer gets longer — nobody is
+ *  waiting on it, and a slow answer still beats no answer. */
+const WAIT_LIVE = 3_500;
+const WAIT_WARM = 9_000;
+
+async function upstream(path: string, search: string, budget = WAIT_LIVE): Promise<Hit> {
   const url = BASE + path + (search === "" ? "" : "?" + search);
-  // AbortSignal.timeout rather than a bare fetch: the index is one box on a
-  // tailnet, and a console request that hangs on it holds a connection open
-  // for as long as the socket lives. Ten seconds is generous for an endpoint
-  // whose own `took_ms` is in the tens.
   const answer = await fetch(url, {
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(budget),
     headers: { accept: "application/json" },
   });
   return { at: Date.now(), status: answer.status, body: await answer.text() };
 }
+
+/** When the index is down, stop making every caller discover it separately.
+ *
+ *  Both outages this box has seen took the whole VM off the tailnet, so every
+ *  request was an identical wait for an identical timeout. One failure now
+ *  shuts the door for a few seconds and the rest are refused immediately —
+ *  which is what turns a dead index from a page that hangs into a page that
+ *  says so. Any success reopens it; there is no half-open dance, because the
+ *  warmer is already probing on its own timer. */
+let closedUntil = 0;
+const BREAKER_MS = 8_000;
+
+/** The aggregates, kept warm.
+ *
+ *  The index is a Hyper-V VM reached over a tailnet relay, and a cold request
+ *  to it costs anywhere from 100ms to the 10s timeout. Paying that on a page
+ *  load — or on a hover — is the difference between a number appearing and a
+ *  panel that never opens, which is exactly how the composer's index card
+ *  failed its first test.
+ *
+ *  So no request ever waits on the tailnet if anything is cached. A timer on
+ *  this box refreshes the two aggregates every TTL whether or not anybody is
+ *  looking, and a request that finds a stale entry serves it AND kicks off a
+ *  refresh behind itself. The only call that can block is the first one after
+ *  a boot, before the warmer has finished — and the warmer starts at import,
+ *  so that window is a second or two of process life rather than a state a
+ *  visitor lands in.
+ *
+ *  This also collapses the failure case. When the index is down the timer
+ *  keeps failing quietly against the last good answer, and the page shows
+ *  numbers with an age on them instead of an error. */
+const WARM = ["/stats", "/analytics"];
+
+function refill(path: string): void {
+  void upstream(path, "", WAIT_WARM)
+    .then((hit) => {
+      if (hit.status !== 200) return;
+      cache.set(path + "?", hit);
+      closedUntil = 0; // the index answered; let live requests through again
+      saveCache();
+    })
+    .catch(() => { /* keep whatever is cached; the age is the whole report */ });
+}
+
+function warm(): void {
+  for (const path of WARM) refill(path);
+}
+
+loadCache();
+warm();
+// unref so this timer is never the reason a process refuses to exit.
+const heartbeat = setInterval(warm, TTL_MS);
+if (typeof heartbeat.unref === "function") heartbeat.unref();
 
 export function searchProxy(): Middleware {
   return (req, res, next) => {
@@ -259,23 +350,44 @@ export function searchProxy(): Middleware {
     const query = sent.toString();
 
     if (route.cache) {
-      const hit = cache.get(route.path + "?" + query);
-      if (hit && Date.now() - hit.at < TTL_MS) {
+      const key = route.path + "?" + query;
+      const hit = cache.get(key);
+      if (hit) {
+        const age = Date.now() - hit.at;
+        // Stale is served, not awaited. The refresh goes behind the response,
+        // so the caller pays nothing for the fact that the entry had expired.
+        if (age >= TTL_MS) refill(route.path);
         res.statusCode = hit.status;
         res.setHeader("content-type", "application/json; charset=utf-8");
         // Cached whole and trimmed on the way out, so one cached answer serves
         // both tiers. `private` once a body depends on who asked: a shared
         // cache in front must not hand an operator's fuller answer to the next
-        // visitor, and the console's own 20s window is the part that mattered.
+        // visitor, and this box's own window is the part that mattered.
         res.setHeader("cache-control", `private, max-age=${Math.floor(TTL_MS / 1000)}`);
+        // Only once the warmer has plainly been failing for a while. A 25s-old
+        // number is not news; a five-minute-old one is, and the page says so.
+        if (age > TTL_MS * 4) res.setHeader("x-index-stale", String(Math.round(age / 1000)));
         res.end(cut(hit.body));
         return;
       }
     }
 
+    if (Date.now() < closedUntil) {
+      json(res, 503, {
+        error: "the search index is not answering",
+        detail: "checked moments ago; retrying in the background",
+        upstream: BASE,
+      });
+      return;
+    }
+
     void upstream(route.path, query)
       .then((hit) => {
-        if (route.cache && hit.status === 200) cache.set(route.path + "?" + query, hit);
+        closedUntil = 0;
+        if (route.cache && hit.status === 200) {
+          cache.set(route.path + "?" + query, hit);
+          if (query === "") saveCache();
+        }
         res.statusCode = hit.status;
         res.setHeader("content-type", "application/json; charset=utf-8");
         res.setHeader(
@@ -291,6 +403,7 @@ export function searchProxy(): Middleware {
         // "The operation was aborted." is what AbortSignal.timeout says, and
         // it names the mechanism rather than the fact. A reader needs to know
         // the index went quiet, not that a signal fired.
+        closedUntil = Date.now() + BREAKER_MS;
         const raw = err instanceof Error ? err.message : String(err);
         const timedOut = err instanceof Error
           && (err.name === "TimeoutError" || /abort/i.test(raw));
@@ -316,7 +429,7 @@ export function searchProxy(): Middleware {
 
         json(res, 503, {
           error: timedOut
-            ? "the search index did not answer within 10s"
+            ? "the search index did not answer in time"
             : "the search index could not be reached",
           detail: timedOut ? `${route.path} timed out; /stats and /analytics may still be fine`
             : raw.slice(0, 200),

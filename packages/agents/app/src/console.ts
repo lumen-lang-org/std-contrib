@@ -7,6 +7,7 @@ import { LitElement, css, html, nothing } from "lit";
 import { BRAND, WORDMARK } from "./brand.js";
 import { customElement, property, state } from "lit/decorators.js";
 import "./ui.js";
+import "./search-dash.js";
 import "./sidebar.js";
 import "./artifact-panel.js";
 import "./knowledge.js";
@@ -879,6 +880,24 @@ export class AgentConsole extends LitElement {
        stretched; a directory is something you browse, and browsing wants the
        width. Still bounded — a panel edge to edge is a page, and this one is
        deliberately not a page. */
+    /* The index layer. Bounded and scrollable rather than full-bleed: what it
+       holds is one screen of reading, and a sheet the size of the window would
+       make a glance look like a destination. */
+    /* Height follows the content, capped — not inset top AND bottom. Pinned to
+       both edges the panel was a tall white column with a third of it empty,
+       which reads as something still loading. */
+    .index-layer { position: fixed; z-index: 40; overflow-y: auto;
+                   top: 8vh; bottom: auto; max-height: 84vh;
+                   left: max(12px, calc(50vw - 380px));
+                   right: max(12px, calc(50vw - 380px));
+                   background: var(--bg-card); border: 1px solid var(--border);
+                   border-radius: 18px; padding: 30px 32px 36px;
+                   box-shadow: 0 24px 60px -12px rgba(0,0,0,.35); }
+    .index-close { position: absolute; top: 14px; right: 14px; }
+    @media (max-width: 720px) {
+      .index-layer { top: 6vh; left: 10px; right: 10px; max-height: 88vh;
+                     padding: 22px 16px 28px; border-radius: 16px; }
+    }
     .gallery { position: fixed; z-index: 40; background: var(--bg-card);
               border: 1px solid var(--border); border-radius: 16px;
               box-shadow: 0 24px 60px -12px rgba(0,0,0,.35);
@@ -1765,6 +1784,7 @@ export class AgentConsole extends LitElement {
       });
       left.appendChild(globe);
       this.styleSearchGlobe(chat);
+      this.hangIndexCard(globe, chat);
     }
     const on = this.pinned === SEARCH_SKILL;
     globe.setAttribute("aria-pressed", on ? "true" : "false");
@@ -1844,6 +1864,139 @@ export class AgentConsole extends LitElement {
       || this.allSkills.some((s) => s.skillName === SEARCH_SKILL);
   }
 
+  /* What the index holds, on hovering the globe.
+   *
+   * The point of the chip is that Joule searches its OWN index, and nothing
+   * on the screen said so — the numbers lived on a page nobody had a reason
+   * to open. A hover card puts the fact where the control is: eleven thousand
+   * pages is an argument, and it is only an argument at the moment somebody
+   * is deciding whether to leave search on.
+   *
+   * Built as a DOM string rather than a Lit template because it is mounted
+   * inside nr-chatbot's shadow root, where this component does not render.
+   * Everything interpolated is a number this console formatted or a two-letter
+   * language code, and both are escaped anyway — the source is an API, not a
+   * promise.
+   *
+   * position: fixed, so it needs no positioned ancestor in a tree this file
+   * does not own, and it is measured off the chip each time it opens rather
+   * than placed once: the composer moves with the transcript. */
+  private indexCard: { at: number; body: string } | null = null;
+
+  /** The index, as a layer over whatever is open. Same component the public
+   *  page renders, same mode, so there is one description of the corpus and
+   *  not two to keep in step. */
+  @state() private indexOpen = false;
+
+  private async indexBody(): Promise<string> {
+    const fresh = this.indexCard !== null && Date.now() - this.indexCard.at < 60_000;
+    if (fresh) return this.indexCard!.body;
+    const esc = (s: string) => s.replace(/[&<>"]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] ?? c));
+    const num = (n: number) => n.toLocaleString("en-US");
+    try {
+      const [s, a] = await Promise.all([
+        fetch("/search-api/stats").then((r) => r.json()),
+        fetch("/search-api/analytics").then((r) => r.json()),
+      ]);
+      const langs: { key: string; n: number }[] = (a.by_lang ?? []).slice(0, 5);
+      const total: number = (a.by_lang ?? []).reduce(
+        (sum: number, b: { n: number }) => sum + b.n, 0);
+      const secs = Math.max(0, Math.floor(Date.now() / 1000) - (s.newest_fetch ?? 0));
+      const ago = secs < 90 ? secs + "s" : secs < 5400 ? Math.round(secs / 60) + "m"
+        : Math.round(secs / 3600) + "h";
+      const bars = langs.map((b, i) =>
+        `<i style="flex:${b.n};opacity:${(1 - i * 0.15).toFixed(2)}"></i>`).join("");
+      const words = langs.map((b) =>
+        `${esc(b.key || "??")} ${total > 0 ? Math.round((b.n / total) * 100) : 0}%`).join(" · ");
+      const body =
+        `<b>${num(s.indexed ?? 0)}</b> pages Joule indexed itself`
+        + `<em>from ${num(s.domains ?? 0)} domains · newest ${ago} ago</em>`
+        + `<span class="rule">${bars}</span>`
+        + `<em>${esc(words)}</em>`
+        // Deliberately NOT an anchor with an href. It was one, and the overlay
+        // opened and then the page navigated to /stats underneath it: the
+        // click is composed, so it leaves the chatbot's shadow root and
+        // reaches the router, which routes on anchors and does not ask whether
+        // somebody already called preventDefault. Nothing to route, nothing
+        // routes.
+        + `<button type="button" class="more">See the index</button>`;
+      this.indexCard = { at: Date.now(), body };
+      return body;
+    } catch {
+      // A card that cannot say anything says nothing. Not an error toast: the
+      // chip still works, and the index being unreachable is not this hover's
+      // news to break.
+      return "";
+    }
+  }
+
+  private hangIndexCard(globe: HTMLElement, chat: Element) {
+    const root = chat.shadowRoot;
+    if (root === null || root === undefined) return;
+    let tip: HTMLElement | null = null;
+    let timer = 0;
+    // Whether the pointer is still on the chip. The body may be a network away
+    // on the very first hover, and without this the panel appears after the
+    // pointer has moved on — a card opening under somebody's mouse three
+    // seconds after they left is worse than no card.
+    let wanted = false;
+
+    // Warmed as soon as the chip exists, not on the first hover. The card used
+    // to open only on the SECOND try, and this is why: the first hover was
+    // waiting on a tailnet round trip through the proxy, the pointer left, and
+    // nothing was ever drawn. The proxy keeps its own warm copy now
+    // (server/search-proxy.ts); this is the same idea one hop nearer.
+    void this.indexBody();
+
+    const close = () => {
+      wanted = false;
+      window.clearTimeout(timer);
+      tip?.remove();
+      tip = null;
+    };
+    const open = async () => {
+      const body = await this.indexBody();
+      if (body === "" || tip !== null || !wanted) return;
+      tip = document.createElement("div");
+      tip.className = "joule-index-tip";
+      tip.innerHTML = body;
+      root.appendChild(tip);
+      const box = globe.getBoundingClientRect();
+      // Above the chip, left-aligned to it, nudged back inside the viewport on
+      // a narrow screen rather than allowed to hang off the edge.
+      const width = Math.min(300, window.innerWidth - 24);
+      const left = Math.max(12, Math.min(box.left, window.innerWidth - width - 12));
+      tip.style.width = width + "px";
+      tip.style.left = left + "px";
+      tip.style.top = (box.top - 12) + "px";
+      tip.addEventListener("mouseenter", () => window.clearTimeout(timer));
+      tip.addEventListener("mouseleave", close);
+      // Same page. A link that navigates away from a composer somebody is
+      // typing into is a link that loses what they typed — and the index is a
+      // thing to glance at, not a place to go.
+      tip.querySelector(".more")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+        this.indexOpen = true;
+      });
+    };
+
+    globe.addEventListener("mouseenter", () => {
+      wanted = true;
+      window.clearTimeout(timer);
+      // Long enough that crossing the chip on the way to Send does not flash a
+      // panel at somebody who never asked for one.
+      timer = window.setTimeout(() => { void open(); }, 400);
+    });
+    globe.addEventListener("mouseleave", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(close, 180);
+    });
+    globe.addEventListener("click", close);
+  }
+
   /* One stylesheet, adopted into the composer's root once. The button lives in
      nr-chatbot's shadow tree, so this component's own styles do not reach it;
      adopting is the supported way in, and the guard keeps a re-render from
@@ -1883,6 +2036,36 @@ export class AgentConsole extends LitElement {
          the chip row be the thing that gives means the failure mode is a
          clipped chip, which is legible, instead of two labels in one place,
          which is not. */
+      /* The index card. transform: translateY(-100%) rather than a measured
+         height, so it sits on the chip's top edge whatever it ends up
+         containing. */
+      .joule-index-tip {
+        position: fixed; z-index: 60; transform: translateY(-100%);
+        display: flex; flex-direction: column; gap: 5px;
+        padding: 12px 14px; border-radius: 13px;
+        background: var(--bg-card, #fff); color: var(--fg, #17171A);
+        border: 1px solid var(--border, rgba(0,0,0,.10));
+        box-shadow: 0 16px 40px -14px rgba(0,0,0,.34);
+        font-size: 12.5px; line-height: 1.45;
+        animation: joule-tip-in .13s cubic-bezier(.23,1,.32,1); }
+      @keyframes joule-tip-in {
+        from { opacity: 0; transform: translateY(calc(-100% + 5px)); }
+        to { opacity: 1; transform: translateY(-100%); } }
+      .joule-index-tip b { font-size: 15px; font-weight: 600;
+        font-variant-numeric: tabular-nums; }
+      .joule-index-tip em { font-style: normal;
+        color: var(--muted, rgba(0,0,0,.45)); font-size: 11.5px; }
+      .joule-index-tip .rule { display: flex; gap: 2px; height: 6px; margin: 2px 0 1px;
+        border-radius: 999px; overflow: hidden;
+        background: var(--bg-sunken, rgba(0,0,0,.05)); }
+      .joule-index-tip .rule i { background: currentColor; min-width: 2px; }
+      .joule-index-tip .more { margin-top: 3px; font: inherit; font-size: 12px;
+        color: inherit; background: none; border: 0; cursor: pointer; padding: 0 0 1px;
+        border-bottom: 1px solid var(--border, rgba(0,0,0,.18));
+        align-self: flex-start; }
+      .joule-index-tip .more:hover { border-color: currentColor; }
+      @media (prefers-reduced-motion: reduce) {
+        .joule-index-tip { animation: none; } }
       .action-buttons-right { flex: none; }
       .action-buttons-left { min-width: 0; overflow: hidden; }
       /* A shorter box on a phone — IN A CONVERSATION. The component opens
@@ -2938,6 +3121,16 @@ export class AgentConsole extends LitElement {
            HTML comment cannot open inside a start tag, and every binding after
            it silently stops being an attribute. That is what "left menu link
            stop working" was — one comment, six dead event handlers. -->
+      ${!this.indexOpen ? nothing : html`
+      <div class="scrim shelves" @click=${() => { this.indexOpen = false; }}></div>
+      <div class="index-layer" role="dialog" aria-label="The Joule index">
+        <button class="icon index-close" title="Close"
+          @click=${() => { this.indexOpen = false; }}>
+          <nr-icon name="x" size="small"></nr-icon>
+        </button>
+        <search-dash mode="public"></search-dash>
+      </div>`}
+
       <console-sidebar
         .threads=${this.threads}
         .activeId=${this.threadId}
