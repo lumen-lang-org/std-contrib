@@ -18,6 +18,9 @@
 
 import { LitElement, css, html } from "lit";
 import "./mcp-gallery.js";
+import { CATALOGUE, brandMark } from "./mcp-gallery.js";
+import { connectEntry, connectServer } from "./connect-flow.js";
+import type { CatalogueEntry, EntryStatus } from "./mcp-gallery.js";
 import "./search-dash.js";
 import { customElement, property, state } from "lit/decorators.js";
 import {
@@ -35,6 +38,7 @@ import {
   TemplateRow, listTemplates, deleteTemplate,
   PluginRow, PluginItem, PluginPreview, listPlugins, pluginItems, inspectPlugin, installPlugin, removePlugin,
   serverMine, setServerMine, forgetServerMine,
+  ConnectionRow, listConnections, startConnect,
   AuthProviderRow, listAuthProviders, saveAuthProvider, setAuthProviderSecret, deleteAuthProvider,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
@@ -338,6 +342,24 @@ export class ConsoleSettings extends LitElement {
     .tag.live { color: var(--ok); font-style: normal; }
     .tag.off { color: var(--danger); font-style: normal; }
     .dim { color: var(--muted); }
+
+    /* A connector's own mark in the name cell, at the size of the text beside
+       it. The path is drawn in currentColor and the brand's colour goes on the
+       wrapper, so one style rule serves ten different logos. */
+    .brand { display: inline-grid; place-items: center; width: 16px; height: 16px;
+             margin-right: 8px; vertical-align: -3px; }
+    .brand svg { width: 15px; height: 15px; display: block; }
+    /* Connected, in the status column. */
+    .ok { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+          font-size: 12.5px; color: var(--ok); }
+    .ok nr-icon { color: var(--ok); }
+    /* The one button that appears inside a table row: it reads as an action on
+       that row rather than as a control of the page, so it is a link with a
+       button's semantics rather than a second button style. */
+    button.link { font: inherit; font-size: 12.5px; background: none; border: 0;
+                  padding: 0; cursor: pointer; color: var(--brand);
+                  text-decoration: underline; text-underline-offset: 2px; }
+    button.link:hover { filter: brightness(1.15); }
     .trunc { display: block; max-width: 46ch; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
 
@@ -477,6 +499,10 @@ export class ConsoleSettings extends LitElement {
   @state() private pluginBusy = false;
   /* Which connectors carry a token of the caller's own — id to stored. */
   @state() private mine = new Map<string, boolean>();
+  /* Which connectors the caller is signed in to — server id to its state.
+     Per-caller and so never folded into `servers`: the same connector is
+     connected for whoever approved it and not for anybody else. */
+  @state() private connections = new Map<string, ConnectionRow>();
   @state() private authProviders: AuthProviderRow[] = [];
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
@@ -543,6 +569,7 @@ export class ConsoleSettings extends LitElement {
       await this.readMenu();
       await this.loadPlugins();
       await this.loadMine();
+      await this.loadConnections();
       this.authProviders = await listAuthProviders().catch(() => []);
       const t = this.tracing;
       if (t !== null) {
@@ -1947,6 +1974,103 @@ export class ConsoleSettings extends LitElement {
     }));
   }
 
+  /* The catalogue entry a server row came from, matched on address. "" for a
+     server somebody typed in by hand, which has no mark and needs none. */
+  private entryFor(s: ServerRow): CatalogueEntry | undefined {
+    return CATALOGUE.find((e) => e.endpoint === s.endpoint);
+  }
+
+  private serverBrand(s: ServerRow) {
+    const entry = this.entryFor(s);
+    if (entry === undefined) { return html`${s.serverName}`; }
+    return html`<span class="brand" style=${`color:${entry.tint}`}
+      >${brandMark(entry)}</span>${s.serverName}`;
+  }
+
+  /* Somebody else's service, or one on your own network. The reference this
+     was built against calls the column Type and says Web or Desktop; "hosted"
+     and "local" are the same distinction in words that are true here — nothing
+     in this console runs on a desktop. */
+  private serverWhere(s: ServerRow): string {
+    const entry = this.entryFor(s);
+    if (entry !== undefined) { return entry.where === "hosted" ? "hosted" : "local"; }
+    return s.endpoint.includes("127.0.0.1") || s.endpoint.includes("localhost") ? "local" : "hosted";
+  }
+
+  /* Where a connector stands, in one cell.
+
+     A connector that authenticates but has nothing stored is the case worth
+     drawing loudest: it is switched on, it looks configured, and every tool
+     call it is asked for will fail. */
+  private serverStatus(s: ServerRow) {
+    const held = this.connections.get(s.id);
+    if (s.authKind === "oauth") {
+      const state = held?.state ?? "none";
+      if (state === "live" || state === "expiring") {
+        return html`<span class="ok"><nr-icon name="check" size="small"></nr-icon>${
+          held?.whose === "you" ? "Connected" : "Connected (deployment)"}</span>`;
+      }
+      return html`<button class="link" @click=${() => this.openConsent(s.id)}
+        >${state === "stale" ? "Reconnect" : "Connect"}</button>`;
+    }
+    if (s.authKind !== "" && s.authKind !== "none" && held?.state === "none") {
+      return html`<span class="tag off">no token</span>`;
+    }
+    if (!s.enabled) { return html`<span class="tag off">off</span>`; }
+    return html`<span class="ok"><nr-icon name="check" size="small"></nr-icon></span>`;
+  }
+
+  /* Connectors a person can paste a token into.
+
+     Not the OAuth ones. A token pasted into an OAuth connector is a token
+     nothing can refresh and nothing issued — the flow hands out its own, keyed
+     to the person who approved it, and the engine refuses a pasted one for
+     that kind outright. Listing them here offered a field whose only outcome
+     was a refusal, beside a Connect button that already worked. */
+  private pasteable(): ServerRow[] {
+    return this.servers.filter((s) =>
+      s.authKind !== "" && s.authKind !== "none" && s.authKind !== "oauth");
+  }
+
+  private async loadConnections() {
+    const rows = await listConnections().catch(() => [] as ConnectionRow[]);
+    const held = new Map<string, ConnectionRow>();
+    for (const r of rows) { held.set(r.serverId, r); }
+    this.connections = held;
+  }
+
+  /* What the shelf's status map is keyed by. The gallery knows endpoints and
+     the engine knows server ids, and the endpoint is the honest join: a person
+     may rename a connector, and the address is what decides whether the card
+     and the row are about the same service. */
+  private shelfStatus(): Map<string, EntryStatus> {
+    const out = new Map<string, EntryStatus>();
+    for (const s of this.servers) {
+      const held = this.connections.get(s.id);
+      out.set(s.endpoint, { serverId: s.id, state: held?.state ?? "none" });
+    }
+    return out;
+  }
+
+  /* Press Connect on a card. The flow itself lives in connect-flow.ts — the
+     directory overlay offers the same button, and a second copy of a popup
+     dance this fiddly would drift. */
+  private async connectEntry(entry: CatalogueEntry) {
+    this.problem = "";
+    const done = await connectEntry(entry, this.servers);
+    this.servers = done.servers;
+    this.problem = done.problem;
+    await this.loadConnections();
+  }
+
+  private async openConsent(serverId: string) {
+    this.problem = "";
+    const done = await connectServer(serverId, this.servers);
+    this.servers = done.servers;
+    this.problem = done.problem;
+    await this.loadConnections();
+  }
+
   /* Services you can reach, as opposed to bundles you install.
      The shelf lives here rather than in MCP for the reason the tab list gives.
      A connector added from a card still becomes an ordinary MCP server row —
@@ -1957,26 +2081,28 @@ export class ConsoleSettings extends LitElement {
     return html`
       ${this.head("Connectors", "plug")}
       <div class="banner">A connector is a service this deployment can call, over
-        MCP. Adding one from the shelf writes a server row you can then edit under
-        <strong>MCP</strong> — the shelf fills the form in, it does not own the
-        result. Entries arrive switched off: adding something from a shelf is
-        interest, not trust, and one that needs a token would otherwise fail every
-        call until somebody noticed.</div>
+        MCP. The hosted ones sign you in: press <strong>Connect</strong>, approve
+        it, and the connector is yours — your conversations call out as you, and
+        nothing here ever sees a password. The ones that run beside the engine are
+        added switched off, because adding something from a shelf is interest,
+        not trust.</div>
 
       ${this.group("Ready-made")}
       <mcp-gallery
         .taken=${this.servers.map((s) => s.endpoint)}
-        @add-server=${(e: CustomEvent) => this.addFromGallery(e.detail)}></mcp-gallery>
+        .status=${this.shelfStatus()}
+        @add-server=${(e: CustomEvent) => this.addFromGallery(e.detail)}
+        @connect-entry=${(e: CustomEvent) => this.connectEntry(e.detail as CatalogueEntry)}></mcp-gallery>
 
       ${this.group("Yours", this.servers.length)}
       ${this.servers.length === 0
         ? html`<p class="empty">None yet.</p>`
         : html`<table><tbody>
             ${this.servers.map((s) => html`<tr>
-              <td class="name">${s.serverName}</td>
+              <td class="name">${this.serverBrand(s)}</td>
               <td class="fill"><span class="slug">${s.endpoint}</span></td>
-              <td><span class="tag">${s.authKind === "none" ? "no auth" : s.authKind}</span></td>
-              <td>${s.enabled ? "" : html`<span class="tag off">off</span>`}</td>
+              <td><span class="tag">${this.serverWhere(s)}</span></td>
+              <td>${this.serverStatus(s)}</td>
               ${this.rowActions([
                 { icon: "edit", title: `Edit ${s.serverName}`,
                   run: () => this.open({ kind: "server", row: { ...s, token: "" }, fresh: false }) },
@@ -1985,13 +2111,15 @@ export class ConsoleSettings extends LitElement {
           </tbody></table>`}
 
       ${this.group("Your access")}
-      <p class="note">A connector that authenticates can carry a token that is
+      <p class="note">A connector that takes a token can carry one that is
       <em>yours</em>: your conversations call out as you, everybody else keeps
-      using the deployment's token, and neither can ever be read back out.</p>
-      ${this.servers.filter((s) => s.authKind !== "" && s.authKind !== "none").length === 0
-        ? html`<p class="empty">No connector here needs a token.</p>`
+      using the deployment's token, and neither can ever be read back out. The
+      ones you sign in to are already yours — connecting is what makes them so,
+      and they are not listed here.</p>
+      ${this.pasteable().length === 0
+        ? html`<p class="empty">No connector here takes a token.</p>`
         : html`<table><tbody>
-            ${this.servers.filter((s) => s.authKind !== "" && s.authKind !== "none").map((s) => html`<tr>
+            ${this.pasteable().map((s) => html`<tr>
               <td class="name">${s.serverName}</td>
               <td>${this.mine.get(s.id) === true
                 ? html`<span class="tag">your token</span>`

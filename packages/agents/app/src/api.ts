@@ -1086,6 +1086,36 @@ export const setServerMine = (id: string, token: string) =>
 export const forgetServerMine = (id: string) =>
   call<unknown>(`/servers/${encodeURIComponent(id)}/mine`, { method: "DELETE" });
 
+// --- connectors you sign in to ---------------------------------------------------
+//
+// A connector that authenticates with OAuth is not given a token; a person
+// signs in to it, and what comes back is theirs. So the answer to "is this
+// connected" is per-caller — the same connector reads as connected for whoever
+// approved it and not connected for everybody else — which is why this is its
+// own request rather than a column on the server row.
+export type ConnectionRow = {
+  serverId: string;
+  authKind: string;
+  // "none" | "live" | "expiring" | "stale". "expiring" fixes itself on the
+  // next call; "stale" needs a person.
+  state: string;
+  // "you" | "deployment" | "".
+  whose: string;
+  connectedAt: string;
+};
+export const listConnections = () => call<ConnectionRow[]>("/servers/connections");
+
+// Where to send the browser to approve a connector. The engine registers
+// itself with the connector on the first call, so this can take a moment the
+// first time and is instant afterwards.
+export const startConnect = (id: string) =>
+  call<{ url: string }>(`/connect/${encodeURIComponent(id)}/start`, { method: "POST" });
+
+// Hand back your own connection. Never anybody else's — the engine reads the
+// owner from the header the gateway verified, not from anything sent here.
+export const dropConnection = (id: string) =>
+  call<unknown>(`/connect/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 // --- ways of signing in --------------------------------------------------------
 //
 // The client id is a row; the secret is never returned — `configured` is all

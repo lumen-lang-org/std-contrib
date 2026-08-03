@@ -19,8 +19,13 @@ import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   QUOTA_SPENT, SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, getQuota, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
-  ServerRow, listServers, listSkills, copySkillLocally,
+  ServerRow, listServers, listSkills, copySkillLocally, createServer,
+  ConnectionRow, listConnections,
   PluginRow, listPlugins, pluginItems, SkillFileRow, listSkillFiles, readBanner } from "./api.js";
+import "./mcp-gallery.js";
+import { CATALOGUE, brandMark } from "./mcp-gallery.js";
+import type { CatalogueEntry, EntryStatus } from "./mcp-gallery.js";
+import { connectEntry } from "./connect-flow.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
 
@@ -964,6 +969,18 @@ export class AgentConsole extends LitElement {
     .gallery-lede { margin: 12px 16px 0; color: var(--muted);
                     font-size: 13px; line-height: 1.45; }
     .pick-from { font-size: 12px; color: var(--faint); }
+    /* The shelf of services you can sign in to, under the ones you already
+       have. A heading rather than a second tab: these are the same kind of
+       thing as the cards above them, at a different stage of setup, and
+       splitting them across tabs would hide the answer to "what can I add"
+       behind a click. */
+    .gallery-scroll mcp-gallery { display: block; padding: 0 16px 16px; }
+    /* A brand mark in the tile a connector's icon would have used. The tile
+       keeps its size and shape so the grid stays a grid; only what is drawn
+       inside it changes. */
+    .pick-tile.brandy { display: grid; place-items: center; }
+    .pick-tile.brandy svg { width: 15px; height: 15px; display: block; }
+    .shelf-problem { margin: 0 16px 16px; font-size: 12.5px; color: var(--danger); }
     /* How many, beside the name. Both references carry the number rather than
        making you count the cards, and it is the fastest way to see that a
        filter is hiding most of them. */
@@ -1366,6 +1383,12 @@ export class AgentConsole extends LitElement {
      menu knows whether to offer the row at all — the alternative is a row that
      opens an empty panel. */
   @state() private servers: ServerRow[] = [];
+  /* Which connectors this person is signed in to — server id to its state.
+     Per-caller, so never a column on the server row: the same connector reads
+     as connected for whoever approved it and not for anybody else. */
+  @state() private connections = new Map<string, ConnectionRow>();
+  /* Why a Connect did not work, said under the shelf that offered it. */
+  @state() private connectProblem = "";
   /* Installed bundles, and what each one brought. The directory needs the
      second to say "From <plugin>" on a skill card: a plugin's skill is stored
      as an ordinary repo-sourced skill, so without the receipts there is no way
@@ -2558,6 +2581,10 @@ export class AgentConsole extends LitElement {
     // closes the drawer behind it; the desktop rail is not a drawer, so
     // clearing the flag there costs nothing and means nothing.
     this.nav = false;
+    // Which connectors this person is signed in to, asked whenever the shelf
+    // that draws it is opened rather than on every page load: it is one
+    // request, and it is only ever read here.
+    if (shelf === "connectors") { void this.loadConnections(); }
     return this.loadShelves();
   }
 
@@ -2690,13 +2717,104 @@ export class AgentConsole extends LitElement {
               @input=${(e: Event) => {
                 this.galleryFind = (e.target as HTMLInputElement).value; }}>
           </div>`}
-        ${rows.length === 0
-          ? html`<p class="gallery-none">${empty}</p>`
-          : shown.length === 0
-            ? html`<p class="gallery-none">Nothing matches
-                “${this.galleryFind.trim()}”.</p>`
-            : html`${this.galleryGroups(shown, shelf)}`}`}
+        ${shelf === "connectors"
+          ? this.connectorsShelf(shown, rows.length)
+          : rows.length === 0
+            ? html`<p class="gallery-none">${empty}</p>`
+            : shown.length === 0
+              ? html`<p class="gallery-none">Nothing matches
+                  “${this.galleryFind.trim()}”.</p>`
+              : html`${this.galleryGroups(shown, shelf)}`}`}
       </div>`;
+  }
+
+  /* Connectors: the ones you have, then the ones you can sign in to.
+     One scrolling column holding two grids, and neither grid scrolls — the
+     rule the skills shelf already follows, and the reason is the same. A
+     `.gallery-list` is itself the scroller, so a second block placed after one
+     competes with it for the panel's height: the first grid was squeezed to
+     52px and its cards were clipped mid-card by the overflow that makes it
+     scroll. Under a heading the column is the scroller and both grids are
+     `flat`. */
+  private connectorsShelf(shown: GalleryRow[], total: number) {
+    return html`
+      <div class="gallery-scroll">
+        ${total === 0
+          ? nothing
+          : html`
+            <div class="gallery-group">Yours
+              <span class="gallery-count">${shown.length}</span></div>
+            ${shown.length === 0
+              ? html`<p class="gallery-none">Nothing matches
+                  “${this.galleryFind.trim()}”.</p>`
+              : this.galleryGrid(shown, "connectors", false)}`}
+        <div class="gallery-group">Ready to connect</div>
+        <mcp-gallery
+          .taken=${this.servers.map((s) => s.endpoint)}
+          .status=${this.connectorStatus()}
+          @add-server=${(e: CustomEvent) => void this.addConnector(e.detail)}
+          @connect-entry=${(e: CustomEvent) => void this.connectConnector(e.detail as CatalogueEntry)}
+        ></mcp-gallery>
+        ${this.connectProblem === "" ? nothing
+          : html`<p class="shelf-problem">${this.connectProblem}</p>`}
+      </div>`;
+  }
+
+  /* The brand mark for a configured connector, matched to the catalogue on
+     address. The endpoint and not the name: a person may rename a connector,
+     and what decides whether this row and that card are the same service is
+     where they point. */
+  private markFor(shelf: Shelf, r: GalleryRow) {
+    if (shelf === "connectors") {
+      const server = this.servers.find((s) => s.id === r.key || s.serverName === r.name);
+      const entry = server === undefined ? undefined
+        : CATALOGUE.find((e) => e.endpoint === server.endpoint);
+      if (entry !== undefined) {
+        return html`<span class="pick-tile brandy" style=${`color:${entry.tint}`}
+          >${brandMark(entry)}</span>`;
+      }
+    }
+    return html`<span class="pick-tile"><nr-icon name=${r.icon} size="small"></nr-icon></span>`;
+  }
+
+  /* Keyed by endpoint, because that is the honest join between a card and a
+     row: a person may rename a connector, and the address is what decides
+     whether the two are about the same service. */
+  private connectorStatus(): Map<string, EntryStatus> {
+    const out = new Map<string, EntryStatus>();
+    for (const s of this.servers) {
+      out.set(s.endpoint, { serverId: s.id, state: this.connections.get(s.id)?.state ?? "none" });
+    }
+    return out;
+  }
+
+  private async addConnector(ask: { serverName: string; transport: string; endpoint: string; authKind: string; authHeader: string; enabled: boolean }) {
+    this.connectProblem = "";
+    try {
+      const ids = new Set(this.servers.map((s) => s.id));
+      let id = ask.serverName;
+      let k = 2;
+      while (ids.has(id)) { id = ask.serverName + "-" + String(k); k = k + 1; }
+      await createServer({ id, ...ask });
+      this.servers = await listServers();
+    } catch (e) {
+      this.connectProblem = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private async connectConnector(entry: CatalogueEntry) {
+    this.connectProblem = "";
+    const done = await connectEntry(entry, this.servers);
+    this.servers = done.servers;
+    this.connectProblem = done.problem;
+    await this.loadConnections();
+  }
+
+  private async loadConnections() {
+    const rows = await listConnections().catch(() => [] as ConnectionRow[]);
+    const held = new Map<string, ConnectionRow>();
+    for (const r of rows) { held.set(r.serverId, r); }
+    this.connections = held;
   }
 
   /* Yours, then everybody else's.
@@ -2742,8 +2860,12 @@ export class AgentConsole extends LitElement {
                     else if (shelf === "agents") { this.agentId = r.key; this.gallery = ""; }
                   }}>
                   <span class="pick-top">
-                    <span class="pick-tile"><nr-icon name=${r.icon}
-                      size="small"></nr-icon></span>
+                    <!-- A connector this shelf knows wears its own mark; a
+                         plug icon on a row of Linear, Notion and Sentry says
+                         only "these are all connectors", which the heading
+                         above them already said. Anything unrecognised keeps
+                         the icon, because there is nothing truer to draw. -->
+                    ${this.markFor(shelf, r)}
                     <span class="pick-name">${r.name}</span>
                   </span>
                   <!-- Provenance under the name, above the description, which

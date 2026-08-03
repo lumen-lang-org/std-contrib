@@ -44,7 +44,7 @@ import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trac
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw} from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { userTokenKey } from "./tools.ts";
+import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
@@ -2345,19 +2345,11 @@ class ServerApi {
     let document = findById(this.db, mcpServersMapping(), param(req, "id"));
     if (document == "") { return notFound("no server " + param(req, "id")); }
     let server: McpServerRow = JSON.parse<McpServerRow>(document);
-    let token = "";
-    if (server.authKind != "" && server.authKind != "none") {
-      // The caller's own token when they stored one — the listing should see
-      // the same tools a run on their conversation will mount.
-      let owner = owningTag(callerTags(req));
-      if (owner != "") {
-        token = credentialFor(this.db, userTokenKey(server.id, owner), this.master);
-      }
-      if (token == "") {
-        token = credentialFor(this.db, "mcp:" + server.id, this.master);
-      }
-    }
-    let listed = toolListing(server, token);
+    // The caller's own token when they stored one — the listing should see the
+    // same tools a run on their conversation will mount, through the same
+    // resolver, so an OAuth connector is refreshed here too rather than
+    // reporting "could not be asked" until somebody starts a conversation.
+    let listed = toolListing(server, accessTokenFor(this.db, server, owningTag(callerTags(req)), this.master));
     let out = "{\"serverId\":" + JSON.stringify(server.id)
       + ",\"problem\":" + JSON.stringify(listed.problem) + ",\"tools\":[";
     let i: int = 0;
@@ -2399,14 +2391,21 @@ class ServerApi {
     }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: ServerAuth = JSON.parse<ServerAuth>(req.body);
-    if (body.authKind != "none" && body.authKind != "bearer" && body.authKind != "header") {
-      return badRequest("auth is none, bearer or header, not \"" + body.authKind + "\"");
+    if (body.authKind != "none" && body.authKind != "bearer"
+        && body.authKind != "header" && body.authKind != "oauth") {
+      return badRequest("auth is none, bearer, header or oauth, not \"" + body.authKind + "\"");
     }
     if (body.authKind == "header" && body.authHeader.trim() == "") {
       return badRequest("a custom header needs a name");
     }
-    if (body.authKind != "none" && body.token == "") {
+    // "oauth" is the one kind whose token cannot be typed: it is issued by the
+    // connector to this person, through POST /connect/:id/start. Accepting one
+    // here would be accepting a token nothing can refresh.
+    if (body.authKind != "none" && body.authKind != "oauth" && body.token == "") {
       return badRequest("that auth kind needs a token");
+    }
+    if (body.authKind == "oauth" && body.token != "") {
+      return badRequest("an OAuth connector is signed in to, not given a token — press Connect");
     }
     executeWith(this.db, "UPDATE mcp_servers SET auth_kind = " + this.db.placeholder
       + ", auth_header = " + placeholderAt(this.db, 2)
@@ -2415,8 +2414,15 @@ class ServerApi {
     if (body.authKind == "none") {
       // Switching a server to no auth used to leave the token in the store,
       // where nothing ever read it again and nothing ever deleted it — until
-      // the kind was switched back, or the id was reused.
-      forgetCredential(this.db, "mcp:" + param(req, "id"));
+      // the kind was switched back, or the id was reused. Everybody's, not
+      // just the deployment's: a per-person token for a connector that no
+      // longer authenticates is a secret with nothing left to send it to.
+      forgetConnector(this.db, param(req, "id"), this.master);
+      return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+    }
+    if (body.authKind == "oauth") {
+      // Nothing to store yet — this only says HOW the connector signs in. The
+      // tokens arrive when somebody presses Connect.
       return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
     }
     let stored = storeCredential(this.db, { provider: "mcp:" + param(req, "id"),
@@ -2512,8 +2518,133 @@ class ServerApi {
       return notFound("server " + param(req, "id"));
     }
     forgetServer(this.db, param(req, "id"));
+    // Every token anyone stored for it, and the registration behind them.
+    forgetConnector(this.db, param(req, "id"), this.master);
     return noContent();
   }
+
+  // Whether each connector is connected, for whoever is asking.
+  //
+  // Its own route rather than a field on GET /servers because the answer is
+  // per-caller: the same connector is "connected" for the person who signed in
+  // to it and "not connected" for everybody else, and a listing that cached
+  // would be wrong for one of them.
+  @get("/connections")
+  connections(req: Request): Reply {
+    let owner = owningTag(callerTags(req));
+    let keys: DbOrder[] = [asc("server_name")];
+    let rows = JSON.parse<McpServerRow[]>(listOrdered(this.db, mcpServersMapping(), "", [], keys));
+    let out = "[";
+    let i: int = 0;
+    while (i < rows.length) {
+      if (i > 0) { out = out + ","; }
+      let held = connectionOf(this.db, rows[i].id, owner);
+      out = out + "{\"serverId\":" + JSON.stringify(rows[i].id)
+        + ",\"authKind\":" + JSON.stringify(rows[i].authKind)
+        + ",\"state\":" + JSON.stringify(held.state)
+        + ",\"whose\":" + JSON.stringify(held.whose)
+        + ",\"connectedAt\":" + JSON.stringify(held.connectedAt) + "}";
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+}
+
+/* Signing in to a connector.
+ *
+ * Its own controller, and not two more routes on /servers, because the
+ * callback cannot live under /servers/:id: the browser comes back to a fixed
+ * address that was registered with the authorization server months earlier,
+ * and "fixed" rules out anything with an id in it. The server is identified by
+ * the `state` instead, which is the one thing that makes the round trip.
+ */
+@controller("/connect")
+class ConnectApi {
+  db: Db;
+  master: string;
+  constructor(db: Db, master: string) { this.db = db; this.master = master; }
+
+  // Where the browser should go to approve this connector.
+  @post("/:id/start")
+  start(req: Request): Reply {
+    let document = findById(this.db, mcpServersMapping(), param(req, "id"));
+    if (document == "") { return notFound("server " + param(req, "id")); }
+    let server: McpServerRow = JSON.parse<McpServerRow>(document);
+    let began = beginConnect(this.db, server, owningTag(callerTags(req)), this.master, callbackUri());
+    if (began.problem != "") { return badRequest(began.problem); }
+    return ok("{\"url\":" + JSON.stringify(began.url) + "}");
+  }
+
+  // Where the connector sends the browser back to.
+  //
+  // Answers HTML rather than JSON, uniquely in this file, because the reader
+  // is a browser window a person is looking at and not a program. It closes
+  // itself; the console notices through the opener and reloads.
+  @get("/callback")
+  callback(req: Request): Reply {
+    let refused = req.query.get("error") ?? "";
+    if (refused != "") {
+      let said = req.query.get("error_description") ?? "";
+      return connectPage(false, said == "" ? refused : said);
+    }
+    let done = completeConnect(this.db, this.master,
+      req.query.get("state") ?? "", req.query.get("code") ?? "");
+    if (done.problem != "") { return connectPage(false, done.problem); }
+    return connectPage(true, done.serverName);
+  }
+
+  // Hand a connection back. The caller's own, never anybody else's — the owner
+  // is read from the verified header, exactly as DELETE /servers/:id/mine is.
+  @del("/:id")
+  drop(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    disconnect(this.db, param(req, "id"), owningTag(callerTags(req)));
+    return noContent();
+  }
+}
+
+// The address a connector sends the browser back to, or "" when this
+// deployment does not know its own public name.
+//
+// It has to be absolute and it has to match what was registered, so it cannot
+// be derived from the request: behind the console's proxy and the gateway, the
+// Host this process sees is an internal one. One variable, set once.
+function callbackUri(): string {
+  let origin = (process.env("AGENTS_PUBLIC_ORIGIN") ?? "").trim();
+  if (origin == "") { return ""; }
+  while (origin.endsWith("/")) { origin = origin.slice(0, origin.length - 1); }
+  return origin + "/api/connect/callback";
+}
+
+// The page the browser lands on after a consent screen.
+//
+// Deliberately plain and deliberately self-closing. A person who pressed
+// Connect is looking at a popup over the console, and the useful outcome is
+// that it goes away and the page behind it knows to refresh.
+function connectPage(worked: bool, detail: string): Reply {
+  let title = worked ? "Connected" : "Not connected";
+  let line = worked
+    ? "You can close this window."
+    : jsonSafe(detail);
+  let body = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
+    + title + "</title><style>"
+    + "body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;"
+    + "height:100vh;background:#fafafa;color:#17171a}"
+    + "div{text-align:center;max-width:32rem;padding:0 1.5rem}"
+    + "h1{font-size:17px;margin:0 0 .35rem}p{margin:0;color:#6b6b70}"
+    + "</style></head><body><div><h1>" + title + (worked ? " to " + jsonSafe(detail) : "")
+    + "</h1><p>" + line + "</p></div>"
+    // The opener is told which way it went, so the console can reload the one
+    // list that changed rather than everything. `postMessage` is targeted at
+    // this deployment's own origin; a popup that shouted at "*" would tell any
+    // page that happened to open it.
+    + "<script>try{if(window.opener){window.opener.postMessage("
+    + "{joule:\"connector\",ok:" + (worked ? "true" : "false") + "},window.location.origin)}}catch(e){}"
+    + "setTimeout(function(){window.close()}," + (worked ? "900" : "4000") + ")</script>"
+    + "</body></html>";
+  return reply(200, body, "text/html; charset=utf-8");
 }
 
 // The highest version a prompt name has, 0 when it has none.
@@ -4934,6 +5065,7 @@ function main(): void {
     new JobApi(db),
     new TraceApi(db, master),
     new ServerApi(db, master),
+    new ConnectApi(db, master),
     new AuthProviderApi(db, master),
     new PluginApi(db),
     new ArtifactApi(db),
