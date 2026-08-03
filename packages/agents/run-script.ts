@@ -1037,6 +1037,19 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // instead of the script — the shell then chokes on the `(` with a cryptic
   // "word unexpected". Caught here so the reply names the mistake the model can
   // fix, rather than a dash parse error it cannot.
+  // A model-token slip with exactly one honest reading: <<'EOF followed by a
+  // newline is an unterminated quote in sh, never a working script, so
+  // closing it cannot break anything and not closing it fails the run with
+  // "Unterminated quoted string" — which one fine-tune emitted on every
+  // single heredoc while getting the whole rest of the script right. The
+  // matching closer line EOF needs no repair; only the opener drops its
+  // quote. Both quote styles, same reasoning.
+  if (run.language == "sh") {
+    run = { language: run.language, threadId: run.threadId, agentId: run.agentId,
+      source: run.source.replaceAll("<<'EOF\n", "<<'EOF'\n").replaceAll("<<\"EOF\n", "<<\"EOF\"\n"),
+      paths: run.paths, mayCreate: run.mayCreate, environment: run.environment,
+      turnSeq: run.turnSeq, now: run.now };
+  }
   if (run.source.trim().startsWith("run_script(")) {
     return scriptRefused("source is the run_script(...) call itself, not a script: pass only the command to run — e.g. source=\"python skill.py 'query'\", not source=\"run_script(...)\"");
   }
