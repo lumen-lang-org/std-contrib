@@ -21,7 +21,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { utf8Length } from "./artifacts.ts";
+import { binaryKind, getArtifact, getVersion, kindOf, listArtifacts, utf8Length } from "./artifacts.ts";
 import { uploadBytesMax } from "./caps.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
@@ -226,17 +226,17 @@ export function workspaceTools(): WorkspaceTool[] {
   let out: WorkspaceTool[] = [
     {
       name: "list_files",
-      description: "List the files in this conversation's workspace: name, size, origin and type.",
+      description: "List this conversation's files, all of them: the artifacts the reader can open (documents, sheets, pages) and the scratch files. One list — there is no other store to check.",
       schema: "{\"type\":\"object\",\"properties\":{}}",
     },
     {
       name: "read_file",
-      description: "Read a file from this conversation's workspace, whole.",
+      description: "Read one of this conversation's files, whole — a scratch file or a text artifact, by its listed name.",
       schema: "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"The file name, exactly as listed.\"}},\"required\":[\"name\"]}",
     },
     {
       name: "write_file",
-      description: "Write a file into this conversation's workspace. Overwrites a file of the same name.",
+      description: "Write a scratch file — notes, intermediate data. A file the READER should get is not this: use write_artifact, which versions it and gives them a download card.",
       schema: "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"name\",\"content\"]}",
     },
   ];
@@ -265,22 +265,30 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
   if (threadId == "") { return not; }
 
   if (name == "list_files") {
+    // One answer for what used to be two stores. The split was real — an
+    // artifact is versioned output, a workspace file is scratch — but it was
+    // OUR split, and the model relayed it to the person verbatim: "the
+    // workspace is empty, but the following artifacts are available" is a
+    // sentence about database tables, told to somebody who asked what files
+    // they have. The person has files; this lists them.
+    let arts = listArtifacts(db, threadId);
     let files = listFiles(db, threadId);
-    if (files.length == 0) {
-      // Named as what it is NOT about, because the one mistake models make
-      // here is reading "empty" as "the user's file does not exist": the
-      // artifacts are a different store, listed in the briefing, and a file
-      // uploaded there will never appear in this answer.
+    if (arts.length == 0 && files.length == 0) {
       let empty: FileToolResult = { handled: true, ok: true,
-        text: "The workspace is empty. Artifacts are separate: the conversation's artifacts are "
-          + "listed in your briefing, and run_script materialises them when their paths are named in paths.", line: 0, changed: "" };
+        text: "This conversation has no files yet.", line: 0, changed: "" };
       return empty;
     }
     let out = "";
+    let a: int = 0;
+    while (a < arts.length) {
+      if (out != "") { out = out + "\n"; }
+      out = out + arts[a].path + "  (" + arts[a].kind + " v" + `${arts[a].currentVersion}` + ", artifact — the reader can open this)";
+      a = a + 1;
+    }
     let i: int = 0;
     while (i < files.length) {
-      if (i > 0) { out = out + "\n"; }
-      out = out + files[i].fileName + "  (" + `${files[i].body.length}` + " bytes, " + files[i].origin + ", " + files[i].mime + ")";
+      if (out != "") { out = out + "\n"; }
+      out = out + files[i].fileName + "  (" + `${files[i].body.length}` + " bytes, scratch, " + files[i].origin + ")";
       i = i + 1;
     }
     let listed: FileToolResult = { handled: true, ok: true, text: out, line: 0, changed: "" };
@@ -289,12 +297,29 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
 
   if (name == "read_file") {
     let file = getFile(db, threadId, argsName);
-    if (file.id == "") {
-      let missing: FileToolResult = { handled: true, ok: false, text: "There is no file named \"" + argsName + "\". Use list_files to see what is here.", line: 0, changed: "" };
-      return missing;
+    if (file.id != "") {
+      let read: FileToolResult = { handled: true, ok: true, text: file.body, line: 0, changed: "" };
+      return read;
     }
-    let read: FileToolResult = { handled: true, ok: true, text: file.body, line: 0, changed: "" };
-    return read;
+    // Not scratch — an artifact then, by the same name the listing showed.
+    // Text comes back whole; a binary document is refused with its route,
+    // because base64 in a context window helps nobody.
+    let artifact = getArtifact(db, threadId, argsName);
+    if (artifact.id != "") {
+      if (binaryKind(kindOf(argsName))) {
+        let binary: FileToolResult = { handled: true, ok: false,
+          text: argsName + " is a binary document — read it with run_script in the office environment"
+            + " (read-docx for .docx), naming it in paths.", line: 0, changed: "" };
+        return binary;
+      }
+      let current = getVersion(db, artifact.id, artifact.currentVersion);
+      if (current.id != "") {
+        let read: FileToolResult = { handled: true, ok: true, text: current.body, line: 0, changed: "" };
+        return read;
+      }
+    }
+    let missing: FileToolResult = { handled: true, ok: false, text: "There is no file named \"" + argsName + "\". Use list_files to see what is here.", line: 0, changed: "" };
+    return missing;
   }
 
   if (name == "write_file") {

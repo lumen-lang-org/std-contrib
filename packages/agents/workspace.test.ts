@@ -148,7 +148,7 @@ test("list, write and read behave as a loop would use them", () => {
   fresh();
   let empty = callWorkspaceTool(database, "t1", "list_files", "", "", "now");
   expect(empty.handled && empty.ok);
-  expect(empty.text.indexOf("empty") >= 0);
+  expect(empty.text.indexOf("no files yet") >= 0);
 
   let wrote = callWorkspaceTool(database, "t1", "write_file", "draft.md", "# Title", "now");
   expect(wrote.handled && wrote.ok);
