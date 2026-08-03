@@ -336,6 +336,57 @@ export class SearchDash extends LitElement {
       </section>`;
   }
 
+  /** The corpus as a masthead rather than a dashboard.
+   *
+   *  The first version of this was three rounded cards in a row, each with an
+   *  uppercase letter-spaced micro-label over a big number, over a grey note —
+   *  which is the shape every generated dashboard has, and it says nothing
+   *  about a web index in particular. It also buried the one number worth
+   *  reading among two others of equal weight.
+   *
+   *  This is a colophon instead: one count at display size, the rest as a
+   *  sentence under it, and the language split as a single segmented rule. The
+   *  ink is one hue at falling opacity rather than a palette — these are parts
+   *  of one quantity, and eight hues would imply eight unrelated things. */
+  private publicView(s: Stats, ratio: number): TemplateResult {
+    const langs = this.analytics?.by_lang ?? [];
+    const total = langs.reduce((sum, b) => sum + b.n, 0);
+    const lead = langs.slice(0, 6);
+    const rest = total - lead.reduce((sum, b) => sum + b.n, 0);
+    const parts = rest > 0 ? lead.concat([{ key: "other", n: rest }]) : lead;
+    return html`
+      <div class="mast">
+        <p class="eyebrow">The Joule index</p>
+        <p class="count">${count(s.indexed)}</p>
+        <p class="lede">
+          documents from ${count(s.domains)} domains, kept as markdown.
+        </p>
+        <p class="facts">
+          ${size(s.corpus_bytes)} on disk — ${ratio.toFixed(1)}× smaller than the
+          ${size(s.markdown_bytes_raw)} of text it came from.
+          The newest page landed <b>${ago(s.newest_fetch)}</b>;
+          the crawl has been running since ${when(s.oldest_fetch)}.
+        </p>
+      </div>
+
+      ${parts.length === 0 ? nothing : html`
+        <section class="split">
+          <h3>Languages</h3>
+          <div class="rule" role="img"
+            aria-label=${parts.map((b) => `${named(b.key, "lang")} ${b.n}`).join(", ")}>
+            ${parts.map((b, i) => html`
+              <span class="seg" title=${`${named(b.key, "lang")} — ${count(b.n)}`}
+                style=${`flex: ${b.n}; opacity: ${(1 - i * 0.13).toFixed(2)}`}></span>`)}
+          </div>
+          <p class="legend">
+            ${parts.map((b, i) => html`${i === 0 ? nothing : html`<span class="sep">·</span>`}<span
+              class="leg"><span class="swatch"
+                style=${`opacity: ${(1 - i * 0.13).toFixed(2)}`}></span>${named(b.key, "lang")}
+              <span class="n">${count(b.n)}</span></span>`)}
+          </p>
+        </section>`}`;
+  }
+
   private statsView(): TemplateResult {
     const s = this.stats;
     if (s === null) {
@@ -344,32 +395,10 @@ export class SearchDash extends LitElement {
     const ratio = s.corpus_bytes > 0 ? s.markdown_bytes_raw / s.corpus_bytes : 0;
     const share = s.docs > 0 ? (s.classified / s.docs) * 100 : 0;
 
-    // The public reading, and the server serves exactly this much (the
-    // publicFields lists in server/search-proxy.ts) — so the fields the admin
-    // view spends below are not merely unrendered here, they are absent. Which
-    // is why nothing in this branch may reach for one: `docs`, `pending`,
-    // `classified` and every breakdown but by_lang are undefined for a
-    // visitor, and `count(undefined)` would draw NaN under a headline.
-    if (this.mode === "public") {
-      return html`
-        <div class="figs">
-          ${this.figure("Documents indexed", count(s.indexed),
-            s.domains > 0 ? `across ${count(s.domains)} domains` : "")}
-          ${this.figure("Domains", count(s.domains),
-            s.domains > 0 ? `${(s.indexed / s.domains).toFixed(1)} pages per domain` : "")}
-          ${this.figure("Corpus on disk", size(s.corpus_bytes),
-            `${size(s.markdown_bytes_raw)} of markdown · ${ratio.toFixed(1)}× compression`)}
-        </div>
-        <p class="freshness">
-          Newest page fetched ${ago(s.newest_fetch)}
-          <span class="dim">(${when(s.newest_fetch)})</span>
-          · crawling since ${when(s.oldest_fetch)}
-        </p>
-        <div class="grid">
-          ${this.bars("What it is written in", this.analytics?.by_lang, 8,
-            (k) => named(k, "lang"))}
-        </div>`;
-    }
+    // The public reading is its own layout, not this one with rows removed.
+    // See publicView(): a dashboard is for somebody who operates the thing,
+    // and a visitor is not operating anything.
+    if (this.mode === "public") { return this.publicView(s, ratio); }
 
     return html`
       <div class="figs">
@@ -597,24 +626,21 @@ export class SearchDash extends LitElement {
   render(): TemplateResult {
     const publicOnly = this.mode === "public";
     return html`
-      <div class="wrap">
+      <div class="wrap ${publicOnly ? "public" : ""}">
+        ${publicOnly ? nothing : html`
         <header class="top">
           <div>
-            <h2>${publicOnly ? "Inside the Joule index" : "Search index"}</h2>
-            <p class="sub">
-              ${publicOnly
-                ? "A markdown-first web index: pages crawled, converted, gated for quality and indexed for search and retrieval. These numbers are live."
-                : "Read-only. Every figure and result comes from the index API."}
-            </p>
+            <h2>Search index</h2>
+            <p class="sub">Read-only. Every figure and result comes from the index API.</p>
           </div>
-          ${publicOnly ? nothing : html`
+          ${html`
             <nav class="views">
               ${(["stats", "search", "rag"] as const).map((v) => html`
                 <button class=${this.view === v ? "on" : ""} @click=${() => { this.view = v; }}>
                   ${v === "stats" ? "Stats" : v === "search" ? "Search" : "RAG"}
                 </button>`)}
             </nav>`}
-        </header>
+        </header>`}
 
         ${this.trouble === "" ? nothing : html`
           <p class="trouble">
@@ -636,6 +662,42 @@ export class SearchDash extends LitElement {
        reset, so the rule has to be stated. */
     *, *::before, *::after { box-sizing: border-box; }
     .wrap { display: flex; flex-direction: column; gap: 18px; }
+
+    /* --- the public page ---------------------------------------------------
+       Set as a colophon: an eyebrow, one count at display size, and two
+       sentences. No cards, no uppercase micro-labels, no row of equal figures
+       — the point of the page is a single quantity and everything else is
+       context for it. */
+    .wrap.public { gap: 30px; }
+    .mast { max-width: 60ch; }
+    .eyebrow { margin: 0; font-size: 12.5px; color: var(--muted); }
+    /* The count is the page. Tabular so a digit change does not shift the
+       ones beside it while it polls, tight tracking because a number this
+       size loosens on its own. */
+    .count { margin: 2px 0 0; font: 600 clamp(56px, 11vw, 92px)/1 var(--display, inherit);
+             letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+    .lede { margin: 10px 0 0; font-size: 19px; line-height: 1.45; max-width: 34ch; }
+    .facts { margin: 14px 0 0; font-size: 14px; line-height: 1.65; color: var(--muted); }
+    .facts b { color: var(--fg); font-weight: 550; }
+
+    /* One rule, segmented — the shape of the whole rather than eight bars to
+       compare. Parts of one quantity, so one ink at falling opacity; eight
+       hues would say eight unrelated things. */
+    /* Held to the text's own measure. Run full-width and the rule reads as a
+       progress bar for the page rather than as a fact about the corpus, and
+       the legend under it strands itself against an empty right half. */
+    .split { max-width: 60ch; }
+    .split h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+    .rule { display: flex; height: 14px; border-radius: 999px; overflow: hidden;
+            gap: 2px; background: var(--bg-sunken); }
+    .seg { background: var(--fg); min-width: 3px; }
+    .legend { display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
+              margin: 11px 0 0; font-size: 12.5px; color: var(--muted); }
+    .leg { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 9px; height: 9px; border-radius: 3px; background: var(--fg);
+              display: inline-block; }
+    .legend .n { font-variant-numeric: tabular-nums; color: var(--fg); }
+    .legend .sep { opacity: .45; }
 
     .top { display: flex; align-items: flex-start; justify-content: space-between;
            gap: 20px; flex-wrap: wrap; }
