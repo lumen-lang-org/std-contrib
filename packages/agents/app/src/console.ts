@@ -557,11 +557,26 @@ export class AgentConsole extends LitElement {
     .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; min-width: 0; }
     .bar-space { flex: 1; }
-    /* The announcement. One line that pushes content down rather than
-       floating over it — a banner that covers the composer is an ad. */
-    .notice { display: flex; align-items: center; gap: 10px;
-              padding: 8px 14px; font-size: 13px; line-height: 1.4;
-              background: var(--bg-user); border-bottom: 1px solid var(--border); }
+    /* The announcement, and the empty box that holds it.
+       It used to be a strip in the flow above the header, which cost the page
+       its top 53px on a phone: the header — drawer toggle, sign in — started
+       below the fold of its own bar, and the centred wordmark and composer
+       were pushed down with it. An announcement is the least important thing
+       on the screen and it was displacing the most important.
+       So the strip floats instead. .notice-slot is a zero-height box placed
+       AFTER the header, which is what makes this need no magic number: the
+       slot lands exactly at the header's bottom edge, and the card inside it
+       is absolute, so it takes no column height at all. Header stays at y=0,
+       the hero centres in the whole page, and the card hangs over the top of
+       the content — never over the composer, which is the one thing a banner
+       must not cover. Under the drawer scrim (39) so an open drawer dims it. */
+    .notice-slot { position: relative; height: 0; z-index: 38; }
+    .notice { position: absolute; top: 8px; left: 12px; right: 12px;
+              display: flex; align-items: center; gap: 10px;
+              padding: 8px 12px; font-size: 13px; line-height: 1.4;
+              border-radius: 12px; background: var(--bg-card);
+              border: 1px solid var(--border);
+              box-shadow: 0 8px 24px -10px rgba(0,0,0,.28); }
     .notice span { flex: 1; min-width: 0; }
 
     select { background: var(--bg-card); border: 1px solid var(--border); color: inherit;
@@ -2927,14 +2942,6 @@ export class AgentConsole extends LitElement {
         ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
           : this.view === "canvas" ? html`<agent-canvas .focusAgent=${this.canvasFocus}></agent-canvas>`
           : this.view === "starts" ? this.startsPage() : html`
-        ${this.banner === "" ? nothing : html`
-        <div class="notice" role="status">
-          <span>${this.banner}</span>
-          <button class="icon" title="Dismiss"
-            @click=${() => { sessionStorage.setItem("joule-banner-seen", this.banner); this.banner = ""; }}>
-            <nr-icon name="x" size="small"></nr-icon>
-          </button>
-        </div>`}
         <header>
           <button class="icon nav" title="Conversations"
             @click=${() => { this.nav = !this.nav; }}>
@@ -2996,6 +3003,19 @@ export class AgentConsole extends LitElement {
               </button>
             </div>`}
         </header>
+        <!-- After the header, not before it: the slot is zero-height and the
+             card inside is absolute, so the announcement hangs below the bar
+             without moving it or anything under it. -->
+        ${this.banner === "" ? nothing : html`
+        <div class="notice-slot">
+          <div class="notice" role="status">
+            <span>${this.banner}</span>
+            <button class="icon" title="Dismiss"
+              @click=${() => { sessionStorage.setItem("joule-banner-seen", this.banner); this.banner = ""; }}>
+              <nr-icon name="x" size="small"></nr-icon>
+            </button>
+          </div>
+        </div>`}
         <main class=${this.session.getState().messages.length === 0
           ? (this.starts.length > 0 ? "empty has-starts" : "empty") : ""}>
           <!-- The session is the controller. Messages are not passed in: the
