@@ -33,6 +33,32 @@ import sys
 
 DB = ["docker", "exec", "agents-db-1", "psql", "-U", "agents", "-d", "agents", "-tA", "-c"]
 
+# The engine's tool surface, close enough for training context: the model
+# should see at train time the same tool names it will see from the engine.
+# Serialized once per sample under LLaMA-Factory's "tools" key, which the
+# qwen template renders into the system block.
+TOOLS_JSON = json.dumps([
+    {"name": "use_skill", "description": "Load a skill's instructions by name",
+     "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "run_script", "description": "Run a script in this conversation's container",
+     "parameters": {"type": "object", "properties": {
+         "language": {"type": "string"}, "environment": {"type": "string"},
+         "source": {"type": "string"}, "paths": {"type": "array", "items": {"type": "string"}},
+         "mayCreate": {"type": "boolean"}}, "required": ["language", "source"]}},
+    {"name": "write_artifact", "description": "Write a text artifact the reader can open",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
+    {"name": "read_artifact", "description": "Read an artifact by path",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+    {"name": "edit_artifact", "description": "Replace text in an artifact",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}}, "required": ["path", "old", "new"]}},
+    {"name": "search_artifacts", "description": "Search this conversation's artifacts",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "list_files", "description": "List this conversation's files",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "read_file", "description": "Read one of this conversation's files by name",
+     "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+], ensure_ascii=False)
+
 
 def rows(sql):
     out = subprocess.run(DB + [sql], capture_output=True, text=True)
@@ -50,6 +76,14 @@ def main():
                     help="truncate a tool result to this many chars (0 = keep whole)")
     ap.add_argument("--min-steps", type=int, default=1,
                     help="drop runs with fewer tool calls than this")
+    ap.add_argument("--format", choices=["messages", "sharegpt"], default="messages",
+                    help="messages: OpenAI shape. sharegpt: LLaMA-Factory's tool format,"
+                         " where every tool call is a function_call turn — a TRAINED turn"
+                         " by construction, so a pipeline that computes loss only on"
+                         " model-side turns still learns to make the call. This exists"
+                         " because a fine-tune trained from the messages shape lost"
+                         " exactly that: it called use_skill, read the briefing, and"
+                         " then narrated the run_script it should have made.")
     args = ap.parse_args()
 
     runs = rows("""select json_agg(t) from (
@@ -81,22 +115,35 @@ def main():
                 if not used:
                     dropped_skill += 1
                     continue
-            messages = [{"role": "user", "content": r["question"]}]
-            for s in steps:
-                messages.append({
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "type": "function",
-                        "function": {"name": s["tool"], "arguments": s["args"] or "{}"},
-                    }],
-                })
-                result = s["result"] or ""
-                if args.max_result and len(result) > args.max_result:
-                    result = result[:args.max_result] + "\n…[truncated for training]"
-                messages.append({"role": "tool", "name": s["tool"], "content": result})
-            messages.append({"role": "assistant", "content": r["answer"]})
-            f.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")
+            if args.format == "sharegpt":
+                convo = [{"from": "human", "value": r["question"]}]
+                for s in steps:
+                    convo.append({"from": "function_call", "value": json.dumps(
+                        {"name": s["tool"], "arguments": s["args"] or "{}"}, ensure_ascii=False)})
+                    result = s["result"] or ""
+                    if args.max_result and len(result) > args.max_result:
+                        result = result[:args.max_result] + "\n…[truncated for training]"
+                    convo.append({"from": "observation", "value": result})
+                convo.append({"from": "gpt", "value": r["answer"]})
+                f.write(json.dumps({"conversations": convo, "tools": TOOLS_JSON},
+                                   ensure_ascii=False) + "\n")
+            else:
+                messages = [{"role": "user", "content": r["question"]}]
+                for s in steps:
+                    messages.append({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "type": "function",
+                            "function": {"name": s["tool"], "arguments": s["args"] or "{}"},
+                        }],
+                    })
+                    result = s["result"] or ""
+                    if args.max_result and len(result) > args.max_result:
+                        result = result[:args.max_result] + "\n…[truncated for training]"
+                    messages.append({"role": "tool", "name": s["tool"], "content": result})
+                messages.append({"role": "assistant", "content": r["answer"]})
+                f.write(json.dumps({"messages": messages}, ensure_ascii=False) + "\n")
             kept += 1
 
     print(f"wrote {kept} samples to {args.out}"
