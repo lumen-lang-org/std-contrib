@@ -417,6 +417,40 @@ const SUGGESTIONS = [
   { id: "s-convert", text: "Convert my docflow's distribution from email to SMS" },
 ];
 
+/* The follow-up block the prompt asks every answer to end with:
+   [FOLLOWUPS]{"items":["…","…"]}[/FOLLOWUPS]. Parsed out of the reply before
+   rendering — the chips get the items, the reader never sees the block. The
+   closing marker anchors recovery the same way cards.ts does it, because the
+   models that need follow-ups most are the ones that mangle openers. */
+export function splitFollowups(raw: string): { text: string; items: string[] } {
+  const close = raw.lastIndexOf("[/FOLLOWUPS]");
+  const none = { text: raw, items: [] as string[] };
+  if (close === -1) {
+    // A stream cut mid-block, or an opener with no close: never show the
+    // half-block as prose.
+    const cut = raw.indexOf("[FOLLOWUPS]");
+    return cut === -1 ? none : { text: raw.slice(0, cut).trimEnd(), items: [] };
+  }
+  const brace = raw.lastIndexOf("{", close);
+  if (brace === -1) return none;
+  let items: string[] = [];
+  try {
+    const parsed = JSON.parse(raw.slice(brace, close)) as { items?: unknown };
+    if (Array.isArray(parsed.items)) {
+      items = parsed.items.map((x) => String(x).trim()).filter((x) => x !== "").slice(0, 4);
+    }
+  } catch { return none; }
+  // Swallow a mangled opener the way cards.ts closedBlock does: an optional
+  // "]", a short word, an optional "[".
+  let open = brace;
+  if (open > 0 && raw[open - 1] === "]") open -= 1;
+  let word = 0;
+  while (open > 0 && word < 16 && /[A-Za-z0-9_-]/.test(raw[open - 1])) { open -= 1; word += 1; }
+  if (open > 0 && raw[open - 1] === "[") open -= 1;
+  const text = (raw.slice(0, open) + raw.slice(close + "[/FOLLOWUPS]".length)).trim();
+  return { text, items };
+}
+
 export type TrayFile = {
   id: string;
   name: string;
@@ -479,6 +513,10 @@ export class ChatSession {
   private polling = 0;
   // The placeholder turn the card is drawn into while the round runs.
   private liveId = "";
+  /* The follow-up chips for the answer on screen. One array object, mutated
+     never — getState() hands the same reference back so nr-chatbot's
+     identity check holds. */
+  private followups: { id: string; text: string; icon?: string }[] = EMPTY_SUGGESTIONS;
   /* The streamed answer-so-far for the round being watched. Painted under the
      steps card and replaced by the real reply when it lands. */
   private partial = "";
@@ -566,7 +604,12 @@ export class ChatSession {
     // is not in the state is not in the DOM, on the server or the client, so
     // there is nothing to flash before a rule catches it. Restore by putting
     // the messages.length === 0 ? SUGGESTIONS : ... ternary back.
-    this.state.suggestions = EMPTY_SUGGESTIONS;
+    // Follow-ups, Perplexity's move: the model ends every answer with three
+    // short next questions written from THIS conversation — after a search,
+    // a built document, a conversion, anything — and they render as the
+    // component's own suggestion chips, which send their text on tap. The
+    // fixed starter list this used to be stayed off; these are per-answer.
+    this.state.suggestions = this.followups;
     return this.state;
   }
 
@@ -650,6 +693,7 @@ export class ChatSession {
       text: escapeHtml(said) + (waiting ? QUEUED_MARK : ""),
       refs: EMPTY,
     });
+    this.followups = EMPTY_SUGGESTIONS;
     this.pending.push({ id, said, choiceId: this.bridge.modelChoiceId() });
     this.emit("message:sent", { text: said });
     // The turn already running will take it on its way out.
@@ -702,11 +746,15 @@ export class ChatSession {
         saved = rows.filter((r) => r.turnSeq === reply.seq)
           .map((r) => ({ slot: r.slot, version: r.version, path: r.path }));
       }
+      const split = splitFollowups(reply.ok ? reply.text : reply.error);
+      this.followups = reply.ok
+        ? split.items.map((t, n) => ({ id: `fu-${reply.seq}-${n}`, text: t }))
+        : EMPTY_SUGGESTIONS;
       this.replaceLive({
         id: reply.runId,
         sender: "bot",
         text: stepsCard(this.live, this.thoughts)
-          + renderWithCards(reply.ok ? reply.text : reply.error, (s) => renderMarkdown(escapeHtml(s)),
+          + renderWithCards(split.text, (s) => renderMarkdown(escapeHtml(s)),
                             toolEvidence(this.live))
           + refCards(saved),
         refs: reply.refs,
@@ -964,7 +1012,8 @@ export class ChatSession {
         id: `t${i}`,
         sender: t.role === "user" ? "user" : "bot" as const,
         text: t.role === "user" ? escapeHtml(t.text)
-          : card + renderWithCards(t.text, (s) => renderMarkdown(escapeHtml(s)), toolEvidence(steps))
+          : card + renderWithCards(splitFollowups(t.text).text,
+              (s) => renderMarkdown(escapeHtml(s)), toolEvidence(steps))
             + refCards(saved),
         refs: t.refs,
         timestamp: new Date().toISOString(),
@@ -1007,8 +1056,9 @@ export class ChatSession {
     // markdown — text that reflows at the end reads as a glitch — but no
     // cards mid-stream: a half-streamed [CURRENCY] block is not a card yet,
     // and the landed reply renders them properly. The bar is a cursor.
-    const typing = this.partial === "" ? ""
-      : renderMarkdown(escapeHtml(this.partial)) + "▍";
+    const shown = splitFollowups(this.partial).text;
+    const typing = shown === "" ? ""
+      : renderMarkdown(escapeHtml(shown)) + "▍";
     this.setMessages(this.state.messages.map((m) =>
       m.id === this.liveId ? { ...m, text: card + typing } : m));
   }
