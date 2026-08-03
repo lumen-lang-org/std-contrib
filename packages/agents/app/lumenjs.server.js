@@ -27,7 +27,17 @@ import { previewFrameCsp } from "./server/csp.ts";
 import { authChain } from "./pages/_middleware.ts";
 import { apiProxy } from "./server/api-proxy.ts";
 import { staticAssets } from "./server/static-assets.ts";
+// After the auth chain, deliberately: half of what it serves is public and
+// half is an operator's, and it can only tell them apart once the chain above
+// has said who is asking. See the head of the file for the split.
+import { searchProxy } from "./server/search-proxy.ts";
 
 // Assets first: /favicon.ico and /og.png carry no identity and proxy nowhere,
 // so nothing earlier in the chain has anything to say about them.
-export default [staticAssets(), previewFrameCsp(), ...authChain, apiProxy()];
+export default [
+  staticAssets(),
+  previewFrameCsp(),
+  ...authChain,
+  searchProxy(),
+  apiProxy(),
+];
