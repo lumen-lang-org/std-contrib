@@ -557,7 +557,6 @@ export class AgentConsole extends LitElement {
     .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; min-width: 0; }
     .bar-space { flex: 1; }
-                 font-size: 14px; }
     /* The announcement. One line that pushes content down rather than
        floating over it — a banner that covers the composer is an ad. */
     .notice { display: flex; align-items: center; gap: 10px;
