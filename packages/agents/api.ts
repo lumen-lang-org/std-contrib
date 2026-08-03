@@ -55,7 +55,7 @@ import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mi
 import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
 import { scriptEnvNameProblem } from "./run-script.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "./office-render.ts";
-import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought } from "./steps.ts";
+import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
 import { EnvSweep, ENV_IDLE_MS, envPlan, envDockerUp, envIdle } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
@@ -2813,8 +2813,13 @@ class ThreadApi {
         thoughts = thoughtsOfRound(this.db, param(req, "id"), round);
       }
     }
+    // The streamed answer, while there is a round to belong to. "" the rest
+    // of the time — the reply itself takes over the moment the turn lands.
+    let partialText = "";
+    if (asked != "all") { partialText = partialOf(this.db, param(req, "id"), round); }
     return ok("{\"seq\":" + `${round}`
       + ",\"running\":" + boolJson(roundRunning(live))
+      + ",\"partial\":" + JSON.stringify(partialText)
       + ",\"thoughts\":" + thoughtsJson(thoughts)
       + ",\"steps\":" + stepsJson(live) + "}");
   }

@@ -27,7 +27,7 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
-import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought } from "./steps.ts";
+import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -571,8 +571,14 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     if (model.provider == "anthropic") {
       last = completeTurns(model, configRow, system, context, specs, key);
     } else {
-      last = streamTurns(model, configRow, system, context, specs, key, (soFar: string) => {
+      last = streamTurns(model, configRow, system, context, specs, key, (soFar: string, saidSoFar: string) => {
         recordThought(db, threadId, thinkingSeq, thinkingDepth, thinkingRotation, soFar, stamp());
+        // The answer-so-far, only from the agent the person is talking to: a
+        // child streams under the same thread, and its half-written delegate
+        // answer must not flash up as the reply.
+        if (thinkingDepth == 0) {
+          recordPartial(db, threadId, thinkingSeq, saidSoFar, stamp());
+        }
       }, () => cancelAsked(db, threadId));
       // The stream may have been cut by the halt above, and it may also have
       // finished normally a moment after the person pressed stop — either

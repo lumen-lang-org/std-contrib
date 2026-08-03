@@ -668,6 +668,9 @@ export type Thought = { seq: number; rotation: number; depth: number; text: stri
 
 export type RoundSteps = {
   seq: number; running: boolean; steps: LiveStep[]; thoughts: Thought[];
+  // The answer as it streams — "" until the model starts writing prose, and
+  // the landed reply takes over the moment the turn ends.
+  partial?: string;
 };
 
 // What the run is doing right now. Polled while POST /messages is outstanding —
