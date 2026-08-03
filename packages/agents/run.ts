@@ -573,7 +573,16 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     } else {
       last = streamTurns(model, configRow, system, context, specs, key, (soFar: string) => {
         recordThought(db, threadId, thinkingSeq, thinkingDepth, thinkingRotation, soFar, stamp());
-      });
+      }, () => cancelAsked(db, threadId));
+      // The stream may have been cut by the halt above, and it may also have
+      // finished normally a moment after the person pressed stop — either
+      // way the press wins over whatever arrived. Without this re-check a
+      // reply with no tool calls would return as "final" and a cut-off
+      // sentence would stand as the answer.
+      if (cancelAsked(db, threadId)) {
+        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT }); }
+        return report(agent, prompt, model, notes, context, steps, last, CANCELLED_TEXT, "cancelled", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
+      }
     }
     rounds = rounds + 1;
     if (!last.ok) {
