@@ -76,6 +76,12 @@ def main():
                     help="truncate a tool result to this many chars (0 = keep whole)")
     ap.add_argument("--min-steps", type=int, default=1,
                     help="drop runs with fewer tool calls than this")
+    ap.add_argument("--since", default="",
+                    help="keep only runs created at or after this epoch-ms — the round-two"
+                         " lesson: the corpus is mostly conversations that predate the skill"
+                         " rewrites, so a fine-tune learned superseded procedures and lost to"
+                         " the base model that simply reads the current briefings. Train on"
+                         " what the briefings say NOW.")
     ap.add_argument("--format", choices=["messages", "sharegpt"], default="messages",
                     help="messages: OpenAI shape. sharegpt: LLaMA-Factory's tool format,"
                          " where every tool call is a function_call turn — a TRAINED turn"
@@ -86,13 +92,17 @@ def main():
                          " then narrated the run_script it should have made.")
     args = ap.parse_args()
 
+    since_sql = ""
+    if args.since:
+        since_sql = "and r.created_at::bigint >= " + str(int(args.since))
     runs = rows("""select json_agg(t) from (
         select r.id, r.thread_id as thread, r.question, r.answer, r.created_at
         from runs r
         where r.ok and r.answer <> '' and r.question <> ''
+          {SINCE}
           and exists (select 1 from run_steps s where s.run_id = r.id)
         order by r.thread_id, r.created_at
-    ) t;""")
+    ) t;""".replace("{SINCE}", since_sql))
     steps_by_run = {}
     for s in rows("""select json_agg(t) from (
         select run_id, step_index, tool, args, result, ok
