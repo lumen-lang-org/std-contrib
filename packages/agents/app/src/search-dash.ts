@@ -50,6 +50,19 @@ interface Passage {
 
 interface Suggestion { text: string; source: string }
 
+interface Nodes {
+  now: number;
+  rate: {
+    per_minute_1m: number; per_minute_5m: number; per_minute_60m: number;
+    per_hour_estimate: number; per_day_estimate: number;
+  };
+  data_node: {
+    role: string; up: boolean; status: string; last_doc_age_sec: number;
+    docs: number; inbox_pending: number; spool_queued: number;
+  };
+  crawl_nodes: string[];
+}
+
 /** Bytes as a person reads them. Binary units because the number came off a
  *  disk; one decimal because the point is the magnitude. */
 function size(bytes: number): string {
@@ -151,8 +164,25 @@ export class SearchDash extends LitElement {
   @state() private retrieving = false;
   @state() private copied = false;
 
+  // The pipeline panel. `nodes` is the last answer that ARRIVED, kept across a
+  // failed poll on purpose: zeros would read as a dead pipeline, which is a
+  // different and much louder claim than "we could not ask".
+  @state() private nodes: Nodes | null = null;
+  @state() private nodesAt = 0;
+  @state() private nodesStale = false;
+  /** One sample of per_minute_1m per poll, newest last. Forty is about ten
+   *  minutes at this cadence — long enough to show a slump, short enough that
+   *  a spike two hours ago is not still flattening today's chart. */
+  @state() private rateHistory: number[] = [];
+  /** Backlog depths, same cadence, for the direction arrows. A queue is only
+   *  legible as a trend: 1,600 spooled is normal, 1,600 and climbing is not. */
+  @state() private spoolHistory: number[] = [];
+  @state() private inboxHistory: number[] = [];
+
   private timer = 0;
+  private nodeTimer = 0;
   private typing = 0;
+  private onVisible: (() => void) | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -161,12 +191,47 @@ export class SearchDash extends LitElement {
     // than a report. The proxy caches for 20s, which means a 30s poll costs
     // the index at most one request per window however many people are here.
     this.timer = window.setInterval(() => { void this.refresh(true); }, 30_000);
+    if (this.mode === "admin") {
+      void this.pollNodes();
+      this.nodeTimer = window.setInterval(() => { void this.pollNodes(); }, 12_000);
+      // A hidden tab is a tab nobody is reading, and this one polls five times
+      // a minute against a single box. Browsers already throttle a background
+      // interval, but throttled is not stopped — and the first thing somebody
+      // wants on coming back is a fresh reading, not a stale one plus a wait.
+      this.onVisible = () => {
+        if (document.visibilityState === "visible") void this.pollNodes();
+      };
+      document.addEventListener("visibilitychange", this.onVisible);
+    }
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     window.clearInterval(this.timer);
+    window.clearInterval(this.nodeTimer);
     window.clearTimeout(this.typing);
+    if (this.onVisible !== null) {
+      document.removeEventListener("visibilitychange", this.onVisible);
+      this.onVisible = null;
+    }
+  }
+
+  private async pollNodes(): Promise<void> {
+    if (document.visibilityState === "hidden") return;
+    try {
+      const n = await ask<Nodes>("/nodes");
+      this.nodes = n;
+      this.nodesAt = Date.now();
+      this.nodesStale = false;
+      const keep = (list: number[], value: number) =>
+        [...list, value].slice(-40);
+      this.rateHistory = keep(this.rateHistory, n.rate?.per_minute_1m ?? 0);
+      this.spoolHistory = keep(this.spoolHistory, n.data_node?.spool_queued ?? 0);
+      this.inboxHistory = keep(this.inboxHistory, n.data_node?.inbox_pending ?? 0);
+    } catch {
+      // Nothing is cleared. The panel dims and says when it last heard.
+      this.nodesStale = true;
+    }
   }
 
   private async refresh(quiet = false): Promise<void> {
@@ -388,6 +453,109 @@ export class SearchDash extends LitElement {
         </section>`}`;
   }
 
+  /** Which way a queue is moving, over the last handful of samples.
+   *
+   *  Compared against five polls back (about a minute) rather than the
+   *  previous one: a queue that ticks 1,600 -> 1,598 -> 1,601 is flat, and an
+   *  arrow that flips on every poll is noise wearing the costume of a signal.
+   *  The 5% band is what makes "flat" a real answer. */
+  private trend(list: number[]): { dir: "up" | "down" | "flat"; delta: number } {
+    if (list.length < 3) return { dir: "flat", delta: 0 };
+    const now = list[list.length - 1];
+    const then = list[Math.max(0, list.length - 6)];
+    const delta = now - then;
+    const band = Math.max(5, then * 0.05);
+    if (delta > band) return { dir: "up", delta };
+    if (delta < -band) return { dir: "down", delta };
+    return { dir: "flat", delta };
+  }
+
+  /** A backlog, with its direction. Up is bad here and the colour says so —
+   *  a growing queue means processing is falling behind the crawlers, which is
+   *  the whole reason to look at this number rather than the rate above it. */
+  private gauge(label: string, value: number, history: number[], what: string): TemplateResult {
+    const { dir, delta } = this.trend(history);
+    const icon = dir === "up" ? "arrow-up" : dir === "down" ? "arrow-down" : "minus";
+    return html`
+      <div class="gauge">
+        <div class="g-label">${label}</div>
+        <div class="g-row">
+          <span class="g-value">${count(value)}</span>
+          <span class="g-trend ${dir}">
+            <nr-icon name=${icon} size="small"></nr-icon>
+            ${dir === "flat" ? "steady" : `${delta > 0 ? "+" : ""}${count(delta)}`}
+          </span>
+        </div>
+        <div class="g-what">${what}</div>
+      </div>`;
+  }
+
+  /** The pipeline, as an operations panel.
+   *
+   *  Three questions in the order somebody asks them: is it alive, how fast is
+   *  it going, is anything piling up. Everything here is one GET; nothing is
+   *  derived except the trend arrows, which are computed from samples this
+   *  component kept rather than from anything the API was asked to remember. */
+  private nodesPanel(): TemplateResult {
+    const n = this.nodes;
+    if (n === null) {
+      return html`
+        <section class="panel wide pipeline">
+          <p class="empty">${this.nodesStale ? "The pipeline is not answering." : "Reading the pipeline…"}</p>
+        </section>`;
+    }
+    const d = n.data_node;
+    // "stalled" is a FAULT, not idleness: a healthy pipeline always has
+    // arrivals, so it gets the weight of a failed request rather than the grey
+    // of a paused one. "empty" is the only genuinely neutral state — a fresh
+    // node legitimately has nothing yet.
+    const tone = d.status === "ingesting" ? "ok" : d.status === "stalled" ? "bad" : "idle";
+    const spark = this.rateHistory;
+    const secs = Math.round((Date.now() - this.nodesAt) / 1000);
+    return html`
+      <section class="panel wide pipeline ${this.nodesStale ? "stale" : ""}">
+        <header class="panel-head">
+          <h3>Pipeline</h3>
+          <span class="of">
+            ${this.nodesStale
+              ? html`<span class="warn-text">not answering</span> · last heard ${secs}s ago`
+              : html`updated ${secs < 2 ? "just now" : `${secs}s ago`}`}
+          </span>
+        </header>
+
+        <div class="pipe-top">
+          <span class="state ${tone}">${d.status}</span>
+          <div class="rate">
+            <span class="rate-n">${count(n.rate.per_minute_5m)}</span>
+            <span class="rate-u">documents / minute</span>
+          </div>
+          <div class="proj">
+            <span>${count(n.rate.per_hour_estimate)} / hour</span>
+            <span>${count(n.rate.per_day_estimate)} / day</span>
+          </div>
+          <div class="proj total">
+            <span>${count(d.docs)} documents</span>
+            <span>newest ${d.last_doc_age_sec <= 1 ? "just now"
+              : `${ago(Math.floor(Date.now() / 1000) - d.last_doc_age_sec)}`}</span>
+          </div>
+        </div>
+
+        ${spark.length < 2 ? nothing : html`
+          <nr-sparkline class="pipe-spark"
+            points=${JSON.stringify(spark)}
+            unit="docs/min"></nr-sparkline>`}
+
+        <div class="gauges">
+          ${this.gauge("Spool queued", d.spool_queued, this.spoolHistory,
+            "raw pages awaiting processing")}
+          ${this.gauge("Inbox pending", d.inbox_pending, this.inboxHistory,
+            "bundles awaiting absorption")}
+          ${this.gauge("Crawl nodes", n.crawl_nodes.length, [],
+            n.crawl_nodes.join(", ") || "none reporting")}
+        </div>
+      </section>`;
+  }
+
   private statsView(): TemplateResult {
     const s = this.stats;
     if (s === null) {
@@ -402,6 +570,7 @@ export class SearchDash extends LitElement {
     if (this.mode === "public") { return this.publicView(s); }
 
     return html`
+      ${this.nodesPanel()}
       <div class="figs">
         ${this.figure("Documents indexed", count(s.indexed),
           `${count(s.docs)} fetched · ${count(s.pending)} pending · ${count(s.excluded)} excluded`)}
@@ -764,6 +933,58 @@ export class SearchDash extends LitElement {
               text-align: right; }
 
     nr-sparkline { display: block; width: 100%; }
+
+    /* --- the pipeline panel ------------------------------------------------
+       An operations panel, so it is read at a glance rather than studied: the
+       state first, the rate as the one large number, projections and totals as
+       supporting text, then the queues. Everything tabular, because a figure
+       that reflows on every poll is a figure nobody can watch. */
+    .pipeline { display: flex; flex-direction: column; gap: 14px; }
+    /* A poll that failed dims the panel rather than blanking it. The values are
+       still true, they are just older than they look, and the header says how
+       much older. */
+    .pipeline.stale { opacity: .6; }
+    .warn-text { color: var(--alert, #B23434); font-weight: 600; }
+
+    .pipe-top { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+    /* The state, as a word. "stalled" carries the weight of a failed request,
+       because five minutes without an arrival is a fault and not a rest. */
+    .state { font-size: 11.5px; font-weight: 650; letter-spacing: .08em;
+             text-transform: uppercase; padding: 4px 11px; border-radius: 999px;
+             border: 1px solid currentColor; display: inline-flex;
+             align-items: center; gap: 7px; }
+    .state::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+                     background: currentColor; }
+    .state.ok { color: var(--ok, #157F4D); }
+    .state.bad { color: var(--alert, #B23434); }
+    .state.idle { color: var(--muted); }
+
+    .rate { display: flex; align-items: baseline; gap: 8px; }
+    .rate-n { font: 600 30px var(--display, inherit); font-variant-numeric: tabular-nums;
+              letter-spacing: -.02em; }
+    .rate-u { font-size: 12.5px; color: var(--muted); }
+    .proj { display: flex; flex-direction: column; font-size: 12.5px;
+            color: var(--muted); font-variant-numeric: tabular-nums; }
+    .proj.total { margin-left: auto; text-align: right; }
+
+    .pipe-spark { height: 54px; }
+
+    .gauges { display: grid; gap: 12px;
+              grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .gauge { padding: 11px 13px; border: 1px solid var(--border); border-radius: 12px;
+             background: var(--bg-sunken); }
+    .g-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+               color: var(--muted); font-weight: 600; }
+    .g-row { display: flex; align-items: baseline; gap: 9px; margin-top: 5px; }
+    .g-value { font: 600 20px var(--display, inherit); font-variant-numeric: tabular-nums; }
+    .g-trend { display: inline-flex; align-items: center; gap: 3px; font-size: 12px;
+               font-variant-numeric: tabular-nums; color: var(--muted); }
+    /* A queue climbing is the bad direction — it means processing is falling
+       behind the crawlers. Draining is the good one. Neither is loud. */
+    .g-trend.up { color: var(--alert, #B23434); }
+    .g-trend.down { color: var(--ok, #157F4D); }
+    .g-what { margin-top: 4px; font-size: 11.5px; color: var(--muted);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     .empty { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
     .empty.big { padding: 34px 0; text-align: center; font-size: 14px; }

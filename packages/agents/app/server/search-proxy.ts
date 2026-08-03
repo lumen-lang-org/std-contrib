@@ -133,6 +133,18 @@ const ROUTES: Route[] = [
     },
   },
   {
+    // The pipeline's own vitals. An operator's, and emphatically not the
+    // public tier's: it names the crawl nodes by tailnet address and reports
+    // how far behind processing is, which is a map of the deployment and a
+    // statement about its health. The brief that asked for this said not to
+    // put the index on a public route, and this is the route that would most
+    // obviously breach that.
+    path: "/nodes",
+    operator: true,
+    cache: false,
+    params: {},
+  },
+  {
     path: "/suggest",
     operator: true,
     cache: false,
