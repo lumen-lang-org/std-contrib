@@ -78,12 +78,41 @@ interface Route {
   /** Cached for TTL_MS when true. Only ever the aggregates. */
   cache: boolean;
   params: Record<string, Param>;
+  /** Fields a NON-operator may see. Absent means the whole answer.
+   *
+   *  The public page shows less than the admin one, and this is what makes
+   *  that true rather than cosmetic: without it a visitor who opened devtools
+   *  could read the reject reasons and the crawl's per-hour rate straight off
+   *  the endpoint the page was calling. Trimming the render alone would be
+   *  hiding the numbers from the screen and not from anybody. */
+  publicFields?: string[];
 }
 
 const ROUTES: Route[] = [
   { path: "/healthz", operator: false, cache: false, params: {} },
-  { path: "/stats", operator: false, cache: true, params: {} },
-  { path: "/analytics", operator: false, cache: true, params: {} },
+  {
+    path: "/stats",
+    operator: false,
+    cache: true,
+    params: {},
+    // Size, breadth and freshness — the three things that say what the index
+    // IS. What is left out is operational: how much is queued, how much was
+    // thrown away, how far behind enrichment is running. Those are a state of
+    // work, and a state of work read by a stranger is only ever read wrong.
+    publicFields: ["indexed", "domains", "corpus_bytes", "markdown_bytes_raw",
+                   "newest_fetch", "oldest_fetch"],
+  },
+  {
+    path: "/analytics",
+    operator: false,
+    cache: true,
+    params: {},
+    // Languages only. by_country and by_category are the same kind of fact and
+    // could be argued for; by_domain names every site the crawler favours,
+    // rejects is the quality gate's own reasoning, and ingest_by_hour is the
+    // crawl rate — none of which a public page is improved by carrying.
+    publicFields: ["by_lang"],
+  },
   {
     path: "/search",
     operator: true,
@@ -147,6 +176,24 @@ function clean(value: string, spec: Param): string | null {
   return text === "" ? null : text;
 }
 
+/** The answer a non-operator gets: the named fields and nothing else. Parsed
+ *  and rebuilt rather than string-edited, so a field this file does not know
+ *  about cannot survive by being spelled unexpectedly. A body that will not
+ *  parse is served whole — it is an error document, and hiding it would only
+ *  make the failure harder to read. */
+function trim(body: string, fields: string[]): string {
+  try {
+    const whole = JSON.parse(body) as Record<string, unknown>;
+    const kept: Record<string, unknown> = {};
+    for (const name of fields) {
+      if (Object.prototype.hasOwnProperty.call(whole, name)) kept[name] = whole[name];
+    }
+    return JSON.stringify(kept);
+  } catch {
+    return body;
+  }
+}
+
 interface Hit { at: number; status: number; body: string }
 const cache = new Map<string, Hit>();
 
@@ -191,6 +238,13 @@ export function searchProxy(): Middleware {
       return;
     }
 
+    // What this caller may see of an answer. Computed once, here, so every
+    // exit below trims identically — the stale path included, which is the one
+    // easiest to forget.
+    const fields = route.publicFields;
+    const full = fields === undefined || isOperator(req);
+    const cut = (body: string) => (full ? body : trim(body, fields as string[]));
+
     // Rebuilt from the allowlist rather than forwarded. Order is the route's,
     // not the caller's, so the same question always produces the same cache
     // key however the query string was written.
@@ -209,11 +263,12 @@ export function searchProxy(): Middleware {
       if (hit && Date.now() - hit.at < TTL_MS) {
         res.statusCode = hit.status;
         res.setHeader("content-type", "application/json; charset=utf-8");
-        // Let a browser and any CDN in front hold it for the same window the
-        // console does. Nothing here is per-caller, so a shared cache is
-        // correct as well as cheap.
-        res.setHeader("cache-control", `public, max-age=${Math.floor(TTL_MS / 1000)}`);
-        res.end(hit.body);
+        // Cached whole and trimmed on the way out, so one cached answer serves
+        // both tiers. `private` once a body depends on who asked: a shared
+        // cache in front must not hand an operator's fuller answer to the next
+        // visitor, and the console's own 20s window is the part that mattered.
+        res.setHeader("cache-control", `private, max-age=${Math.floor(TTL_MS / 1000)}`);
+        res.end(cut(hit.body));
         return;
       }
     }
@@ -225,9 +280,9 @@ export function searchProxy(): Middleware {
         res.setHeader("content-type", "application/json; charset=utf-8");
         res.setHeader(
           "cache-control",
-          route.cache ? `public, max-age=${Math.floor(TTL_MS / 1000)}` : "no-store",
+          route.cache ? `private, max-age=${Math.floor(TTL_MS / 1000)}` : "no-store",
         );
-        res.end(hit.body);
+        res.end(cut(hit.body));
       })
       .catch((err: unknown) => {
         // The one failure worth naming: the index is a single box on a tailnet
@@ -255,7 +310,7 @@ export function searchProxy(): Middleware {
           // Seconds, so the page can say how old rather than only that it is
           // old. A reader deciding whether to trust a number wants the age.
           res.setHeader("x-index-stale", String(Math.round((Date.now() - stale.at) / 1000)));
-          res.end(stale.body);
+          res.end(cut(stale.body));
           return;
         }
 

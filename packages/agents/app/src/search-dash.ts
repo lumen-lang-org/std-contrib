@@ -343,6 +343,34 @@ export class SearchDash extends LitElement {
     }
     const ratio = s.corpus_bytes > 0 ? s.markdown_bytes_raw / s.corpus_bytes : 0;
     const share = s.docs > 0 ? (s.classified / s.docs) * 100 : 0;
+
+    // The public reading, and the server serves exactly this much (the
+    // publicFields lists in server/search-proxy.ts) — so the fields the admin
+    // view spends below are not merely unrendered here, they are absent. Which
+    // is why nothing in this branch may reach for one: `docs`, `pending`,
+    // `classified` and every breakdown but by_lang are undefined for a
+    // visitor, and `count(undefined)` would draw NaN under a headline.
+    if (this.mode === "public") {
+      return html`
+        <div class="figs">
+          ${this.figure("Documents indexed", count(s.indexed),
+            s.domains > 0 ? `across ${count(s.domains)} domains` : "")}
+          ${this.figure("Domains", count(s.domains),
+            s.domains > 0 ? `${(s.indexed / s.domains).toFixed(1)} pages per domain` : "")}
+          ${this.figure("Corpus on disk", size(s.corpus_bytes),
+            `${size(s.markdown_bytes_raw)} of markdown · ${ratio.toFixed(1)}× compression`)}
+        </div>
+        <p class="freshness">
+          Newest page fetched ${ago(s.newest_fetch)}
+          <span class="dim">(${when(s.newest_fetch)})</span>
+          · crawling since ${when(s.oldest_fetch)}
+        </p>
+        <div class="grid">
+          ${this.bars("What it is written in", this.analytics?.by_lang, 8,
+            (k) => named(k, "lang"))}
+        </div>`;
+    }
+
     return html`
       <div class="figs">
         ${this.figure("Documents indexed", count(s.indexed),

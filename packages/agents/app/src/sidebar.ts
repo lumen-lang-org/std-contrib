@@ -29,6 +29,9 @@ export class ConsoleSidebar extends LitElement {
             color: var(--fg); font-size: 14px;
             transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .item:hover { background: var(--bg-sunken); }
+    /* One row is an <a>. Undo what a browser does to links so it is the same
+       row as the buttons above it. */
+    a.item { text-decoration: none; color: var(--fg); }
     /* The same ink as the label beside it, not --muted.
        --muted is rgba(0,0,0,.45), which renders 140,140,140 on this rail's
        250,250,250 — a grey glyph next to near-black text, so every row read as
@@ -159,6 +162,17 @@ export class ConsoleSidebar extends LitElement {
       <div class="item" data-nav="starts" @click=${() => this.dispatchEvent(new CustomEvent("open-starts"))}>
         <nr-icon name="share" size="small"></nr-icon><span>Starting points</span>
       </div>
+      <!-- A real link and not a dispatched event, because /stats is a page of
+           its own rather than a view of the console: it server-renders, it is
+           the one address here a stranger can be handed, and a link is what a
+           browser can open in a new tab. Everything above stays an event
+           because everything above stays on this page. -->
+      <a class="item" data-nav="index" href="/stats">
+        <!-- "globe" and not "database": the row beside it is Knowledge, which
+             is already the database glyph, and two rows drawn with one icon
+             read as one thing twice. This one is the open web. -->
+        <nr-icon name="globe" size="small"></nr-icon><span>Search index</span>
+      </a>
 
       <div class="find">
         <nr-icon name="search" size="small"></nr-icon>
