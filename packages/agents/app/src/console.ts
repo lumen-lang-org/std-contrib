@@ -1152,6 +1152,22 @@ export class AgentConsole extends LitElement {
     .card .card-name { font-size: 13px; font-weight: 600; max-width: 100%;
                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .card .card-meta { font: 11.5px var(--mono); color: var(--muted); }
+    /* The composer sits on the bottom edge of the window, in every browser.
+     *
+     * The component grows its transcript with
+     *   :host([boxed]) .chatbot-content:not(:has(.empty-state)) { flex: 1 }
+     * and Firefox does not apply that rule — measured, not guessed: the same
+     * element computes flex 1 1 0% in Chromium and flex 0 0 auto in
+     * Firefox 153 on the same page. With flex:0 the transcript is only as tall
+     * as its messages, so the composer rides up under the last reply and
+     * leaves a third of the window blank beneath it.
+     *
+     * Reachable because .chatbot-content carries part="content" — the note
+     * further up about ::part being useless is about .input-box, which exposes
+     * none, and does not generalise. Scoped to a conversation: the empty home
+     * deliberately lets the chatbot size to its content so the wordmark and
+     * composer centre together, and this would undo that. */
+    main:not(.empty) nr-chatbot::part(content) { flex: 1 1 auto; min-height: 0; }
     nr-chatbot {
       height: 100%;
       /* The Claude reading: the user's turn is a warm block, the model's is
