@@ -41,6 +41,7 @@ const TAB_OF: Record<string, string> = {
   "mcp": "MCP",
   "sign-in": "Sign-in",
   "tracing": "Tracing",
+  "search": "Search",
 };
 
 type LoaderArgs = { params: { tab?: string } };

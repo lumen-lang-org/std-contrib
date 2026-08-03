@@ -18,6 +18,7 @@
 
 import { LitElement, css, html } from "lit";
 import "./mcp-gallery.js";
+import "./search-dash.js";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   AgentFull, AgentRow, ModelChoiceRow, ModelConfigRow, ModelRouterRow, ModelRow, PromptRow,
@@ -78,6 +79,10 @@ const TABS = [
   { name: "Sign-in", icon: "log-in", zone: "admin" },
   { name: "Tracing", icon: "layers", zone: "admin" },
   { name: "Banner", icon: "bell", zone: "admin" },
+  // The search index's own screen. Admin zone because two of its three views
+  // query the index, which server/search-proxy.ts refuses to anybody else —
+  // the public half of the same component is the /stats page.
+  { name: "Search", icon: "search", zone: "admin" },
 ] as const;
 type Tab = typeof TABS[number]["name"];
 type Zone = typeof TABS[number]["zone"];
@@ -127,7 +132,7 @@ const NEW_AGENT: AgentRow = {
 };
 const NEW_MODEL: ModelRow = {
   id: "", label: "", apiName: "", provider: "mistral", kind: "chat",
-  dimensions: 0, baseUrl: "", enabled: true,
+  dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0,
 };
 // `selectable` and `rank` are the row's own flags, not the menu: a config is
 // offered where somebody picks a config, and model_choices is a separate list
@@ -743,6 +748,9 @@ export class ConsoleSettings extends LitElement {
       }
       case "Tracing": return this.tracingTab();
       case "Banner": return this.bannerTab();
+      // The whole tab is one component: it owns its own fetching, polling and
+      // three views, and none of it is settings state.
+      case "Search": return html`<search-dash mode="admin"></search-dash>`;
     }
   }
 
@@ -1132,6 +1140,10 @@ export class ConsoleSettings extends LitElement {
           value: String(m.dimensions), required: true, placeholder: "1024",
           help: "How wide this model's vectors are — 1024 for mistral-embed. A width that does not match builds a column the provider's own answers will not fit.",
           on: (v) => this.patch({ dimensions: parseInt(v || "0", 10) }) }) : ""}
+        ${this.text({ id: "m-context", label: "Context window", type: "number",
+          value: String(m.contextTokens), placeholder: "0",
+          help: "Tokens the model holds, prompt and answer together. 0 leaves it to the engine's conservative default — guessing high is a refused request, guessing low is only a shorter memory.",
+          on: (v) => this.patch({ contextTokens: parseInt(v || "0", 10) }) })}
         ${this.check({ id: "m-enabled", label: "Enabled", checked: m.enabled,
           help: embedding
             ? "One embedding model is active at a time: turning this on turns the others off."

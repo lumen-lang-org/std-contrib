@@ -37,6 +37,15 @@ export type ModelRow = {
   // OpenAI-compatible host — a gateway, a proxy, a local server.
   baseUrl: string;
   enabled: boolean;
+  // How many tokens the model holds, prompt and answer together. 0 means
+  // nobody has said, and the engine falls back to a conservative default.
+  //
+  // Declared here because the engine declares it. Its ModelRow is parsed with
+  // JSON.parse<ModelRow>, which fails the whole request when a declared field
+  // is absent — so a body that omits this is not a body with a default, it is
+  // a 400 reading "invalid JSON (MissingField)" on a form that looks complete.
+  // That is what every model edit did once the engine gained the field.
+  contextTokens: number;
 };
 
 export type ModelConfigRow = {
@@ -876,6 +885,7 @@ export const updateModel = (m: ModelRow) =>
     body: JSON.stringify({
       id: m.id, label: m.label, apiName: m.apiName, provider: m.provider,
       kind: m.kind, dimensions: m.dimensions, baseUrl: m.baseUrl, enabled: m.enabled,
+      contextTokens: m.contextTokens,
     }),
   });
 
