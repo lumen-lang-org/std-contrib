@@ -60,7 +60,10 @@ interface Nodes {
     role: string; up: boolean; status: string; last_doc_age_sec: number;
     docs: number; inbox_pending: number; spool_queued: number;
   };
-  crawl_nodes: string[];
+  // Strings once, records since sharding landed. Both are still in the wild —
+  // a data node that has not been redeployed answers the old way — so the
+  // client accepts either rather than assuming the newer one.
+  crawl_nodes: (string | { name?: string; host?: string; shard?: number })[];
 }
 
 /** Bytes as a person reads them. Binary units because the number came off a
@@ -105,6 +108,41 @@ function named(key: string, kind: "country" | "category" | "lang"): string {
 }
 
 const TIERS: Record<string, string> = { "0": "news", "1": "docs / reference", "2": "evergreen" };
+
+/** A crawl node, as a word.
+ *
+ *  The endpoint used to answer this as "ubuntu@100.87.212.31" and now answers
+ *  it as {name, host, shard}. Joining the array without looking printed
+ *  "[object Object]" under the count — the one failure mode a panel like this
+ *  must not have, because it is the reading that says the data is wrong when
+ *  the data is fine. Both shapes are handled, and anything else falls back to
+ *  something a person can still read. */
+function nodeName(n: unknown): string {
+  if (typeof n === "string") return n;
+  if (n !== null && typeof n === "object") {
+    const r = n as { name?: unknown; host?: unknown; shard?: unknown };
+    if (typeof r.name === "string" && r.name !== "") return r.name;
+    if (typeof r.host === "string" && r.host !== "") return r.host;
+    if (typeof r.shard === "number") return `shard ${r.shard}`;
+  }
+  return "unnamed node";
+}
+
+/** The same node with its address, for a title attribute — the detail somebody
+ *  wants when a node looks wrong, and clutter when none of them do. */
+function nodeDetail(n: unknown): string {
+  if (typeof n === "string") return n;
+  if (n !== null && typeof n === "object") {
+    const r = n as { name?: unknown; host?: unknown; shard?: unknown };
+    const bits = [
+      typeof r.name === "string" ? r.name : "",
+      typeof r.host === "string" ? r.host : "",
+      typeof r.shard === "number" ? `shard ${r.shard}` : "",
+    ].filter((b) => b !== "");
+    return bits.join(" · ");
+  }
+  return "";
+}
 
 /** A snippet carries markdown bold around the matched terms. Split rather than
  *  parse, and emit Lit nodes rather than markup: the strings are page titles
@@ -473,7 +511,9 @@ export class SearchDash extends LitElement {
   /** A backlog, with its direction. Up is bad here and the colour says so —
    *  a growing queue means processing is falling behind the crawlers, which is
    *  the whole reason to look at this number rather than the rate above it. */
-  private gauge(label: string, value: number, history: number[], what: string): TemplateResult {
+  private gauge(
+    label: string, value: number, history: number[], what: string, detail = "",
+  ): TemplateResult {
     const { dir, delta } = this.trend(history);
     const icon = dir === "up" ? "arrow-up" : dir === "down" ? "arrow-down" : "minus";
     return html`
@@ -486,7 +526,7 @@ export class SearchDash extends LitElement {
             ${dir === "flat" ? "steady" : `${delta > 0 ? "+" : ""}${count(delta)}`}
           </span>
         </div>
-        <div class="g-what">${what}</div>
+        <div class="g-what" title=${detail === "" ? what : detail}>${what}</div>
       </div>`;
   }
 
@@ -551,7 +591,9 @@ export class SearchDash extends LitElement {
           ${this.gauge("Inbox pending", d.inbox_pending, this.inboxHistory,
             "bundles awaiting absorption")}
           ${this.gauge("Crawl nodes", n.crawl_nodes.length, [],
-            n.crawl_nodes.join(", ") || "none reporting")}
+            n.crawl_nodes.length === 0 ? "none reporting"
+              : n.crawl_nodes.map(nodeName).join(", "),
+            n.crawl_nodes.map(nodeDetail).join(" | "))}
         </div>
       </section>`;
   }
