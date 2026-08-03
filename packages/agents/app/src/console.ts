@@ -886,7 +886,12 @@ export class AgentConsole extends LitElement {
     /* Height follows the content, capped — not inset top AND bottom. Pinned to
        both edges the panel was a tall white column with a third of it empty,
        which reads as something still loading. */
-    .index-layer { position: fixed; z-index: 40; overflow-y: auto;
+    /* Above the header, which is sticky at 40 — at the same 40 the header won
+       on document order alone and stayed lit over a dimmed page. Below the nav
+       drawer (60) and its scrim (55), which are still the layer that covers
+       everything. */
+    .scrim.index { display: block; position: fixed; inset: 0; z-index: 51; }
+    .index-layer { position: fixed; z-index: 52; overflow-y: auto;
                    top: 8vh; bottom: auto; max-height: 84vh;
                    left: max(12px, calc(50vw - 380px));
                    right: max(12px, calc(50vw - 380px));
@@ -3122,7 +3127,7 @@ export class AgentConsole extends LitElement {
            it silently stops being an attribute. That is what "left menu link
            stop working" was — one comment, six dead event handlers. -->
       ${!this.indexOpen ? nothing : html`
-      <div class="scrim shelves" @click=${() => { this.indexOpen = false; }}></div>
+      <div class="scrim index" @click=${() => { this.indexOpen = false; }}></div>
       <div class="index-layer" role="dialog" aria-label="The Joule index">
         <button class="icon index-close" title="Close"
           @click=${() => { this.indexOpen = false; }}>

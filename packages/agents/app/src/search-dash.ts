@@ -348,7 +348,7 @@ export class SearchDash extends LitElement {
    *  sentence under it, and the language split as a single segmented rule. The
    *  ink is one hue at falling opacity rather than a palette — these are parts
    *  of one quantity, and eight hues would imply eight unrelated things. */
-  private publicView(s: Stats, ratio: number): TemplateResult {
+  private publicView(s: Stats): TemplateResult {
     const langs = this.analytics?.by_lang ?? [];
     const total = langs.reduce((sum, b) => sum + b.n, 0);
     const lead = langs.slice(0, 6);
@@ -359,11 +359,12 @@ export class SearchDash extends LitElement {
         <p class="eyebrow">The Joule index</p>
         <p class="count">${count(s.indexed)}</p>
         <p class="lede">
-          documents from ${count(s.domains)} domains, kept as markdown.
+          documents from ${count(s.domains)} domains.
         </p>
+        <!-- No disk figure and no compression ratio. Both are facts about how
+             the corpus is STORED, which is the operator's business; a visitor
+             is being told how much there is and how fresh it is. -->
         <p class="facts">
-          ${size(s.corpus_bytes)} on disk — ${ratio.toFixed(1)}× smaller than the
-          ${size(s.markdown_bytes_raw)} of text it came from.
           The newest page landed <b>${ago(s.newest_fetch)}</b>;
           the crawl has been running since ${when(s.oldest_fetch)}.
         </p>
@@ -398,7 +399,7 @@ export class SearchDash extends LitElement {
     // The public reading is its own layout, not this one with rows removed.
     // See publicView(): a dashboard is for somebody who operates the thing,
     // and a visitor is not operating anything.
-    if (this.mode === "public") { return this.publicView(s, ratio); }
+    if (this.mode === "public") { return this.publicView(s); }
 
     return html`
       <div class="figs">
