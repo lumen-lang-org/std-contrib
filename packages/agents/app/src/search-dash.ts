@@ -682,7 +682,10 @@ export class SearchDash extends LitElement {
     .ask { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
     .ask-field { position: relative; flex: 1 1 320px; min-width: 0; }
     /* A field and whatever labels it. nr-input slots its own label; a dropdown
-       cannot, so `.label` is dressed to match one. */
+       cannot, so the .label span is dressed to match one. (No backticks in
+       this comment: it lives inside a css template literal, where one ends the
+       literal — and the result still BUILDS, so the only symptom is a
+       TypeError at import time.) */
     .f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .f .label { font-size: 12px; color: var(--muted); font-weight: 500; }
     .k { flex: none; width: 82px; }
