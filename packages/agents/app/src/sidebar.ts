@@ -29,14 +29,21 @@ export class ConsoleSidebar extends LitElement {
             color: var(--fg); font-size: 14px;
             transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .item:hover { background: var(--bg-sunken); }
-    .item nr-icon { color: var(--muted); }
+    /* The same ink as the label beside it, not --muted.
+       --muted is rgba(0,0,0,.45), which renders 140,140,140 on this rail's
+       250,250,250 — a grey glyph next to near-black text, so every row read as
+       half disabled. Sampled against Kimi's rail at the same size, its row
+       icons carry the SAME ink as their labels; grey is spent there on the
+       section headings only. This is the rule the console's own header and
+       composer icons already follow. */
+    .item nr-icon { color: var(--fg); }
 
     /* Search is a row until it is used, like every other row here. */
     .find { display: flex; align-items: center; gap: 10px; margin: 1px 8px;
             padding: 8px 10px; border-radius: 12px;
             transition: background-color .15s cubic-bezier(.23,1,.32,1); }
     .find:focus-within { background: var(--bg-sunken); }
-    .find nr-icon { color: var(--muted); }
+    .find nr-icon { color: var(--fg); }
     .find input { flex: 1; min-width: 0; background: none; border: 0; padding: 0;
                   font: inherit; color: inherit; outline: none; }
     .find input::placeholder { color: var(--muted); }
@@ -47,7 +54,12 @@ export class ConsoleSidebar extends LitElement {
     nav { flex: 1; overflow-y: auto; padding-bottom: 8px; }
     .thread { margin: 1px 8px; padding: 7px 10px; cursor: pointer; border-radius: 12px;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-              font-size: 13.5px; color: var(--muted);
+              /* A conversation title is a destination, not an annotation. At
+                 --muted it was the faintest text on the rail while being the
+                 only part of it a person actually reads — the hover and active
+                 states below already promote it to --fg, so the resting state
+                 was the odd one out. */
+              font-size: 13.5px; color: var(--fg);
               transition: background-color .15s cubic-bezier(.23,1,.32,1),
                           color .15s cubic-bezier(.23,1,.32,1); }
     .thread:hover { background: var(--bg-sunken); color: var(--fg); }
