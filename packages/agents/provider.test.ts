@@ -50,7 +50,7 @@ test("a disabled model is not called", () => {
 test("a disabled model is not called on the streamed path either", () => {
   let turns: Turn[] = [userTurn("hi")];
   let none: ToolSpec[] = [];
-  let r = streamTurns(model("mistral", "mistral-small-latest", false), config(), "", turns, none, "k", (soFar: string) => {});
+  let r = streamTurns(model("mistral", "mistral-small-latest", false), config(), "", turns, none, "k", (soFar: string) => {}, () => false);
   expect(!r.ok);
   expect(r.error.indexOf("disabled") >= 0);
 });

@@ -820,6 +820,13 @@ export function replyText(provider: string, body: string): string {
 // would escape every `try` between this and the handler.
 export type Thinking = (soFar: string) => void;
 
+// Asked mid-stream: "should this generation keep going?" Answering true
+// closes the stream where it stands. The caller decides what the question
+// means — for the agent loop it is "did the person press stop" — and the
+// throttle below decides how often it is worth asking, because the answer
+// may cost a database read and a stream delivers many events a second.
+export type Halt = () => bool;
+
 // One tool call, assembled from the fragments a stream delivers. OpenAI sends
 // `tool_calls[i]` in pieces — an id on one chunk, a name on the next, the
 // arguments a character at a time — keyed only by `index`.
@@ -885,7 +892,7 @@ export function sseData(line: string): string {
 
 // One completion, streamed. Falls back to nothing: a caller that wants the
 // buffered path calls `completeTurns` instead.
-export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string, onThinking: Thinking): Completion {
+export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string, onThinking: Thinking, shouldHalt: Halt): Completion {
   let endpoint = chatEndpointFor(model);
   if (endpoint == "") {
     let nowhere: Completion = { ok: false, text: "", status: 0, error: "no chat endpoint for \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
@@ -936,8 +943,27 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
   let frags: CallFragment[] = [];
   let inTokens: int = 0;
   let outTokens: int = 0;
+  // Events since shouldHalt was last asked. Every 5th event: the check is a
+  // primary-key read, a stream that delivers coarse chunks (Gemini bundles
+  // many tokens per event) still gets asked early, and a fast stream pays a
+  // few reads a second. 25 was measured first and a ten-paragraph Gemini
+  // answer sailed past the press — fewer, fatter events than the count
+  // assumed.
+  let sinceAsked: int = 0;
 
   while (!s.done()) {
+    sinceAsked = sinceAsked + 1;
+    if (sinceAsked >= 5) {
+      sinceAsked = 0;
+      if (shouldHalt()) {
+        s.close();
+        // ok:false with a named error, not a partial success: the caller
+        // that asked for the halt knows why, and no caller should mistake
+        // a cut-off generation for the model's whole answer.
+        let halted: Completion = { ok: false, text: "", status: status, error: "stopped mid-stream at the caller's request", inputTokens: inTokens, outputTokens: outTokens, counted: false };
+        return halted;
+      }
+    }
     let line = s.readLine();
     if (s.done()) { break; }
     let data = sseData(line);
