@@ -71,7 +71,8 @@ RUN chmod +x /opt/office/*.py \
  && ln -sf /opt/office/merge_runs.py /usr/local/bin/merge-runs \
  && ln -sf /opt/office/make_docx.py /usr/local/bin/make-doc \
  && ln -sf /opt/office/make_xlsx.py /usr/local/bin/make-sheet \
- && ln -sf /opt/office/make_pptx.py /usr/local/bin/make-deck
+ && ln -sf /opt/office/make_pptx.py /usr/local/bin/make-deck \
+ && ln -sf /opt/office/extract_image.py /usr/local/bin/extract-image
 
 # The docx npm library, for BUILDING a document from nothing — it produces
 # cleaner OOXML than python-docx and is what the published guidance uses. A

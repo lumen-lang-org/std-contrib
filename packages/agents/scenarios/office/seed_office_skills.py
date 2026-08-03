@@ -224,7 +224,40 @@ NEVER use edit_artifact on a .docx. It is a zip; there is no text in it to
 match."""
 
 
+EXTRACT_BODY = f"""Show the person a picture: a page of a document rendered as an image, or a
+picture embedded inside one. A .png artifact appears IN the conversation as
+an image, so this is how "show me the chart on page 3" is answered with the
+chart itself.
+
+run_script with environment "office" — never "main". One command:
+
+  extract-image /artifacts/<the document's path> <page> /artifacts/images/<name>.png
+
+{PREFIX_RULE}
+
+The document must be named in `paths` (mayCreate true, because the png is a
+new artifact). Pages count from 1. For the pictures EMBEDDED in an office
+file — photos in a report — use:
+
+  extract-image /artifacts/<path> --embedded /artifacts/images/
+
+Every png it writes under /artifacts/images/ becomes an image the reader
+sees on your message. Check stdout for "wrote" before saying so. The output
+name is lowercase with dashes; a space in an unquoted path splits the
+command."""
+
+
+
 SKILLS = [
+    {
+        "name": "extract-image",
+        # Public, not featured: it acts on a document already in the
+        # conversation, same reasoning as fill-doc.
+        "rank": 0,
+        "files": [],
+        "description": "Render a page of a document as an image in the chat, or pull out its embedded pictures",
+        "body": EXTRACT_BODY,
+    },
     {
         "name": "fill-doc",
         # NOT featured, deliberately. featured_rank > 0 is what puts a skill in
