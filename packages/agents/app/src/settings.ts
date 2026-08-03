@@ -37,8 +37,7 @@ import {
   AuthProviderRow, listAuthProviders, saveAuthProvider, setAuthProviderSecret, deleteAuthProvider,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
-  Me, isAdmin,
-} from "./api.js";
+  Me, isAdmin, readBanner, writeBanner } from "./api.js";
 
 // Each tab, with the mark that stands for it in the rail. The icons are the
 // ones nr-icon carries — a name it does not have is drawn as the name itself.
@@ -78,6 +77,7 @@ const TABS = [
   { name: "MCP", icon: "code", zone: "admin" },
   { name: "Sign-in", icon: "log-in", zone: "admin" },
   { name: "Tracing", icon: "layers", zone: "admin" },
+  { name: "Banner", icon: "bell", zone: "admin" },
 ] as const;
 type Tab = typeof TABS[number]["name"];
 type Zone = typeof TABS[number]["zone"];
@@ -742,6 +742,7 @@ export class ConsoleSettings extends LitElement {
         return this.signInTab();
       }
       case "Tracing": return this.tracingTab();
+      case "Banner": return this.bannerTab();
     }
   }
 
@@ -2389,6 +2390,37 @@ export class ConsoleSettings extends LitElement {
         if (secret !== "") { await setAuthProviderSecret(row.id, secret); }
         this.authProviders = await listAuthProviders();
       }))}
+    `;
+  }
+
+  /* One sentence over every visitor's page. Loaded when the tab opens and
+     saved whole; "" takes it down. The engine bounds it at 500 bytes. */
+  private bannerText: string | null = null;
+
+  private bannerTab() {
+    if (this.bannerText === null) {
+      this.bannerText = "";
+      void readBanner().then((b) => { this.bannerText = b?.text ?? ""; this.requestUpdate(); })
+        .catch(() => undefined);
+    }
+    return html`
+      ${this.head("Banner", "bell")}
+      <div class="formhead"><h3>${this.bannerText === "" ? "No banner showing" : "Showing to everyone"}</h3></div>
+      <div class="grid">
+        ${this.text({ id: "bn-text", label: "Announcement", value: this.bannerText ?? "",
+          placeholder: "Maintenance tonight 22:00–22:30 UTC…",
+          help: "Shows above the page for every visitor, guests included, until cleared. Empty means no banner.",
+          on: (v) => { this.bannerText = v; } })}
+      </div>
+      <div class="formacts">
+        <button class="primary" @click=${() => this.act(async () => {
+          await writeBanner((this.bannerText ?? "").trim());
+        }, { kind: "list" })}>Save</button>
+        <button class="ghost" @click=${() => this.act(async () => {
+          this.bannerText = "";
+          await writeBanner("");
+        }, { kind: "list" })}>Take it down</button>
+      </div>
     `;
   }
 

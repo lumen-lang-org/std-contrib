@@ -237,6 +237,14 @@ export function threadPlan(db: Db): Migration[] {
     // publish the entire history of every deployment on the day it migrated.
     migration("89", "a conversation can be offered as a starting point",
       "ALTER TABLE threads ADD COLUMN replayable " + dialectType(db, "bool") + " NOT NULL DEFAULT false"),
+    // When a person asked this conversation's running turn to stop. On the
+    // thread and not the run, because the run row is only written when the
+    // run has finished — mid-flight the thread is the one id both sides
+    // hold. "" is "nobody asked"; say() clears it as each turn begins, and
+    // the helpers live in schema.ts (threads.ts imports run.ts, and run.ts
+    // is the one that has to ask).
+    migration("92", "a person can ask a running turn to stop",
+      "ALTER TABLE threads ADD COLUMN cancel_asked " + db.textType + " NOT NULL DEFAULT ''"),
   ];
   return plan;
 }

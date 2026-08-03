@@ -19,7 +19,7 @@ import {
   QUOTA_SPENT, SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, getQuota, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
   ServerRow, listServers, listSkills, copySkillLocally,
-  PluginRow, listPlugins, pluginItems, SkillFileRow, listSkillFiles } from "./api.js";
+  PluginRow, listPlugins, pluginItems, SkillFileRow, listSkillFiles, readBanner } from "./api.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
 
@@ -532,6 +532,12 @@ export class AgentConsole extends LitElement {
     .title { font: 500 17px var(--display); overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; min-width: 0; }
     .bar-space { flex: 1; }
+    /* The announcement. One line that pushes content down rather than
+       floating over it — a banner that covers the composer is an ad. */
+    .notice { display: flex; align-items: center; gap: 10px;
+              padding: 8px 14px; font-size: 13px; line-height: 1.4;
+              background: var(--bg-user); border-bottom: 1px solid var(--border); }
+    .notice span { flex: 1; min-width: 0; }
 
     select { background: var(--bg-card); border: 1px solid var(--border); color: inherit;
              border-radius: 8px; padding: 4px 8px; font: inherit; }
@@ -1259,6 +1265,10 @@ export class AgentConsole extends LitElement {
      — and a briefing is the whole of what a skill does, so not being able to
      read one made every skill a name and a sentence. */
   @state() private skillOpen = "";
+  /* The operator's announcement, above everything. Loaded once per page
+     life, dismissible per TAB (sessionStorage): an announcement should not
+     reappear on every navigation, and should reappear tomorrow. */
+  @state() private banner = "";
   @state() private skillFiles: SkillFileRow[] = [];
   /* What is typed into the gallery's filter. Cleared when it opens, because a
      filter left over from last time is a gallery that looks empty. */
@@ -1369,6 +1379,10 @@ export class AgentConsole extends LitElement {
     this.allSkills = await listSkills().catch(() => []);
     // The run says what it is doing while it is doing it. Held here so the
     // card re-renders; the session owns the list and never rebuilds it.
+    void readBanner().then((b) => {
+      const text = b?.text ?? "";
+      if (text !== "" && sessionStorage.getItem("joule-banner-seen") !== text) this.banner = text;
+    }).catch(() => undefined);
     [this.agents, this.threads] = await Promise.all([listAgents(), listThreads()])
       .catch(() => [[], []] as [AgentFull[], ThreadListing[]]);
     this.agents = this.agents.filter((a) => a.enabled).filter(offerable);
@@ -2888,6 +2902,14 @@ export class AgentConsole extends LitElement {
         ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
           : this.view === "canvas" ? html`<agent-canvas .focusAgent=${this.canvasFocus}></agent-canvas>`
           : this.view === "starts" ? this.startsPage() : html`
+        ${this.banner === "" ? nothing : html`
+        <div class="notice" role="status">
+          <span>${this.banner}</span>
+          <button class="icon" title="Dismiss"
+            @click=${() => { sessionStorage.setItem("joule-banner-seen", this.banner); this.banner = ""; }}>
+            <nr-icon name="x" size="small"></nr-icon>
+          </button>
+        </div>`}
         <header>
           <button class="icon nav" title="Conversations"
             @click=${() => { this.nav = !this.nav; }}>

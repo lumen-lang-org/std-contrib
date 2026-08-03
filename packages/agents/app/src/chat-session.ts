@@ -25,7 +25,7 @@
 // its signature, and without the import that name resolved to nothing — a
 // pre-existing TS2304 in this file, and the only thing standing between it and
 // a clean check.
-import { LiveStep, RoundSteps, Thought, TranscriptTurn, TurnArtifactRef, WireRef, artifactsByTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
+import { LiveStep, RoundSteps, Thought, TranscriptTurn, TurnArtifactRef, WireRef, artifactsByTurn, cancelTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { renderWithCards } from "./cards.js";
 import * as live from "./live.js";
@@ -465,6 +465,15 @@ export class ChatSession {
      — and by any send at all, because a person who deleted it by hand should
      not have the next message trimmed. */
   slashPrefix = "";
+
+  /* nr-chatbot's stop button calls controller.stop?.() — this is the deliberate
+     addition the header note promised. Fire-and-forget: the engine stops the
+     turn at its next boundary and the POST already in flight reports the
+     ending, so there is nothing to await here and nothing to redraw. */
+  stop(): void {
+    if (this.threadId === "") { return; }
+    void cancelTurn(this.threadId).catch(() => undefined);
+  }
   private live: LiveStep[] = [];
   private thoughts: Thought[] = [];
   private polling = 0;

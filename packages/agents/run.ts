@@ -22,7 +22,7 @@
 
 import { Db } from "../plume/driver.ts";
 import { findById } from "../plume/plume.ts";
-import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping } from "./schema.ts";
+import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping, cancelAsked } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
@@ -54,6 +54,11 @@ import { GenerationCall, Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, en
 // deployment's call, not a constant: a cloud tier may want more, a demo box
 // fewer, and neither should need a rebuild.
 const MAX_TOOL_STEPS: int = maxToolSteps();
+
+// What a cancelled turn says. A sentence rather than silence, because the
+// transcript keeps the turn: the person pressed stop, and the row that
+// records it should read as that.
+const CANCELLED_TEXT: string = "Stopped at your request.";
 
 function maxToolSteps(): int {
   let said = process.env["AGENTS_MAX_TOOL_STEPS"] ?? "";
@@ -538,6 +543,17 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
 
   while (rounds < MAX_TOOL_STEPS) {
+    // Asked to stop, before spending a provider call. The flag is on the
+    // thread (schema.ts explains why), set by POST /threads/:id/cancel and
+    // cleared as each turn begins — so a hit here is always THIS turn's
+    // person changing their mind, never a stale request from an old round.
+    // Checked at the two spending points and nowhere else: a cancel lands at
+    // the next boundary, which is honest about what stopping a model
+    // mid-sentence can be.
+    if (cancelAsked(db, threadId)) {
+      if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT }); }
+      return report(agent, prompt, model, notes, context, steps, last, CANCELLED_TEXT, "cancelled", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
+    }
     let modelSpan = startSpan(model.apiName, TRACE_GENERATION, agentSpan.id);
     // Streamed, so the rotation's thinking is written while the model is still
     // writing it rather than when the reply lands. What comes back is the same
@@ -636,6 +652,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // The step budget bounds tool calls as well as rounds: one reply can ask
       // for an unbounded number of them, so without this a single round could
       // run arbitrarily many side effects.
+      if (cancelAsked(db, threadId)) {
+        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT }); }
+        return report(agent, prompt, model, notes, context, steps, last, CANCELLED_TEXT, "cancelled", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
+      }
       if (steps.length >= MAX_TOOL_STEPS) {
         let cutSaid = said.text;
         if (cutSaid == "") { cutSaid = closingWord(model, configRow, system, context, key); }
@@ -978,7 +998,11 @@ function report(agent: AgentRow, prompt: PromptRow, model: ModelRow, notes: stri
   // a transcript that hides it while the artifact versions it produced stand
   // is the worse lie. Only a silent cut stays not-ok.
   let out: AgentRun = {
-    ok: last.ok && (stopReason == "final" || (stopReason == "max_steps" && answer != "")),
+    // Cancelled is ok=true whatever the last completion said: nothing
+    // failed — the person stopped it, and an error card over their own
+    // choice would read as the engine objecting.
+    ok: stopReason == "cancelled"
+      || (last.ok && (stopReason == "final" || (stopReason == "max_steps" && answer != ""))),
     text: answer,
     body: last.text,
     status: last.status,
