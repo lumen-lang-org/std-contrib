@@ -403,7 +403,7 @@ export class SearchDash extends LitElement {
             ? html`<span class="of">top ${limit} of ${(buckets ?? []).length}</span>` : nothing}
         </header>
         ${rows.length === 0
-          ? html`<p class="empty">Nothing here yet.</p>`
+          ? html`<p class="empty">No documents counted.</p>`
           : html`<div class="bars">
               ${rows.map((r) => html`
                 <div class="bar-row">
@@ -431,7 +431,8 @@ export class SearchDash extends LitElement {
           <span class="of">${count(total)} over ${points.length} hours</span>
         </header>
         ${points.length < 2
-          ? html`<p class="empty">Not enough hours recorded yet.</p>`
+          ? html`<p class="empty">${points.length === 0
+              ? "No hours recorded." : "One hour recorded; a line needs two."}</p>`
           : html`<nr-sparkline
               points=${JSON.stringify(points)}
               labels=${JSON.stringify(labels)}
@@ -601,7 +602,8 @@ export class SearchDash extends LitElement {
   private statsView(): TemplateResult {
     const s = this.stats;
     if (s === null) {
-      return html`<p class="empty big">${this.loading ? "Reading the index…" : "No numbers yet."}</p>`;
+      return html`<p class="empty big">${this.loading
+        ? "Reading the index…" : "The index answered with nothing."}</p>`;
     }
     const ratio = s.corpus_bytes > 0 ? s.markdown_bytes_raw / s.corpus_bytes : 0;
     const share = s.docs > 0 ? (s.classified / s.docs) * 100 : 0;
@@ -747,7 +749,10 @@ export class SearchDash extends LitElement {
       </div>
       ${this.filterRow()}
       ${this.results === null ? nothing : this.results.length === 0
-        ? html`<p class="empty big">No coverage for that query yet — the corpus is young.</p>`
+        ? html`<p class="empty big">Nothing matched.
+            ${Object.values(this.filters).some((v) => v !== "")
+              ? "Clear the filters, or try fewer words."
+              : "Try fewer words, or a term the pages would use themselves."}</p>`
         : html`
           <p class="tookline">${count(this.results.length)} results in ${this.took} ms</p>
           <ol class="results">
@@ -775,7 +780,7 @@ export class SearchDash extends LitElement {
       <div class="ask">
         <div class="ask-field">
           ${this.field({ id: "r-q", value: this.rq,
-            placeholder: "What would the agent be retrieving for?",
+            placeholder: "A question an agent would need context for",
             on: (v) => { this.rq = v; }, onEnter: () => { void this.retrieve(); } })}
         </div>
         <div class="f k">
@@ -793,7 +798,8 @@ export class SearchDash extends LitElement {
       </div>
       ${this.filterRow()}
       ${this.passages === null ? nothing : passages.length === 0
-        ? html`<p class="empty big">Nothing retrievable for that query yet.</p>`
+        ? html`<p class="empty big">No passages.
+            Run the same query under Search to see whether anything matches at all.</p>`
         : html`
           <div class="budget">
             <p class="tookline">
@@ -843,7 +849,6 @@ export class SearchDash extends LitElement {
         <header class="top">
           <div>
             <h2>Search index</h2>
-            <p class="sub">Read-only. Every figure and result comes from the index API.</p>
           </div>
           ${html`
             <nav class="views">
