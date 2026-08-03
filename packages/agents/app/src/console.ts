@@ -69,6 +69,11 @@ const CAPS: Record<string, { label: string; icon: string; kind: string }> = {
   // "Start from" row — which is the honest state, not a gap: a site's starting
   // point is a sentence about what it is for, and the composer is right there.
   "make-site": { label: "Site", icon: "globe", kind: "site" },
+  // The same skill the composer's globe toggles. Two doors, one pin, one
+  // piece of state — the chip and the globe light together. kind "" means no
+  // Start-from row: research starts from a question, and the composer is
+  // right there.
+  "search-web": { label: "Research", icon: "search", kind: "" },
 };
 const capLabel = (name: string) => CAPS[name]?.label ?? name;
 // The fallback for a skill this table does not know, and it has to be a name
