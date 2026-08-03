@@ -537,6 +537,22 @@ export class SearchDash extends LitElement {
    *  it going, is anything piling up. Everything here is one GET; nothing is
    *  derived except the trend arrows, which are computed from samples this
    *  component kept rather than from anything the API was asked to remember. */
+  /** Whether the data node is the one doing the extracting.
+   *
+   *  Inferred, because the payload does not say. Spool queued above zero means
+   *  the crawl nodes are shipping raw pages for somebody else to extract, and
+   *  the only somebody else is the data node. Inferred from anything ever
+   *  seen rather than from the current sample: spool drains to zero regularly
+   *  on a healthy fleet, and a gauge that reappeared every time it did would
+   *  be worse than one that never went away.
+   *
+   *  The clean answer is `extract_on` in the payload. That is the index API's
+   *  own repo and not this one's to change — if this inference is ever wrong,
+   *  that is the fix, not a cleverer guess here. */
+  private extractsHere(): boolean {
+    return this.spoolHistory.some((n) => n > 0);
+  }
+
   private nodesPanel(): TemplateResult {
     const n = this.nodes;
     if (n === null) {
@@ -551,6 +567,20 @@ export class SearchDash extends LitElement {
     // of a paused one. "empty" is the only genuinely neutral state — a fresh
     // node legitimately has nothing yet.
     const tone = d.status === "ingesting" ? "ok" : d.status === "stalled" ? "bad" : "idle";
+    // A payload that disagrees with itself.
+    //
+    // The index says "empty" only when the docs table has no rows, and answers
+    // -1 for the age in the same breath. Both of those arriving beside a docs
+    // count in the hundreds of thousands is not a state the pipeline can be in
+    // — it is one request's five separate table scans disagreeing about what
+    // they saw, which is what a screenshot of EMPTY beside 130,277 documents
+    // and 604 documents a minute actually was.
+    //
+    // Drawn rather than hidden, and drawn as a fault. Every field here is
+    // individually plausible, so a panel that renders them without comment
+    // reports a dead pipeline to someone whose pipeline is fine — and the next
+    // person to see it has no way to tell this from the real thing.
+    const disagrees = (d.status === "empty" || d.last_doc_age_sec < 0) && d.docs > 0;
     const spark = this.rateHistory;
     const secs = Math.round((Date.now() - this.nodesAt) / 1000);
     return html`
@@ -564,8 +594,14 @@ export class SearchDash extends LitElement {
           </span>
         </header>
 
+        ${disagrees ? html`
+          <p class="disagrees">The index reported
+            <strong>${d.status}</strong> beside ${count(d.docs)} documents, which
+            cannot both be true. Read this panel as unreliable until the index
+            answers consistently.</p>` : nothing}
+
         <div class="pipe-top">
-          <span class="state ${tone}">${d.status}</span>
+          <span class="state ${disagrees ? "bad" : tone}">${d.status}</span>
           <div class="rate">
             <span class="rate-n">${count(n.rate.per_minute_5m)}</span>
             <span class="rate-u">documents / minute</span>
@@ -576,8 +612,14 @@ export class SearchDash extends LitElement {
           </div>
           <div class="proj total">
             <span>${count(d.docs)} documents</span>
-            <span>newest ${d.last_doc_age_sec <= 1 ? "just now"
-              : `${ago(Math.floor(Date.now() / 1000) - d.last_doc_age_sec)}`}</span>
+            <!-- -1 is a sentinel, not an age: it is what the index answers when
+                 MAX(first_seen) found no rows at all. It satisfied the <= 1 test, so a
+                 node that has never ingested a single document reported that its
+                 newest document arrived this second — the most reassuring
+                 possible rendering of the emptiest possible state. -->
+            <span>${d.last_doc_age_sec < 0 ? "no documents yet"
+              : d.last_doc_age_sec <= 1 ? "newest just now"
+              : `newest ${ago(Math.floor(Date.now() / 1000) - d.last_doc_age_sec)}`}</span>
           </div>
         </div>
 
@@ -589,8 +631,21 @@ export class SearchDash extends LitElement {
         <div class="gauges">
           ${this.gauge("Spool queued", d.spool_queued, this.spoolHistory,
             "raw pages awaiting processing")}
-          ${this.gauge("Inbox pending", d.inbox_pending, this.inboxHistory,
-            "bundles awaiting absorption")}
+          <!-- Inbox pending counts bundles awaiting absorption, and only means
+               anything where the crawl nodes extract. This fleet extracts on the
+               data node, so nothing ever produces a bundle and the number is
+               structurally 0 — healthy or dead alike. A gauge that reads zero
+               through a total outage does not merely fail to inform; it trains
+               whoever is watching to take a meaningless number as reassurance.
+
+               Which mode is running is not in the payload. Adding extract_on
+               upstream is the clean fix and it belongs to the index API's own
+               repo, so this infers it instead: spool that has ever been seen
+               queued is proof the crawl nodes ship raw pages, which is the data
+               side doing the extracting. -->
+          ${this.extractsHere() ? nothing
+            : this.gauge("Inbox pending", d.inbox_pending, this.inboxHistory,
+                "bundles awaiting absorption")}
           ${this.gauge("Crawl nodes", n.crawl_nodes.length, [],
             n.crawl_nodes.length === 0 ? "none reporting"
               : n.crawl_nodes.map(nodeName).join(", "),
@@ -992,6 +1047,12 @@ export class SearchDash extends LitElement {
        much older. */
     .pipeline.stale { opacity: .6; }
     .warn-text { color: var(--alert, #B23434); font-weight: 600; }
+    /* A payload that contradicts itself. Above the numbers rather than beside
+       them, because it is about all of them at once. */
+    .disagrees { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px;
+                 background: color-mix(in srgb, var(--alert, #B23434) 9%, transparent);
+                 border: 1px solid color-mix(in srgb, var(--alert, #B23434) 30%, transparent);
+                 font-size: 12.5px; line-height: 1.5; color: var(--fg); }
 
     .pipe-top { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
     /* The state, as a word. "stalled" carries the weight of a failed request,
