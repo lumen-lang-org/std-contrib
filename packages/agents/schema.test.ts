@@ -154,7 +154,7 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Fifty-seven: ten tables from mappings, the plugins pair (a bundle's
+  // Sixty-one: ten tables from mappings, the plugins pair (a bundle's
   // receipt and what it brought — migrations 90.3 and 90.4), three link
   // tables, the credentials table, the index, the twelve ALTERs that add
   // columns those tables did not have when they were first created (the
@@ -163,12 +163,15 @@ test("the plan creates every table, from the mappings", () => {
   // them auth_providers.kind, 90.9; before it a skill's source and
   // sourceUrl, 90.1 and 90.2 — this count sat at 48 while both were already
   // in the plan, which is exactly the "canary nobody updates" failure the
-  // healthz test warns about), the twelve statements of the named seed, the
+  // healthz test warns about), the three tables OAuth connectors need —
+  // 94.1 the client this deployment registered, 94.2 a consent screen still
+  // open, 94.3 what is known about a connection without opening it — the
+  // twelve statements of the named seed, the
   // four of the derived seed, and the three that repair what those four wrote
   // where they did find rows. Every one of them changes nothing on an empty
   // database, which is the point of the empty case. Asserting the number
   // rather than "some" is what catches a migration silently dropped.
-  expect(r.applied == 58);
+  expect(r.applied == 61);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -176,7 +179,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 58);
+  expect(migrate(database, schemaPlan(database)).applied == 61);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

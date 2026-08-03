@@ -13,7 +13,8 @@ import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts"
 import { storeCredential } from "./credentials.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, ScriptImageRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing , userTokenKey } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing } from "./tools.ts";
+import { userTokenKey } from "./connect.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
 import { scriptProbeReset } from "./run-script.ts";

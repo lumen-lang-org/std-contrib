@@ -601,15 +601,138 @@ export function mcpServersMapping(): DbRepository {
     field("serverName", "server_name", "text"),
     field("transport", "transport", "text"),
     field("endpoint", "endpoint", "text"),
-    // How to authenticate: "none", "bearer", or "header". The token itself is
-    // NOT here — it goes through the same encrypted store as a provider key,
-    // because a secret beside the thing it authenticates is decoration.
+    // How to authenticate: "none", "bearer", "header", or "oauth". The token
+    // itself is NOT here — it goes through the same encrypted store as a
+    // provider key, because a secret beside the thing it authenticates is
+    // decoration.
     field("authKind", "auth_kind", "text"),
     // Which header carries it, when the kind is "header".
     field("authHeader", "auth_header", "text"),
     field("enabled", "enabled", "bool"),
   ];
   return repository("mcp_servers", "id", "id", fs);
+}
+
+// --- connectors that authenticate with OAuth --------------------------------------
+//
+// Three tables, and the split between them is the whole design: none of them
+// holds a secret. The access and refresh tokens go through `credentials.ts`
+// like every other secret in this package, so reading this database tells you
+// which connectors a person has attached and tells you nothing you could use.
+
+/* The client this deployment registered with one connector's authorization
+ * server, and where that server's endpoints are.
+ *
+ * Keyed by server id, so re-pointing a connector at a different endpoint is
+ * caught the same way re-pointing a stored token is: the row is for the server
+ * as it was when someone approved it.
+ *
+ * Discovered once and kept, rather than re-discovered per connect. Not for
+ * speed — it is two GETs — but because a client id is a registration at the
+ * far end, and registering a new one on every press would leave a trail of
+ * abandoned clients on somebody else's account. */
+export type McpOauthRow = {
+  // The server's id. One registration per connector.
+  id: string,
+  issuer: string,
+  authorizeUrl: string,
+  tokenUrl: string,
+  clientId: string,
+  // What we ask for, space-separated. "" asks for the server's default.
+  scope: string,
+  // Exactly what was registered. An authorization server compares the redirect
+  // byte-for-byte, so a deployment that moves needs a new registration and
+  // this is what notices.
+  redirectUri: string,
+  registeredAt: string,
+};
+
+export function mcpOauthMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("issuer", "issuer", "text"),
+    field("authorizeUrl", "authorize_url", "text"),
+    field("tokenUrl", "token_url", "text"),
+    field("clientId", "client_id", "text"),
+    field("scope", "scope", "text"),
+    field("redirectUri", "redirect_uri", "text"),
+    field("registeredAt", "registered_at", "text"),
+  ];
+  return repository("mcp_oauth", "id", "id", fs);
+}
+
+/* One press of Connect, waiting for the person to come back from the consent
+ * screen.
+ *
+ * A row rather than memory because the two halves of the flow are two HTTP
+ * requests that may not reach the same worker thread, and because a deploy
+ * mid-consent should fail the flow rather than lose it silently.
+ *
+ * The verifier sits here in the clear, and that is deliberate rather than an
+ * oversight: it is worth nothing without the matching authorization code, it
+ * lives for as long as one consent screen is open, and the row is deleted the
+ * moment it is used. Putting it in the encrypted store would encrypt a value
+ * whose whole security property is that it is single-use and short-lived,
+ * while making the store's contents unbounded. */
+export type McpPendingRow = {
+  // The `state` parameter. Unguessable, and the only thing that comes back
+  // from the browser — which is what makes it the key.
+  id: string,
+  serverId: string,
+  // Who pressed Connect, so the token is stored as theirs. "" on a deployment
+  // with no sign-in, where there is one shared connection.
+  owner: string,
+  verifier: string,
+  startedAt: string,
+};
+
+export function mcpPendingMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("serverId", "server_id", "text"),
+    field("owner", "owner", "text"),
+    field("verifier", "verifier", "text"),
+    field("startedAt", "started_at", "text"),
+  ];
+  return repository("mcp_oauth_pending", "id", "id", fs);
+}
+
+/* What is known about a connection without opening it.
+ *
+ * The tokens are in the credential store, which never reads back — so nothing
+ * could otherwise answer "is this connected, and until when" without trying a
+ * call and waiting for a 401. This row is that answer: when the access token
+ * expires, and whether there is a refresh token to get another.
+ *
+ * Its id is the credential key the tokens live under, so the two cannot drift:
+ * one connection, one grant row, one pair of secrets. */
+export type McpGrantRow = {
+  // The credential key: "mcp:<server>" for the deployment's connection, or
+  // "mcp:<server>:u:<owner>" for a person's own.
+  id: string,
+  serverId: string,
+  owner: string,
+  // Milliseconds since the epoch, as text — `int` is 32 bits here and a
+  // millisecond stamp overflows it. "" when the server named no expiry, which
+  // reads as "does not expire" rather than "expired".
+  expiresAt: string,
+  // Whether a refresh token is stored beside the access token. A connection
+  // without one dies at expiry and needs a person, which is the difference
+  // between drawing "connected" and drawing "reconnect".
+  refreshable: bool,
+  connectedAt: string,
+};
+
+export function mcpGrantsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("serverId", "server_id", "text"),
+    field("owner", "owner", "text"),
+    field("expiresAt", "expires_at", "text"),
+    field("refreshable", "refreshable", "bool"),
+    field("connectedAt", "connected_at", "text"),
+  ];
+  return repository("mcp_oauth_grants", "id", "id", fs);
 }
 
 // The agent as a flat row, for writing.
@@ -1950,6 +2073,15 @@ export function schemaPlan(db: Db): Migration[] {
       "CREATE TABLE IF NOT EXISTS settings ("
       + "id " + db.textType + " PRIMARY KEY, "
       + "value " + db.textType + " NOT NULL)"),
+    // Connectors that authenticate with OAuth. Three tables and not one
+    // secret between them — the tokens are in `credentials`, encrypted, like
+    // every other secret here.
+    migration("94.1", "the client this deployment registered with a connector",
+      createTableSql(db, mcpOauthMapping())),
+    migration("94.2", "a connect in progress, waiting on a consent screen",
+      createTableSql(db, mcpPendingMapping())),
+    migration("94.3", "what is known about a connection without opening it",
+      createTableSql(db, mcpGrantsMapping())),
   ];
   return plan;
 }

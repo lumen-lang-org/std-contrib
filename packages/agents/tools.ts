@@ -13,7 +13,7 @@
 // somebody deploys a new tool.
 
 import { Db } from "../plume/driver.ts";
-import { credentialFor } from "./credentials.ts";
+import { accessTokenFor } from "./connect.ts";
 import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, SkillRow, SkillFileRow, agentsMapping, mcpServersMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
@@ -133,14 +133,6 @@ export function delegateSchema(): string {
 // described without renaming it out from under the server that owns it. The
 // first server linked wins and the clash is recorded, which at least makes it
 // visible to whoever linked them.
-// The key a person's own token for a server lives under. Beside the
-// deployment's "mcp:<id>" rather than in a new table: the credential store
-// already encrypts, already never reads back, and a second store would be a
-// second set of those promises to keep.
-export function userTokenKey(serverId: string, owner: string): string {
-  return "mcp:" + serverId + ":u:" + owner;
-}
-
 export function mountTools(db: Db, agentId: string, master: string, owner: string): Mounted {
   let tools: MountedTool[] = [];
   let problems: string[] = [];
@@ -154,21 +146,16 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
   let t: int = 0;
   while (t < servers.length) {
     let each = servers[t];
-    let held = "";
-    if (each.authKind != "" && each.authKind != "none") {
-      // The person's own token first, the deployment's as the fallback. The
-      // order is the feature: a GitHub connector with one shared PAT calls
-      // out as one account for everybody, which is wrong the moment the
-      // account is somebody's own. "" for owner — a bare run, an unowned
-      // box — skips straight to the shared one, which is what it always did.
-      if (owner != "") {
-        held = credentialFor(db, userTokenKey(each.id, owner), master);
-      }
-      if (held == "") {
-        held = credentialFor(db, "mcp:" + each.id, master);
-      }
-    }
-    tokens.push(held);
+    // The person's own token first, the deployment's as the fallback. The
+    // order is the feature: a GitHub connector with one shared PAT calls out
+    // as one account for everybody, which is wrong the moment the account is
+    // somebody's own. "" for owner — a bare run, an unowned box — skips
+    // straight to the shared one, which is what it always did.
+    //
+    // And for an OAuth connector this is also where an access token that
+    // expired mid-conversation is renewed, before it is put on a header
+    // rather than after the far end has refused it.
+    tokens.push(accessTokenFor(db, each, owner, master));
     t = t + 1;
   }
 

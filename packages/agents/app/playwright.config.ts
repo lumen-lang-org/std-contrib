@@ -48,6 +48,16 @@ const DOUBLES = [
     reuseExistingServer: true,
     timeout: 20_000,
   },
+  {
+    // A connector that signs you in. The OAuth flow needs an authorization
+    // server to be tested at all, and every real one needs a person at a
+    // consent screen and an account — so the suite brings its own, strict
+    // enough that passing it means passing PKCE.
+    command: "node e2e/oauth-double.mjs",
+    url: "http://127.0.0.1:8936/issued",
+    reuseExistingServer: true,
+    timeout: 20_000,
+  },
 ];
 
 // The console under test needs a running API. These specs do not start one —

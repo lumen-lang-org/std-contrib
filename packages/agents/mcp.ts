@@ -130,10 +130,16 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
 // What a server's auth setting means on the wire. "none" sends nothing;
 // "bearer" is the usual Authorization header; "header" is whatever name the
 // row carries, for a server that wants its own.
+//
+// "oauth" is on the wire exactly what "bearer" is — the difference is entirely
+// in where the token came from and who keeps it fresh, which is `connect.ts`'s
+// business and not this file's. That is the whole reason OAuth needed no new
+// transport code: RFC 9728 says the token goes in `Authorization: Bearer`, the
+// same header a pasted key goes in.
 export function authHeaders(server: McpServerRow, token: string): Map<string, string> {
   let out = new Map<string, string>();
   if (token == "" || server.authKind == "none" || server.authKind == "") { return out; }
-  if (server.authKind == "bearer") {
+  if (server.authKind == "bearer" || server.authKind == "oauth") {
     out.set("authorization", "Bearer " + token);
     return out;
   }
