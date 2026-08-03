@@ -64,6 +64,9 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { ModelChoice } from "./api.js";
 
+// The shelf of what is not for sale yet. Display only — see the menu note.
+const COMING = ["Opus 5", "Haiku 4.5", "Mistral Large"];
+
 @customElement("model-picker")
 export class ModelPicker extends LitElement {
   static styles = css`
@@ -141,6 +144,11 @@ export class ModelPicker extends LitElement {
     .mark { flex: none; width: 16px; display: grid; place-items: center;
             padding-top: 1px; }
     .tier { color: var(--muted); }
+    .soon-head { font-size: 11px; font-weight: 600; letter-spacing: .05em;
+                 text-transform: uppercase; color: var(--faint, var(--muted));
+                 padding: 6px 10px 2px; }
+    .row.soon { cursor: default; opacity: .55; }
+    .row.soon:hover { background: none; }
     hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
 
     :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
@@ -265,6 +273,20 @@ export class ModelPicker extends LitElement {
         </button>
         <div slot="content" class="menu" role="menu">
           ${this.choices.map((c) => this.row(c))}
+          ${COMING.length === 0 ? nothing : html`
+          <hr />
+          <!-- Announced, not offered. These are display rows: no click, no
+               role, dimmed — a padlocked pickable row would promise a refusal
+               the engine never performs, and an enabled one would let any
+               crafted POST run the expensive model with no billing anywhere.
+               When tiers become enforceable this list moves to the engine as
+               tier rows; until then it is what it looks like: a sign. -->
+          <div class="soon-head">Coming soon</div>
+          ${COMING.map((m) => html`
+            <div class="row soon">
+              <div class="body"><div class="name"><span>${m}</span>
+                <nr-icon class="tier" name="diamond" size="small"></nr-icon></div></div>
+            </div>`)}`}
           <hr />
           <!-- The way back to "". Under a divider because it is not one of the
                operator's rows: it is the absence of a choice, which is what
