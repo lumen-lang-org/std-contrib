@@ -810,18 +810,14 @@ export function threadSummariesMapping(): DbRepository {
 
 /* A way of signing in that is not a password.
  *
- * The client id is a row; the client SECRET is not — it goes through the same
- * encrypted store as a provider key and a connector token, under
- * "oauth:<id>", because a secret sitting beside the thing it authenticates is
- * decoration. Nothing here can read it back, which is the point.
+ * The client id is a row; the client SECRET goes through the encrypted
+ * credential store under "oauth:<id>" and cannot be read back.
  *
- * `issuer` is what makes an OIDC row a table rather than an enum: discovery
- * means a provider is an address plus a client, so a deployment can add one
- * this package has never heard of without a release. `kind` widens that past
- * OIDC: "github" is OAuth2, which has no discovery document and whose identity
- * mapping is code, not data — so a github row carries no issuer and the
- * console resolves it through a named factory (githubProvider) rather than
- * from the row alone.
+ * `issuer` is why this is a table, not an enum: OIDC discovery makes a
+ * provider an address plus a client id, so a deployment can add one without
+ * a release. `kind` widens that past OIDC — "github" is OAuth2, no discovery
+ * document, identity mapping in code — so a github row carries no issuer and
+ * resolves through githubProvider rather than from the row alone.
  */
 export type AuthProviderRow = {
   id: string,
