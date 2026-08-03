@@ -385,9 +385,13 @@ export function searchProxy(): Middleware {
     }
 
     if (Date.now() < closedUntil) {
+      // The seconds, not "moments ago". This code knows the number, and a
+      // reader deciding whether to retry needs it rather than a word that
+      // could mean two seconds or two minutes.
+      const since = Math.max(1, Math.round((BREAKER_MS - (closedUntil - Date.now())) / 1000));
       json(res, 503, {
         error: "the search index is not answering",
-        detail: "checked moments ago; retrying in the background",
+        detail: `last tried ${since}s ago; retrying in the background`,
         upstream: BASE,
       });
       return;
@@ -443,7 +447,12 @@ export function searchProxy(): Middleware {
           error: timedOut
             ? "the search index did not answer in time"
             : "the search index could not be reached",
-          detail: timedOut ? `${route.path} timed out; /stats and /analytics may still be fine`
+          // Says what happened and how long it waited. The line here used to
+          // read "<route> timed out; /stats and /analytics may still be fine",
+          // which hedges twice and contradicts itself outright when the route
+          // that timed out IS /stats.
+          detail: timedOut
+            ? `${route.path} did not respond within ${Math.round(WAIT_LIVE / 1000)}s`
             : raw.slice(0, 200),
           upstream: BASE,
         });

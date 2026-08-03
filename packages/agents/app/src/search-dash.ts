@@ -799,7 +799,7 @@ export class SearchDash extends LitElement {
       ${this.filterRow()}
       ${this.passages === null ? nothing : passages.length === 0
         ? html`<p class="empty big">No passages.
-            Run the same query under Search to see whether anything matches at all.</p>`
+            Run the same query under Search to see whether anything matches.</p>`
         : html`
           <div class="budget">
             <p class="tookline">
