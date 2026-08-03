@@ -818,7 +818,10 @@ export function replyText(provider: string, body: string): string {
 // `onThinking` is called with the reasoning accumulated so far, each time it
 // grows. It must not throw: a throw does not cross a function value here, so it
 // would escape every `try` between this and the handler.
-export type Thinking = (soFar: string) => void;
+// Both halves of what has streamed so far: the reasoning and the ANSWER.
+// One callback because they grow interleaved from the same events, and a
+// caller that wants only one ignores the other.
+export type Thinking = (soFar: string, contentSoFar: string) => void;
 
 // Asked mid-stream: "should this generation keep going?" Answering true
 // closes the stream where it stands. The caller decides what the question
@@ -972,13 +975,17 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     let delta = jsonRaw(data, "delta");
     if (delta != "") {
       let piece = jsonText(delta, "content");
-      if (piece != "") { content = content + piece; }
+      if (piece != "") {
+        content = content + piece;
+        // Told as it grows, like the reasoning below: this is what lets the
+        // person watch the answer being written instead of meeting it whole.
+        onThinking(reasoning, content);
+      }
       let thought = jsonText(delta, "reasoning_content");
       if (thought == "") { thought = jsonText(delta, "reasoning"); }
       if (thought != "") {
         reasoning = reasoning + thought;
-        // Told as it grows, so the console can draw it growing.
-        onThinking(reasoning);
+        onThinking(reasoning, content);
       }
       let calls = jsonList(jsonRaw(delta, "tool_calls"));
       let c: int = 0;

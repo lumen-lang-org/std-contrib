@@ -479,6 +479,9 @@ export class ChatSession {
   private polling = 0;
   // The placeholder turn the card is drawn into while the round runs.
   private liveId = "";
+  /* The streamed answer-so-far for the round being watched. Painted under the
+     steps card and replaced by the real reply when it lands. */
+  private partial = "";
 
   private state: {
     messages: ChatMessage[];
@@ -521,9 +524,15 @@ export class ChatSession {
       // and settled `live` from what the server recorded, so a late push must
       // not repaint over it.
       if (!this.watching) return;
-      if (round.seq <= this.doneSeq) return;
+      // seq -1 is a round with no tool calls yet — nothing for the card, but
+      // the PARTIAL rides those answers too, and dropping them held the
+      // streamed text back until the first tool call or the end of the turn.
+      // A late push cannot slip through here: unwatch() has already cleared
+      // `watching` by the time the reply settles.
+      if (round.seq >= 0 && round.seq <= this.doneSeq) return;
       this.live = round.steps;
       this.thoughts = round.thoughts ?? [];
+      this.partial = round.partial ?? "";
       this.paintLive();
       this.emit("steps:changed", round);
       return;
@@ -676,6 +685,7 @@ export class ChatSession {
       // The answer carries its own calls, so the card settles on what the
       // server recorded rather than on whatever the last poll tick caught.
       this.unwatch();
+      this.partial = "";
       this.doneSeq = Math.max(this.doneSeq, reply.seq);
       this.live = reply.steps ?? [];
       this.thoughts = reply.thoughts ?? [];
@@ -993,8 +1003,14 @@ export class ChatSession {
   private paintLive(): void {
     if (this.liveId === "") return;
     const card = stepsCard(this.live, this.thoughts);
+    // The answer, being typed. Markdown because the final rendering is
+    // markdown — text that reflows at the end reads as a glitch — but no
+    // cards mid-stream: a half-streamed [CURRENCY] block is not a card yet,
+    // and the landed reply renders them properly. The bar is a cursor.
+    const typing = this.partial === "" ? ""
+      : renderMarkdown(escapeHtml(this.partial)) + "▍";
     this.setMessages(this.state.messages.map((m) =>
-      m.id === this.liveId ? { ...m, text: card } : m));
+      m.id === this.liveId ? { ...m, text: card + typing } : m));
   }
 
   // The answer takes the placeholder's place rather than being appended after

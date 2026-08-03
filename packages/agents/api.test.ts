@@ -590,7 +590,7 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"93\"") >= 0);
+  expect(said.indexOf("\"migration\":\"94\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);

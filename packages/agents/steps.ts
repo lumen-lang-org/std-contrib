@@ -20,7 +20,7 @@
 
 import { Db } from "../plume/driver.ts";
 import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
-import { DbField, DbRepository, DbOrder, asc, desc, field, repository, persist, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
+import { DbField, DbRepository, DbOrder, asc, desc, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 // One dispatched call, before and after it returns.
@@ -153,6 +153,17 @@ export function stepPlan(db: Db): Migration[] {
     // is one sequence across files and the high-water rule refuses reuse.
     migration("70", "steps keep a result preview",
       "ALTER TABLE thread_steps ADD COLUMN result " + db.textType + " NOT NULL DEFAULT ''"),
+    // The answer as it streams. One row per thread, overwritten as the text
+    // grows — same shape as a thought, but the ANSWER: what the person is
+    // waiting to read, visible while the model writes it instead of landing
+    // whole at the end. Scoped by seq so a stale row from the last round is
+    // never shown as this one's; nothing clears it, the scope is the clear.
+    migration("94", "the answer as it streams",
+      "CREATE TABLE IF NOT EXISTS thread_partials ("
+      + "thread_id " + db.textType + " PRIMARY KEY, "
+      + "seq INTEGER NOT NULL, "
+      + "text " + db.textType + " NOT NULL, "
+      + "updated_at " + db.textType + " NOT NULL)"),
   ];
   return plan;
 }
@@ -485,4 +496,43 @@ export function stepsOfThread(db: Db, threadId: string): LiveStep[] {
 export function forgetSteps(db: Db, threadId: string): void {
   let args: string[] = [threadId];
   deleteWhere(db, stepsMapping(), "thread_id = " + placeholderAt(db, 1), args);
+}
+
+
+// The streamed answer so far, one row per thread. See migration 94.
+type PartialRow = {
+  id: string,
+  seq: int,
+  text: string,
+  updatedAt: string,
+};
+
+function partialsMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "thread_id", "text"),
+    field("seq", "seq", "int"),
+    field("text", "text", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("thread_partials", "id", "thread_id", fs);
+}
+
+export function recordPartial(db: Db, threadId: string, seq: int, text: string, now: string): void {
+  if (threadId == "" || text == "") { return; }
+  let row: PartialRow = { id: threadId, seq: seq, text: text, updatedAt: now };
+  persist(db, partialsMapping(), JSON.stringify(row));
+}
+
+// This round's streamed answer, or "" — a row from another round answers
+// nothing, which is what makes clearing unnecessary. seq -1 means "whatever
+// round the row itself claims": a turn that calls no tools writes no steps,
+// so the route has no round number to ask with, and the row's own seq is
+// the only authority there is. The consumer only paints a partial while its
+// own send is in flight, which is what keeps a stale row harmless.
+export function partialOf(db: Db, threadId: string, seq: int): string {
+  let held = findById(db, partialsMapping(), threadId);
+  if (held == "") { return ""; }
+  let row: PartialRow = JSON.parse<PartialRow>(held);
+  if (seq >= 0 && row.seq != seq) { return ""; }
+  return row.text;
 }
