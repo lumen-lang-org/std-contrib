@@ -417,6 +417,12 @@ const SUGGESTIONS = [
   { id: "s-convert", text: "Convert my docflow's distribution from email to SMS" },
 ];
 
+/* What a "went looking" tool is called. Substring rather than an allow-list of
+   names: connectors bring their own tools and a Linear or Notion search is as
+   much a search as the built-in one, so a list maintained here would be a list
+   that goes stale every time somebody presses Connect. */
+const SEARCHY = /search|research|retriev|fetch|browse|crawl|lookup|query/i;
+
 /* The follow-up block the prompt asks every answer to end with:
    [FOLLOWUPS]{"items":["…","…"]}[/FOLLOWUPS]. Parsed out of the reply before
    rendering — the chips get the items, the reader never sees the block. The
@@ -613,6 +619,25 @@ export class ChatSession {
     return this.state;
   }
 
+  /* Whether this round actually went looking for something.
+
+     Follow-ups are Perplexity's move and they work there because every answer
+     is a search: three next questions are three more searches. Here most
+     rounds are not. Asked to correct "pas besoin de la saisi dans ce cas",
+     the model answered in one line and then offered "Quelle est la
+     signification de ce texte ?" — a question about a sentence the person had
+     just written themselves. Three of those under a one-line answer is a
+     surface inventing work.
+
+     So the chips follow the tools, not the prose: a round that searched,
+     retrieved or fetched has somewhere further to go, and a round that only
+     rewrote a sentence does not. The model keeps emitting the block — it is
+     told to by a prompt in the database, not by anything here — and this
+     decides whether it was worth showing. */
+  private searched(): boolean {
+    return this.live.some((s) => s.kind === "tool" && SEARCHY.test(s.name));
+  }
+
   // The calls of the round now running, or of the last one that ran. Never a
   // fresh array per call: getState() building fresh arrays every time pegged
   // this tab once already, and this is read on the same render path.
@@ -746,8 +771,11 @@ export class ChatSession {
         saved = rows.filter((r) => r.turnSeq === reply.seq)
           .map((r) => ({ slot: r.slot, version: r.version, path: r.path }));
       }
+      // The block is always parsed out of the prose — a raw [FOLLOWUPS]{…}
+      // rendered as text is the one outcome nobody can want — but the chips
+      // are only offered where they lead somewhere.
       const split = splitFollowups(reply.ok ? reply.text : reply.error);
-      this.followups = reply.ok
+      this.followups = reply.ok && this.searched()
         ? split.items.map((t, n) => ({ id: `fu-${reply.seq}-${n}`, text: t }))
         : EMPTY_SUGGESTIONS;
       this.replaceLive({
@@ -1058,7 +1086,12 @@ export class ChatSession {
     // and the landed reply renders them properly. The bar is a cursor.
     const shown = splitFollowups(this.partial).text;
     const typing = shown === "" ? ""
-      : renderMarkdown(escapeHtml(shown)) + "▍";
+      // No trailing block cursor. It was a caret glyph appended to the
+      // streamed text, and it sat on its own line whenever the partial ended
+      // at a block boundary — a black rectangle under the paragraph, which
+      // reads as a rendering fault rather than as "still typing". The steps
+      // card above already says the round is running.
+      : renderMarkdown(escapeHtml(shown));
     this.setMessages(this.state.messages.map((m) =>
       m.id === this.liveId ? { ...m, text: card + typing } : m));
   }
