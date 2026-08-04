@@ -374,13 +374,13 @@ function testKey(): string { return "0123456789abcdef0123456789abcdef"; }
 // "Agent default", which is the id "" SENT rather than the field left out.
 function ask(threadId: string, choiceId: string): ThreadReply {
   let said: ModelPick = { choiceId: choiceId, sent: true };
-  return runInThreadWith(database, threadId, { userText: "how many A-114 are in Lyon?", master: testKey(), tracer: noTracer(), pick: said });
+  return runInThreadWith(database, threadId, { userText: "how many A-114 are in Lyon?", master: testKey(), tracer: noTracer(), pick: said, think: false });
 }
 
 // One turn that says nothing about the model at all: every caller written
 // before the picker existed, and every curl that leaves the field out.
 function asks(threadId: string): ThreadReply {
-  return runInThreadWith(database, threadId, { userText: "how many A-114 are in Lyon?", master: testKey(), tracer: noTracer(), pick: inheritedPick() });
+  return runInThreadWith(database, threadId, { userText: "how many A-114 are in Lyon?", master: testKey(), tracer: noTracer(), pick: inheritedPick(), think: false });
 }
 
 test("a message's choice answers that turn and the thread remembers it", () => {
