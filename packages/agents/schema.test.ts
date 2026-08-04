@@ -154,7 +154,7 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  // Sixty-one: ten tables from mappings, the plugins pair (a bundle's
+  // Sixty-two: ten tables from mappings, the plugins pair (a bundle's
   // receipt and what it brought — migrations 90.3 and 90.4), three link
   // tables, the credentials table, the index, the twelve ALTERs that add
   // columns those tables did not have when they were first created (the
@@ -171,7 +171,7 @@ test("the plan creates every table, from the mappings", () => {
   // where they did find rows. Every one of them changes nothing on an empty
   // database, which is the point of the empty case. Asserting the number
   // rather than "some" is what catches a migration silently dropped.
-  expect(r.applied == 61);
+  expect(r.applied == 62);
   // Every table answers, which means every generated statement ran.
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
@@ -179,7 +179,7 @@ test("the plan creates every table, from the mappings", () => {
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 61);
+  expect(migrate(database, schemaPlan(database)).applied == 62);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

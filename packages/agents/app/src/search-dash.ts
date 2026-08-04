@@ -803,7 +803,11 @@ export class SearchDash extends LitElement {
         </button>
       </div>
       ${this.filterRow()}
-      ${this.results === null ? nothing : this.results.length === 0
+      ${this.results === null
+        ? html`<p class="empty big resting">Ask the index something. Results are
+            the pages themselves — title, URL and the matched text — ranked by
+            BM25, not by a model.</p>`
+        : this.results.length === 0
         ? html`<p class="empty big">Nothing matched.
             ${Object.values(this.filters).some((v) => v !== "")
               ? "Clear the filters, or try fewer words."
@@ -852,7 +856,11 @@ export class SearchDash extends LitElement {
         </button>
       </div>
       ${this.filterRow()}
-      ${this.passages === null ? nothing : passages.length === 0
+      ${this.passages === null
+        ? html`<p class="empty big resting">Ask what an agent would need context
+            for. This returns the passages a retrieval call would hand the
+            model, with the scores and the budget they would spend.</p>`
+        : passages.length === 0
         ? html`<p class="empty big">No passages.
             Run the same query under Search to see whether anything matches.</p>`
         : html`
@@ -926,7 +934,15 @@ export class SearchDash extends LitElement {
   }
 
   static styles = css`
+    /* The admin dashboard fills the pane it was given.
+       :host was display:block with no height, so the shadow content was only
+       ever as tall as itself — which is right on Stats, where the panels
+       overflow and the pane scrolls, and wrong on Search and RAG, where a
+       query box and a filter row came to 190px inside an 845px pane and left
+       655px of nothing under them. The public page keeps its natural height:
+       it is a document that ends, not a surface to fill. */
     :host { display: block; color: var(--fg); }
+    :host([mode="admin"]) { display: flex; flex-direction: column; min-height: 100%; }
     /* Every box here is border-box. Not a habit — the query field is
        width:100% inside a flex column with padding and a border, and under the
        default content-box it overflowed its container by exactly those 26px
@@ -934,6 +950,16 @@ export class SearchDash extends LitElement {
        reset, so the rule has to be stated. */
     *, *::before, *::after { box-sizing: border-box; }
     .wrap { display: flex; flex-direction: column; gap: 18px; }
+    :host([mode="admin"]) .wrap { flex: 1; min-height: 0; }
+    /* Whatever the view puts last takes the slack, so an empty state sits in
+       the middle of the space it owns rather than pinned under the filters
+       with the rest of the pane blank beneath it. */
+    :host([mode="admin"]) .wrap > :last-child { flex: 1 1 auto; min-height: 0; }
+    .empty.big { display: grid; place-content: center; }
+    /* The state before anybody has asked anything. Quieter than a result that
+       came back empty: nothing has gone wrong, the view is simply waiting. */
+    .empty.big.resting { color: var(--faint); max-width: 44ch;
+                         margin-inline: auto; text-align: center; }
 
     /* --- the public page ---------------------------------------------------
        Set as a colophon: an eyebrow, one count at display size, and two

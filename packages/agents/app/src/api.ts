@@ -1067,10 +1067,24 @@ export const listServers = () => call<ServerRow[]>("/servers");
 export type ServerTools = {
   serverId: string;
   problem: string;
-  tools: { name: string; description: string }[];
+  // `on` is what this deployment does with the tool; the rest is what the
+  // connector offers. A screen that showed only the offer would draw switches
+  // it could not reflect.
+  tools: { name: string; description: string; on: boolean }[];
 };
 export const serverTools = (id: string) =>
   call<ServerTools>(`/servers/${encodeURIComponent(id)}/tools`);
+/* Mount or unmount one of a connector's tools.
+ *
+ * Deployment-wide, unlike a token: what is mounted decides what every
+ * conversation's model is told it can do. It matters because tool specs are
+ * spent context — Linear offers 52, and all of them together are more than a
+ * small local model can hold. */
+export const setServerTool = (id: string, tool: string, on: boolean) =>
+  call<unknown>(`/servers/${encodeURIComponent(id)}/tools/${encodeURIComponent(tool)}`, {
+    method: "PUT", body: JSON.stringify({ on }),
+  });
+
 export const createServer = (row: ServerRow) =>
   call<ServerRow>("/servers", { method: "POST", body: JSON.stringify(row) });
 

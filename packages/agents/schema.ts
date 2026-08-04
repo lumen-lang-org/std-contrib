@@ -613,6 +613,35 @@ export function mcpServersMapping(): DbRepository {
   return repository("mcp_servers", "id", "id", fs);
 }
 
+/* A tool a connector offers that this deployment does not want mounted.
+ *
+ * Rows are the exceptions, not the roster: a connector's tools are the
+ * connector's to change, and a table listing the ones that ARE on would go
+ * stale the moment a vendor shipped a new one — silently, by omission, which
+ * is the failure mode that reads as "the connector is broken".
+ *
+ * It earns its place because tool specs are spent context. Linear offers 52,
+ * each with its own JSON Schema, and mounting all of them put more into the
+ * prompt than Qwen 3 8B could hold — the model refused the request outright
+ * rather than answering worse. Turning some off is the difference between a
+ * connector that works on a small model and one that cannot be used at all.
+ */
+export type McpToolOffRow = {
+  // serverId + ":" + toolName. Composite, because the pair is the fact.
+  id: string,
+  serverId: string,
+  toolName: string,
+};
+
+export function mcpToolsOffMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("serverId", "server_id", "text"),
+    field("toolName", "tool_name", "text"),
+  ];
+  return repository("mcp_tools_off", "id", "id", fs);
+}
+
 // --- connectors that authenticate with OAuth --------------------------------------
 //
 // Three tables, and the split between them is the whole design: none of them
@@ -2082,6 +2111,10 @@ export function schemaPlan(db: Db): Migration[] {
       createTableSql(db, mcpPendingMapping())),
     migration("94.3", "what is known about a connection without opening it",
       createTableSql(db, mcpGrantsMapping())),
+    // Which of a connector's tools not to mount. The exceptions, so a vendor
+    // shipping a new tool does not need a migration here to be usable.
+    migration("94.4", "a tool a connector offers that this deployment declines",
+      createTableSql(db, mcpToolsOffMapping())),
   ];
   return plan;
 }

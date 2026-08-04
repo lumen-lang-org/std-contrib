@@ -13,7 +13,7 @@
 // somebody deploys a new tool.
 
 import { Db } from "../plume/driver.ts";
-import { accessTokenFor } from "./connect.ts";
+import { accessTokenFor, toolsOff } from "./connect.ts";
 import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, SkillRow, SkillFileRow, agentsMapping, mcpServersMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
@@ -188,8 +188,19 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
       continue;
     }
 
+    // The tools this deployment has switched off for this connector. Read once
+    // per server rather than per tool: a connector with 52 of them would
+    // otherwise be 52 queries to mount one agent.
+    let declined = toolsOff(db, server.id);
+
     let i: int = 0;
     while (i < offered.length) {
+      if (declined.includes(offered[i].name)) {
+        // Silently, and not as a problem: a tool switched off on purpose is
+        // not a fault, and reporting 40 of them would bury the ones that are.
+        i = i + 1;
+        continue;
+      }
       if (mountedIndex(tools, offered[i].name) >= 0) {
         problems.push(server.serverName + " also offers \"" + offered[i].name + "\", which is already mounted");
       } else {

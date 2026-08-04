@@ -19,8 +19,8 @@
 // 401 the model has to explain.
 
 import { Db } from "../plume/driver.ts";
-import { findById, persist, deleteById, listWhere, placeholderAt } from "../plume/plume.ts";
-import { McpServerRow, McpOauthRow, McpPendingRow, McpGrantRow, mcpOauthMapping, mcpPendingMapping, mcpGrantsMapping, mcpServersMapping } from "./schema.ts";
+import { DbField, DbRepository, findById, persist, deleteById, listWhere, placeholderAt, executeWith, countWhere, field, repository } from "../plume/plume.ts";
+import { McpServerRow, McpOauthRow, McpPendingRow, McpGrantRow, AgentRow, mcpOauthMapping, mcpPendingMapping, mcpGrantsMapping, mcpServersMapping, agentsMapping, McpToolOffRow, mcpToolsOffMapping } from "./schema.ts";
 import { credentialFor, storeCredential, hasCredential, forgetCredential } from "./credentials.ts";
 import { Discovery, Grant, consentUrl, discover, exchangeCode, newState, newVerifier, refreshGrant, registerClient } from "./mcp-oauth.ts";
 
@@ -402,7 +402,50 @@ export function completeConnect(db: Db, master: string, state: string, code: str
   // everything switched off, and staying off after someone signed in reads as
   // the connection having failed.
   enable(db, server.id);
+  // And attach it, which is the other half of the same sentence.
+  //
+  // Enabling a connector only says it MAY be called. What decides whether a
+  // model ever sees its tools is `agent_mcp_servers`, and a freshly connected
+  // connector was linked to nothing — so signing in to Linear, correctly, all
+  // the way to a live refreshable token, produced an agent that answered "the
+  // Linear tool is not a standard or widely recognized tool". Every part of
+  // the flow reported success and the feature did nothing.
+  attachToDefault(db, server.id);
   return { serverId: server.id, serverName: server.serverName, problem: "" };
+}
+
+/* Give the connector to the agent people actually talk to.
+ *
+ * The default agent, and only that one. Attaching to every agent would hand a
+ * person's Linear account to a sub-agent written for something else, and
+ * attaching to none is what this is fixing. The default is the one the console
+ * opens a new conversation with, so it is the one whose tools a person expects
+ * to change when they press Connect.
+ *
+ * Additive and idempotent: an operator who later attaches it elsewhere, or
+ * detaches it here, is not overruled the next time somebody reconnects. */
+function attachToDefault(db: Db, serverId: string): void {
+  let agents = JSON.parse<AgentRow[]>(listWhere(db, agentsMapping(),
+    "is_default = " + placeholderAt(db, 1), ["1"]));
+  if (agents.length == 0) { return; }
+  let agentId = agents[0].id;
+  if (countWhere(db, agentServerLink(),
+        "agent_id = " + placeholderAt(db, 1) + " AND server_id = " + placeholderAt(db, 2),
+        [agentId, serverId]) > 0) {
+    return;
+  }
+  executeWith(db, "INSERT INTO agent_mcp_servers (agent_id, server_id) VALUES ("
+    + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ")", [agentId, serverId]);
+}
+
+/* The link table as something countWhere can read. Two columns and no id —
+ * it is a join, not a record — so it never gets a mapping in schema.ts. */
+function agentServerLink(): DbRepository {
+  let fs: DbField[] = [
+    field("agentId", "agent_id", "text"),
+    field("serverId", "server_id", "text"),
+  ];
+  return repository("agent_mcp_servers", "agentId", "agent_id", fs);
 }
 
 function enable(db: Db, serverId: string): void {
@@ -454,4 +497,35 @@ export function forgetConnector(db: Db, serverId: string, master: string): void 
     deleteById(db, mcpGrantsMapping(), rows[i].id);
     i = i + 1;
   }
+}
+
+// --- which of a connector's tools are mounted -------------------------------------
+//
+// The rows are the exceptions. A connector's roster is the connector's to
+// change, so a list of what IS on would go stale by omission every time a
+// vendor shipped a tool — and go stale silently, which reads as the connector
+// being broken rather than as a new tool nobody has switched on.
+
+/** The tools switched off for this connector. */
+export function toolsOff(db: Db, serverId: string): string[] {
+  let rows = JSON.parse<McpToolOffRow[]>(listWhere(db, mcpToolsOffMapping(),
+    "server_id = " + placeholderAt(db, 1), [serverId]));
+  let out: string[] = [];
+  let i: int = 0;
+  while (i < rows.length) { out.push(rows[i].toolName); i = i + 1; }
+  return out;
+}
+
+/** Switch one tool on or off. Idempotent both ways, because the console sends
+ *  the state it wants rather than a toggle — two tabs open on the same
+ *  connector should not be able to invert each other. */
+export function setToolOn(db: Db, serverId: string, toolName: string, on: bool): void {
+  let id = serverId + ":" + toolName;
+  if (on) {
+    deleteById(db, mcpToolsOffMapping(), id);
+    return;
+  }
+  if (findById(db, mcpToolsOffMapping(), id) != "") { return; }
+  let row: McpToolOffRow = { id: id, serverId: serverId, toolName: toolName };
+  persist(db, mcpToolsOffMapping(), JSON.stringify(row));
 }

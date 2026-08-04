@@ -99,6 +99,18 @@ function rpc(endpoint: string, id: int, method: string, params: string): McpCall
 function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: string, params: string): McpCall {
   let headers = new Map<string, string>();
   headers.set("content-type", "application/json");
+  // Both, and not one or the other.
+  //
+  // MCP's Streamable HTTP transport lets a server answer a single POST either
+  // as JSON or as an SSE stream, and it decides which — so a client has to say
+  // it will take both. Linear refuses outright without it:
+  //
+  //   HTTP 406 Not Acceptable: Client must accept both application/json and
+  //   text/event-stream
+  //
+  // which is what every hosted connector on the shelf does, and what made a
+  // perfectly good OAuth token look like a dead endpoint.
+  headers.set("accept", "application/json, text/event-stream");
   for (const name of extra.keys()) {
     headers.set(name, extra.get(name) ?? "");
   }
@@ -107,21 +119,70 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
   body = body + "}";
 
   let res = http.request(endpoint, "POST", body, headers);
-  if (!res.ok) {
+  // `ok` is false for every non-2xx, not only for a connection that failed —
+  // so this branch was reporting "no answer from <endpoint>" about servers
+  // that had answered perfectly clearly, 401 included. A person reading that
+  // goes looking at DNS and firewalls for a problem that is a token. The
+  // status is the thing to lead with wherever there is one.
+  if (res.status == 0) {
     let failed: McpCall = { ok: false, text: "", error: "no answer from " + endpoint };
     return failed;
   }
   if (res.status != 200) {
-    let bad: McpCall = { ok: false, text: res.body, error: "HTTP " + `${res.status}` };
+    // The body too, capped: an MCP server that refuses says why in it, and
+    // "HTTP 401" alone cannot distinguish an expired token from a revoked one
+    // from a scope the connector will not grant.
+    let said = res.body.length > 200 ? res.body.slice(0, 200) : res.body;
+    let bad: McpCall = { ok: false, text: res.body,
+      error: "HTTP " + `${res.status}` + (said == "" ? "" : ": " + said) };
     return bad;
   }
-  let refused = rpcFailure(res.body);
+  let envelope = jsonOf(res.body);
+  let refused = rpcFailure(envelope);
   if (refused.failed) {
-    let rpcErr: McpCall = { ok: false, text: res.body, error: refused.message };
+    let rpcErr: McpCall = { ok: false, text: envelope, error: refused.message };
     return rpcErr;
   }
-  let good: McpCall = { ok: true, text: res.body, error: "" };
+  let good: McpCall = { ok: true, text: envelope, error: "" };
   return good;
+}
+
+// The JSON-RPC envelope, whichever way the server chose to send it.
+//
+// Having asked for both, we get both: some servers answer a POST with a plain
+// JSON body and others frame the same envelope as one Server-Sent Event —
+//
+//   event: message
+//   data: {"jsonrpc":"2.0","id":2,"result":{"tools":[…]}}
+//
+// — and the difference is the server's to make per request, not a property of
+// the connector this could be configured with. Unwrapped here rather than in
+// each caller: `toolListing` and `callTool` both scan the envelope, and a
+// scanner handed an SSE frame finds the keys it wants inside the `data:` line
+// anyway, which is worse than failing — it half-works until a field name
+// appears in the framing.
+export function jsonOf(body: string): string {
+  let text = body.trim();
+  if (text == "" || text.startsWith("{") || text.startsWith("[")) { return text; }
+  // Take the LAST data line that carries an envelope: a stream may carry
+  // progress notifications before the reply, and the reply is what a caller
+  // asked for. Continuation lines of one SSE field are joined with "\n" by the
+  // specification, and no MCP server sends a multi-line JSON payload, so this
+  // reads one line per event and takes the last that parses as an object.
+  let found = "";
+  let rest = text;
+  while (true) {
+    let at = rest.indexOf("data:");
+    if (at < 0) { break; }
+    rest = rest.slice(at + 5, rest.length);
+    let end = rest.indexOf("\n");
+    let line = (end < 0 ? rest : rest.slice(0, end)).trim();
+    if (line.startsWith("{")) { found = line; }
+    if (end < 0) { break; }
+    rest = rest.slice(end + 1, rest.length);
+  }
+  if (found != "") { return found; }
+  return text;
 }
 
 // The handshake. A server that will not initialise is not mounted, and saying

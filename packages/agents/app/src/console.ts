@@ -19,13 +19,13 @@ import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   QUOTA_SPENT, SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, getQuota, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
-  ServerRow, listServers, listSkills, copySkillLocally, createServer,
+  ServerRow, listServers, listSkills, copySkillLocally, createServer, updateServer, serverTools, setServerTool,
   ConnectionRow, listConnections,
   PluginRow, listPlugins, pluginItems, SkillFileRow, listSkillFiles, readBanner } from "./api.js";
 import "./mcp-gallery.js";
 import { CATALOGUE, brandMark } from "./mcp-gallery.js";
 import type { CatalogueEntry, EntryStatus } from "./mcp-gallery.js";
-import { connectEntry } from "./connect-flow.js";
+import { connectEntry, connectServer } from "./connect-flow.js";
 import { ChatSession } from "./chat-session.js";
 import * as live from "./live.js";
 
@@ -978,6 +978,52 @@ export class AgentConsole extends LitElement {
        splitting them across tabs would hide the answer to "what can I add"
        behind a click. */
     .gallery-scroll mcp-gallery { display: block; padding: 0 16px 16px; }
+    /* --- a connector, with its switches ------------------------------------ */
+    .conn-list { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
+    .conn { border: 1px solid var(--border); border-radius: 12px;
+            background: var(--bg-card); padding: 10px 12px; }
+    .conn-top { display: flex; align-items: center; gap: 10px; }
+    .conn-mark { display: inline-grid; place-items: center; width: 20px; height: 20px;
+                 flex: none; }
+    .conn-mark svg { width: 16px; height: 16px; display: block; }
+    .conn-name { font-size: 14px; font-weight: 600; flex: 1; min-width: 0;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conn-ok { font-size: 12px; color: var(--ok); white-space: nowrap; }
+    .conn-connect { font: inherit; font-size: 12.5px; padding: 4px 12px; cursor: pointer;
+                    border-radius: 999px; border: 1px solid var(--brand);
+                    background: var(--brand); color: var(--accent-fg); white-space: nowrap; }
+    /* The switch. A button with role=switch rather than a checkbox: it is the
+       control the reference uses, it reads to a screen reader as on or off
+       rather than as checked, and it needs no label beside it to be understood. */
+    .sw { flex: none; width: 34px; height: 20px; border-radius: 999px; cursor: pointer;
+          border: 1px solid var(--border); background: var(--bg-sunken); padding: 0;
+          position: relative; transition: background-color .16s cubic-bezier(.23,1,.32,1),
+                                          border-color .16s cubic-bezier(.23,1,.32,1); }
+    .sw span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+               border-radius: 50%; background: var(--muted); display: block;
+               transition: transform .16s cubic-bezier(.23,1,.32,1), background-color .16s; }
+    .sw.on { background: var(--brand); border-color: var(--brand); }
+    .sw.on span { transform: translateX(14px); background: var(--accent-fg); }
+    .conn-sub { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+    .conn-where { font-size: 12px; color: var(--faint); flex: 1; min-width: 0;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conn-tools { display: inline-flex; align-items: center; gap: 4px; flex: none;
+                  font: inherit; font-size: 12px; background: none; border: 0;
+                  padding: 0; cursor: pointer; color: var(--muted); }
+    .conn-tools:hover { color: var(--fg); }
+    /* The tool list. Scrolls at about eight rows: a connector with 52 of them
+       would otherwise push the shelf below it off the panel entirely. */
+    .tool-list { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+                 max-height: 260px; overflow-y: auto; display: flex;
+                 flex-direction: column; gap: 2px; }
+    .tool { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline;
+            gap: 8px; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
+    .tool:hover { background: var(--bg-sunken); }
+    .tool input { margin: 0; accent-color: var(--brand); cursor: pointer; }
+    .tool-name { font-size: 12.5px; font-family: var(--mono, monospace); }
+    .tool-why { font-size: 12px; color: var(--muted); overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+    .tool-none { margin: 0; padding: 6px; font-size: 12.5px; color: var(--muted); }
     /* A brand mark in the tile a connector's icon would have used. The tile
        keeps its size and shape so the grid stays a grid; only what is drawn
        inside it changes. */
@@ -1392,6 +1438,9 @@ export class AgentConsole extends LitElement {
   @state() private connections = new Map<string, ConnectionRow>();
   /* Why a Connect did not work, said under the shelf that offered it. */
   @state() private connectProblem = "";
+  /* Which connector's tool list is open, and what each one offered. */
+  @state() private toolsOpen = "";
+  @state() private toolList = new Map<string, { name: string; description: string; on: boolean }[]>();
   /* Installed bundles, and what each one brought. The directory needs the
      second to say "From <plugin>" on a skill card: a plugin's skill is stored
      as an ordinary repo-sourced skill, so without the receipts there is no way
@@ -2144,6 +2193,7 @@ export class AgentConsole extends LitElement {
     // conversation you own.
     this.mine = found !== undefined;
     await this.session.open(id);
+    this.takeComposer();
     if (found === undefined) {
       this.mine = await transcript(id).then((t) => t.mine !== false).catch(() => true);
     }
@@ -2159,6 +2209,33 @@ export class AgentConsole extends LitElement {
   private fresh() {
     this.route("");
     this.threadId = ""; this.turnRefs = []; this.railClosed = false; this.session.fresh();
+    this.takeComposer();
+  }
+
+  /* Put the caret where the person is about to type.
+
+     Opening a conversation, or starting one, is a person saying they intend to
+     write — and every other chat surface acts on that. Without it the first
+     keystroke goes nowhere and has to be typed twice.
+
+     Deferred past the render that is about to happen: the composer lives in
+     another component's shadow root and, on a fresh conversation, is not on
+     screen at the moment this is called. Skipped where a pointer is not the
+     input method — focusing on a phone raises the keyboard over the
+     conversation somebody just opened to read. */
+  private takeComposer(): void {
+    if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) { return; }
+    void this.updateComplete.then(() => {
+      requestAnimationFrame(() => {
+        const box = this.composerBox();
+        if (box === null) { return; }
+        // Not while a dialog owns the screen: the directory and the settings
+        // overlay both take focus for their own controls, and stealing it back
+        // would fight them.
+        if (this.gallery !== "" || this.indexOpen) { return; }
+        box.focus();
+      });
+    });
   }
 
   // Whether the person shut the rail themselves. The auto-open below must
@@ -2721,7 +2798,7 @@ export class AgentConsole extends LitElement {
                 this.galleryFind = (e.target as HTMLInputElement).value; }}>
           </div>`}
         ${shelf === "connectors"
-          ? this.connectorsShelf(shown, rows.length)
+          ? this.connectorsShelf()
           : rows.length === 0
             ? html`<p class="gallery-none">${empty}</p>`
             : shown.length === 0
@@ -2739,18 +2816,15 @@ export class AgentConsole extends LitElement {
      52px and its cards were clipped mid-card by the overflow that makes it
      scroll. Under a heading the column is the scroller and both grids are
      `flat`. */
-  private connectorsShelf(shown: GalleryRow[], total: number) {
+  private connectorsShelf() {
     return html`
       <div class="gallery-scroll">
-        ${total === 0
+        ${this.servers.length === 0
           ? nothing
           : html`
             <div class="gallery-group">Yours
-              <span class="gallery-count">${shown.length}</span></div>
-            ${shown.length === 0
-              ? html`<p class="gallery-none">Nothing matches
-                  “${this.galleryFind.trim()}”.</p>`
-              : this.galleryGrid(shown, "connectors", false)}`}
+              <span class="gallery-count">${this.servers.length}</span></div>
+            <div class="conn-list">${this.servers.map((s) => this.connectorRow(s))}</div>`}
         <div class="gallery-group">Ready to connect</div>
         <mcp-gallery
           .taken=${this.servers.map((s) => s.endpoint)}
@@ -2778,6 +2852,126 @@ export class AgentConsole extends LitElement {
       }
     }
     return html`<span class="pick-tile"><nr-icon name=${r.icon} size="small"></nr-icon></span>`;
+  }
+
+  /* One connector, with the two switches that decide what it costs.
+
+     A connector is off, on, or on-with-some-tools-off, and the last is not a
+     refinement — it is what makes a big connector usable at all. Linear offers
+     52 tools and each one's JSON Schema goes into every prompt: mounted whole,
+     they put more in front of Qwen 3 8B than it can hold, and it refused the
+     request outright rather than answering worse. So the tool list is not an
+     advanced screen tucked away somewhere; it is on the row, one press down. */
+  private connectorRow(s: ServerRow) {
+    const entry = CATALOGUE.find((e) => e.endpoint === s.endpoint);
+    const held = this.connections.get(s.id);
+    const open = this.toolsOpen === s.id;
+    const listed = this.toolList.get(s.id);
+    return html`
+      <div class="conn">
+        <div class="conn-top">
+          <span class="conn-mark" style=${entry === undefined ? "" : `color:${entry.tint}`}>
+            ${entry === undefined
+              ? html`<nr-icon name="plug" size="small"></nr-icon>`
+              : brandMark(entry)}
+          </span>
+          <span class="conn-name">${s.serverName}</span>
+          ${s.authKind !== "oauth" ? nothing
+            : (held?.state ?? "none") === "none"
+              ? html`<button class="conn-connect"
+                  @click=${() => void this.connectConnector2(s)}>Connect</button>`
+              : (held?.state === "stale"
+                ? html`<button class="conn-connect"
+                    @click=${() => void this.connectConnector2(s)}>Reconnect</button>`
+                : html`<span class="conn-ok">signed in</span>`)}
+          <!-- The connector's own switch. Off means the agent is never told it
+               exists, which is the honest meaning of "disabled" and the reason
+               it is a switch rather than a delete: turning it back on should
+               not mean signing in again. -->
+          <button class=${s.enabled ? "sw on" : "sw"} role="switch"
+            aria-checked=${s.enabled ? "true" : "false"}
+            aria-label=${(s.enabled ? "Disable " : "Enable ") + s.serverName}
+            @click=${() => void this.toggleConnector(s)}><span></span></button>
+        </div>
+        <div class="conn-sub">
+          <span class="conn-where">${s.endpoint}</span>
+          ${!s.enabled ? nothing : html`
+            <button class="conn-tools" @click=${() => void this.openTools(s.id)}>
+              ${listed === undefined ? "Tool access"
+                : `${listed.filter((t) => t.on).length} of ${listed.length} tools`}
+              <nr-icon name=${open ? "chevron-up" : "chevron-down"} size="small"></nr-icon>
+            </button>`}
+        </div>
+        ${!open ? nothing : html`
+          <div class="tool-list">
+            ${listed === undefined
+              ? html`<p class="tool-none">Asking ${s.serverName} what it offers…</p>`
+              : listed.length === 0
+                ? html`<p class="tool-none">${s.serverName} offered no tools.</p>`
+                : listed.map((t) => html`
+                    <label class="tool">
+                      <input type="checkbox" .checked=${t.on}
+                        @change=${(e: Event) => void this.toggleTool(
+                          s.id, t.name, (e.target as HTMLInputElement).checked)}>
+                      <span class="tool-name">${t.name}</span>
+                      <span class="tool-why">${t.description}</span>
+                    </label>`)}
+          </div>`}
+      </div>`;
+  }
+
+  private async toggleConnector(s: ServerRow) {
+    this.connectProblem = "";
+    try {
+      await updateServer({ ...s, enabled: !s.enabled });
+      this.servers = await listServers();
+    } catch (e) {
+      this.connectProblem = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private async connectConnector2(s: ServerRow) {
+    this.connectProblem = "";
+    const done = await connectServer(s.id, this.servers);
+    this.servers = done.servers;
+    this.connectProblem = done.problem;
+    await this.loadConnections();
+  }
+
+  /* The tool list, fetched when it is first opened rather than with the shelf.
+     It is a live call to the connector — the roster is the connector's to
+     change, so there is nothing here to cache and asking twelve of them on
+     every open would be twelve tailnet round trips nobody asked for. */
+  private async openTools(id: string) {
+    if (this.toolsOpen === id) { this.toolsOpen = ""; return; }
+    this.toolsOpen = id;
+    if (this.toolList.has(id)) { return; }
+    try {
+      const answer = await serverTools(id);
+      const held = new Map(this.toolList);
+      held.set(id, answer.tools);
+      this.toolList = held;
+      if (answer.problem !== "") { this.connectProblem = answer.problem; }
+    } catch (e) {
+      this.connectProblem = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private async toggleTool(id: string, tool: string, on: boolean) {
+    // Drawn immediately and written behind it: a checkbox that waits for a
+    // round trip feels broken, and the failure path puts it back.
+    const before = this.toolList.get(id) ?? [];
+    const held = new Map(this.toolList);
+    held.set(id, before.map((t) => (t.name === tool ? { ...t, on } : t)));
+    this.toolList = held;
+    try {
+      await setServerTool(id, tool, on);
+    } catch (e) {
+      const back = new Map(this.toolList);
+      back.set(id, before);
+      this.toolList = back;
+      this.connectProblem = e instanceof Error ? e.message : String(e);
+    }
   }
 
   /* Keyed by endpoint, because that is the honest join between a card and a
