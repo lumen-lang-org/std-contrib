@@ -978,6 +978,39 @@ export class AgentConsole extends LitElement {
        splitting them across tabs would hide the answer to "what can I add"
        behind a click. */
     .gallery-scroll mcp-gallery { display: block; padding: 0 16px 16px; }
+    /* --- the attach menu, in the composer's dropdown ----------------------- */
+    /* Light DOM inside nr-chatbot's slot, so these rules reach it from here.
+       Sized to the reference: a menu you read down, not a grid. */
+    /* box-sizing, stated: this shadow root carries no reset, so the rows were
+       width:100% against the panel's PADDING box and came out 8px wider
+       than the content box they sat in — which put the switch at the end of
+       each connector row 6px past the panel's right edge, half of it clipped.
+       Stretch is what a flex column does anyway, so the width goes too. */
+    .attach, .attach-row { box-sizing: border-box; }
+    .attach { min-width: 264px; padding: 4px; display: flex; flex-direction: column; }
+    .attach-row { display: flex; align-items: center; gap: 10px;
+                  font: inherit; font-size: 13.5px; color: var(--fg); text-align: left;
+                  background: none; border: 0; border-radius: 8px; padding: 8px 10px;
+                  cursor: pointer; }
+    .attach-row:hover { background: var(--bg-sunken); }
+    /* A connector row is not itself pressable — the switch inside it is — so it
+       must not take the hover of something that acts on click. */
+    .attach-row.conn-row { cursor: default; }
+    .attach-row.conn-row:hover { background: none; }
+    .attach-row nr-icon { color: var(--fg); flex: none; }
+    /* The label only. A bare attach-row span selector also matched the
+       switch's own knob and the mark's inner span, which gave the knob flex:1
+       and stretched the pill across the row until it ran out of menu. */
+    .attach-label { flex: 1; min-width: 0; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
+    .attach-row .go { color: var(--muted); flex: none; }
+    .attach-mark { display: inline-grid; place-items: center; width: 18px; height: 18px;
+                   flex: none; }
+    .attach-mark svg { width: 15px; height: 15px; display: block; }
+    .attach-rule { height: 1px; background: var(--border); margin: 4px 8px; }
+    .attach-warn { background: none; border: 0; padding: 2px; cursor: pointer;
+                   display: grid; place-items: center; flex: none; }
+    .attach-warn nr-icon { color: var(--warn, #b26a00); }
     /* --- a connector, with its switches ------------------------------------ */
     .conn-list { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
     .conn { border: 1px solid var(--border); border-radius: 12px;
@@ -1518,10 +1551,13 @@ export class AgentConsole extends LitElement {
     // not gate the shell.
     if (this.me?.anonymous === true) { void this.loadQuota(); }
     this.capabilities = await featuredSkills().catch(() => []);
-    // Only to decide whether the + menu offers a Plugins row. A deployment
-    // with no servers should not have one, and finding that out after the menu
-    // is open is too late.
+    // The + menu draws every connector with a switch, so both of these are
+    // needed before it is first opened rather than when the directory is.
+    // Loaded together because they are one answer split across two routes: a
+    // connector without its connection state cannot be told from one nobody
+    // has signed in to, and every row would draw the warning.
     this.servers = await listServers().catch(() => []);
+    await this.loadConnections();
     // The whole skill list, at startup rather than on first use.
     //
     // It was lazy — fetched when the gallery or the slash menu first opened —
@@ -2404,6 +2440,81 @@ export class AgentConsole extends LitElement {
       items.push({ id: "pick:plugins", label: "Plugins", icon: "cube" });
     }
     return items;
+  }
+
+  /* The attach menu, drawn here rather than by the component.
+
+     `attachItems` is {id, label, icon} and nothing else, which is right for a
+     list of actions and wrong for a menu that has to carry switches. Turning a
+     connector off is something people do mid-conversation and for that
+     conversation's reasons — this one is noisy, that one is slow, I do not
+     want the model touching Linear for this question — and a menu that cannot
+     express it sends them to a settings tab, which means they do not bother
+     and ask a model holding tools it should not have.
+
+     nr-dropdown has taken arbitrary content in its `content` slot all along;
+     what was missing was a slot in nr-chatbot to reach it, which the component
+     now has behind `custom-attach-menu`. Light DOM, so these are this
+     component's own styles and events. */
+  private attachPanel() {
+    return html`
+      <div class="attach" slot="attach-menu" role="menu">
+        <button class="attach-row" role="menuitem" @click=${() => this.pickFile()}>
+          <nr-icon name="paperclip" size="small"></nr-icon><span class="attach-label">Add files &amp; photos</span>
+        </button>
+        <button class="attach-row" role="menuitem"
+          @click=${() => void this.openShelf("skills")}>
+          <nr-icon name="zap" size="small"></nr-icon><span class="attach-label">Skills</span>
+          <nr-icon class="go" name="chevron-right" size="small"></nr-icon>
+        </button>
+        <button class="attach-row" role="menuitem"
+          @click=${() => void this.openShelf("connectors")}>
+          <nr-icon name="share" size="small"></nr-icon><span class="attach-label">Manage connectors</span>
+          <nr-icon class="go" name="chevron-right" size="small"></nr-icon>
+        </button>
+        ${this.servers.length === 0 ? nothing : html`
+          <div class="attach-rule"></div>
+          ${this.servers.map((s) => this.attachConnector(s))}`}
+      </div>`;
+  }
+
+  /* One connector in the menu: its mark, its name, and a switch.
+
+     A connector that authenticates but has nothing stored gets the warning
+     rather than the switch — it is on, it looks configured, and every tool
+     call it is asked for will fail. That is the state worth interrupting for,
+     and it is the one the reference marks the same way. */
+  private attachConnector(s: ServerRow) {
+    const entry = CATALOGUE.find((e) => e.endpoint === s.endpoint);
+    const held = this.connections.get(s.id);
+    const unusable = s.authKind !== "" && s.authKind !== "none"
+      && (held?.state ?? "none") === "none";
+    return html`
+      <div class="attach-row conn-row" role="menuitem">
+        <span class="attach-mark" style=${entry === undefined ? "" : `color:${entry.tint}`}>
+          ${entry === undefined
+            ? html`<nr-icon name="plug" size="small"></nr-icon>`
+            : brandMark(entry)}
+        </span>
+        <span class="attach-label">${s.serverName}</span>
+        ${unusable
+          ? html`<button class="attach-warn" title="Not connected — sign in to use it"
+              @click=${() => void this.connectConnector2(s)}>
+              <nr-icon name="warning" size="small"></nr-icon></button>`
+          : html`<button class=${s.enabled ? "sw on" : "sw"} role="switch"
+              aria-checked=${s.enabled ? "true" : "false"}
+              aria-label=${(s.enabled ? "Disable " : "Enable ") + s.serverName}
+              @click=${() => void this.toggleConnector(s)}><span></span></button>`}
+      </div>`;
+  }
+
+  /* The component owns the file input; this reaches its button rather than
+     building a second one, so there is one upload path and one set of
+     accepted types. */
+  private pickFile(): void {
+    const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
+    const input = chat?.shadowRoot?.querySelector("input[type=file]") as HTMLInputElement | null;
+    input?.click();
   }
 
   /* The composer's own text, read where it actually lives.
@@ -3595,7 +3706,8 @@ export class AgentConsole extends LitElement {
                       send: { sendButton: "", stopButton: "" } }}
             .messageCollapseThreshold=${1000000}
             .attachItems=${this.attachMenu()}
-          ></nr-chatbot>
+            custom-attach-menu
+          >${this.attachPanel()}</nr-chatbot>
           ${this.session.getState().messages.length > 0 ? "" : this.capabilityRow()}
         </main>
         ${this.session.getState().messages.length > 0 ? "" : html`
