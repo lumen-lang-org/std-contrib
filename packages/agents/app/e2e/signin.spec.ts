@@ -11,8 +11,13 @@
 //   JOULE_TEST_USER=… JOULE_TEST_PASS=… \
 //     CONSOLE_URL=https://joule.sh npx playwright test e2e/signin.spec.ts
 //
-// The credentials come from the environment and are never written down here.
-// A password in a repository is a password, whatever the file is called.
+// The credentials live in `packages/agents/app/.env`, which is gitignored, and
+// this file reads them from the environment. They are deliberately not written
+// down here: this repository is PUBLIC (lumen-lang-org/std-contrib), so a
+// password in this file is a password anyone can read and use.
+//
+// playwright.config.ts loads that .env before the suite runs, so `npx
+// playwright test e2e/signin.spec.ts` works with no exports of your own.
 
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -100,7 +105,7 @@ test("pressing it opens somewhere to type", async ({ page }) => {
 
 test("signing in stops you being a guest", async ({ page }) => {
   test.skip(USER === "" || PASS === "",
-    "set JOULE_TEST_USER and JOULE_TEST_PASS to drive a real sign-in");
+    "put JOULE_TEST_USER and JOULE_TEST_PASS in packages/agents/app/.env");
   await open(page);
   await ready(page);
   test.skip(!(await deep(page, ".guest-strip")), "this deployment does not admit guests");
