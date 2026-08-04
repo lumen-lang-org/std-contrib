@@ -2495,7 +2495,8 @@ export class AgentConsole extends LitElement {
      component's own styles and events. */
   private attachPanel() {
     return html`
-      <div class="attach" slot="attach-menu" role="menu">
+      <div class="attach" slot="attach-menu" role="menu"
+        @mouseleave=${() => { this.attachSub = ""; }}>
         <button class="attach-row" role="menuitem" @click=${() => this.pickFile()}>
           <nr-icon name="paperclip" size="small"></nr-icon><span class="attach-label">Add files &amp; photos</span>
         </button>
@@ -2508,6 +2509,7 @@ export class AgentConsole extends LitElement {
           <button class=${this.attachSub === "skills" ? "attach-row open" : "attach-row"}
             role="menuitem" aria-haspopup="menu"
             aria-expanded=${this.attachSub === "skills" ? "true" : "false"}
+            @mouseenter=${(e: Event) => this.openSub("skills", e, true)}
             @click=${(e: Event) => { e.stopPropagation(); this.openSub("skills", e); }}>
             <nr-icon name="zap" size="small"></nr-icon><span class="attach-label">Skills</span>
             <nr-icon class="go" name="chevron-right" size="small"></nr-icon>
@@ -2515,7 +2517,7 @@ export class AgentConsole extends LitElement {
           ${this.attachSub !== "skills" ? nothing : this.skillFlyout()}
         </div>
         <button class="attach-row" role="menuitem"
-          @click=${() => void this.openShelf("connectors")}>
+          @click=${() => { this.shutAttach(); void this.openShelf("connectors"); }}>
           <nr-icon name="share" size="small"></nr-icon><span class="attach-label">Manage connectors</span>
         </button>
         ${this.servers.length === 0 ? nothing : html`
@@ -2579,8 +2581,11 @@ export class AgentConsole extends LitElement {
      flyout beside the panel measured correctly, reported itself on screen, and
      was invisible — the box was there and the pixels were cut off. Fixed
      escapes the clip; the coordinates are the price. */
-  private openSub(which: string, e: Event): void {
-    if (this.attachSub === which) { this.attachSub = ""; return; }
+  private openSub(which: string, e: Event, hovering = false): void {
+    // Hover opens and never closes: a pointer crossing the row on its way to
+    // the connectors below would otherwise flicker the submenu open and shut.
+    // Closing is the click's job, or leaving the menu's.
+    if (this.attachSub === which) { if (!hovering) { this.attachSub = ""; } return; }
     this.subFind = "";
     const button = e.currentTarget as HTMLElement;
     const row = button.getBoundingClientRect();
@@ -2648,6 +2653,21 @@ export class AgentConsole extends LitElement {
     const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
     const input = chat?.shadowRoot?.querySelector("input[type=file]") as HTMLInputElement | null;
     input?.click();
+  }
+
+  /* Close the composer's attach dropdown.
+
+     The dropdown belongs to nr-chatbot, so there is no element here to hide —
+     but it exposes `open` as a property, and setting it is what a host is
+     meant to do. Without this, "Manage connectors" opened the directory and
+     left the menu sitting on top of it, which is the same complaint the Skills
+     row earned before it grew a submenu. */
+  private shutAttach(): void {
+    this.attachSub = "";
+    const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
+    const dd = chat?.shadowRoot?.querySelector("nr-dropdown") as
+      (Element & { open?: boolean }) | null;
+    if (dd !== null && dd !== undefined) { dd.open = false; }
   }
 
   /* Copy, for the buttons a card renders as a string.
@@ -3212,6 +3232,7 @@ export class AgentConsole extends LitElement {
           ${!s.enabled ? nothing : html`
             <button class="conn-tools" @click=${() => void this.openTools(s.id)}>
               ${listed === undefined ? "Tool access"
+                : listed.length === 0 ? "Tool access"
                 : `${listed.filter((t) => t.on).length} of ${listed.length} tools`}
               <nr-icon name=${open ? "chevron-up" : "chevron-down"} size="small"></nr-icon>
             </button>`}
@@ -3221,7 +3242,16 @@ export class AgentConsole extends LitElement {
             ${listed === undefined
               ? html`<p class="tool-none">Asking ${s.serverName} what it offers…</p>`
               : listed.length === 0
-                ? html`<p class="tool-none">${s.serverName} offered no tools.</p>`
+                // "offered no tools" is what this said to anyone who was not
+                // signed in to the connector — a guest, or a person who had
+                // simply not connected it — which reads as the connector being
+                // empty when the truth is that nobody asked it as anybody. The
+                // tools are per-caller because the token is.
+                ? html`<p class="tool-none">${
+                    (this.connections.get(s.id)?.state ?? "none") === "none"
+                      ? html`You are not signed in to ${s.serverName}, so it has
+                          nothing to show you. Press Connect above.`
+                      : html`${s.serverName} offered no tools.`}</p>`
                 : listed.map((t) => html`
                     <label class="tool">
                       <input type="checkbox" .checked=${t.on}

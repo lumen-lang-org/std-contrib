@@ -23,7 +23,7 @@
 // esbuild and copies the result to this path, which is why `server/nudge.ts`
 // keeps its registry on `globalThis` (two bundles, two module scopes, one
 // registry).
-import { previewFrameCsp } from "./server/csp.ts";
+import { previewFrameCsp, openerPolicy } from "./server/csp.ts";
 import { authChain } from "./pages/_middleware.ts";
 import { apiProxy } from "./server/api-proxy.ts";
 import { staticAssets } from "./server/static-assets.ts";
@@ -37,6 +37,8 @@ import { searchProxy } from "./server/search-proxy.ts";
 export default [
   staticAssets(),
   previewFrameCsp(),
+  // After the framework's security headers, so the override sticks.
+  openerPolicy(),
   ...authChain,
   searchProxy(),
   apiProxy(),
