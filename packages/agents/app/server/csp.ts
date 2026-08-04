@@ -86,3 +86,26 @@ export function previewFrameCsp(): Middleware {
     next();
   };
 }
+
+/** Keep our handle on the popups we open.
+ *
+ *  The framework sets `Cross-Origin-Opener-Policy: same-origin`, which severs
+ *  the browsing-context group the moment a popup navigates to another origin.
+ *  For the connector sign-in that means the window comes back from Linear with
+ *  `window.opener` null and our own reference to it neutered — so the callback
+ *  page's postMessage never arrives, `popup.closed` never reports, and the
+ *  console sits there until somebody reloads the page by hand.
+ *
+ *  `same-origin-allow-popups` keeps the half that protects this page — another
+ *  origin still cannot get a handle on us — and gives up only the half that
+ *  was breaking our own flow.
+ *
+ *  Set after the framework's own middleware so it wins, and on every response
+ *  rather than on the callback alone: COOP is evaluated on the document that
+ *  OPENS the popup, which is the console itself. */
+export function openerPolicy(): (req: unknown, res: { setHeader(k: string, v: string): void }, next: () => void) => void {
+  return (_req, res, next) => {
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+    next();
+  };
+}
