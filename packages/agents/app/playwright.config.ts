@@ -1,4 +1,24 @@
 import { defineConfig } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+/* Load packages/agents/app/.env before anything reads process.env.
+ *
+ * It holds the credentials e2e/signin.spec.ts signs in with, and it is
+ * gitignored — std-contrib is a public repository, so a password in a tracked
+ * file is a password anyone can read. Hand-parsed rather than pulling in
+ * dotenv: it is six lines, and the suite has no other need for the dependency.
+ *
+ * Existing environment always wins, so CI and a one-off export are unaffected. */
+try {
+  for (const line of readFileSync(new URL(".env", import.meta.url), "utf8").split("\n")) {
+    const at = line.indexOf("=");
+    if (at <= 0 || line.trimStart().startsWith("#")) { continue; }
+    const key = line.slice(0, at).trim();
+    if (process.env[key] === undefined) {
+      process.env[key] = line.slice(at + 1).trim();
+    }
+  }
+} catch { /* no .env, which is the ordinary case in CI */ }
 import { PORT, PREVIEW_HOST, PREVIEW_HOSTNAME } from "./e2e/deployment.js";
 
 // The artifacts host, as this run understands it — read in e2e/deployment.ts,
