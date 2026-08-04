@@ -262,19 +262,16 @@ const CHAT_SKIN = `
 `;
 
 const CHAT_SOURCES = `
-  /* The answer reads like an article, Perplexity's move: a serif reading
-     face at reading size for the MODEL's prose, while the person's own
-     bubble and every control stay in the interface sans. System serifs
-     only — the CSP forbids font CDNs, and Iowan/Palatino/Georgia are the
-     stacks the reading apps themselves ship. Content rules arrive after
-     hydration by nature; a font swap on the answer text is a reflow the eye
-     forgives, unlike the composer jump the CHAT_SKIN note bans. */
+  /* The answer is set in the interface face, like everything else.
+     It was a serif reading stack for a while — Perplexity's move, an answer
+     that reads like an article. Reverted: this console is a working surface
+     more than a reading one, and the serif made a two-line correction or a
+     tool result look like an essay about itself. A long researched answer
+     was the case it flattered, and that is the minority of what is asked
+     here. Size and leading stay generous; only the face goes back. */
   .message.bot .message__content {
-    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
-                 "Times New Roman", serif;
-    font-size: 17px;
-    line-height: 1.65;
-    letter-spacing: .003em;
+    font-size: 15.5px;
+    line-height: 1.6;
   }
   /* The working parts inside an answer stay instrumental: step cards, code,
      file chips are telemetry, not prose. */
@@ -878,7 +875,13 @@ export class AgentConsole extends LitElement {
        click on the page underneath went to the page. This one is the
        directory's own, always drawn, and it is what makes the panel read as
        being in front of the conversation rather than pasted onto it. */
-    .scrim.shelves { display: block; position: fixed; inset: 0; z-index: 39;
+    /* Above the header, which is sticky at 40. Both sat at 39/40, and equal
+       z-index is decided by paint order — so the header drew ON TOP of the
+       directory, with the folder icon and the guest strip floating over a
+       dialog that was supposed to have taken the screen. The index layer at
+       51/52 already had this right; this is the same band, so the two
+       overlays cannot fight each other either. */
+    .scrim.shelves { display: block; position: fixed; inset: 0; z-index: 49;
                      background: rgba(0,0,0,.32); backdrop-filter: blur(2px); }
     /* Wide enough to be a directory. At 560px the card grid fell to two
        columns on a 1500px screen and the panel read as a menu that had been
@@ -908,7 +911,7 @@ export class AgentConsole extends LitElement {
       .index-layer { top: 6vh; left: 10px; right: 10px; max-height: 88vh;
                      padding: 22px 16px 28px; border-radius: 16px; }
     }
-    .gallery { position: fixed; z-index: 40; background: var(--bg-card);
+    .gallery { position: fixed; z-index: 50; background: var(--bg-card);
               border: 1px solid var(--border); border-radius: 16px;
               box-shadow: 0 24px 60px -12px rgba(0,0,0,.35);
               display: flex; flex-direction: column; overflow: hidden;
