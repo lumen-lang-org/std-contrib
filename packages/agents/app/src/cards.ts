@@ -323,3 +323,82 @@ export const currencyCard: CardPlugin = {
 };
 
 registerCard(currencyCard);
+
+// --- a passage worth keeping ---------------------------------------------------
+//
+// The answer to "correct this", "translate this", "write the email" is not
+// prose about a result — it IS the result, and the next thing anybody does
+// with it is select it and copy it. Rendering it as another paragraph makes
+// them drag across exactly the right characters, which is the one interaction
+// a chat surface can most easily get wrong: too little and the quote marks
+// come along, too much and the model's preamble does.
+//
+// So it gets a card. Bordered, in the reading face, with the text and nothing
+// else inside it — and a Copy button that takes precisely the text.
+
+type TextData = {
+  // The passage itself. The only required field.
+  body?: string;
+  // What it is: "Corrected", "Translation", "Draft email". Short, and shown
+  // as the card's eyebrow. Optional — an untitled card is still useful.
+  title?: string;
+  // A language tag, drawn beside the title when the model says. Useful on a
+  // translation and meaningless everywhere else, hence optional.
+  lang?: string;
+};
+
+/** [TEXT]{"title":"Corrected","body":"Bonjour, comment ça va ?"}[/TEXT] */
+export const textCard: CardPlugin = {
+  id: "text-card",
+  htmlTags: [{ name: "text", open: "[TEXT]", close: "[/TEXT]" }],
+  claimsShape(d: Record<string, unknown>): boolean {
+    // A body and nothing numeric: this is the shape a currency card is not.
+    return typeof d.body === "string" && d.body.trim() !== ""
+      && typeof (d as { rate?: unknown }).rate !== "number";
+  },
+  renderHtmlBlock(name: string, content: string, _evidence: CardEvidence = []): string {
+    if (name !== "text") return "";
+    let d: TextData;
+    try { d = JSON.parse(content) as TextData; } catch { return ""; }
+    const body = typeof d.body === "string" ? d.body : "";
+    if (body.trim() === "") return "";
+
+    const title = typeof d.title === "string" && d.title.trim() !== ""
+      ? esc(d.title.slice(0, 48)) : "";
+    const lang = typeof d.lang === "string" && d.lang.trim() !== ""
+      ? esc(d.lang.slice(0, 16)) : "";
+    const eyebrow = [title, lang].filter((x) => x !== "").join(" · ");
+
+    // The text twice, deliberately: once escaped for display, once escaped
+    // into an attribute for the button to hand the clipboard. Reading it back
+    // off the DOM instead would give whatever the browser's text extraction
+    // produced — line breaks collapsed, entities resolved differently — and
+    // the point of the button is that it copies exactly the passage.
+    const shown = esc(body).replace(/\n/g, "<br>");
+    const held = esc(body);
+
+    // Inline styles: this string lands inside the chatbot's shadow root, where
+    // the console's stylesheet does not reach. Custom properties do cross, so
+    // the colours lean on the theme with plain fallbacks.
+    const border = "var(--nuraly-border-color,rgba(128,128,128,.25))";
+    return `<div style="margin:10px 0;border:1px solid ${border};border-radius:12px;`
+      + `max-width:640px;font-family:inherit;overflow:hidden">`
+      + `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;`
+      + `border-bottom:1px solid ${border}">`
+      + `<span style="flex:1;min-width:0;font-size:11px;letter-spacing:.06em;`
+      + `text-transform:uppercase;opacity:.6">${eyebrow === "" ? "Text" : eyebrow}</span>`
+      // data-copy-card is what the console's delegated listener looks for. A
+      // click inside a shadow root still reaches it: the event is composed, so
+      // composedPath() carries this button out to the listener.
+      + `<button type="button" data-copy-card="${held}" `
+      + `style="display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12px;`
+      + `padding:4px 10px;border-radius:999px;cursor:pointer;background:none;`
+      + `color:inherit;border:1px solid ${border}">Copy</button>`
+      + `</div>`
+      + `<div style="padding:12px 14px;font-size:15px;line-height:1.6;`
+      + `white-space:pre-wrap;word-break:break-word">${shown}</div>`
+      + `</div>`;
+  },
+};
+
+registerCard(textCard);

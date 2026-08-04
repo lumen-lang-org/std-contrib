@@ -1546,6 +1546,10 @@ export class AgentConsole extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    // Card buttons live inside the chatbot's shadow root as plain HTML, so the
+    // listener goes on the host and reads composedPath(). Capture, so a card
+    // in a message cannot be beaten to the click by the transcript.
+    this.addEventListener("click", this.onCopyCard, true);
     // The tab's name is part of the brand too — nothing else in the app sets
     // a <title>, so without this the tab wears whatever the framework's shell
     // defaulted to. Safe here because SSR skips connectedCallback (see the
@@ -1731,6 +1735,7 @@ export class AgentConsole extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.removeEventListener("click", this.onCopyCard, true);
     if (this.threadsTicker !== null) { clearInterval(this.threadsTicker); this.threadsTicker = null; }
     if (this.dotTicker !== null) { clearInterval(this.dotTicker); this.dotTicker = null; }
     if (this.unlisten !== null) { this.unlisten(); this.unlisten = null; }
@@ -2643,6 +2648,66 @@ export class AgentConsole extends LitElement {
     const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
     const input = chat?.shadowRoot?.querySelector("input[type=file]") as HTMLInputElement | null;
     input?.click();
+  }
+
+  /* Copy, for the buttons a card renders as a string.
+
+     A card is HTML handed to the chatbot as text, so nothing in it can carry
+     a Lit handler — there is no element here to bind one to. The click is
+     composed, though, so composedPath() carries the button out of two shadow
+     roots to this listener, and the passage rides on the button's own
+     attribute rather than being read back off the DOM: text extraction
+     collapses line breaks and resolves entities its own way, and the whole
+     point of the button is that it copies exactly what the card shows.
+
+     Bound once, on the host, rather than per card. */
+  private onCopyCard = (e: Event): void => {
+    const hit = e.composedPath().find((n) =>
+      n instanceof HTMLElement && n.hasAttribute("data-copy-card")) as HTMLElement | undefined;
+    if (hit === undefined) { return; }
+    e.preventDefault();
+    e.stopPropagation();
+    const text = hit.getAttribute("data-copy-card") ?? "";
+    const fallback = (t: string) => AgentConsole.copyTheOldWay(t);
+    const said = (word: string) => {
+      const was = hit.textContent;
+      hit.textContent = word;
+      window.setTimeout(() => { hit.textContent = was; }, 1400);
+    };
+    // navigator.clipboard is UNDEFINED on an insecure origin, not merely
+    // refusing — so calling it throws where a rejected promise was expected,
+    // and the button did nothing at all with no error a person could see.
+    // joule.sh is https and has it; a LAN address or a plain-http preview does
+    // not, and those are exactly where this gets tested.
+    const api = navigator.clipboard;
+    if (api !== undefined && typeof api.writeText === "function") {
+      void api.writeText(text).then(() => said("Copied"), () => said(fallback(text) ? "Copied" : "Press ⌘C"));
+      return;
+    }
+    said(fallback(text) ? "Copied" : "Press ⌘C");
+  };
+
+  /* The copy that works without the Clipboard API.
+   *
+   *  A hidden textarea and execCommand("copy"). Deprecated, and the only thing
+   *  available on an insecure origin — which is every LAN address and every
+   *  plain-http preview of this console. Returns whether it took. */
+  private static copyTheOldWay(text: string): boolean {
+    try {
+      const pad = document.createElement("textarea");
+      pad.value = text;
+      // Off-screen rather than hidden: display:none and visibility:hidden are
+      // both unselectable, and selection is the whole mechanism.
+      pad.setAttribute("readonly", "");
+      pad.style.position = "fixed";
+      pad.style.top = "-1000px";
+      pad.style.opacity = "0";
+      document.body.appendChild(pad);
+      pad.select();
+      const took = document.execCommand("copy");
+      document.body.removeChild(pad);
+      return took;
+    } catch { return false; }
   }
 
   /* The composer's own text, read where it actually lives.
