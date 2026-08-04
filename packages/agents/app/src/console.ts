@@ -1014,16 +1014,25 @@ export class AgentConsole extends LitElement {
     /* The submenu. Positioned against its own row so it opens level with it,
        which is what makes a flyout read as belonging to the row rather than as
        a second menu that happened to appear. */
-    .attach-sub { position: relative; }
+    /* The wrapper is a flex column so the button inside it stretches. As a
+       plain block it left the button at its own intrinsic width, so the one
+       row that opens a submenu was the one row narrower than the rest — the
+       others are direct flex children of the panel and stretch for free. */
+    .attach-sub { position: relative; display: flex; flex-direction: column; }
     .attach-row.open { background: var(--bg-sunken); }
-    .fly { position: fixed; z-index: 60;
-           width: 224px; max-height: 320px; overflow-y: auto; padding: 4px;
+    .fly { position: fixed; z-index: 60; max-height: 320px; overflow-y: auto; padding: 4px;
            box-sizing: border-box; background: var(--bg-card);
            border: 1px solid var(--border); border-radius: 12px;
            box-shadow: 0 12px 32px rgba(23,23,26,0.16);
            display: flex; flex-direction: column; }
     .fly .attach-row.on { color: var(--brand); }
     .fly .attach-row.on nr-icon { color: var(--brand); }
+    .fly-find { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+                margin-bottom: 2px; border-bottom: 1px solid var(--border); }
+    .fly-find nr-icon { color: var(--muted); flex: none; }
+    .fly-find input { flex: 1; min-width: 0; border: 0; background: none; padding: 0;
+                      font: inherit; font-size: 13px; color: var(--fg); outline: none; }
+    .fly-find input::placeholder { color: var(--muted); }
     .fly-none { margin: 0; padding: 8px 10px; font-size: 12.5px; color: var(--muted); }
     /* --- a connector, with its switches ------------------------------------ */
     .conn-list { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
@@ -1491,6 +1500,11 @@ export class AgentConsole extends LitElement {
   @state() private attachSub = "";
   /* Where the open submenu sits, in viewport coordinates. */
   @state() private subAt = { x: 0, y: 0 };
+  /* The submenu's own filter. Cleared whenever it opens. */
+  @state() private subFind = "";
+  /* How wide the open submenu is: its own width beside the menu, the
+     parent's width where it stands in for it. */
+  @state() private subW = 224;
   @state() private toolList = new Map<string, { name: string; description: string; on: boolean }[]>();
   /* Installed bundles, and what each one brought. The directory needs the
      second to say "From <plugin>" on a skill card: a plugin's skill is stored
@@ -2513,13 +2527,33 @@ export class AgentConsole extends LitElement {
      is still there for reading what a skill does — that is a different errand
      and it has its own door. */
   private skillFlyout() {
-    const skills = this.allSkills;
+    // Filtered on name AND description: half of what you remember about a
+    // skill is what it does rather than what it is called, so "spreadsheet"
+    // has to find make-sheet. The same rule the directory's own filter uses.
+    const find = this.subFind.trim().toLowerCase();
+    const skills = find === ""
+      ? this.allSkills
+      : this.allSkills.filter((k) =>
+          (k.skillName + " " + k.description).toLowerCase().includes(find));
     return html`
       <div class="fly" role="menu"
-        style=${`left:${this.subAt.x}px; top:${this.subAt.y}px`}>
-        ${skills.length === 0
+        style=${`left:${this.subAt.x}px; top:${this.subAt.y}px; width:${this.subW}px`}>
+        <!-- Thirteen is past the number you can find one in by reading, and
+             the flyout scrolls at eight. -->
+        ${this.allSkills.length < 6 ? nothing : html`
+          <div class="fly-find">
+            <nr-icon name="search" size="small"></nr-icon>
+            <input type="text" .value=${this.subFind} placeholder="Find a skill"
+              aria-label="Find a skill"
+              @click=${(e: Event) => e.stopPropagation()}
+              @input=${(e: Event) => {
+                this.subFind = (e.target as HTMLInputElement).value; }}>
+          </div>`}
+        ${this.allSkills.length === 0
           ? html`<p class="fly-none">No skills on this deployment.</p>`
-          : skills.map((k) => html`
+          : skills.length === 0
+            ? html`<p class="fly-none">Nothing matches “${this.subFind.trim()}”.</p>`
+            : skills.map((k) => html`
               <button class=${this.pinned === k.skillName ? "attach-row on" : "attach-row"}
                 role="menuitemcheckbox"
                 aria-checked=${this.pinned === k.skillName ? "true" : "false"}
@@ -2542,6 +2576,7 @@ export class AgentConsole extends LitElement {
      escapes the clip; the coordinates are the price. */
   private openSub(which: string, e: Event): void {
     if (this.attachSub === which) { this.attachSub = ""; return; }
+    this.subFind = "";
     const button = e.currentTarget as HTMLElement;
     const row = button.getBoundingClientRect();
     // Beside the PANEL, not beside the row: the row ends inside the menu, so
@@ -2549,11 +2584,24 @@ export class AgentConsole extends LitElement {
     // top still comes from the row, which is what makes it read as belonging
     // to that line rather than to the menu as a whole.
     const panel = button.closest(".attach")?.getBoundingClientRect() ?? row;
+
+    // On a phone there is no room beside anything, so the submenu takes the
+    // parent's own footprint and reads as a drill-down. Flipping it to the
+    // left instead put a 224px card diagonally across the menu it came from,
+    // which is legible but looks like two menus fighting.
+    if (window.innerWidth < 560) {
+      this.subAt = { x: Math.round(panel.left), y: Math.round(panel.top) };
+      this.subW = Math.round(panel.width);
+      this.attachSub = which;
+      return;
+    }
+
     let x = panel.right + 6;
     const width = 224;
-    // Flipped where there is no room to the right, which is the narrow window
-    // and the phone. A submenu that opens off-screen is one nobody can use.
-    if (x + width > window.innerWidth - 8) { x = Math.max(8, row.left - width - 6); }
+    // Flipped where there is no room to the right — a wide phone in landscape,
+    // a narrow window. A submenu that opens off-screen is one nobody can use.
+    if (x + width > window.innerWidth - 8) { x = Math.max(8, panel.left - width - 6); }
+    this.subW = width;
     this.subAt = { x, y: Math.max(8, row.top - 4) };
     this.attachSub = which;
   }
