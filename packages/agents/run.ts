@@ -25,7 +25,7 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping, cancelAsked } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
@@ -544,6 +544,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // there said its abilities were larger than the list in front of it.
   let waitingLines = deferredBriefing(mounted);
   if (waitingLines != "") { system = system + "\n\n" + waitingLines; }
+
+  // How to hand back a passage somebody will want to copy.
+  system = system + "\n\n" + TEXT_CARD;
   if (threadId != "") {
     // The fence convention rides the system prompt, not a tool description:
     // a model decides how to answer before it considers any particular tool,

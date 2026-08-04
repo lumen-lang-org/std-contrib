@@ -504,6 +504,25 @@ const SELF_CONTAINED: string = "An artifact may reach its siblings and nothing e
 // to answer needs the convention before it starts writing, not at the moment
 // it happens to consider write_artifact. Offered only where the tools are —
 // with a thread — since a fence saves into the same conversation they do.
+/* When an answer IS the thing that was asked for.
+ *
+ * "Correct this", "translate this", "write the email" — the reply is not prose
+ * about a result, it is the result, and the next thing anybody does is copy
+ * it. Left as a paragraph, they have to drag across exactly the right
+ * characters: too little and the quote marks come with it, too much and this
+ * model's preamble does. In a card, one button takes precisely the passage.
+ *
+ * Narrow on purpose. A model told "use this when useful" reaches for it on
+ * every answer, and a page of cards is a page with no emphasis left in it.
+ */
+export const TEXT_CARD: string = "When your answer IS a passage the person asked you to produce "
+  + "— a correction, a translation, a rewrite, a draft message — put the passage in a card so they can copy it "
+  + "in one press: [TEXT]{\"title\":\"Corrected\",\"body\":\"the passage itself\"}[/TEXT]. `title` is two or "
+  + "three words for what it is, and `lang` may name the language on a translation. Put ONLY the passage in "
+  + "`body`, with none of your own framing, and say anything you want to say about it outside the block. Use it "
+  + "only for a passage that is the answer — never for an explanation, a list, an ordinary reply, or a passage "
+  + "the person wrote and you are merely quoting back.";
+
 export const FILE_FENCE: string = "You can also create a file directly in your reply: open a code fence whose "
   + "info line names a path, like ```html path=/index.html title=Landing page — the fenced body is saved as a new "
   + "artifact and your reply keeps a one-line reference in its place. The first word after the backticks is the "
