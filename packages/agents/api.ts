@@ -44,7 +44,7 @@ import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trac
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw} from "./scan.ts";
 import { toolListing } from "./mcp.ts";
-import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector } from "./connect.ts";
+import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, toolsOff, setToolOn } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
@@ -78,6 +78,8 @@ type RunBody = { text: string };
 type TraceSecret = { secretKey: string };
 type ScopeGrant = { scope: string };
 type ServerAuth = { authKind: string, authHeader: string, token: string };
+// The one member PUT /servers/:id/tools/:tool reads.
+type ToolSwitch = { on: bool };
 type FileUpload = { name: string, content: string };
 // Every field is required, `note` included — JSON.parse refuses a body missing
 // one, so "no note" is spelled "note":"" rather than left out.
@@ -2350,13 +2352,18 @@ class ServerApi {
     // resolver, so an OAuth connector is refreshed here too rather than
     // reporting "could not be asked" until somebody starts a conversation.
     let listed = toolListing(server, accessTokenFor(this.db, server, owningTag(callerTags(req)), this.master));
+    let declined = toolsOff(this.db, server.id);
     let out = "{\"serverId\":" + JSON.stringify(server.id)
       + ",\"problem\":" + JSON.stringify(listed.problem) + ",\"tools\":[";
     let i: int = 0;
     while (i < listed.tools.length) {
       if (i > 0) { out = out + ","; }
       out = out + "{\"name\":" + JSON.stringify(listed.tools[i].name)
-        + ",\"description\":" + JSON.stringify(listed.tools[i].description) + "}";
+        + ",\"description\":" + JSON.stringify(listed.tools[i].description)
+        // Whether it is actually mounted. The listing is what the connector
+        // offers; this is what this deployment does with it, and a screen that
+        // showed only the first would offer switches it could not reflect.
+        + ",\"on\":" + (declined.includes(listed.tools[i].name) ? "false" : "true") + "}";
       i = i + 1;
     }
     return ok(out + "]}");
@@ -2429,6 +2436,31 @@ class ServerApi {
       apiKey: body.token, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
     return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+  }
+
+  /* Switch one of this connector's tools on or off.
+   *
+   * Deployment-wide rather than per-person, unlike the token: a tool being
+   * mounted decides what every conversation's model is told it can do, and two
+   * people on one deployment disagreeing about that would make the same agent
+   * behave differently depending on who asked.
+   *
+   * It exists because tool specs are spent context. Linear offers 52, each
+   * with a JSON Schema, and mounting all of them put more in the prompt than a
+   * small local model could hold — it refused the request outright rather than
+   * answering badly. Switching some off is what makes such a connector usable
+   * at all on a model that is not enormous.
+   */
+  @put("/:id/tools/:tool")
+  setTool(req: Request): Reply {
+    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
+      return notFound("server " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: ToolSwitch = JSON.parse<ToolSwitch>(req.body);
+    if (param(req, "tool").trim() == "") { return badRequest("a tool needs a name"); }
+    setToolOn(this.db, param(req, "id"), param(req, "tool"), body.on);
+    return noContent();
   }
 
   // The caller's OWN token for this server — the per-person half of auth.

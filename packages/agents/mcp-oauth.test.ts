@@ -9,6 +9,7 @@
 //   cd packages/agents && lumen test mcp-oauth.test.ts
 
 import { base64Url, challengeFor, consentUrl, formEncode, newState, newVerifier, originOf, pathOf, urlEncode } from "./mcp-oauth.ts";
+import { jsonOf } from "./mcp.ts";
 
 // --- PKCE -----------------------------------------------------------------------
 
@@ -130,4 +131,34 @@ test("an authorize endpoint that already has a query keeps it", () => {
   // And asks for nothing it was not given.
   expect(url.indexOf("scope=") < 0);
   expect(url.indexOf("resource=") < 0);
+});
+
+// --- the transport a hosted connector actually speaks ------------------------
+
+test("an SSE-framed reply is unwrapped to its envelope", () => {
+  // What Linear answers once the Accept header is right: the JSON-RPC envelope
+  // as one Server-Sent Event rather than as the body.
+  let framed = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}\n\n";
+  expect(jsonOf(framed) == "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}");
+});
+
+test("a plain JSON body is left exactly as it is", () => {
+  expect(jsonOf("{\"jsonrpc\":\"2.0\",\"id\":1}") == "{\"jsonrpc\":\"2.0\",\"id\":1}");
+  expect(jsonOf("  {\"a\":1}  ") == "{\"a\":1}");
+});
+
+test("the reply wins over the notifications before it", () => {
+  // A stream may carry progress before the answer. The last envelope is the
+  // one the caller asked for; taking the first would report progress as the
+  // result and find no tools in it.
+  let stream = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n"
+    + "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"list_issues\"}]}}\n\n";
+  expect(jsonOf(stream).indexOf("list_issues") > 0);
+  expect(jsonOf(stream).indexOf("progress") < 0);
+});
+
+test("something that is neither is handed back rather than swallowed", () => {
+  // An HTML error page from a proxy in the middle: the caller reports it,
+  // which beats reporting an empty envelope it cannot explain.
+  expect(jsonOf("<html>bad gateway</html>") == "<html>bad gateway</html>");
 });
