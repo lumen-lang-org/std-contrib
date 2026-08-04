@@ -1011,6 +1011,20 @@ export class AgentConsole extends LitElement {
     .attach-warn { background: none; border: 0; padding: 2px; cursor: pointer;
                    display: grid; place-items: center; flex: none; }
     .attach-warn nr-icon { color: var(--warn, #b26a00); }
+    /* The submenu. Positioned against its own row so it opens level with it,
+       which is what makes a flyout read as belonging to the row rather than as
+       a second menu that happened to appear. */
+    .attach-sub { position: relative; }
+    .attach-row.open { background: var(--bg-sunken); }
+    .fly { position: fixed; z-index: 60;
+           width: 224px; max-height: 320px; overflow-y: auto; padding: 4px;
+           box-sizing: border-box; background: var(--bg-card);
+           border: 1px solid var(--border); border-radius: 12px;
+           box-shadow: 0 12px 32px rgba(23,23,26,0.16);
+           display: flex; flex-direction: column; }
+    .fly .attach-row.on { color: var(--brand); }
+    .fly .attach-row.on nr-icon { color: var(--brand); }
+    .fly-none { margin: 0; padding: 8px 10px; font-size: 12.5px; color: var(--muted); }
     /* --- a connector, with its switches ------------------------------------ */
     .conn-list { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
     .conn { border: 1px solid var(--border); border-radius: 12px;
@@ -1473,6 +1487,10 @@ export class AgentConsole extends LitElement {
   @state() private connectProblem = "";
   /* Which connector's tool list is open, and what each one offered. */
   @state() private toolsOpen = "";
+  /* Which submenu of the attach menu is open, or "". */
+  @state() private attachSub = "";
+  /* Where the open submenu sits, in viewport coordinates. */
+  @state() private subAt = { x: 0, y: 0 };
   @state() private toolList = new Map<string, { name: string; description: string; on: boolean }[]>();
   /* Installed bundles, and what each one brought. The directory needs the
      second to say "From <plugin>" on a skill card: a plugin's skill is stored
@@ -2462,20 +2480,82 @@ export class AgentConsole extends LitElement {
         <button class="attach-row" role="menuitem" @click=${() => this.pickFile()}>
           <nr-icon name="paperclip" size="small"></nr-icon><span class="attach-label">Add files &amp; photos</span>
         </button>
-        <button class="attach-row" role="menuitem"
-          @click=${() => void this.openShelf("skills")}>
-          <nr-icon name="zap" size="small"></nr-icon><span class="attach-label">Skills</span>
-          <nr-icon class="go" name="chevron-right" size="small"></nr-icon>
-        </button>
+        <!-- A chevron promises a submenu, so it has to open one. It used to
+             open the full directory overlay, which appeared BEHIND this
+             dropdown and left the menu sitting on top of the thing it had just
+             opened. Skills flies out; "Manage connectors" is a destination and
+             loses its chevron. -->
+        <div class="attach-sub">
+          <button class=${this.attachSub === "skills" ? "attach-row open" : "attach-row"}
+            role="menuitem" aria-haspopup="menu"
+            aria-expanded=${this.attachSub === "skills" ? "true" : "false"}
+            @click=${(e: Event) => { e.stopPropagation(); this.openSub("skills", e); }}>
+            <nr-icon name="zap" size="small"></nr-icon><span class="attach-label">Skills</span>
+            <nr-icon class="go" name="chevron-right" size="small"></nr-icon>
+          </button>
+          ${this.attachSub !== "skills" ? nothing : this.skillFlyout()}
+        </div>
         <button class="attach-row" role="menuitem"
           @click=${() => void this.openShelf("connectors")}>
           <nr-icon name="share" size="small"></nr-icon><span class="attach-label">Manage connectors</span>
-          <nr-icon class="go" name="chevron-right" size="small"></nr-icon>
         </button>
         ${this.servers.length === 0 ? nothing : html`
           <div class="attach-rule"></div>
           ${this.servers.map((s) => this.attachConnector(s))}`}
       </div>`;
+  }
+
+  /* The skills submenu.
+
+     A flyout beside the menu rather than the directory overlay: pinning a
+     skill is a one-press decision made while composing, and sending the whole
+     screen to a dialog for it loses the message being written. The directory
+     is still there for reading what a skill does — that is a different errand
+     and it has its own door. */
+  private skillFlyout() {
+    const skills = this.allSkills;
+    return html`
+      <div class="fly" role="menu"
+        style=${`left:${this.subAt.x}px; top:${this.subAt.y}px`}>
+        ${skills.length === 0
+          ? html`<p class="fly-none">No skills on this deployment.</p>`
+          : skills.map((k) => html`
+              <button class=${this.pinned === k.skillName ? "attach-row on" : "attach-row"}
+                role="menuitemcheckbox"
+                aria-checked=${this.pinned === k.skillName ? "true" : "false"}
+                title=${k.description}
+                @click=${() => { void this.pin(k.skillName); this.attachSub = ""; }}>
+                <span class="attach-label">${k.skillName}</span>
+                ${this.pinned === k.skillName
+                  ? html`<nr-icon name="check" size="small"></nr-icon>`
+                  : nothing}
+              </button>`)}
+      </div>`;
+  }
+
+  /* Open a submenu, anchored to the row that owns it.
+
+     Fixed to the viewport and positioned from the row's own rect, because the
+     dropdown's menu container clips its overflow: an absolutely-positioned
+     flyout beside the panel measured correctly, reported itself on screen, and
+     was invisible — the box was there and the pixels were cut off. Fixed
+     escapes the clip; the coordinates are the price. */
+  private openSub(which: string, e: Event): void {
+    if (this.attachSub === which) { this.attachSub = ""; return; }
+    const button = e.currentTarget as HTMLElement;
+    const row = button.getBoundingClientRect();
+    // Beside the PANEL, not beside the row: the row ends inside the menu, so
+    // anchoring to it opened the flyout over the connectors underneath. The
+    // top still comes from the row, which is what makes it read as belonging
+    // to that line rather than to the menu as a whole.
+    const panel = button.closest(".attach")?.getBoundingClientRect() ?? row;
+    let x = panel.right + 6;
+    const width = 224;
+    // Flipped where there is no room to the right, which is the narrow window
+    // and the phone. A submenu that opens off-screen is one nobody can use.
+    if (x + width > window.innerWidth - 8) { x = Math.max(8, row.left - width - 6); }
+    this.subAt = { x, y: Math.max(8, row.top - 4) };
+    this.attachSub = which;
   }
 
   /* One connector in the menu: its mark, its name, and a switch.
@@ -2672,8 +2752,18 @@ export class AgentConsole extends LitElement {
     if (this.slash === null) return nothing;
     const rows = this.slashMatches();
     if (rows.length === 0) return nothing;
+    // Sat above the composer, measured rather than assumed.
+    //
+    // It was `bottom: 132px` against the viewport, which is right in a
+    // conversation — the composer is docked at the bottom — and wrong on the
+    // empty screen, where the composer is centred and the menu appeared far
+    // below it with the page showing through the gap.
+    const box = this.composerBox()?.getBoundingClientRect();
+    const above = box === undefined
+      ? ""
+      : `bottom:${Math.max(12, Math.round(window.innerHeight - box.top + 12))}px`;
     return html`
-      <div class="slash" role="listbox" aria-label="Skills">
+      <div class="slash" role="listbox" aria-label="Skills" style=${above}>
         ${rows.map((r) => html`
           <button class=${r.on ? "slash-row on" : "slash-row"}
             role="option" aria-selected=${r.on}
