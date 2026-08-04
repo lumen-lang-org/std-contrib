@@ -954,7 +954,12 @@ export class SearchDash extends LitElement {
     /* Whatever the view puts last takes the slack, so an empty state sits in
        the middle of the space it owns rather than pinned under the filters
        with the rest of the pane blank beneath it. */
-    :host([mode="admin"]) .wrap > :last-child { flex: 1 1 auto; min-height: 0; }
+    /* Only the resting states take the slack. Stretching whatever happens to
+       be last put a column of blank screen under a real result list — the
+       results end, the page keeps going, and on a phone that reads as content
+       that failed to load. A resting state is the one thing that WANTS the
+       room, because its whole job is to fill an empty view. */
+    :host([mode="admin"]) .wrap > .empty.big.resting { flex: 1 1 auto; min-height: 0; }
     .empty.big { display: grid; place-content: center; }
     /* The state before anybody has asked anything. Quieter than a result that
        came back empty: nothing has gone wrong, the view is simply waiting. */
@@ -1220,6 +1225,40 @@ export class SearchDash extends LitElement {
       .top { flex-direction: column; }
       .bar-row { grid-template-columns: minmax(56px, 34%) 1fr auto; }
       .bar-pc { display: none; }
+
+      /* --- the query row, stacked -------------------------------------------
+         flex-wrap was doing this job and doing it only sometimes. The row is
+         a field with flex 1-1-320px followed by fixed-width knobs, so
+         whether it wraps is a subtraction against the viewport: at 390px the
+         field takes the line and the knobs drop below it, and at ~430 — an
+         ordinary large phone — 320 + 82 fits, the field stops growing, and the
+         "k" box sits half off the right edge with its label clipped. RAG is
+         worse than Search because it has two knobs, not one.
+         A layout that is correct at one phone width and broken at the next is
+         not responsive, it is lucky. Below this breakpoint the row is a column
+         and every control owns the full width — which is also the better
+         answer on a touch screen, where an 82px number field beside a search
+         box is a target nobody wants. */
+      .ask { flex-direction: column; align-items: stretch; }
+      .ask-field, .k, .wide-k, .go { width: 100%; }
+      .k, .wide-k { flex: none; }
+      /* And the basis has to be reset with the direction, which is the part
+         that is easy to miss: flex-basis is measured along the MAIN axis, so
+         the row's flex 1-1-320px on the field becomes 320px of HEIGHT the
+         moment the container turns into a column. The controls did stack and
+         did fit the width — and sat under 320px of blank screen, which a
+         width-only check reports as correct. */
+      .ask-field { flex: 0 0 auto; }
+
+      /* The suggestion list, bounded by the screen rather than by a number
+         chosen on a desktop. 300px of dropdown under a field that sits halfway
+         down a phone — with the keyboard up, which is exactly when this list
+         is open — is taller than what is left, so the last row was cut mid-
+         text and looked like a rendering fault rather than like a list that
+         scrolls. dvh and not vh: vh on iOS is the tallest the viewport
+         ever gets, which is the one measurement that is wrong while a keyboard
+         is up. */
+      .suggest { max-height: min(300px, 38dvh); }
     }
   `;
 }
