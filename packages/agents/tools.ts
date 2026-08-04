@@ -49,7 +49,183 @@ export type Mounted = {
   // tool the model was never told about is a failure that looks like a bad
   // answer.
   problems: string[],
+  /* Tools the model can reach but has not been shown.
+   *
+   * A tool costs context whether or not it is ever called: the model is sent
+   * every name, description and JSON Schema on every rotation. Linear alone
+   * offers 52, which is more than a 32k model can hold beside a conversation —
+   * and it does not fail gracefully, it refuses the request outright.
+   *
+   * So past a threshold a connector's tools are held here instead, and the
+   * model is given `find_tools` to ask for what it needs. It costs one spec
+   * rather than fifty-two, and it costs the same whether one connector is
+   * attached or six. `findTools` moves them across; run.ts adds their specs to
+   * the rotation that follows, which is why `specs` in that file is built once
+   * and mutated rather than rebuilt. */
+  deferred: MountedTool[],
 };
+
+/* How many tools one connector may mount before its tools are deferred.
+ *
+ * Twelve, which is roughly where a connector stops being a handful of verbs
+ * and starts being an API surface. Below it, deferring costs the model a round
+ * trip to learn what it could have been told; above it, mounting costs every
+ * rotation of every conversation whether the connector is used or not. */
+const MOUNT_DIRECTLY = 12;
+
+/* The tool that fetches other tools. Its description is doing real work: the
+ * model has to understand that its absent capabilities are reachable, or it
+ * will answer "I cannot do that" about a connector that is attached and
+ * working — which is the exact failure this whole mechanism exists to fix. */
+export function findToolsSpec(mounted: Mounted): ToolSpec {
+  return toolSpec("find_tools",
+    "Find tools you have access to but have not been shown yet. "
+    + mountedDeferredSummary(mounted)
+    + " Call this FIRST whenever a request needs one of them — search by what "
+    + "you want to do (\"list issues\", \"send email\"), not by tool name. "
+    + "The matching tools become callable immediately afterwards.",
+    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\","
+    + "\"description\":\"What you are trying to do.\"}},\"required\":[\"query\"]}");
+}
+
+/* Which connectors have tools waiting, and how many. Named rather than
+ * counted: "52 tools" tells a model nothing it can act on, and "Linear" tells
+ * it exactly when to call this. */
+function mountedDeferredSummary(mounted: Mounted): string {
+  let names: string[] = [];
+  let i: int = 0;
+  while (i < mounted.deferred.length) {
+    let server = mounted.servers[mounted.deferred[i].server].serverName;
+    if (!names.includes(server)) { names.push(server); }
+    i = i + 1;
+  }
+  if (names.length == 0) { return ""; }
+  return "Waiting: " + `${stillWaiting(mounted)}` + " tools from "
+    + names.join(", ") + ".";
+}
+
+/* Move the tools matching a query from deferred to mounted.
+ *
+ * Matched on the words of the query against each tool's name and description,
+ * because the model is asked to search by intent and a substring match on the
+ * whole phrase would find nothing for "list the issues in my team". Capped, so
+ * a query of "tool" cannot undo the whole point of deferring.
+ */
+export type FoundTools = {
+  // The mount with the matches added. A new record, because a record's fields
+  // are immutable here — run.ts rebinds its own `mounted` to this.
+  mounted: Mounted,
+  found: MountedTool[],
+};
+
+export function findTools(mounted: Mounted, query: string, cap: int): FoundTools {
+  let words = query.toLowerCase().split(" ");
+  let grown: MountedTool[] = [];
+  let m: int = 0;
+  while (m < mounted.tools.length) { grown.push(mounted.tools[m]); m = m + 1; }
+
+  // Score every candidate first, then take the best. Taking the first `cap`
+  // matches in roster order is what this did, and it is why asking for "teams"
+  // came back with list_agent_skills, list_comments and list_cycles while
+  // list_teams — the only exact match — fell off the end of the cap. The model
+  // then called list_cycles and got a 400, which reads as the connector being
+  // broken rather than as the search having answered badly.
+  let pool: MountedTool[] = [];
+  let scores: int[] = [];
+  let i: int = 0;
+  while (i < mounted.deferred.length) {
+    let t = mounted.deferred[i];
+    // Already fetched by an earlier call this round. `deferred` is never
+    // emptied — what is mounted is the moving part.
+    if (mountedIndex(grown, t.name) >= 0) { i = i + 1; continue; }
+    let name = t.name.toLowerCase();
+    let hay = name + " " + t.description.toLowerCase();
+    let score: int = 0;
+    let w: int = 0;
+    while (w < words.length) {
+      let word = words[w].trim();
+      // Two characters or fewer matches everything; "of" would pull in the
+      // whole roster and the cap would then decide at random.
+      if (word.length > 2) {
+        // A hit in the NAME is worth more than one anywhere in the prose: a
+        // tool called list_teams is what "list teams" means, and a tool whose
+        // description merely mentions teams is a near miss.
+        if (name.includes(word)) { score = score + 4; }
+        else if (hay.includes(word)) { score = score + 1; }
+      }
+      w = w + 1;
+    }
+    if (score > 0) { pool.push(t); scores.push(score); }
+    i = i + 1;
+  }
+
+  // The best `cap` of them, by selection — the array has no sort here and the
+  // pool is a few dozen entries at most.
+  let found: MountedTool[] = [];
+  // Selection by descending score, without a `taken` array: an index cannot be
+  // assigned into here, so "already chosen" is read off `found` instead — the
+  // pool is a few dozen entries and the cap is single digits.
+  while (found.length < cap) {
+    let best: int = -1;
+    let k: int = 0;
+    while (k < pool.length) {
+      if (mountedIndex(found, pool[k].name) < 0
+          && (best < 0 || scores[k] > scores[best])) { best = k; }
+      k = k + 1;
+    }
+    if (best < 0) { break; }
+    found.push(pool[best]);
+    grown.push(pool[best]);
+  }
+
+  let out: Mounted = {
+    tools: grown, servers: mounted.servers, tokens: mounted.tokens,
+    problems: mounted.problems, deferred: mounted.deferred,
+  };
+  let answer: FoundTools = { mounted: out, found: found };
+  return answer;
+}
+
+
+/* What to tell the model about the tools it has not been shown.
+ *
+ * In the system prompt and not only in the tool's description, because a model
+ * decides what it is capable of from the prompt: with 52 Linear tools one
+ * find_tools call away, Qwen 3 8B answered "I cannot access your Linear
+ * account" and made no call. The tool was there and perfectly described. What
+ * was missing was anything telling it that "I cannot" was the wrong answer.
+ *
+ * Written as a capability rather than as a mechanism — "you can read and write
+ * Linear" lands where "a tool-discovery facility is available" does not. */
+export function deferredBriefing(mounted: Mounted): string {
+  if (stillWaiting(mounted) == 0) { return ""; }
+  let names: string[] = [];
+  let i: int = 0;
+  while (i < mounted.deferred.length) {
+    let server = mounted.servers[mounted.deferred[i].server].serverName;
+    if (!names.includes(server)) { names.push(server); }
+    i = i + 1;
+  }
+  return "You are connected to " + names.join(", ") + ". Their tools are not "
+    + "listed above to save room, but you have them: call find_tools with what "
+    + "you are trying to do, and the tools you need become callable straight "
+    + "away. Never tell someone you cannot reach " + names.join(" or ")
+    + " — call find_tools first.";
+}
+
+/** How many deferred tools are still unfetched. */
+export function stillWaiting(mounted: Mounted): int {
+  let n: int = 0;
+  let i: int = 0;
+  while (i < mounted.deferred.length) {
+    if (mountedIndex(mounted.tools, mounted.deferred[i].name) < 0) { n = n + 1; }
+    i = i + 1;
+  }
+  return n;
+}
+
+
+
 
 // The servers an agent is linked to.
 export function agentServers(db: Db, agentId: string): McpServerRow[] {
@@ -135,6 +311,8 @@ export function delegateSchema(): string {
 // visible to whoever linked them.
 export function mountTools(db: Db, agentId: string, master: string, owner: string): Mounted {
   let tools: MountedTool[] = [];
+  // Held back rather than mounted — see `deferred` on Mounted for why.
+  let deferred: MountedTool[] = [];
   let problems: string[] = [];
   let tokens: string[] = [];
   let servers = agentServers(db, agentId);
@@ -210,14 +388,17 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
           schema: offered[i].schema,
           server: s,
         };
-        tools.push(t);
+        // A connector small enough to hold goes straight in; a large one waits
+        // behind find_tools, because its specs cost every rotation of every
+        // conversation whether or not anybody uses it.
+        if (offered.length > MOUNT_DIRECTLY) { deferred.push(t); } else { tools.push(t); }
       }
       i = i + 1;
     }
     s = s + 1;
   }
 
-  let out: Mounted = { tools: tools, servers: servers, tokens: tokens, problems: problems };
+  let out: Mounted = { tools: tools, servers: servers, tokens: tokens, problems: problems, deferred: deferred };
   return out;
 }
 

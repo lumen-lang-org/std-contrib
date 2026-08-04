@@ -13,7 +13,7 @@ import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts"
 import { storeCredential } from "./credentials.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, ScriptImageRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing, MountedTool, findTools, findToolsSpec, stillWaiting } from "./tools.ts";
 import { userTokenKey } from "./connect.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
@@ -707,4 +707,101 @@ test("the suite leaves nothing behind", () => {
   seeded();
   expect(dropTable(database, agentsMapping()).ok);
   database.close();
+});
+
+// --- tools the model has to ask for -------------------------------------------
+//
+// A tool costs context whether or not it is called: every name, description
+// and JSON Schema is sent on every rotation. Linear offers 52, which is more
+// than a 32k model can hold beside a conversation — and it does not degrade,
+// it refuses the request outright. So a large connector waits behind
+// find_tools, and this is the search that hands them over.
+
+function waiting(names: string[]): Mounted {
+  let deferred: MountedTool[] = [];
+  let i: int = 0;
+  while (i < names.length) {
+    let t: MountedTool = { name: names[i], description: "Does " + names[i] + " things.", schema: "{}", server: 0 };
+    deferred.push(t);
+    i = i + 1;
+  }
+  let servers: McpServerRow[] = [{ id: "s1", serverName: "linear", transport: "http", endpoint: "https://mcp.linear.app/mcp", authKind: "oauth", authHeader: "", enabled: true }];
+  let m: Mounted = { tools: [], servers: servers, tokens: [""], problems: [], deferred: deferred };
+  return m;
+}
+
+test("a search by intent finds the tool, not only an exact name", () => {
+  // The model is asked to search by what it wants to do, so "list issues" has
+  // to reach list_issues — a substring match on the whole phrase finds nothing.
+  let got = findTools(waiting(["list_issues", "get_team", "save_document"]), "list the issues", 8);
+  expect(got.found.length == 1);
+  expect(got.found[0].name == "list_issues");
+  // And it is mounted, which is what makes it callable on the next rotation.
+  expect(got.mounted.tools.length == 1);
+});
+
+test("a short word does not match everything", () => {
+  // "of" appears in most descriptions. Matching on it would pull the whole
+  // roster across and leave the cap to choose at random, which is the saving
+  // undone.
+  let got = findTools(waiting(["list_issues", "get_team"]), "of", 8);
+  expect(got.found.length == 0);
+});
+
+test("the cap holds, so one broad query cannot undo the deferring", () => {
+  let many: string[] = [];
+  let i: int = 0;
+  while (i < 30) { many.push("issue_tool_" + `${i}`); i = i + 1; }
+  let got = findTools(waiting(many), "issue", 8);
+  expect(got.found.length == 8);
+});
+
+test("asking twice does not mount the same tool twice", () => {
+  // "issues" reaches list_issues and not get_issue — the match is on the word
+  // as written, which is the honest behaviour to pin: a model that wants both
+  // asks for "issue" and gets both.
+  let once = findTools(waiting(["list_issues", "get_issue"]), "issues", 8);
+  expect(once.found.length == 1);
+  let twice = findTools(once.mounted, "issues", 8);
+  // The roster is never emptied — a record's fields are immutable — so the
+  // guard is that a tool already mounted is skipped.
+  expect(twice.found.length == 0);
+  expect(twice.mounted.tools.length == 1);
+});
+
+test("what is still waiting is counted after what has been taken", () => {
+  let m = waiting(["list_issues", "get_issue", "save_document"]);
+  expect(stillWaiting(m) == 3);
+  let got = findTools(m, "issues", 8);
+  expect(stillWaiting(got.mounted) == 2);
+  // The broader word takes get_issue too, leaving only the document tool.
+  let more = findTools(got.mounted, "issue", 8);
+  expect(more.found.length == 1);
+  expect(stillWaiting(more.mounted) == 1);
+});
+
+test("find_tools names the connectors, not just a number", () => {
+  // "52 tools" tells a model nothing it can act on; the connector's name tells
+  // it exactly when to call this.
+  let spec = findToolsSpec(waiting(["list_issues", "get_issue"]));
+  expect(spec.description.indexOf("linear") > 0);
+  expect(spec.name == "find_tools");
+});
+
+test("an exact name beats a passing mention", () => {
+  // Asking for "teams" with a cap of 2 must return list_teams. It did not:
+  // matches were taken in roster order, so three alphabetically earlier tools
+  // filled the cap and the only exact match fell off the end — the model then
+  // called one of them and got a 400 from the connector.
+  let m = waiting(["list_agent_skills", "list_comments", "list_cycles", "list_teams"]);
+  let got = findTools(m, "teams", 2);
+  // Only one of them is about teams at all, so one is the whole answer — and
+  // the cap is a ceiling, never a quota to fill with near misses.
+  expect(got.found.length == 1);
+  expect(got.found[0].name == "list_teams");
+
+  // And where several do match, the exact name still comes first: "list" hits
+  // every name here, so ordering is the only thing being tested.
+  let all = findTools(waiting(["list_comments", "list_teams"]), "list teams", 2);
+  expect(all.found[0].name == "list_teams");
 });

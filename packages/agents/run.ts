@@ -25,7 +25,7 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping, cancelAsked } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
@@ -54,6 +54,12 @@ import { GenerationCall, Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, en
 // deployment's call, not a constant: a cloud tier may want more, a demo box
 // fewer, and neither should need a rebuild.
 const MAX_TOOL_STEPS: int = maxToolSteps();
+/* How many tools one find_tools call may mount.
+ *
+ * Eight. The point of deferring is that a model gets what it needs and not a
+ * roster, and a query broad enough to match forty tools has undone the saving
+ * it was called to make — better that it asks twice. */
+const FIND_TOOLS_CAP: int = 8;
 
 // What a cancelled turn says. A sentence rather than silence, because the
 // transcript keeps the turn: the person pressed stop, and the row that
@@ -345,6 +351,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // call to work out what it was refusing.
   let mounted = mountTools(db, agent.id, master, where.owner);
   let specs = toolSpecs(mounted);
+  // One spec instead of a connector's whole roster. `mounted` and `specs` are
+  // both rebuilt as the model asks for tools, which is why neither is const.
+  if (stillWaiting(mounted) > 0) { specs.push(findToolsSpec(mounted)); }
 
   // In a thread, the conversation's files are tools like any others: a write
   // is a tool span in the trace and an expectation an eval can check. A bare
@@ -524,6 +533,17 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // agent do", which a model settles before it picks a tool.
   let envLines = envBriefing(db);
   if (envLines != "") { system = system + "\n\n" + envLines; }
+
+  // Tools the model has but has not been shown.
+  //
+  // The spec for find_tools describes itself perfectly well and a small model
+  // still will not reach for it: asked to list Linear teams with 52 Linear
+  // tools one call away, Qwen 3 8B answered "I cannot access your Linear
+  // account" and made no tool call at all. It is not a wording problem in the
+  // tool — a model decides what it CAN do from the system prompt, and nothing
+  // there said its abilities were larger than the list in front of it.
+  let waitingLines = deferredBriefing(mounted);
+  if (waitingLines != "") { system = system + "\n\n" + waitingLines; }
   if (threadId != "") {
     // The fence convention rides the system prompt, not a tool description:
     // a model decides how to answer before it considers any particular tool,
@@ -772,7 +792,40 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let skilled = callSkillTool(db, {
         agentId: agentId, name: calls[i].name, args: calls[i].args,
       });
-      if (fileAnswer.handled) {
+      // find_tools before everything: it is this package's own, it takes no
+      // side effect, and a connector that happened to export a tool of that
+      // name must never answer it.
+      if (calls[i].name == "find_tools") {
+        let query = jsonText(calls[i].args, "query");
+        if (query == "") {
+          resultText = "Say what you are trying to do: find_tools takes {\"query\":\"list issues\"}.";
+          resultOk = false;
+        } else {
+          let got = findTools(mounted, query, FIND_TOOLS_CAP);
+          mounted = got.mounted;
+          if (got.found.length == 0) {
+            resultText = "Nothing matched \"" + query + "\". "
+              + `${stillWaiting(mounted)}` + " tools are still waiting; try other words "
+              + "for what you want to do.";
+            resultOk = false;
+          } else {
+            // The specs, appended to the list the NEXT rotation is sent. This
+            // is the whole mechanism: the tools were always callable, they had
+            // simply not been described yet.
+            let f: int = 0;
+            let named: string[] = [];
+            while (f < got.found.length) {
+              specs.push(toolSpec(got.found[f].name, got.found[f].description, got.found[f].schema));
+              named.push(got.found[f].name);
+              f = f + 1;
+            }
+            resultText = "You can now call: " + named.join(", ") + ".";
+            resultOk = true;
+          }
+        }
+        from = "tools";
+        calledTools.push(calls[i].name);
+      } else if (fileAnswer.handled) {
         resultOk = fileAnswer.ok;
         resultText = fileAnswer.text;
         from = "workspace";
