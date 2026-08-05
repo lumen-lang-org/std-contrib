@@ -85,6 +85,20 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS agent_skills");
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
+  // The same rule again, and the same symptom, for everything that arrived
+  // after the list above was last extended: Discover's stories gained four
+  // columns at 98.3-98.5 and 100, a card plugin gained two at 97.3-97.4. The
+  // FIRST fresh() in a run creates those tables; every one after it re-ran the
+  // plan against them and failed on a duplicate column, which stopped the plan
+  // and left eighteen tests reporting a scoping bug that was really a fixture
+  // that had not kept up.
+  execute(database, "DROP TABLE IF EXISTS discover_stories");
+  execute(database, "DROP TABLE IF EXISTS discover_feeds");
+  execute(database, "DROP TABLE IF EXISTS card_plugins");
+  execute(database, "DROP TABLE IF EXISTS card_cases");
+  execute(database, "DROP TABLE IF EXISTS tool_cards");
+  execute(database, "DROP TABLE IF EXISTS agent_web_rag");
+  execute(database, "DROP TABLE IF EXISTS scheduled_tasks");
   // Not ALTERed, but seeded below: rows surviving a wipe would make the menu's
   // order a fact about how often this suite has been run.
   execute(database, "DROP TABLE IF EXISTS model_choices");
@@ -590,7 +604,7 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"94.4\"") >= 0);
+  expect(said.indexOf("\"migration\":\"100\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);

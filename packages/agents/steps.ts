@@ -19,6 +19,7 @@
 //   cd packages/agents && lumen test steps.test.ts
 
 import { Db } from "../plume/driver.ts";
+import { cardClaims } from "./toolcards.ts";
 import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
 import { DbField, DbRepository, DbOrder, asc, desc, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
@@ -83,6 +84,24 @@ export const ARGS_PREVIEW = 120;
 // column is a failure's first traceback lines or a validator's verdict head,
 // and 120 bytes cuts both off before they say anything.
 export const RESULT_PREVIEW = 700;
+
+/* The cap for a result a CARD draws, rather than one a person skims.
+ *
+ * 700 bytes is the right size for the steps card: a result is context for
+ * somebody reading what a round did, and four thousand lines of JSON under a
+ * tool name is not that. It is the wrong size for a card, because a card
+ * reads its numbers back out of this very row — and a list_issues answer runs
+ * to a few kilobytes, so it arrived cut mid-object, parsed as nothing, and
+ * the block degraded to a raw [LINEAR_ISSUES] marker in the transcript. The
+ * cap was doing its job; it was being asked to serve two purposes.
+ *
+ * So the cap is per-tool now: whatever a card claims is kept whole to this
+ * much larger ceiling, and everything else keeps the preview it always had.
+ * A deployment with no card plugins stores exactly what it stored before.
+ * The ceiling is still a ceiling — an unbounded column is how a steps table
+ * becomes the largest thing in the database — and 64KB holds every connector
+ * listing seen here with room to spare. */
+export const RESULT_FOR_CARD = 65536;
 
 export function stepsMapping(): DbRepository {
   let fs: DbField[] = [
@@ -263,6 +282,16 @@ export function resultPreview(text: string): string {
   return text.slice(0, cut) + "...";
 }
 
+/** A result a card will draw: kept whole, to a much larger ceiling. Cut with
+ *  the same discipline as the preview — never through a character — because a
+ *  broken final byte is a JSON.parse failure either way. */
+export function resultForCard(text: string): string {
+  if (text.length <= RESULT_FOR_CARD) { return text; }
+  let cut = RESULT_FOR_CARD - 3;
+  while (cut > 0 && continuationByte(text.charCodeAt(cut))) { cut = cut - 1; }
+  return text.slice(0, cut) + "...";
+}
+
 // A byte that continues a character rather than starting one: 10xxxxxx.
 function continuationByte(b: int): bool {
   return b >= 128 && b < 192;
@@ -398,7 +427,12 @@ export function endStepAt(db: Db, s: StepStart, close: StepClose): void {
     kind: s.kind, name: s.name, target: s.target,
     args: stepArgsAt(s.name, s.args, close.line, close.changed),
     startedAt: s.now, endedAt: close.endedAt, millis: close.millis, ok: close.ok,
-    result: resultPreview(close.result),
+    // Whole for a tool a card draws, the preview for everything else. The
+    // lookup is one indexed read on a table with a handful of rows, on a
+    // path that has just made a network call to an MCP server.
+    result: cardClaims(db, s.name)
+      ? resultForCard(close.result)
+      : resultPreview(close.result),
   };
   persist(db, stepsMapping(), JSON.stringify(row));
 }
@@ -515,6 +549,31 @@ function partialsMapping(): DbRepository {
     field("updatedAt", "updated_at", "text"),
   ];
   return repository("thread_partials", "id", "thread_id", fs);
+}
+
+/** Blank the streamed answer this thread is holding.
+ *
+ *  Called when a turn STARTS, and the bug it fixes is visible from the
+ *  transcript: the row survives its round, `partialOf(..., -1)` answers
+ *  "whatever round the row itself claims", and the console paints a partial
+ *  the moment it puts a bot placeholder on screen. So pressing send rendered
+ *  the PREVIOUS answer in full inside the new bubble, which was then replaced
+ *  when the new round's first chunk landed — the reader watched the last
+ *  answer arrive again and vanish.
+ *
+ *  The comment on `partialOf` said a stale row was harmless because "the
+ *  consumer only paints a partial while its own send is in flight". That was
+ *  true when the consumer polled and painted late; it stopped being true when
+ *  the console started painting from the first push. The row is what is
+ *  stale, so the row is what is cleared.
+ *
+ *  Blanked rather than deleted: `recordPartial` refuses empty text, so an
+ *  empty row cannot be written by the normal path and reads unambiguously as
+ *  "this thread has nothing streaming". */
+export function clearPartial(db: Db, threadId: string, now: string): void {
+  if (threadId == "") { return; }
+  let row: PartialRow = { id: threadId, seq: -1, text: "", updatedAt: now };
+  persist(db, partialsMapping(), JSON.stringify(row));
 }
 
 export function recordPartial(db: Db, threadId: string, seq: int, text: string, now: string): void {

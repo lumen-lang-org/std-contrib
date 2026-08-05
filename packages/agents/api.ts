@@ -38,21 +38,21 @@ import { migrate, appliedHighWater } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, enabledChoices, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, AuthProviderRow, authProvidersMapping, PluginRow, PluginItemRow, pluginsMapping, pluginItemsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel, readSetting, writeSetting } from "./schema.ts";
 import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
-import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText } from "./provider.ts";
+import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText, userTurn } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
-import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw} from "./scan.ts";
+import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw, jsonFlag } from "./scan.ts";
 import { toolListing } from "./mcp.ts";
 import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, toolsOff, setToolOn } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
-import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread} from "./threads.ts";
+import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson, runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
-import { ArtifactRow, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
+import { ArtifactRow, ArtifactCard, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, libraryFor, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
 import { scriptEnvNameProblem } from "./run-script.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "./office-render.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
@@ -60,6 +60,11 @@ import { EnvSweep, ENV_IDLE_MS, envPlan, envDockerUp, envIdle } from "./environm
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
+import { AgentWebRagRow, agentWebRagMapping, webRagFor, webRagPlan } from "./webrag.ts";
+import { ToolCardRow, allToolCards, toolCardsMapping, toolCardsPlan } from "./toolcards.ts";
+import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, feedById, refreshFeed, storiesFor, storyById } from "./discover.ts";
+import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping, cardPluginsPlan } from "./plugincards.ts";
+import { TaskRow, MAX_PER_OWNER, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, tasksPlan, withNextAt } from "./tasks.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
@@ -95,6 +100,7 @@ type RetrievalSetup = { embeddingModelId: string, topK: int, maxDistance: number
 // the only line that reads it off a request, so that "did this route scope?"
 // is a question about one call and not about a header check copied sixteen
 // times.
+
 function callerTags(req: Request): string[] {
   return tagsFromHeader(trustsProxyAuth(), header(req, "x-user"));
 }
@@ -427,6 +433,51 @@ class AgentApi {
     let written = persist(this.db, agentRetrievalMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, agentRetrievalMapping(), param(req, "id")));
+  }
+
+  // Whether and how this agent reads the public web index. Its own GET,
+  // unlike the knowledge row, because the form that edits it wants to draw
+  // the saved state and the agent document does not carry this.
+  @get("/:id/web-rag")
+  webRag(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    return ok(JSON.stringify(webRagFor(this.db, param(req, "id"))));
+  }
+
+  @put("/:id/web-rag")
+  setWebRag(req: Request): Reply {
+    if (!existsById(this.db, this.flat, param(req, "id"))) {
+      return notFound("agent " + param(req, "id"));
+    }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let body: AgentWebRagRow = JSON.parse<AgentWebRagRow>(req.body);
+    if (body.topK <= 0 || body.topK > 20) { return badRequest("topK must be between 1 and 20 — the index caps at 20"); }
+    if (body.maxChars < 500 || body.maxChars > 100000) { return badRequest("maxChars must be between 500 and 100000"); }
+    if (body.queryMode != "verbatim" && body.queryMode != "generated") {
+      return badRequest("queryMode must be verbatim or generated");
+    }
+    // A generated mode with no model would silently behave as verbatim
+    // (generateQuery falls back), and a form that saves one thing and gets
+    // another teaches people the form is broken. Refused instead.
+    if (body.queryMode == "generated") {
+      let modelDoc = findById(this.db, modelsMapping(), body.queryModelId);
+      if (modelDoc == "") { return badRequest("queryMode generated needs an existing chat model as queryModelId"); }
+      let m: ModelRow = JSON.parse<ModelRow>(modelDoc);
+      if (m.kind != "chat") { return badRequest(m.label + " is not a chat model"); }
+    }
+    let row: AgentWebRagRow = {
+      agentId: param(req, "id"),
+      enabled: body.enabled,
+      topK: body.topK,
+      maxChars: body.maxChars,
+      queryMode: body.queryMode,
+      queryModelId: body.queryModelId,
+    };
+    let written = persist(this.db, agentWebRagMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, agentWebRagMapping(), param(req, "id")));
   }
 
   // Run the agent against a user's text. The reply is the conversation's side
@@ -2892,6 +2943,71 @@ class ThreadApi {
     return ok(out + "]");
   }
 
+  /* A conversation about a Discover article.
+   *
+   * Under `/threads` and not under `/discover`, and that placement is the
+   * whole reason this route works for the reader it is for. The console's
+   * middleware admits a guest to exactly one write path — `/api/threads` —
+   * and refuses every write under `/api/discover`. An anonymous visitor
+   * reading the front page is precisely who asks the first question about an
+   * article, so the route has to live where they are allowed to knock.
+   *
+   * Declared before the "/:id" routes below. The router refuses at startup a
+   * table whose literal is written after the parameter that would shadow it —
+   * `GET /threads/replayable` carries the same note.
+   *
+   * The body names a STORY and an agent, and nothing else. The context that
+   * goes into the thread is built here from the stored row, because a client
+   * that could supply it could write an invisible instruction — see
+   * `asArticleContext`.
+   */
+  @post("/from-story")
+  fromStory(req: Request): Reply {
+    if (req.body == "") {
+      return badRequest("a body is required: {\"storyId\":\"tech-en:ab12cd34\",\"agentId\":\"a1\"}");
+    }
+    let storyId = jsonText(req.body, "storyId");
+    let agentId = jsonText(req.body, "agentId");
+    if (storyId == "" || agentId == "") {
+      return badRequest("a storyId and an agentId are required");
+    }
+    if (!existsById(this.db, agentsMapping(), agentId)) {
+      return badRequest("no agent " + agentId);
+    }
+    let story = storyById(this.db, storyId);
+    if (story.id == "") { return notFound("story " + storyId); }
+
+    let id = openThread(this.db, { agentId: agentId, owner: owningTag(callerTags(req)), now: stamp() });
+    if (id == "") { return badRequest("the thread could not be opened"); }
+
+    // The picker, when the console had one showing. Same optional field the
+    // ordinary door takes, refused the same way.
+    let chosen = askedChoice(req.body);
+    if (chosen != "" && choiceProblem(this.db, chosen) == "") {
+      if (rememberChoice(this.db, id, chosen) != "") { chosen = ""; }
+    } else {
+      chosen = "";
+    }
+
+    // The article, as the first turn. Stored as CHUNK_ROLE — see
+    // `isRetrievedContext` — so the model reads it and the transcript never
+    // shows it as something the person typed.
+    let feed = feedById(this.db, story.feedId);
+    let seed = [userTurn(asArticleContext(story, feed.topic))];
+    let wrote = appendTurns(this.db, id, seed, 0);
+    if (wrote != "") { return badRequest("the article could not be attached: " + wrote); }
+
+    // Named from the headline, which also means the naming call never runs:
+    // `titleThread` returns early on a thread that already has a title, so
+    // this saves a completion on every article somebody asks about.
+    nameThread(this.db, id, story.headline);
+
+    return created("{\"id\":" + JSON.stringify(id)
+      + ",\"agentId\":" + JSON.stringify(agentId)
+      + ",\"modelChoiceId\":" + JSON.stringify(chosen)
+      + ",\"title\":" + JSON.stringify(story.headline) + "}");
+  }
+
   @post("/")
   open(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required: {\"agentId\":\"a1\"}"); }
@@ -3443,6 +3559,198 @@ function artifactJson(a: ArtifactRow): string {
 // metadata, bodies as JSON, and the token that builds a preview link. It never
 // serves an artifact as itself — that is the preview host's job, below, and
 // keeping the two apart is the whole of the containment.
+/* Every artifact this caller owns, across every conversation.
+ *
+ * The per-thread route below answers "what does THIS conversation hold";
+ * this answers "what have I made", which is a different question and the one
+ * somebody asks when they cannot remember which conversation a document came
+ * out of. Scoped by the same ownership the thread routes use, so it can never
+ * be a way to read somebody else's files.
+ */
+/* Discover: what the digest job wrote.
+ *
+ * A table read. The model call is in the background pass (digestLoop), so
+ * this route is as fast as any other list and cannot fail on a model being
+ * down — a visitor gets the last good digest rather than a spinner.
+ *
+ * Feeds are per topic per language per country, so the answer is scoped to
+ * what the caller asked for and falls back to the worldwide feeds when their
+ * own pair has none: an empty page for a language nobody has crawled yet is
+ * worse than the same stories everybody else is reading.
+ */
+@controller("/discover")
+class DiscoverApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  read(req: Request): Reply {
+    let lang = req.query.get("lang") ?? "";
+    let country = req.query.get("country") ?? "";
+    let feeds = allFeeds(this.db);
+
+    let out = "[";
+    let wrote: int = 0;
+    let i: int = 0;
+    while (i < feeds.length) {
+      let feed = feeds[i];
+      // A feed matches when it names the caller's language and place, or
+      // names neither — the worldwide fallback.
+      let langOk = feed.lang == "" || lang == "" || feed.lang == lang;
+      let placeOk = feed.country == "" || country == "" || feed.country == country;
+      if (feed.enabled && langOk && placeOk) {
+        let rows = storiesFor(this.db, feed.id);
+        if (rows.length > 0) {
+          if (wrote > 0) { out = out + ","; }
+          out = out + "{\"id\":" + JSON.stringify(feed.id)
+            + ",\"topic\":" + JSON.stringify(feed.topic)
+            + ",\"lang\":" + JSON.stringify(feed.lang)
+            + ",\"country\":" + JSON.stringify(feed.country)
+            + ",\"digestedAt\":" + JSON.stringify(feed.digestedAt)
+            + ",\"stories\":[";
+          let r: int = 0;
+          while (r < rows.length) {
+            if (r > 0) { out = out + ","; }
+            /* Field by field, and NOT `JSON.stringify(rows[r])`, which is what
+               stood here before a story had a body. The body is up to twelve
+               thousand characters; the feed draws six of them per topic across
+               every topic that matches, so shipping it here would put a
+               megabyte of article text into a page that shows two-sentence
+               summaries. It travels on `/discover/story/:id`, where it is the
+               point. */
+            out = out + "{\"id\":" + JSON.stringify(rows[r].id)
+              + ",\"feedId\":" + JSON.stringify(rows[r].feedId)
+              + ",\"rank\":" + `${rows[r].rank}`
+              + ",\"headline\":" + JSON.stringify(rows[r].headline)
+              + ",\"summary\":" + JSON.stringify(rows[r].summary)
+              + ",\"sources\":" + JSON.stringify(rows[r].sources)
+              + ",\"fetchedAt\":" + JSON.stringify(rows[r].fetchedAt)
+              + ",\"why\":" + JSON.stringify(rows[r].why)
+              + ",\"madeAt\":" + JSON.stringify(rows[r].madeAt)
+              + ",\"image\":" + JSON.stringify(rows[r].image)
+              + ",\"readMinutes\":" + `${rows[r].readMinutes}`
+              // Whether there is anything to open. A card that links to an
+              // empty article is worse than one that does not link.
+              + ",\"hasBody\":" + (rows[r].body == "" ? "false" : "true") + "}";
+            r = r + 1;
+          }
+          out = out + "]}";
+          wrote = wrote + 1;
+        }
+      }
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+
+  /* One story, in full, for its own page.
+   *
+   * Public, like the feed it came off: `GUEST_GETS` in the console's
+   * middleware holds "/api/discover" and matches by prefix, so this needs no
+   * entry of its own.
+   *
+   * A missing row is answered with a SENTENCE and a 404 rather than a bare
+   * one, because a missing row is the ordinary case here and not a fault. A
+   * refresh replaces a feed's stories, so a link somebody sent this morning
+   * outlives what it points at by design; the page turns this into "that
+   * story has rolled off the feed" and offers the feed, which is a true and
+   * useful thing to say. A blank error screen would suggest the site broke.
+   */
+  @get("/story/:id")
+  story(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    let row = storyById(this.db, id);
+    if (row.id == "") {
+      return notFound("story " + id + " has rolled off its feed");
+    }
+    let feed = feedById(this.db, row.feedId);
+
+    /* Made readable on first open, then kept.
+     *
+     * Once per story, not once per reader: the second visitor gets the stored
+     * column and no model call at all. That is the same argument the digest
+     * loop makes for working on a schedule rather than per request — an
+     * identical answer for everyone, so paying for it more than once buys
+     * nothing but a spinner.
+     *
+     * It is done HERE and not where the digest writes the story because the
+     * digest is off wherever AGENTS_DISCOVER_EVERY_MS is unset, which is every
+     * deployment serving this page today. A column filled by a job that does
+     * not run is a column that stays empty.
+     *
+     * A failure is silent by design: `readable` answers "" and the article
+     * falls back to the raw body, which is what it showed before this existed. */
+    /* Whatever is stored, and no model call on this path.
+     *
+     * The reflowed body is written by the scheduler's pass (scheduler.ts),
+     * not here. It was here first, filled on first open, and the measurement
+     * is the reason it moved: the first reader of a story waited 53 seconds
+     * for a page that already had text to show. Nobody waits for a
+     * presentation improvement.
+     *
+     * So a story opened before the sweep reaches it shows the raw body — what
+     * this page showed before the column existed — and reads cleanly a minute
+     * later. */
+    return ok("{\"story\":" + JSON.stringify(row)
+      + ",\"topic\":" + JSON.stringify(feed.topic)
+      + ",\"feedId\":" + JSON.stringify(feed.id) + "}");
+  }
+
+  /** The feeds themselves, for whoever maintains them. */
+  @get("/feeds")
+  feeds(req: Request): Reply {
+    return ok(listOrdered(this.db, discoverFeedsMapping(), "", [], [asc("topic")]));
+  }
+
+  /** Add one. A feed is a deliberate "this topic, in this language, for this
+   *  place, has enough material to be worth digesting" — never a cross
+   *  product, which for fifty thousand domains would be tens of thousands of
+   *  model calls an hour to fill feeds nobody reads. */
+  @post("/feeds")
+  addFeed(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let row: DiscoverFeed = JSON.parse<DiscoverFeed>(req.body);
+    if (row.id == "" || row.topic == "" || row.query == "") {
+      return badRequest("a feed needs an id, a topic and a query");
+    }
+    persist(this.db, discoverFeedsMapping(), JSON.stringify(row));
+    return ok(JSON.stringify(row));
+  }
+
+  @del("/feeds/:id")
+  dropFeed(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    deleteWhere(this.db, discoverStoriesMapping(), "feed_id = " + this.db.placeholder, [id]);
+    deleteById(this.db, discoverFeedsMapping(), id);
+    return ok("{\"deleted\":" + JSON.stringify(id) + "}");
+  }
+}
+
+@controller("/artifacts")
+class LibraryApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    let cards = libraryFor(this.db, callerTags(req), 240);
+    let out = "[";
+    let i: int = 0;
+    while (i < cards.length) {
+      if (i > 0) { out = out + ","; }
+      out = out + JSON.stringify(cards[i]);
+      i = i + 1;
+    }
+    return ok(out + "]");
+  }
+}
+
 @controller("/threads/:id/artifacts")
 class ArtifactApi {
   db: Db;
@@ -4387,6 +4695,236 @@ class RunApi {
   }
 }
 
+// Things that run without anybody asking.
+//
+// The rows only. Nothing here fires a task: `scheduler.ts` does, as a separate
+// process on a timer, for the reasons tasks.ts records. That is why even
+// "run now" is a write — it moves the task's next firing to now and lets the
+// runner pick it up — rather than a second path into `runAgent`. One firing
+// path means one place where a claim, a failure count and a transcript are
+// written, and no chance of the two drifting apart.
+@controller("/tasks")
+class TaskApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  // This caller's tasks, soonest first.
+  //
+  // Scoped by owner and not merely filtered in the console: a task carries an
+  // instruction that runs against somebody's connectors on their schedule, and
+  // a list that leaked would be a list of what a stranger has automated.
+  @get("/")
+  list(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(tasksOf(this.db, owningTag(tags)));
+  }
+
+  // Create one. The words a person typed arrive as `schedule`; the cron
+  // expression is compiled here and never sent by a client — a client that
+  // could send its own expression could schedule a task per second, and a
+  // client that could send its own `nextAt` could schedule one in the past and
+  // have it fire on every tick forever.
+  @post("/")
+  create(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    // Nobody unnamed may schedule. A guest already runs under a daily cap, and
+    // a task is a standing instruction — a scheduler for callers nobody can
+    // name is an open tap on a provider bill that nobody can turn off either.
+    //
+    // Two shapes of "not signed in" and both are refused: a guest carries
+    // `guest:<hex>`, while a signed-out visitor behind a trusted proxy carries
+    // `[""]`, the unowned bucket. The first version of this line tested only
+    // the second and so refused the unowned bucket while waving guests
+    // through, which is precisely backwards.
+    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
+      return badRequest("signing in is what makes a task yours to run");
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"agentId\":\"a1\",\"instruction\":\"...\",\"schedule\":\"every weekday at 08:00\"}");
+    }
+
+    let agentId = jsonText(req.body, "agentId");
+    if (!existsById(this.db, agentsMapping(), agentId)) { return badRequest("no agent " + agentId); }
+    let chosen = askedChoice(req.body);
+    let refusedChoice = choiceProblem(this.db, chosen);
+    if (refusedChoice != "") { return badRequest(refusedChoice); }
+
+    if (enabledCount(this.db, owner) >= MAX_PER_OWNER) {
+      return badRequest("that is " + `${MAX_PER_OWNER}` + " tasks already — pause one before adding another");
+    }
+
+    // "every ..." compiles; a one-off carries the instant instead. The instant
+    // comes from the client because the wall-clock intent lives where the
+    // calendar is, and it is checked here because a time in the past is a task
+    // that fires on the next tick and every tick after it.
+    let said = jsonText(req.body, "schedule");
+    let zone = jsonText(req.body, "tz");
+    let kind = said == "" || isOnce(said) ? "once" : "every";
+    let expr = "";
+    let at = "";
+    if (kind == "every") {
+      let compiled = compile(said);
+      if (!compiled.ok) { return badRequest(compiled.error); }
+      expr = compiled.expr;
+    } else if (isOnce(said)) {
+      // A date said in words rather than an instant computed by a client.
+      // Same grammar the task tools use, resolved server-side for the same
+      // reason cron is: a browser that worked out "2026-08-06 09:00 in
+      // Europe/Paris" itself would be wrong twice a year and believed anyway.
+      let once = onceInstant(said, zone == "" ? "UTC" : zone, Date.now() as number);
+      if (!once.ok) { return badRequest(once.error); }
+      at = once.at;
+    } else {
+      at = jsonText(req.body, "at");
+      if (stampMs(at) <= (Date.now() as number)) {
+        return badRequest("a one-off task needs an instant in the future: {\"at\":\"<epoch ms>\"}");
+      }
+    }
+
+    let now = stamp();
+    let row: TaskRow = {
+      id: crypto.randomUUID(),
+      owner: owner,
+      agentId: agentId,
+      modelChoiceId: chosen,
+      title: jsonText(req.body, "title"),
+      instruction: jsonText(req.body, "instruction"),
+      kind: kind,
+      cronExpr: expr,
+      tz: zone,
+      nextAt: at,
+      runningSince: "",
+      enabled: true,
+      failures: 0,
+      pausedReason: "",
+      lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
+      runCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    let wrong = refuse(row);
+    if (wrong != "") { return badRequest(wrong); }
+
+    // The first firing, computed here and not by whoever asked.
+    let ready = row;
+    if (kind == "every") {
+      let first = nextFire(row, Date.now() as number);
+      if (!first.ok) { return badRequest(first.error); }
+      ready = withNextAt(row, first.at);
+    }
+
+    let written = persist(this.db, tasksMapping(), JSON.stringify(ready));
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, tasksMapping(), ready.id));
+  }
+
+  // Pause, resume, retitle, reschedule. One PUT of the whole row, as agents
+  // do — and the schedule is recompiled rather than trusted, for the same
+  // reason it is compiled on the way in.
+  @put("/:id")
+  update(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("task " + param(req, "id")); }
+    if (req.body == "") { return badRequest("a body is required"); }
+
+    let said = jsonText(req.body, "schedule");
+    let expr = mine.cronExpr;
+    let kind = mine.kind;
+    let when = mine.nextAt;
+    if (said != "" && isOnce(said)) {
+      let once = onceInstant(said, mine.tz == "" ? "UTC" : mine.tz, Date.now() as number);
+      if (!once.ok) { return badRequest(once.error); }
+      // A repeating task rescheduled onto a date becomes a one-off, which is
+      // what "actually, just do it once, on Thursday" means.
+      kind = "once";
+      expr = "";
+      when = once.at;
+    } else if (said != "") {
+      let compiled = compile(said);
+      if (!compiled.ok) { return badRequest(compiled.error); }
+      kind = "every";
+      expr = compiled.expr;
+    }
+    let title = jsonText(req.body, "title");
+    let instruction = jsonText(req.body, "instruction");
+    let tz = jsonText(req.body, "tz");
+    let on = jsonFlag(req.body, "enabled", mine.enabled);
+
+    let edited: TaskRow = {
+      id: mine.id, owner: mine.owner, agentId: mine.agentId,
+      modelChoiceId: mine.modelChoiceId,
+      title: title == "" ? mine.title : title,
+      instruction: instruction == "" ? mine.instruction : instruction,
+      kind: kind, cronExpr: expr,
+      tz: tz == "" ? mine.tz : tz,
+      nextAt: when, runningSince: mine.runningSince,
+      enabled: on,
+      // Switching a paused task back on is what clears its failures. Leaving
+      // them would pause it again on the next failure rather than the fifth,
+      // which reads as "it will not stay on" to the person who just fixed it.
+      failures: on && !mine.enabled ? 0 : mine.failures,
+      pausedReason: on ? "" : mine.pausedReason,
+      lastRunAt: mine.lastRunAt, lastRunId: mine.lastRunId,
+      lastStatus: mine.lastStatus, lastError: mine.lastError,
+      runCount: mine.runCount, createdAt: mine.createdAt, updatedAt: stamp(),
+    };
+    let wrong = refuse(edited);
+    if (wrong != "") { return badRequest(wrong); }
+    let stored = edited;
+    if (edited.kind == "every") {
+      let ahead = nextFire(edited, Date.now() as number);
+      if (!ahead.ok) { return badRequest(ahead.error); }
+      stored = withNextAt(edited, ahead.at);
+    }
+
+    let written = persist(this.db, tasksMapping(), JSON.stringify(stored));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, tasksMapping(), stored.id));
+  }
+
+  // Fire it on the next tick.
+  //
+  // A write, not a run: moving `next_at` to now is how this door reaches the
+  // one firing path instead of building a second one. Whoever asked waits up
+  // to a tick, which is the price of there being exactly one place a task can
+  // be claimed, counted and recorded.
+  @post("/:id/run-now")
+  runNow(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("task " + param(req, "id")); }
+    let now = stamp();
+    executeWith(this.db,
+      "UPDATE scheduled_tasks SET next_at = " + this.db.placeholder
+      + ", running_since = '', enabled = true, updated_at = " + placeholderAt(this.db, 2)
+      + " WHERE id = " + placeholderAt(this.db, 3),
+      [now, now, mine.id]);
+    return accepted(findById(this.db, tasksMapping(), mine.id));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("task " + param(req, "id")); }
+    let gone = deleteById(this.db, tasksMapping(), mine.id);
+    if (!gone.ok) { return badRequest(gone.error); }
+    return noContent();
+  }
+
+  // The row this caller is allowed to touch, or an empty one. Every write goes
+  // through here rather than checking the owner in four places — three of them
+  // would be right and the fourth would be the interesting one.
+  private owned(req: Request): TaskRow {
+    let document = findById(this.db, tasksMapping(), param(req, "id"));
+    if (document == "") { return emptyTask(); }
+    let row: TaskRow = JSON.parse<TaskRow>(document);
+    if (!holdsOwner(callerTags(req), row.owner)) { return emptyTask(); }
+    return row;
+  }
+}
+
 // Whether this process is worth sending a request to, and which build it is.
 //
 // The one route that answers without a bearer token (`bearerRefused` below)
@@ -4396,6 +4934,348 @@ class RunApi {
 // The announcement banner: one sentence the operator can put above every
 // visitor's page — maintenance tonight, a new capability, a holiday notice —
 // and take down again, all without a deploy.
+// Which tool results the console draws as cards, as rows anybody can add.
+//
+// The engine's half of a card plugin. A row names a tool, a marker and the
+// short payload the model should emit; run.ts appends the hint to that tool's
+// successful results and knows nothing else about it. The console's half is
+// the renderer, looked up by marker — so adding a card for a connector this
+// package has never heard of is a POST here plus a renderer the console can
+// find, and no change to either codebase.
+@controller("/tool-cards")
+class ToolCardApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  // Read by the console on load, so it knows which markers to expect and can
+  // brief a prompt with them. Carries no secret and names no person.
+  @get("/")
+  list(req: Request): Reply {
+    return ok(listOrdered(this.db, toolCardsMapping(), "", [], [asc("tool_name")]));
+  }
+
+  @post("/")
+  add(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let row: ToolCardRow = JSON.parse<ToolCardRow>(req.body);
+    let problem = toolCardProblem(row);
+    if (problem != "") { return badRequest(problem); }
+    if (findById(this.db, toolCardsMapping(), row.id) != "") {
+      return badRequest("tool card " + row.id + " already exists; PUT it to change it");
+    }
+    persist(this.db, toolCardsMapping(), JSON.stringify(row));
+    return ok(JSON.stringify(row));
+  }
+
+  @put("/:id")
+  change(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    if (findById(this.db, toolCardsMapping(), id) == "") {
+      return notFound("no tool card " + id);
+    }
+    let row: ToolCardRow = JSON.parse<ToolCardRow>(req.body);
+    let problem = toolCardProblem(row);
+    if (problem != "") { return badRequest(problem); }
+    if (row.id != id) { return badRequest("the body's id must match the path"); }
+    persist(this.db, toolCardsMapping(), JSON.stringify(row));
+    return ok(JSON.stringify(row));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    if (findById(this.db, toolCardsMapping(), id) == "") {
+      return notFound("no tool card " + id);
+    }
+    deleteById(this.db, toolCardsMapping(), id);
+    return ok("{\"deleted\":" + JSON.stringify(id) + "}");
+  }
+}
+
+/** The manifest with the install's own facts injected: where it was actually
+ *  fetched from, and the renderer source that was actually fetched.
+ *
+ *  Rewritten rather than trusted: a manifest may carry any sourceUrl it likes,
+ *  including one pointing at a plugin somebody else published, and the row is
+ *  meant to answer "where did this come from" for whoever is debugging it. */
+function injectSource(manifest: string, url: string, rendererUrl: string, rendererSource: string): string {
+  let trimmed = manifest.trim();
+  if (!trimmed.startsWith("{")) { return trimmed; }
+  return "{\"sourceUrl\":" + JSON.stringify(url)
+    + ",\"rendererUrl\":" + JSON.stringify(rendererUrl)
+    + ",\"rendererSource\":" + JSON.stringify(rendererSource)
+    + "," + trimmed.slice(1);
+}
+
+/** A reference resolved against the url it was found in — "./renderer.js"
+ *  beside the manifest, an absolute url as itself. The two forms a manifest
+ *  actually writes; anything else is refused by the fetch that follows. */
+function resolveAgainst(base: string, ref: string): string {
+  if (ref.startsWith("https://") || ref.startsWith("http://")) { return ref; }
+  let cut = base.lastIndexOf("/");
+  if (cut < 0) { return ref; }
+  let dir = base.slice(0, cut);
+  if (ref.startsWith("./")) { return dir + ref.slice(1); }
+  return dir + "/" + ref;
+}
+
+/* What an install POSTs, which is NOT what gets stored.
+ *
+ * A record parse here is exact: a body carrying {"toolName","marker",...}
+ * cannot be read as a ToolCardRow, because that row also has an id, a
+ * plugin_id and an enabled flag — and the parse answering "no rows" rather
+ * than complaining is how an install first appeared to succeed while storing
+ * a plugin with nothing under it. The ids and the ownership are the SERVER's
+ * to assign anyway: a plugin that could choose its cards' ids could overwrite
+ * another plugin's. */
+type CardInput = { toolName: string, marker: string, payload: string, hint: string };
+type CaseInput = { when: string, then: string };
+
+/** A JSON array member, or "[]" when the body omits it — an install carrying
+ *  only cards is as valid as one carrying only cases. */
+function rawListOr(body: string, member: string): string {
+  let raw = jsonRaw(body, member);
+  if (raw == "") { return "[]"; }
+  return raw;
+}
+
+// What a card row has to say to be usable.
+//
+// The marker is the strict one: it becomes [MARKER]…[/MARKER] in a reply, so a
+// marker carrying a bracket or a space would produce a block nothing can
+// parse — and the failure would look like a model that ignored instructions.
+function toolCardProblem(row: ToolCardRow): string {
+  if (row.id.trim() == "") { return "a tool card needs an id"; }
+  if (row.toolName.trim() == "") { return "a tool card needs the tool whose result it draws"; }
+  if (row.marker.trim() == "") { return "a tool card needs a marker"; }
+  if (row.marker.length > 32) { return "a marker is at most 32 characters"; }
+  let i: int = 0;
+  while (i < row.marker.length) {
+    let c = row.marker[i];
+    let okChar = (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "_";
+    if (!okChar) {
+      return "a marker is upper-case letters, digits and underscores — got \"" + row.marker + "\"";
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
+// Card plugins: install, list, disable, remove.
+//
+// A plugin is the unit somebody actually manages — it owns its cards
+// (/tool-cards, plugin_id) and its cases (below), so switching one off makes
+// its markers stop being taught and its lines stop being briefed without
+// deleting anything. See plugincards.ts for why that is a table rather than
+// three unrelated rows.
+//
+// Install is deliberately one POST carrying the whole plugin: a plugin that
+// arrives as four requests can half-arrive, and a half-installed plugin is a
+// model told to emit a marker nothing draws.
+@controller("/card-plugins")
+class CardPluginApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  @get("/")
+  list(req: Request): Reply {
+    return ok(listOrdered(this.db, cardPluginsMapping(), "", [], [asc("plugin_name")]));
+  }
+
+  // Everything the plugin is, in one body:
+  //   {"id","pluginName","description","sourceUrl","version",
+  //    "cards":[{"toolName","marker","payload","hint"}],
+  //    "cases":[{"when","then"}]}
+  @post("/")
+  install(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let id = jsonText(req.body, "id");
+    let name = jsonText(req.body, "pluginName");
+    if (id == "") { return badRequest("a plugin needs an id"); }
+    if (name == "") { return badRequest("a plugin needs a name"); }
+    if (findById(this.db, cardPluginsMapping(), id) != "") {
+      return badRequest("plugin " + id + " is already installed");
+    }
+
+    let plugin: CardPluginRow = {
+      id: id, pluginName: name,
+      description: jsonText(req.body, "description"),
+      sourceUrl: jsonText(req.body, "sourceUrl"),
+      version: jsonText(req.body, "version"),
+      rendererUrl: jsonText(req.body, "rendererUrl"),
+      rendererSource: jsonText(req.body, "rendererSource"),
+      enabled: true, installedAt: stamp(),
+    };
+
+    // The cards first, so a refused marker refuses the whole install rather
+    // than leaving a plugin row with nothing under it.
+    let cards = JSON.parse<CardInput[]>(rawListOr(req.body, "cards"));
+    let c: int = 0;
+    while (c < cards.length) {
+      let card: ToolCardRow = {
+        id: id + ":" + `${c}`, pluginId: id,
+        toolName: cards[c].toolName, marker: cards[c].marker,
+        payload: cards[c].payload, hint: cards[c].hint, enabled: true,
+      };
+      let problem = toolCardProblem(card);
+      if (problem != "") { return badRequest(problem); }
+      c = c + 1;
+    }
+
+    persist(this.db, cardPluginsMapping(), JSON.stringify(plugin));
+    let w: int = 0;
+    while (w < cards.length) {
+      let card: ToolCardRow = {
+        id: id + ":" + `${w}`, pluginId: id,
+        toolName: cards[w].toolName, marker: cards[w].marker,
+        payload: cards[w].payload, hint: cards[w].hint, enabled: true,
+      };
+      persist(this.db, toolCardsMapping(), JSON.stringify(card));
+      w = w + 1;
+    }
+    let cases = JSON.parse<CaseInput[]>(rawListOr(req.body, "cases"));
+    let k: int = 0;
+    while (k < cases.length) {
+      let one: CardCaseRow = {
+        id: id + ":case:" + `${k}`, pluginId: id,
+        when: cases[k].when, then: cases[k].then,
+      };
+      persist(this.db, cardCasesMapping(), JSON.stringify(one));
+      k = k + 1;
+    }
+    return ok(JSON.stringify(plugin));
+  }
+
+  // Off rather than gone. The rows stay and nothing is briefed — the state
+  // for working out whether a plugin is what is making a model behave oddly.
+  @put("/:id")
+  change(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    let held = findById(this.db, cardPluginsMapping(), id);
+    if (held == "") { return notFound("no plugin " + id); }
+    let row: CardPluginRow = JSON.parse<CardPluginRow>(held);
+    let after: CardPluginRow = {
+      id: row.id, pluginName: row.pluginName, description: row.description,
+      sourceUrl: row.sourceUrl, version: row.version,
+      rendererUrl: row.rendererUrl, rendererSource: row.rendererSource,
+      // Same trap as the captcha row, one controller over: a JSON boolean
+      // false read as "" through jsonText, and "" != "false" is true — so
+      // switching a plugin off with {"enabled":false} switched it ON. The
+      // default when the member is absent is unchanged.
+      enabled: jsonFlag(req.body, "enabled", true),
+      installedAt: row.installedAt,
+    };
+    persist(this.db, cardPluginsMapping(), JSON.stringify(after));
+    return ok(JSON.stringify(after));
+  }
+
+  // Uninstall takes exactly what the install created, by plugin_id — a card
+  // somebody added by hand carries no plugin and survives, which is what the
+  // person who added it expects.
+  @del("/:id")
+  remove(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    if (findById(this.db, cardPluginsMapping(), id) == "") {
+      return notFound("no plugin " + id);
+    }
+    deleteWhere(this.db, toolCardsMapping(), "plugin_id = " + this.db.placeholder, [id]);
+    deleteWhere(this.db, cardCasesMapping(), "plugin_id = " + this.db.placeholder, [id]);
+    deleteById(this.db, cardPluginsMapping(), id);
+    return ok("{\"uninstalled\":" + JSON.stringify(id) + "}");
+  }
+
+
+  // Install from where the plugin lives, rather than from a body somebody
+  // pasted. The url is fetched, and what comes back is the same manifest the
+  // POST above takes — so a plugin is publishable as one JSON file, and the
+  // row records where it came from, which is the first question when a card
+  // draws wrongly.
+  //
+  // Nothing executable is fetched, and that is deliberate rather than
+  // unfinished. A manifest names markers and cases; the RENDERER stays in the
+  // console, looked up by marker. A plugin that could ship its own drawing
+  // code would be a way to put markup of somebody else's choosing inside a
+  // transcript, and no amount of sandboxing makes that a good trade for a
+  // cycle chart. A marker with no renderer degrades to the model's own line.
+  @post("/from-source")
+  fromSource(req: Request): Reply {
+    let url = jsonText(req.body, "sourceUrl");
+    if (url == "") { return badRequest("a sourceUrl is required"); }
+    if (!url.startsWith("https://") && !url.startsWith("http://")) {
+      return badRequest("a plugin source is an http(s) url");
+    }
+    let res = http.request(url, "GET", "", new Map<string, string>());
+    if (!res.ok) { return badRequest("could not reach " + url); }
+    if (res.status != 200) {
+      return badRequest(url + " answered " + `${res.status}`);
+    }
+    // The manifest decides everything except where it came from: that is this
+    // deployment's record of the install, not the publisher's claim about it.
+    let manifest = res.body;
+    if (jsonText(manifest, "id") == "") {
+      return badRequest("that url did not answer a plugin manifest (no id)");
+    }
+
+    // The renderer, snapshotted NOW — the whole reason installs go through
+    // this route. "./renderer.js" resolves against the manifest's own url, so
+    // a repo can hold many plugins as folders. An install whose renderer
+    // cannot be fetched is refused whole: a plugin row whose markers nothing
+    // will ever draw is exactly the half-install this route exists to
+    // prevent. A manifest that names no renderer installs fine — its markers
+    // may be ones the console already draws.
+    let rendererUrl = "";
+    let rendererSource = "";
+    let renderer = jsonText(manifest, "renderer");
+    if (renderer != "") {
+      rendererUrl = resolveAgainst(url, renderer);
+      let fetched = http.request(rendererUrl, "GET", "", new Map<string, string>());
+      if (!fetched.ok || fetched.status != 200) {
+        return badRequest("the manifest names a renderer at " + rendererUrl
+          + " and it could not be fetched — refusing a half-install");
+      }
+      rendererSource = fetched.body;
+    }
+
+    let withSource = injectSource(manifest, url, rendererUrl, rendererSource);
+    let forward: Request = {
+      method: "POST", path: "/card-plugins", body: withSource,
+      params: req.params, query: req.query, headers: req.headers,
+    };
+    return this.install(forward);
+  }
+
+  // The snapshot, as the module the console's sandbox imports. Served from
+  // this database rather than from the CDN it came from — see rendererSource
+  // in plugincards.ts for the three reasons in order.
+  @get("/:id/renderer")
+  renderer(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    let held = findById(this.db, cardPluginsMapping(), id);
+    if (held == "") { return notFound("no plugin " + id); }
+    let row: CardPluginRow = JSON.parse<CardPluginRow>(held);
+    if (row.rendererSource == "") { return notFound("plugin " + id + " ships no renderer"); }
+    let reply: Reply = {
+      status: 200, body: row.rendererSource,
+      headers: new Map<string, string>([["Content-Type", "text/javascript; charset=utf-8"]]),
+    };
+    return reply;
+  }
+
+  // The cases, listed and edited on their own — a plugin's behaviour is
+  // mostly these lines, and tuning one should not be a reinstall.
+  @get("/:id/cases")
+  cases(req: Request): Reply {
+    let id = req.params.get("id") ?? "";
+    return ok(listWhere(this.db, cardCasesMapping(), "plugin_id = " + this.db.placeholder, [id]));
+  }
+}
+
 @controller("/banner")
 class BannerApi {
   db: Db;
@@ -4425,6 +5305,93 @@ class BannerApi {
     let problem = writeSetting(this.db, "banner", text);
     if (problem != "") { return badRequest(problem); }
     return ok("{\"text\":" + JSON.stringify(text) + "}");
+  }
+}
+
+// The bot challenge on the sign-in form, configured rather than deployed.
+//
+// Same bargain as /auth-providers, and for the same reason: a site key and a
+// secret are a per-deployment fact that an operator should be able to change at
+// 2am without a rebuild, and baking either into an image or a unit file makes
+// rotating one an engineering task. So the public half is a settings row and
+// the secret goes in the encrypted store beside every other secret this
+// deployment holds.
+//
+// Only the CONSOLE ever verifies a token. This route is storage: it knows what
+// a site key is, and it does not know what Turnstile is.
+
+@controller("/captcha")
+class CaptchaApi {
+  db: Db;
+  master: string;
+  constructor(db: Db, master: string) { this.db = db; this.master = master; }
+
+  // The operator's view: everything except the secret, which is never read
+  // back. `configured` is the question the form actually asks — "is there a
+  // secret stored" — answered without opening it.
+  @get("/")
+  show(req: Request): Reply {
+    let held = readSetting(this.db, "captcha");
+    let provider = held == "" ? "turnstile" : jsonText(held, "provider");
+    let siteKey = held == "" ? "" : jsonText(held, "siteKey");
+    let enabled = held != "" && jsonText(held, "enabled") == "true";
+    return ok("{\"provider\":" + JSON.stringify(provider)
+      + ",\"siteKey\":" + JSON.stringify(siteKey)
+      + ",\"enabled\":" + (enabled ? "true" : "false")
+      + ",\"configured\":" + (hasCredential(this.db, "captcha") ? "true" : "false") + "}");
+  }
+
+  // What the console's own server needs to verify a token: the secret. Its own
+  // route because it is the one place this secret leaves the process, exactly
+  // as /auth-providers/resolved is for OAuth — and it answers the enabled and
+  // fully-configured case only, so a half-set-up challenge cannot lock anybody
+  // out of a login form.
+  @get("/resolved")
+  resolved(req: Request): Reply {
+    let held = readSetting(this.db, "captcha");
+    if (held == "") { return ok("{\"enabled\":false}"); }
+    let enabled = jsonText(held, "enabled") == "true";
+    let siteKey = jsonText(held, "siteKey");
+    let secret = credentialFor(this.db, "captcha", this.master);
+    if (!enabled || siteKey == "" || secret == "") { return ok("{\"enabled\":false}"); }
+    return ok("{\"enabled\":true,\"provider\":" + JSON.stringify(jsonText(held, "provider"))
+      + ",\"siteKey\":" + JSON.stringify(siteKey)
+      + ",\"secret\":" + JSON.stringify(secret) + "}");
+  }
+
+  @put("/")
+  change(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required"); }
+    let provider = jsonText(req.body, "provider");
+    if (provider == "") { provider = "turnstile"; }
+    if (provider != "turnstile" && provider != "hcaptcha" && provider != "recaptcha") {
+      return badRequest("provider must be turnstile, hcaptcha or recaptcha");
+    }
+    let siteKey = jsonText(req.body, "siteKey");
+    if (utf8Length(siteKey) > 200) { return badRequest("that is not a site key"); }
+    let enabled = jsonFlag(req.body, "enabled", false);
+    // Refusing here rather than at the console: turning the challenge on with
+    // no secret stored would mean every verification fails, which locks the
+    // login form for everybody including the operator who just did it.
+    if (enabled && (siteKey == "" || !hasCredential(this.db, "captcha"))) {
+      return badRequest("store a site key and a secret before turning the challenge on");
+    }
+    let value = "{\"provider\":" + JSON.stringify(provider)
+      + ",\"siteKey\":" + JSON.stringify(siteKey)
+      + ",\"enabled\":" + (enabled ? "\"true\"" : "\"false\"") + "}";
+    let problem = writeSetting(this.db, "captcha", value);
+    if (problem != "") { return badRequest(problem); }
+    return ok(value);
+  }
+
+  @put("/secret")
+  setSecret(req: Request): Reply {
+    let secret = jsonText(req.body, "secret");
+    if (secret == "") { return badRequest("a secret is required"); }
+    let stored = storeCredential(this.db, { provider: "captcha",
+      apiKey: secret, masterKey: this.master, now: stamp() });
+    if (stored != "") { return badRequest(stored); }
+    return ok("{\"configured\":true}");
   }
 }
 
@@ -4842,6 +5809,58 @@ function stamp(): string {
 // not, so the second must not be held hostage to the first. Wiring them
 // together is what kept envIdle uncalled on every deployment there has ever
 // been, since AGENTS_SWEEP_IDLE_MS has never been set on any of them.
+/* The Discover digest, on a schedule rather than on a visitor.
+ *
+ * A worker thread for the reason sweepLoop states below: once `listen` hands
+ * over the event loop no setInterval in this process fires again. Its body
+ * may not throw — Worker.run takes `() => T` — so the whole loop is inside
+ * one try.
+ *
+ * On a schedule and NOT per request, which is the design decision worth
+ * writing down. A digest asked for on page load costs a model call per topic
+ * per visitor, produces identical answers for all of them, waits sixty
+ * seconds while somebody watches a spinner, and never digests a topic nobody
+ * happens to open. On a timer the cost is topics x passes-per-day, fixed,
+ * whatever the traffic — and the page becomes a table read.
+ *
+ * Feeds go one at a time: the local model serves one request at a time, so a
+ * burst would queue anyway while holding every feed's snippets in memory.
+ */
+function digestLoop(master: string, everyMs: int): int {
+  try {
+    let db = openDatabase();
+    while (true) {
+      let feeds = allFeeds(db);
+      let i: int = 0;
+      while (i < feeds.length) {
+        if (feeds[i].enabled) { refreshFeed(db, feeds[i], master); }
+        i = i + 1;
+      }
+      process.sleep(everyMs);
+    }
+  } catch (e) {
+    // A background pass that dies must not take the process with it: it is
+    // logged, the thread ends, and the page keeps serving what was last
+    // written until a restart starts it again.
+    console.error("discover: the digest pass stopped");
+  }
+  return 0;
+}
+
+/* How often the digest runs, and whether it runs at all.
+ *
+ * Unset means OFF: Discover is a deployment's choice, and a box that has not
+ * asked for it should not be calling a model every half hour forever. Thirty
+ * minutes is the value to set — the crawl's own cadence, and often enough
+ * that a feed is never more than one pass stale. */
+function discoverEveryMs(): int {
+  let said = process.env["AGENTS_DISCOVER_EVERY_MS"] ?? "";
+  if (said == "") { return 0; }
+  let n = parseInt(said, 10) ?? 0;
+  if (n > 0 && n < 60000) { return 60000; }
+  return n;
+}
+
 function sweepLoop(idleMs: int): int {
   try {
     let db = openDatabase();
@@ -4927,6 +5946,22 @@ export function migrationProblem(db: Db): string {
   let t: int = 0;
   while (t < traces.length) { plan.push(traces[t]); t = t + 1; }
   let knowledge = knowledgePlan(db);
+  let webRag = webRagPlan(db);
+  let wr: int = 0;
+  while (wr < webRag.length) { knowledge.push(webRag[wr]); wr = wr + 1; }
+  // Which tool results the console draws as cards. A table rather than names
+  // in run.ts — see toolcards.ts.
+  let cards = toolCardsPlan(db);
+  let tc: int = 0;
+  while (tc < cards.length) { knowledge.push(cards[tc]); tc = tc + 1; }
+  // The Discover feeds and the stories the digest job writes.
+  let discover = discoverPlan(db);
+  let dc: int = 0;
+  while (dc < discover.length) { knowledge.push(discover[dc]); dc = dc + 1; }
+  // The plugin that owns cards and cases — installable as one thing.
+  let cardPlugins = cardPluginsPlan(db);
+  let cp: int = 0;
+  while (cp < cardPlugins.length) { knowledge.push(cardPlugins[cp]); cp = cp + 1; }
   let k: int = 0;
   while (k < knowledge.length) { plan.push(knowledge[k]); k = k + 1; }
   let conversations = threadPlan(db);
@@ -4952,6 +5987,11 @@ export function migrationProblem(db: Db): string {
   let envs = envPlan(db);
   let ev: int = 0;
   while (ev < envs.length) { plan.push(envs[ev]); ev = ev + 1; }
+  // What runs without anybody asking (tasks.ts). The firing lives in
+  // scheduler.ts, a separate process; the engine only owns the rows.
+  let scheduled = tasksPlan(db);
+  let st: int = 0;
+  while (st < scheduled.length) { plan.push(scheduled[st]); st = st + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) { return ""; }
   // Logged and carried on with, this served an API whose routes SELECT columns
@@ -5066,6 +6106,10 @@ function main(): void {
   // every deployment, which is the whole point — it never ran on any of them.
   console.log(`stopping environments idle for ${ENV_IDLE_MS}ms`);
   Worker.run(() => sweepLoop(sweepIdle));
+  // The Discover digest. Off unless a deployment names an interval, so a box
+  // that has not configured Discover pays nothing for it.
+  let discoverEvery = discoverEveryMs();
+  if (discoverEvery > 0) { Worker.run(() => digestLoop(master, discoverEvery)); }
 
   // Nineteen controllers, handed over whole. Each one is read for its own
   // `@controller` and its methods bound (specs 477/478), so there is no table
@@ -5082,6 +6126,7 @@ function main(): void {
     new AgentApi(db, master),
     new ProviderApi(db, master),
     new RunApi(db),
+    new TaskApi(db),
     new ScriptImageApi(db),
     new SkillApi(db),
     new TemplateApi(db),
@@ -5102,7 +6147,12 @@ function main(): void {
     new PluginApi(db),
     new ArtifactApi(db),
     new PreviewApi(db),
+    new DiscoverApi(db),
+    new LibraryApi(db),
+    new ToolCardApi(db),
+    new CardPluginApi(db),
     new BannerApi(db),
+    new CaptchaApi(db, master),
     new HealthApi(db),
     new UsageApi(db),
     new QuotaApi(db),

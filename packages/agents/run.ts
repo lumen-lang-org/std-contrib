@@ -25,11 +25,15 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping, cancelAsked } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
+import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
-import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial } from "./steps.ts";
+import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
+import { WebPassage, webRagFor, generateQuery, retrieveWeb, asWebContext, webSummary, webSearchTools, callWebSearchTool } from "./webrag.ts";
+import { cardHintFor } from "./toolcards.ts";
+import { casesBriefing } from "./plugincards.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
 import { GenerationCall, Tracer, TraceSpan, RecordedSpan, startSpan, endSpan, endSpanFailed, endGeneration, endTool, tracerSpans, tracerWithMoreSpans, tracerForCallee, noTracer, tracing, TRACE_AGENT, TRACE_GENERATION, TRACE_TOOL, TRACE_RETRIEVER } from "../tracing/tracing.ts";
 
@@ -350,7 +354,34 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // server what it offers, and a refused run should not have made a network
   // call to work out what it was refusing.
   let mounted = mountTools(db, agent.id, master, where.owner);
+  // A person who NAMES a connector has already done the search find_tools
+  // exists for. "What are the current cycles in Linear" answered with a
+  // clarifying question, from a model that had list_cycles one find_tools call
+  // away — the briefing says to make that call, but it sits mid-prompt and a
+  // small model follows recency, not the middle. So when the question names a
+  // connected server with tools still deferred, the matching tools are moved
+  // across BEFORE the first round, with the question itself as the query: the
+  // model sees list_cycles, not a promise about it, and a deterministic string
+  // match costs no model judgment. A question that names no connector changes
+  // nothing, and find_tools stays for everything the trigger word misses.
+  if (stillWaiting(mounted) > 0) {
+    let named = userText.toLowerCase();
+    let sv: int = 0;
+    while (sv < mounted.servers.length) {
+      if (named.includes(mounted.servers[sv].serverName.toLowerCase())) {
+        let warm = findTools(mounted, userText, FIND_TOOLS_CAP);
+        mounted = warm.mounted;
+        break;
+      }
+      sv = sv + 1;
+    }
+  }
   let specs = toolSpecs(mounted);
+  // The deployment's own index, offered to every agent. One HTTP call to a
+  // corpus this box already runs — see webrag.ts on what it replaced.
+  let webSpecs = webSearchTools();
+  let ws: int = 0;
+  while (ws < webSpecs.length) { specs.push(webSpecs[ws]); ws = ws + 1; }
   // One spec instead of a connector's whole roster. `mounted` and `specs` are
   // both rebuilt as the model asks for tools, which is why neither is const.
   if (stillWaiting(mounted) > 0) { specs.push(findToolsSpec(mounted)); }
@@ -384,6 +415,19 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     while (sc < scripts.length) {
       specs.push(scripts[sc]);
       sc = sc + 1;
+    }
+    // Scheduling, on the same thread-only condition and one more: somebody has
+    // to own what is scheduled. A guest and a signed-out visitor are refused by
+    // the tools themselves, and are not offered them either — a tool a caller
+    // can only be refused by is a turn spent finding that out, and an offer
+    // this conversation cannot honour.
+    if (maySchedule(where.owner)) {
+      let sched = taskTools();
+      let td: int = 0;
+      while (td < sched.length) {
+        specs.push(sched[td]);
+        td = td + 1;
+      }
     }
   }
 
@@ -455,6 +499,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // Every way this can come up short leaves the run going and lands in `notes`.
   // An agent that answers without its documents looks exactly like one that
   // answered from them, which is the failure this package keeps meeting.
+  // Whatever the last turn left streaming is not this turn's, and the console
+  // paints from the first push — see clearPartial. Before retrieval, because
+  // retrieval can take a second and the placeholder is already on screen.
+  clearPartial(db, threadId, stamp());
+
   let retrieved: Retrieved[] = [];
   let want = retrievalFor(db, agent.id);
   // The span opens before the work and closes after it whether or not anything
@@ -500,6 +549,37 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     trace = endSpan(trace, retrieveSpan, { input: userText, output: passageSummary(retrieved) });
   }
 
+  // The public web index, beside the uploaded documents and never instead of
+  // them — an agent may have both, and the two blocks carry their own
+  // prefixes so the model knows a corpus passage from a web page. Same
+  // failure contract as above: every way this comes up short is a note and a
+  // running turn, because a search index being down must cost grounding, not
+  // the conversation.
+  let webFound: WebPassage[] = [];
+  let webWant = webRagFor(db, agent.id);
+  if (webWant.enabled) {
+    let webSpan = startSpan("web-retrieve", TRACE_RETRIEVER, agentSpan.id);
+    // The query the index is actually asked. In "generated" mode a designated
+    // model writes it from the message; every failure inside falls back to
+    // the message verbatim, so the mode can only change WHICH query runs,
+    // never whether one does.
+    let webQuery = generateQuery(db, webWant, userText, master);
+    let webGot = retrieveWeb(webQuery, webWant.topK, webWant.maxChars);
+    if (!webGot.ok) {
+      notes.push("web retrieval failed: " + webGot.error);
+    } else {
+      webFound = webGot.found;
+      if (webFound.length == 0) {
+        notes.push("the web index had nothing for \"" + webQuery + "\"");
+      } else {
+        notes.push(webSummary(webQuery, webFound));
+      }
+    }
+    if (on) {
+      trace = endSpan(trace, webSpan, { input: webQuery, output: `${webFound.length}` + " passages" });
+    }
+  }
+
   // Everything the thread already holds, then this question's passages, then
   // the question. The prior turns come first because they are what happened
   // first — a model handed its own tool calls out of order is being told a
@@ -511,6 +591,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     // Before the question, and in the context rather than the conversation:
     // the model reads it, the transcript does not.
     context.push(userTurn(asContext(retrieved)));
+  }
+  if (webFound.length > 0) {
+    context.push(userTurn(asWebContext(webFound)));
   }
   context.push(userTurn(userText));
   let steps: AgentStep[] = [];
@@ -545,8 +628,22 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let waitingLines = deferredBriefing(mounted);
   if (waitingLines != "") { system = system + "\n\n" + waitingLines; }
 
-  // How to hand back a passage somebody will want to copy.
-  system = system + "\n\n" + TEXT_CARD;
+  // When to draw rather than describe — the installed card plugins' cases.
+  // Empty on a deployment with none, so a box that installs nothing pays
+  // nothing. The marker itself is taught on the tool RESULT (toolcards.ts);
+  // this is the other half, which has to arrive before the model has already
+  // chosen prose.
+  let cases = casesBriefing(db);
+  if (cases != "") { system = system + "\n\n" + cases; }
+
+  // How to fill an argument it does not know the value of. Only when there
+  // is something to call: on a bare conversation the rule is a paragraph
+  // about tools for a turn that has none, and every line of an unused
+  // instruction is context the answer is paying for.
+  if (mounted.tools.length > 0 || stillWaiting(mounted) > 0) {
+    system = system + "\n\n" + NO_PLACEHOLDER_ARGS;
+  }
+
   if (threadId != "") {
     // The fence convention rides the system prompt, not a tool description:
     // a model decides how to answer before it considers any particular tool,
@@ -556,6 +653,16 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     let briefing = artifactBriefing(db, threadId);
     if (briefing != "") { system = system + "\n\n" + briefing; }
   }
+
+  // How to hand back a passage somebody will want to copy.
+  //
+  // LAST, and that is the whole of the change. It sat above FILE_FENCE and the
+  // artifact briefing and Qwen 3 8B emitted the block 0 times in 4 — it
+  // answered "The corrected sentence is: …" in prose every time. This file
+  // already says why, a few hundred lines up: recency is what a small model
+  // follows, so the real instruction goes last. The instruction was fine; its
+  // position was not.
+  system = system + "\n\n" + TEXT_CARD;
 
   let last: Completion = { ok: false, text: "", status: 0, error: "", inputTokens: 0, outputTokens: 0, counted: false };
   // Summed across rounds and across children: what the whole run cost, which
@@ -795,6 +902,16 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let skilled = callSkillTool(db, {
         agentId: agentId, name: calls[i].name, args: calls[i].args,
       });
+      // Scheduling, same convention: five fixed names, none of which belongs to
+      // a connector, and each refused for this caller rather than answered when
+      // the conversation has nobody to own a task.
+      let scheduled = callTaskTool(db, {
+        owner: where.owner, agentId: agentId, modelChoiceId: "",
+        name: calls[i].name, args: calls[i].args, nowMs: Date.now() as number,
+      });
+      // The web index, same convention: asked about every call, answers only
+      // search_web, which belongs to no connector.
+      let websearched = callWebSearchTool(calls[i].name, calls[i].args);
       // find_tools before everything: it is this package's own, it takes no
       // side effect, and a connector that happened to export a tool of that
       // name must never answer it.
@@ -842,6 +959,28 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = scripted.ok;
         resultText = scripted.text;
         from = "scripts";
+        calledTools.push(calls[i].name);
+      } else if (scheduled.handled) {
+        resultOk = scheduled.ok;
+        resultText = scheduled.text;
+        from = "tasks";
+        calledTools.push(calls[i].name);
+      } else if (websearched != "") {
+        // BEFORE skills, and the ordering is the whole fix. callSkillTool
+        // deliberately answers a skill called by its own name — a model
+        // reaching for search_web(query=...) instead of
+        // use_skill(name="search-web") gets the skill loaded rather than a
+        // refusal, which is right and which its comment explains. But
+        // search_web is now a REAL tool as well as a skill name, and with
+        // skills dispatched first every call to it came back as the skill's
+        // own instructions: the model read "call search_web", called it,
+        // received the instructions again, and the repeat guard stopped the
+        // turn. Gemini reported exactly that. The skill comment already says
+        // "a real tool never reaches here — the dispatch tries the mounted
+        // tools first"; this makes that true for the package's own tools too.
+        resultOk = true;
+        resultText = websearched;
+        from = "web-index";
         calledTools.push(calls[i].name);
       } else if (skilled.handled) {
         resultOk = skilled.ok;
@@ -922,9 +1061,56 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           from = child.agentName;
         }
       } else {
+        // A tool the model names that is deferred rather than absent is one
+        // mount away, so mount it and make the call it asked for.
+        //
+        // This is a whole turn's failure mode, not a nicety. `mounted` is
+        // rebuilt per run, and what find_tools brought across last turn is
+        // gone this turn — while the conversation the model reads still shows
+        // it calling list_issues and getting an answer. So it calls it again,
+        // correctly, and is told the tool does not exist. Nothing recovers
+        // from that: the roster it is offered instead has no Linear in it, so
+        // it apologises about a connector that is attached and working.
+        //
+        // Named exactly, so this is not a search: the model asked for a tool
+        // this agent's own servers offer, and refusing it on a bookkeeping
+        // detail is the engine failing the model rather than the other way
+        // round.
+        if (mountedIndex(mounted.tools, calls[i].name) < 0) {
+          let recalled = findTools(mounted, calls[i].name, 1);
+          if (recalled.found.length > 0) {
+            mounted = recalled.mounted;
+            specs = toolSpecs(mounted);
+            if (stillWaiting(mounted) > 0) { specs.push(findToolsSpec(mounted)); }
+          }
+        }
         let answered = callMounted(mounted, calls[i].name, calls[i].args);
         resultOk = answered.ok;
         resultText = answered.text;
+        // A connector tool that failed wanting an id is a dead end only if
+        // the model treats it as one. Watched happen: list_cycles refused a
+        // guessed teamId and the model asked the person for it — with
+        // list_teams one find_tools call away. The way out rides the failure
+        // itself, because a small model follows what it just read: fetch the
+        // tool that lists the thing, read the id, retry. Only on failure and
+        // only while there are tools left to find, so a healthy call pays
+        // nothing.
+        if (!resultOk && stillWaiting(mounted) > 0) {
+          resultText = resultText + "\n\nIf this failed because an id or name "
+            + "was missing or guessed, do not ask the person for it: call "
+            + "find_tools for a tool that lists those (\"list teams\", \"list "
+            + "projects\"), call it, take the id from its answer, and retry "
+            + "this tool.";
+        }
+        // A result the console draws rather than restates. Which tools those
+        // are is a row in `tool_cards`, never a name in this file: the engine
+        // has no business knowing what Linear is, and a card somebody adds
+        // must not need a change here (toolcards.ts). The model learns the
+        // marker on the result itself — the same recency trick as the
+        // recovery hint above — and every number in the card is read back out
+        // of THIS result by the console, so nothing rests on the model
+        // transcribing fields.
+        if (resultOk) { resultText = resultText + cardHintFor(db, calls[i].name); }
         calledTools.push(calls[i].name);
       }
       if (on) { trace = endTool(trace, callSpan, { input: calls[i].args, output: resultText }, resultOk); }

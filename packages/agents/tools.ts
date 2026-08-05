@@ -515,6 +515,34 @@ const SELF_CONTAINED: string = "An artifact may reach its siblings and nothing e
  * Narrow on purpose. A model told "use this when useful" reaches for it on
  * every answer, and a page of cards is a page with no emphasis left in it.
  */
+/* Never fill a required argument with a stand-in.
+ *
+ * Asked to "list cycles from Linear", a model called `find_tools`, mounted
+ * `list_cycles`, and then called it with `{"teamId": "your-team-id"}` — a
+ * placeholder it invented — got the failure that argument deserves, and told
+ * the person "teamId is required but not provided. Please provide the specific
+ * team ID." Every step of that is wrong from the person's side: they asked a
+ * question that a second tool call would have answered, and got an error and a
+ * homework assignment instead.
+ *
+ * It is a system-prompt rule and not a tool description for the reason
+ * `deferredBriefing` above is: a model decides HOW to fill an argument before
+ * it reads any particular spec, and no per-tool wording reaches the decision
+ * that a plausible-looking string is an acceptable substitute for a lookup.
+ *
+ * The wording leads with the recovery rather than the prohibition — "call the
+ * one that lists them" is an instruction a small model can follow, where "do
+ * not hallucinate identifiers" only tells it what not to do and leaves it
+ * exactly where it was. Asking the person stays available, and is named last
+ * and as the fallback, because sometimes it genuinely is the answer. */
+export const NO_PLACEHOLDER_ARGS: string = "Never invent a value for a required argument. If a tool "
+  + "needs an identifier you do not have — a team, a project, a repository, a board, a user — call the tool "
+  + "that LISTS those and take the id from its answer, then make the real call. A stand-in like "
+  + "\"your-team-id\", \"example\", \"<id>\" or a guessed name is not a way of asking a question: it is a call "
+  + "that fails, and the person has to read an error to learn you never looked. If more than one row comes "
+  + "back and nothing in the request chooses between them, ask which one. Ask for an id only when no tool you "
+  + "have can find it.";
+
 export const TEXT_CARD: string = "When your answer IS a passage the person asked you to produce "
   + "— a correction, a translation, a rewrite, a draft message — put the passage in a card so they can copy it "
   + "in one press: [TEXT]{\"title\":\"Corrected\",\"body\":\"the passage itself\"}[/TEXT]. `title` is two or "
