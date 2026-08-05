@@ -37,12 +37,15 @@ import {
   createRouter, deleteRouter, listRouters, updateRouter,
   TemplateRow, listTemplates, deleteTemplate,
   PluginRow, PluginItem, PluginPreview, listPlugins, pluginItems, inspectPlugin, installPlugin, removePlugin,
+  CardPluginRow, listCardPlugins, installCardPlugin, removeCardPlugin,
   serverMine, setServerMine, forgetServerMine,
   ConnectionRow, listConnections, startConnect,
   AuthProviderRow, listAuthProviders, saveAuthProvider, setAuthProviderSecret, deleteAuthProvider,
   setTracingSecret, storeProviderKey, tracingStatus,
   updateAgent, updateModel, updateServer, updateSkill, updateSkillFile, setServerAuth, testModel,
-  Me, isAdmin, readBanner, writeBanner } from "./api.js";
+  Me, isAdmin, readBanner, writeBanner,
+  getCaptcha, saveCaptcha, setCaptchaSecret, type CaptchaRow,
+  getAgentWebRag, saveAgentWebRag, type AgentWebRagRow } from "./api.js";
 
 // Each tab, with the mark that stands for it in the rail. The icons are the
 // ones nr-icon carries — a name it does not have is drawn as the name itself.
@@ -72,21 +75,30 @@ const TABS = [
   { name: "Templates", icon: "file-text", zone: "user" },
   { name: "Connectors", icon: "plug", zone: "user" },
   { name: "Plugins", icon: "cube", zone: "user" },
-  { name: "Models", icon: "zap", zone: "admin" },
-  { name: "Model menu", icon: "list", zone: "admin" },
-  { name: "Providers", icon: "cloud", zone: "admin" },
-  { name: "Images", icon: "box", zone: "admin" },
-  // The raw server table. The Connectors tab above is the browsing face of
-  // the same rows; this is the one with transports and auth headers on it,
-  // which is operator work even when the row began as somebody's browse.
-  { name: "MCP", icon: "code", zone: "admin" },
-  { name: "Sign-in", icon: "log-in", zone: "admin" },
-  { name: "Tracing", icon: "layers", zone: "admin" },
-  { name: "Banner", icon: "bell", zone: "admin" },
+  // The admin zone carries a `group` as well, and the rail draws a heading per
+  // group in the order they first appear below. Nine flat items was a list you
+  // read from the top every time to find the one you wanted, and the four
+  // groups are the four questions an operator actually arrives with: what can
+  // it think with, what can it do, who gets in, and what is it doing.
+  //
+  // Order within a group is deliberate too — Models before Model menu before
+  // Providers is the order you set them up in, and a rail that matches the
+  // order of the work is one you stop reading.
+  { name: "Models", icon: "zap", zone: "admin", group: "Models" },
+  { name: "Model menu", icon: "list", zone: "admin", group: "Models" },
+  { name: "Providers", icon: "cloud", zone: "admin", group: "Models" },
+  // The raw server table. The Connectors tab in the user zone is the browsing
+  // face of the same rows; this is the one with transports and auth headers on
+  // it, which is operator work even when the row began as somebody's browse.
+  { name: "MCP", icon: "code", zone: "admin", group: "Capabilities" },
+  { name: "Images", icon: "box", zone: "admin", group: "Capabilities" },
   // The search index's own screen. Admin zone because two of its three views
   // query the index, which server/search-proxy.ts refuses to anybody else —
   // the public half of the same component is the /stats page.
-  { name: "Search", icon: "search", zone: "admin" },
+  { name: "Search", icon: "search", zone: "admin", group: "Capabilities" },
+  { name: "Sign-in", icon: "log-in", zone: "admin", group: "Access" },
+  { name: "Tracing", icon: "layers", zone: "admin", group: "Operations" },
+  { name: "Banner", icon: "bell", zone: "admin", group: "Operations" },
 ] as const;
 type Tab = typeof TABS[number]["name"];
 type Zone = typeof TABS[number]["zone"];
@@ -208,12 +220,55 @@ export class ConsoleSettings extends LitElement {
       --nuraly-color-overlay-hover: var(--bg-sunken);
     }
 
-    .body { flex: 1; display: flex; min-height: 0; width: 100%; }
-    /* A page has the whole window, so the content column stops sprawling: a
-       table measured across 1900px is a table nobody can follow from one
-       column to the next. Wider than the overlay ever was, bounded well short
-       of the screen. */
-    :host([page]) main { max-width: 1180px; }
+    .body { flex: 1; display: flex; min-height: 0; width: 100%; position: relative; }
+
+    /* Close and fullscreen, in the content rather than in a bar above it.
+       nr-overlay draws a header with the word SETTINGS and these two controls
+       in it, and that bar cost 56px of a card whose whole job is to hold forms
+       — to say a word the rail beside it already says, in the one place a
+       person is not looking. The component's no-header attribute removes it,
+       and these take over the two things it did that mattered.
+       Floating over the content, not in it: they belong to the window, and a
+       row of window controls that scrolled away with the form would be a
+       different kind of wrong. .body is the positioning context because main
+       scrolls and aside does not reach the right edge.
+       Only in the overlay frame. On a page there is nothing to close and
+       nothing to expand — the window is already the window. */
+    /* The mobile bar, absent everywhere else — see the media query below. */
+    .bar-top { display: none; }
+    .bar-act { display: grid; place-items: center; padding: 8px;
+               border: 0; border-radius: 8px; background: none;
+               color: var(--muted); cursor: pointer; --nuraly-icon-size: 16px; }
+    .bar-act:hover { background: var(--bg-sunken); color: var(--fg); }
+
+    .chrome { position: absolute; top: 10px; right: 12px; z-index: 2;
+              display: flex; align-items: center; gap: 2px; }
+    .chrome button { display: grid; place-items: center; padding: 7px;
+                     border: 0; border-radius: 8px; background: none;
+                     color: var(--muted); cursor: pointer;
+                     --nuraly-icon-size: 16px;
+                     transition: background-color .15s cubic-bezier(.23,1,.32,1),
+                                 color .15s cubic-bezier(.23,1,.32,1),
+                                 transform .12s cubic-bezier(.23,1,.32,1); }
+    .chrome button:hover { background: var(--bg-sunken); color: var(--fg); }
+    .chrome button:active { transform: scale(.93); }
+    /* The content has to keep clear of them, or the first heading on a tab
+       sits under the close button. main's own top padding is 22px; this makes
+       the first 40px of its width narrower rather than pushing everything
+       down, which would waste the space on every tab to protect one. */
+    main > :first-child { padding-right: 76px; }
+    @media (prefers-reduced-motion: reduce) {
+      .chrome button { transition-duration: .01ms; }
+    }
+    /* A page takes the width it is given.
+       This used to stop at 1180px on the argument that a table measured across
+       1900px is hard to follow from one column to the next. That argument is
+       about TABLES, and it was applied to the whole panel — so the search
+       dashboard, whose cards are a grid that wants every pixel, sat in a
+       column with a third of the window empty beside it. Any screen that
+       genuinely needs a reading measure sets one on its own content, where the
+       decision belongs; the container does not make it for all of them. */
+    :host([page]) main { max-width: none; }
 
     /* Left rail. Each item is an icon and a word; the active one is a filled
        pill rather than a coloured word, so the eye finds it by shape. */
@@ -221,12 +276,65 @@ export class ConsoleSettings extends LitElement {
             background: var(--bg-rail); padding: 12px 8px; overflow-y: auto; }
     aside .label { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
                    color: var(--muted); font-weight: 600; padding: 4px 10px 8px; }
+    /* Every heading after the first, which is to say every one that follows a
+       group. Written as "a label that comes after an item" rather than as
+       :not(:first-child) so it stays right whatever else the rail grows above
+       it — the gap belongs to the boundary between two groups, not to a
+       position in the list. */
+    aside .item + .label { margin-top: 14px; }
+    /* --fg at rest, not --muted — the correction the .thread note in
+       src/sidebar.ts already records for the chat rail, arriving here for the same
+       reason. --muted is rgba(0,0,0,.45), which lands near 140,140,140 on this
+       surface: under 4.5:1 on the rail's own background, so every item in the
+       menu was failing contrast while being the primary way around the page.
+       The states below already promoted hover and active to --fg, which is
+       what made the resting state read as disabled rather than as quiet. */
     aside .item { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-                  border-radius: 8px; cursor: pointer; color: var(--muted);
+                  border-radius: 8px; cursor: pointer; color: var(--fg);
                   font-size: 14px; margin-bottom: 1px; }
     aside .item:hover { background: var(--bg-sunken); color: var(--fg); }
     aside .item.on { background: var(--bg-sunken); color: var(--fg); font-weight: 500; }
-    aside .item .ic { width: 16px; display: grid; place-items: center; opacity: 0.8; }
+    /* The icon takes the label's ink too. The 0.8 was doing the same job the
+       --muted above was — holding the mark back from text that was itself
+       held back — and against --fg it just reads as a half-drawn glyph. */
+    aside .item .ic { width: 16px; display: grid; place-items: center; }
+
+    /* --- the hover, and the one idea in it ------------------------------------
+       The mark leans in and the row fills behind it. One motion, not two: the
+       label stays exactly where it is, because a menu whose text moves is a
+       menu you have to re-aim at — the icon is the part with room to move and
+       nothing reading along beside it.
+
+       The numbers are small on purpose. 1.14 and a pixel of lift is at the
+       edge of what registers as movement rather than as a jump, and this fires
+       nine times down a rail somebody is scanning; anything louder turns a
+       glance into a light show.
+
+       transform-origin is centre by default and that is what is wanted here —
+       the .ic box is a fixed 16px grid cell, so the glyph grows about its own
+       middle and the row's spacing never shifts. Scaling a transform costs no
+       layout, so this is a compositor-only animation and the list does not
+       reflow while a pointer runs down it.
+
+       The easing is the console's, not a new one — the same
+       cubic-bezier(.23,1,.32,1) the composer and the login card use, which
+       leaves fast and settles slowly. */
+    aside .item { transition: background-color .15s cubic-bezier(.23,1,.32,1),
+                              color .15s cubic-bezier(.23,1,.32,1); }
+    aside .item .ic { transition: transform .18s cubic-bezier(.23,1,.32,1); }
+    aside .item:hover .ic { transform: scale(1.14) translateY(-1px); }
+    /* The active row keeps a still mark. It is where you already are, so it has
+       nothing to invite — and an icon that stayed enlarged after the click
+       would read as stuck rather than as selected. */
+    aside .item.on:hover .ic { transform: none; }
+
+    /* An ask, honoured. The login card's hue-cycling dot does the same, and the
+       rule is the same one: motion here is decoration over a menu that works
+       identically without it, so it is the first thing to go. */
+    @media (prefers-reduced-motion: reduce) {
+      aside .item, aside .item .ic { transition: none; }
+      aside .item:hover .ic { transform: none; }
+    }
 
     main { flex: 1; overflow-y: auto; padding: 22px 26px 40px; min-width: 0; }
     /* Preferences: the theme picker is three buttons in one track, the choice
@@ -277,6 +385,32 @@ export class ConsoleSettings extends LitElement {
        columns at exactly the same width or the two disagree about what a
        narrow screen is. */
     @media (max-width: 1024px) {
+      /* A header, back again — on a phone only.
+       *
+       * The chrome above floats over the content because on a desktop it
+       * floats over MAIN: the tabs are a column down the left, so nothing is
+       * under the top-right corner but whitespace. Below 1025px that column
+       * becomes a horizontal strip along the top, and the floating buttons
+       * land squarely on the last tabs — "Skills" wearing an X through it,
+       * which is what the panel actually looked like. Removing 56px of
+       * chrome was right for the layout it was measured in and wrong for
+       * this one.
+       *
+       * So the strip gets a bar of its own above it: the word, and the two
+       * window controls, in a row nothing else occupies. The tabs then start
+       * below it and can scroll their whole width. */
+      .bar-top {
+        display: flex; align-items: center; gap: 8px;
+        padding: 10px 8px 10px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .bar-top .what {
+        flex: 1; font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--muted);
+      }
+      /* The floating pair is what the bar replaces. */
+      .chrome { display: none; }
+
       .body { flex-direction: column; }
       aside {
         width: 100%; flex: none;
@@ -504,6 +638,10 @@ export class ConsoleSettings extends LitElement {
      connected for whoever approved it and not for anybody else. */
   @state() private connections = new Map<string, ConnectionRow>();
   @state() private authProviders: AuthProviderRow[] = [];
+  /* The web-retrieval row of the agent being edited, loaded when the form
+     opens and written on save. null while no agent form is open. */
+  @state() private webRagDraft: AgentWebRagRow | null = null;
+  @state() private captcha: CaptchaRow = { provider: "turnstile", siteKey: "", enabled: false };
   @state() private providers: string[] = [];
   @state() private tracing: TracingStatus | null = null;
   @state() private problem = "";
@@ -568,9 +706,11 @@ export class ConsoleSettings extends LitElement {
         ]);
       await this.readMenu();
       await this.loadPlugins();
+      await this.loadCardPlugins();
       await this.loadMine();
       await this.loadConnections();
       this.authProviders = await listAuthProviders().catch(() => []);
+      this.captcha = await getCaptcha().catch(() => this.captcha);
       const t = this.tracing;
       if (t !== null) {
         this.trace = {
@@ -639,6 +779,44 @@ export class ConsoleSettings extends LitElement {
     this.view = { ...v, row: { ...v.row, ...fields } } as View;
   }
 
+  /** The rail, as headings and items.
+   *
+   *  A zone whose tabs carry no `group` draws the way it always did: one label
+   *  and a flat list. That is the user zone, and it stays flat because seven
+   *  items you use daily are a list you already know — headings there would be
+   *  furniture. The admin zone earns them: nine items, most of which an
+   *  operator touches once a quarter, where "which screen has the API keys" is
+   *  a question the rail should answer without being read end to end.
+   *
+   *  Grouped in first-appearance order rather than alphabetically or by a
+   *  separate ordering table: TABS is already the running order, and a second
+   *  list saying where each group goes is a second list to forget to update. */
+  private railGroups() {
+    const mine = TABS.filter((t) => t.zone === this.zone);
+    const item = (t: { name: string; icon: string }) => html`
+      <div class="item ${t.name === this.tab ? "on" : ""}" data-tab=${t.name}
+        @click=${() => this.goTab(t.name as Tab)}>
+        <span class="ic"><nr-icon name=${t.icon} size="small"></nr-icon></span>
+        <span>${t.name}</span>
+      </div>`;
+
+    const grouped = mine.filter((t) => "group" in t && t.group);
+    if (grouped.length === 0) {
+      return html`
+        <div class="label">Settings</div>
+        ${mine.map(item)}`;
+    }
+    // Distinct groups, in the order TABS lists them.
+    const order: string[] = [];
+    for (const t of grouped) {
+      const g = (t as { group: string }).group;
+      if (!order.includes(g)) { order.push(g); }
+    }
+    return order.map((g) => html`
+      <div class="label">${g}</div>
+      ${grouped.filter((t) => (t as { group: string }).group === g).map(item)}`);
+  }
+
   /* The same element, two frames.
      As an overlay it is something you opened over your conversation and will
      close again. As a page it is where you went — its own address, its own
@@ -648,15 +826,8 @@ export class ConsoleSettings extends LitElement {
   render() {
     const body = html`
       <div class="body">
-        <aside>
-          <div class="label">${this.zone === "admin" ? "Deployment" : "Settings"}</div>
-          ${TABS.filter((t) => t.zone === this.zone).map((t) => html`
-            <div class="item ${t.name === this.tab ? "on" : ""}" data-tab=${t.name}
-              @click=${() => this.goTab(t.name)}>
-              <span class="ic"><nr-icon name=${t.icon} size="small"></nr-icon></span>
-              <span>${t.name}</span>
-            </div>`)}
-        </aside>
+        ${this.page ? "" : this.chrome()}
+        <aside>${this.railGroups()}</aside>
         <main>
           ${this.renderTab()}
           ${this.problem === "" ? "" : html`<p class="err" role="alert">${this.problem}</p>`}
@@ -666,6 +837,7 @@ export class ConsoleSettings extends LitElement {
     return html`
       <nr-overlay
         open
+        no-header
         label="Settings"
         allow-fullscreen
         @nr-close=${() => this.dispatchEvent(new CustomEvent("close"))}
@@ -673,6 +845,48 @@ export class ConsoleSettings extends LitElement {
         ${body}
       </nr-overlay>
     `;
+  }
+
+  /* The two window controls, drawn where the header used to be.
+   *
+   *  Expand toggles the component's own `fullscreen`, which is a public
+   *  reflected property — its toggleFullscreen is private, and reaching into a
+   *  component's shadow root for a button would be a worse dependency than
+   *  setting the property it reflects. Close dispatches the same `close` this
+   *  element has always dispatched, which is what the console listens for; it
+   *  does not touch nr-overlay's `open`, because the console removes the
+   *  element outright and an overlay animating shut on a node about to be
+   *  detached is a frame of nothing. */
+  private chrome() {
+    const shell = () => this.renderRoot.querySelector("nr-overlay") as
+      (HTMLElement & { fullscreen: boolean }) | null;
+    // "maximize" and "x" are both in icon-paths; "expand" and "close" are the
+    // names that sound right and are not there, and nr-icon draws the NAME it
+    // cannot find, which would print the word where the mark should be.
+    return html`
+      <!-- The mobile bar. Hidden by CSS at desktop widths, where the floating
+           chrome does this job without spending a row on it. -->
+      <div class="bar-top">
+        <span class="what">Settings</span>
+        <button class="bar-act expand" title="Expand" aria-label="Expand"
+          @click=${() => { const o = shell(); if (o !== null) { o.fullscreen = !o.fullscreen; } }}>
+          <nr-icon name="maximize" size="small"></nr-icon>
+        </button>
+        <button class="bar-act close" title="Close" aria-label="Close"
+          @click=${() => this.dispatchEvent(new CustomEvent("close"))}>
+          <nr-icon name="x" size="small"></nr-icon>
+        </button>
+      </div>
+      <div class="chrome">
+        <button class="expand" title="Expand" aria-label="Expand"
+          @click=${() => { const o = shell(); if (o !== null) { o.fullscreen = !o.fullscreen; } }}>
+          <nr-icon name="maximize" size="small"></nr-icon>
+        </button>
+        <button class="close" title="Close" aria-label="Close"
+          @click=${() => this.dispatchEvent(new CustomEvent("close"))}>
+          <nr-icon name="x" size="small"></nr-icon>
+        </button>
+      </div>`;
   }
 
   /* Choosing a tab. On a page it is a navigation — the URL is the tab, so the
@@ -992,6 +1206,8 @@ export class ConsoleSettings extends LitElement {
             { icon: "edit", title: `Edit ${a.agentName}`, run: () => {
               this.skillDraft = (a.skills ?? []).map((s) => s.id);
               this.open({ kind: "agent", row: { ...a }, fresh: false });
+              void getAgentWebRag(a.id).then((r) => { this.webRagDraft = r; })
+                .catch(() => { this.webRagDraft = null; });
             } },
             { icon: "trash", title: `Delete ${a.agentName}`, danger: true,
               run: () => this.act(() => deleteAgent(a.id)) },
@@ -1054,6 +1270,8 @@ export class ConsoleSettings extends LitElement {
         </div>
       `}
 
+      ${this.webRagSection(a, fresh)}
+
       ${this.formActions(() => this.act(async () => {
         // The row first — a fresh agent needs to exist before a link can name
         // it — then the checklist's diff against what was stored.
@@ -1061,7 +1279,56 @@ export class ConsoleSettings extends LitElement {
         const before = fresh ? [] : (this.agents.find((x) => x.id === a.id)?.skills ?? []).map((s) => s.id);
         for (const id of this.skillDraft.filter((x) => !before.includes(x))) { await linkSkill(a.id, id); }
         for (const id of before.filter((x) => !this.skillDraft.includes(x))) { await unlinkSkill(a.id, id); }
+        if (this.webRagDraft !== null) {
+          await saveAgentWebRag({ ...this.webRagDraft, agentId: a.id });
+        }
       }))}
+    `;
+  }
+
+  /** Grounding in the public web index, per agent.
+   *
+   *  Sits on the agent form because it is a property of the agent, exactly as
+   *  the knowledge row is — and the form's save writes it with the rest, so
+   *  there is one Save and not two. A fresh agent starts from the defaults the
+   *  engine answers for an absent row. */
+  private webRagSection(a: AgentRow, fresh: boolean) {
+    const r = this.webRagDraft ?? { agentId: a.id, enabled: false, topK: 5,
+      maxChars: 6000, queryMode: "verbatim", queryModelId: "" };
+    if (this.webRagDraft === null && fresh) { this.webRagDraft = r; }
+    const chat = this.models.filter((m) => m.kind !== "embedding" && m.enabled);
+    const patch = (part: Partial<AgentWebRagRow>) => {
+      this.webRagDraft = { ...r, ...part, agentId: a.id };
+    };
+    return html`
+      ${this.group("Web retrieval")}
+      <div class="banner">Passages from the deployment's search index, retrieved
+        for every question and handed to the model beside its other context. The
+        query can be the person's message as written, or a model can turn the
+        message into a search query first — conversation rarely reads like a
+        search, and the rewrite is the difference on follow-ups.</div>
+      <div class="grid">
+        ${this.check({ id: "wr-enabled", label: "Ground answers in the web index",
+          checked: r.enabled, on: (v: boolean) => patch({ enabled: v }) })}
+        ${this.text({ id: "wr-k", label: "Passages", value: String(r.topK),
+          help: "How many passages to ask for. The index caps at 20.",
+          on: (v: string) => patch({ topK: Number(v) || 5 }) })}
+        ${this.text({ id: "wr-chars", label: "Character budget", value: String(r.maxChars),
+          help: "The index stops adding passages at this size — it is what the model's context pays.",
+          on: (v: string) => patch({ maxChars: Number(v) || 6000 }) })}
+        ${this.choice({ id: "wr-mode", label: "Query", value: r.queryMode || "verbatim",
+          options: [
+            { value: "verbatim", label: "The message, as written" },
+            { value: "generated", label: "Written by a model" },
+          ],
+          on: (v: string) => patch({ queryMode: v }) })}
+        ${r.queryMode !== "generated" ? "" : this.choice({ id: "wr-model",
+          label: "Query model", value: r.queryModelId,
+          options: chat.map((m) => ({ value: m.id, label: m.label })),
+          required: true,
+          help: "Writes the search query from the message. Pin something fast — it runs before every retrieval.",
+          on: (v: string) => patch({ queryModelId: v }) })}
+      </div>
     `;
   }
 
@@ -1526,12 +1793,12 @@ export class ConsoleSettings extends LitElement {
     return html`
       ${this.formHead(fresh ? "New router" : `Edit ${r.label}`)}
       <div class="banner">A router is what the menu's automatic entry does. Before each
-        message a small, cheap model is shown the candidates below — their keys and the
-        descriptions written for them — and answers with one key; that candidate answers the
+        message a small, cheap model is shown the candidates below, with their keys and the
+        descriptions written for them, and answers with one key; that candidate answers the
         message. <strong>It costs one extra completion per message</strong>, which is tens to
         low hundreds of milliseconds and a token bill that is small rather than absent. Every
-        failure — an unknown answer, a provider error, a deleted configuration — lands on the
-        fallback, so a message that would have been answered is always answered.</div>
+        failure lands on the fallback — an unknown answer, a provider error, a deleted
+        configuration — so a message that would have been answered is always answered.</div>
 
       <div class="grid">
         ${this.text({ id: "rt-label", label: "Label", value: r.label, required: true,
@@ -2134,6 +2401,7 @@ export class ConsoleSettings extends LitElement {
                     await forgetServerMine(s.id);
                     await this.loadMine();
       this.authProviders = await listAuthProviders().catch(() => []);
+      this.captcha = await getCaptcha().catch(() => this.captcha);
                   }) },
               ])}
             </tr>`)}
@@ -2204,6 +2472,24 @@ export class ConsoleSettings extends LitElement {
         <p class="note">Skills arrive private and connectors arrive switched off —
         the same rule the connector shelf keeps. Turn on what you meant to use.</p>`}
 
+      ${this.installed === "" ? "" : html`<p class="note">${this.installed}</p>`}
+
+      ${this.cardPlugins.length === 0 ? "" : html`
+        ${this.group("Card plugins", this.cardPlugins.length)}
+        <p class="note">These draw a tool's answer as a card instead of prose —
+        a Linear cycle, a list of tickets. The renderer was fetched once when
+        it was installed and runs in a sandbox with no network of its own.</p>
+        <table><tbody>
+          ${this.cardPlugins.map((p) => html`<tr>
+            <td class="name">${p.pluginName}</td>
+            <td class="fill">${p.description}</td>
+            <td>${p.version === "" ? "" : html`<span class="tag">v${p.version}</span>`}</td>
+            <td><span class="tag">${p.enabled ? "on" : "off"}</span></td>
+            <td><button class="act" @click=${() => void this.dropCard(p)}>
+              <nr-icon name="trash-2" size="small"></nr-icon> Remove</button></td>
+          </tr>`)}
+        </tbody></table>`}
+
       ${this.group("Installed", this.plugins.length)}
       ${this.plugins.length === 0
         ? html`<p class="empty">None yet. A plugin is the only one of the three
@@ -2230,6 +2516,15 @@ export class ConsoleSettings extends LitElement {
   }
 
   // Read a manifest without installing it.
+  /* Card plugins, the other kind. Kept beside `plugins` rather than merged
+     into it: they are different tables with different lifecycles, and the one
+     place they should look the same is on screen. */
+  @state() private cardPlugins: CardPluginRow[] = [];
+
+  private async loadCardPlugins(): Promise<void> {
+    this.cardPlugins = await listCardPlugins().catch(() => []);
+  }
+
   private async inspect() {
     this.problem = "";
     this.preview = null;
@@ -2238,8 +2533,43 @@ export class ConsoleSettings extends LitElement {
     this.pluginBusy = true;
     try {
       this.preview = await inspectPlugin(url);
-    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
+    } catch (e) {
+      /* Not a bundle manifest — try it as a card plugin before giving up.
+       *
+       * Two manifest shapes arrive through one field, and asking a person
+       * which kind they are holding is asking them to know a distinction that
+       * is ours, not theirs: they have a URL somebody gave them. The bundle
+       * reader is tried first because it previews before it writes; a card
+       * plugin has no preview route, so this installs it and reports what it
+       * installed, which is the honest description of what happened. */
+      const said = e instanceof Error ? e.message : String(e);
+      try {
+        const made = await installCardPlugin(url);
+        this.pluginUrl = "";
+        this.problem = "";
+        await this.loadCardPlugins();
+        this.installed = `Installed ${made.pluginName}.`;
+      } catch (second) {
+        // Both refused. The BUNDLE reader's words, because that is the shape
+        // most manifests are, and a card plugin's failure is usually "no id",
+        // which reads as noise beside it.
+        this.problem = said;
+        void second;
+      }
+    }
     finally { this.pluginBusy = false; }
+  }
+
+  /* What the last install did, said once. Cleared when the tab is left. */
+  @state() private installed = "";
+
+  private async dropCard(p: CardPluginRow) {
+    this.problem = "";
+    try {
+      await removeCardPlugin(p.id);
+      this.installed = `Removed ${p.pluginName}.`;
+      await this.loadCardPlugins();
+    } catch (e) { this.problem = e instanceof Error ? e.message : String(e); }
   }
 
   private async installPreviewed() {
@@ -2274,6 +2604,7 @@ export class ConsoleSettings extends LitElement {
       await setServerMine(id, token);
       await this.loadMine();
       this.authProviders = await listAuthProviders().catch(() => []);
+      this.captcha = await getCaptcha().catch(() => this.captcha);
     });
   }
 
@@ -2491,7 +2822,63 @@ export class ConsoleSettings extends LitElement {
           <p class="note">A provider with no secret is never offered: its button
           would be a dead end. The callback this deployment registers is
           <span class="slug">${location.origin}/__nk_auth/callback</span> — paste
-          that into the provider's console.</p>`}`;
+          that into the provider's console.</p>`}
+
+      ${this.captchaSection()}`;
+  }
+
+  /** The bot challenge, configured here rather than deployed.
+   *
+   *  Sits on the Sign-in tab because that is the form it guards, and it guards
+   *  exactly two routes: creating an account and claiming one. The secret is
+   *  written to the engine's encrypted store and never read back, so the field
+   *  is always blank and blank always means "keep the one you have" — the same
+   *  rule the provider form keeps, and for the same reason: an empty save that
+   *  overwrote a working secret could never be noticed, because nothing can
+   *  read it to compare. */
+  private captchaSection() {
+    const c = this.captcha;
+    const ready = c.siteKey.trim() !== "" && c.configured === true;
+    return html`
+      ${this.group("Bot challenge")}
+      <div class="banner">A challenge in front of sign-in and sign-up, so a bot
+        cannot create accounts or grind passwords. It runs on those two actions
+        only — the rest of the site is untouched, and a signed-in person never
+        sees it. Turnstile is free and invisible for most visitors; hCaptcha and
+        reCAPTCHA speak the same protocol and work here unchanged.</div>
+      <div class="grid">
+        ${this.choice({ id: "cap-provider", label: "Provider", value: c.provider || "turnstile",
+          options: [
+            { value: "turnstile", label: "Cloudflare Turnstile" },
+            { value: "hcaptcha", label: "hCaptcha" },
+            { value: "recaptcha", label: "reCAPTCHA" },
+          ],
+          on: (v: string) => { this.captcha = { ...this.captcha, provider: v }; } })}
+        ${this.text({ id: "cap-site", label: "Site key", value: c.siteKey, wide: true,
+          help: "Public — it is rendered into the login page. From the provider's dashboard.",
+          on: (v: string) => { this.captcha = { ...this.captcha, siteKey: v }; } })}
+        ${this.text({ id: "cap-secret", label: "Secret key", type: "password", value: "", wide: true,
+          placeholder: c.configured === true ? "unchanged" : "",
+          help: "Stored encrypted and never read back. Leave blank to keep the one already stored.",
+          on: () => undefined })}
+        ${this.check({ id: "cap-enabled", label: "Challenge sign-in and sign-up",
+          checked: c.enabled,
+          on: (v: boolean) => { this.captcha = { ...this.captcha, enabled: v }; } })}
+      </div>
+      ${c.enabled || ready ? "" : html`<p class="note">A site key and a secret
+        are both needed before the challenge can be turned on — half a challenge
+        refuses everybody, including you.</p>`}
+      ${this.formActions(() => this.act(async () => {
+        // The secret first: `enabled` is refused by the engine while no secret
+        // is stored, so saving the row before the secret would fail the one
+        // save an operator makes when setting this up for the first time.
+        const box = this.renderRoot.querySelector("#cap-secret") as unknown as { value?: string } | null;
+        const secret = (box?.value ?? "").trim();
+        if (secret !== "") { await setCaptchaSecret(secret); }
+        await saveCaptcha({ provider: this.captcha.provider || "turnstile",
+          siteKey: this.captcha.siteKey.trim(), enabled: this.captcha.enabled });
+        this.captcha = await getCaptcha();
+      }))}`;
   }
 
   private authProviderForm(row: AuthProviderRow, fresh: boolean) {

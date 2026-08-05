@@ -135,6 +135,86 @@ export const startFromTemplate = (threadId: string, templateId: string) =>
     `/threads/${encodeURIComponent(threadId)}/artifacts/from-template`,
     { method: "POST", body: JSON.stringify({ templateId }) });
 
+// --- tasks that run without anybody asking -----------------------------------
+
+export type TaskRow = {
+  id: string;
+  owner: string;
+  agentId: string;
+  modelChoiceId: string;
+  title: string;
+  instruction: string;
+  // "once" or "every".
+  kind: string;
+  // Six fields, seconds first — compiled by the engine from the words a person
+  // typed, and never shown to them. Here only so the list can tell two
+  // schedules apart when neither has a title.
+  cronExpr: string;
+  tz: string;
+  nextAt: string;
+  runningSince: string;
+  enabled: boolean;
+  failures: number;
+  pausedReason: string;
+  lastRunAt: string;
+  lastRunId: string;
+  lastStatus: string;
+  lastError: string;
+  runCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** What a person typed, on its way to becoming a schedule. The engine compiles
+ *  it and refuses what it cannot read, so nothing here parses anything. */
+export type TaskAsk = {
+  agentId: string;
+  title: string;
+  instruction: string;
+  // "every weekday at 08:00", "every 30 minutes". The engine's grammar.
+  schedule: string;
+  tz: string;
+  modelChoiceId?: string;
+};
+
+/** One run, whole — the question, the answer, and which conversation it
+ *  happened in. What the task page previews: reading the run rather than the
+ *  thread means one call for both the text and the link to it. */
+export type RunDocument = {
+  id: string;
+  agentId: string;
+  threadId: string;
+  question: string;
+  answer: string;
+  ok: boolean;
+  error: string;
+  modelApiName: string;
+  createdAt: string;
+};
+
+export const runDocument = (id: string) =>
+  call<RunDocument>(`/runs/${encodeURIComponent(id)}`);
+
+export const listTasks = () => call<TaskRow[]>("/tasks");
+
+export const createTask = (ask: TaskAsk) =>
+  call<TaskRow>("/tasks", { method: "POST", body: JSON.stringify(ask) });
+
+/** Pause, resume, retitle or reschedule. Every field is optional: the engine
+ *  keeps what is not sent, so a pause is `{enabled:false}` and nothing else. */
+export const changeTask = (id: string, change: Partial<TaskAsk> & { enabled?: boolean }) =>
+  call<TaskRow>(`/tasks/${encodeURIComponent(id)}`, {
+    method: "PUT", body: JSON.stringify(change) });
+
+/** Move its next firing to now. The runner picks it up within a tick, so this
+ *  answers before anything has run — which is why the button says "Run soon"
+ *  and not "Run". */
+export const runTaskNow = (id: string) =>
+  call<TaskRow>(`/tasks/${encodeURIComponent(id)}/run-now`, { method: "POST" });
+
+export const deleteTask = (id: string) =>
+  call<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 export type SkillRow = {
   id: string;
   skillName: string;
@@ -741,6 +821,94 @@ export const uploadFile = (threadId: string, name: string, content: string) =>
 
 // --- artifacts ------------------------------------------------------------------------
 
+/** One card in the library — every artifact this person owns, across every
+ *  conversation, with the head of its text for the ones that have text. */
+export type ArtifactCard = {
+  id: string;
+  threadId: string;
+  threadTitle: string;
+  slot: number;
+  path: string;
+  title: string;
+  kind: string;
+  currentVersion: number;
+  updatedAt: string;
+  excerpt: string;
+};
+
+export const listLibrary = () => call<ArtifactCard[]>("/artifacts");
+
+/** One story on a Discover feed, as the digest job wrote it. */
+export type DiscoverStory = {
+  id: string;
+  feedId: string;
+  rank: number;
+  headline: string;
+  summary: string;
+  /** The urls, newline-joined — one column for something only read whole. */
+  sources: string;
+  /** When the OLDEST source was FETCHED. Never a publication date: the index
+   *  knows when it fetched a page and not when the page was written, so the
+   *  card says "fetched" and means it. */
+  fetchedAt: string;
+  why: string;
+  madeAt: string;
+  /** The picture, when the crawl has one. Empty on every row today — the
+   *  crawler does not extract `og:image` yet, and the field is here so the
+   *  article layout can be built with the slot in it once. */
+  image: string;
+  readMinutes: number;
+  /** The body reflowed by a model — same facts, without the crawl wreckage.
+   *  "" for a story nobody has opened since the column existed, in which case
+   *  the raw `body` is what there is. */
+  bodyMd?: string;
+  /** Whether there is an article to open. The body itself is NOT on this
+   *  route: it runs to twelve thousand characters and the feed draws six
+   *  stories a topic, so it travels on `/discover/story/:id` where it is the
+   *  point. A card with no body does not link. */
+  hasBody: boolean;
+};
+
+/** One story with what the crawl holds on it — the article route's answer. */
+export type DiscoverArticle = {
+  story: DiscoverStory & { body: string };
+  topic: string;
+  feedId: string;
+};
+
+export type DiscoverFeed = {
+  id: string;
+  topic: string;
+  lang: string;
+  country: string;
+  digestedAt: string;
+  stories: DiscoverStory[];
+};
+
+/** The feeds for a language and a place. Both may be empty, which asks for
+ *  everything — the engine falls back to the worldwide feeds when a pair has
+ *  none of its own. */
+export const listDiscover = (lang = "", country = "") =>
+  call<DiscoverFeed[]>(`/discover?lang=${encodeURIComponent(lang)}&country=${encodeURIComponent(country)}`);
+
+/** One article. 404 when the story has rolled off its feed, which is ordinary
+ *  rather than exceptional — a refresh replaces a feed's rows, so an address
+ *  outlives what it points at by design. */
+export const readArticle = (id: string) =>
+  call<DiscoverArticle>(`/discover/story/${encodeURIComponent(id)}`);
+
+/** Start a conversation about an article.
+ *
+ *  Under `/threads` and not `/discover` because that is the one path a guest
+ *  may write to — and an anonymous reader of the front page is exactly who
+ *  asks the first question. The article's text is NOT sent: the engine builds
+ *  the context from the stored row, so a client cannot put words in front of
+ *  a model that the transcript will never show. */
+export const threadFromStory = (storyId: string, agentId: string, modelChoiceId = "") =>
+  call<{ id: string; agentId: string; modelChoiceId: string; title: string }>(
+    "/threads/from-story",
+    { method: "POST", body: JSON.stringify({ storyId, agentId, modelChoiceId }) });
+
 export const listArtifacts = (threadId: string) =>
   call<ArtifactListing[]>(`/threads/${encodeURIComponent(threadId)}/artifacts`);
 
@@ -1158,6 +1326,46 @@ export const setAuthProviderSecret = (id: string, clientSecret: string) =>
   call<unknown>(`/auth-providers/${encodeURIComponent(id)}/secret`, {
     method: "PUT", body: JSON.stringify({ clientSecret }),
   });
+/** The bot challenge on the sign-in form.
+ *
+ *  Configured like a provider and for the same reason — a site key and a secret
+ *  are per-deployment facts an operator should be able to rotate without a
+ *  rebuild. The secret is stored encrypted by the engine and never read back,
+ *  so `configured` is how a form knows one is held. */
+export interface CaptchaRow {
+  provider: string;
+  siteKey: string;
+  enabled: boolean;
+  configured?: boolean;
+}
+
+export const getCaptcha = () => call<CaptchaRow>("/captcha");
+export const saveCaptcha = (row: { provider: string; siteKey: string; enabled: boolean }) =>
+  call<CaptchaRow>("/captcha", { method: "PUT", body: JSON.stringify(row) });
+export const setCaptchaSecret = (secret: string) =>
+  call<unknown>("/captcha/secret", { method: "PUT", body: JSON.stringify({ secret }) });
+
+/** Whether and how an agent grounds its answers in the public web index.
+ *
+ *  Per agent, like the knowledge retrieval row: the assistant benefits from
+ *  the open web, a validator does not. queryMode "generated" has the model
+ *  named by queryModelId write the search query from the user's message;
+ *  "verbatim" sends the message as-is. */
+export interface AgentWebRagRow {
+  agentId: string;
+  enabled: boolean;
+  topK: number;
+  maxChars: number;
+  queryMode: string;
+  queryModelId: string;
+}
+
+export const getAgentWebRag = (agentId: string) =>
+  call<AgentWebRagRow>(`/agents/${encodeURIComponent(agentId)}/web-rag`);
+export const saveAgentWebRag = (row: AgentWebRagRow) =>
+  call<AgentWebRagRow>(`/agents/${encodeURIComponent(row.agentId)}/web-rag`,
+    { method: "PUT", body: JSON.stringify(row) });
+
 export const deleteAuthProvider = (id: string) =>
   call<unknown>(`/auth-providers/${encodeURIComponent(id)}`, { method: "DELETE" });
 
@@ -1195,6 +1403,41 @@ export type PluginPreview = {
 export type PluginItem = { kind: string; itemId: string; name: string };
 
 export const listPlugins = () => call<PluginRow[]>("/plugins");
+
+/** Card plugins — the OTHER thing this console calls a plugin, and the reason
+ *  the directory lists both under one tab.
+ *
+ *  A bundle (`/plugins`) installs skills and connectors; a card plugin
+ *  (`/card-plugins`) installs the markers that turn a tool result into a
+ *  drawn card, plus the cases that say when to reach for them. They are
+ *  separate tables with separate lifecycles, and to a person they are both
+ *  "a thing I installed from a manifest" — a Plugins tab reading only the
+ *  first showed "0" on a deployment with one installed, which is a lie the
+ *  UI told because the code had two words for one idea. */
+export type CardPluginRow = {
+  id: string;
+  pluginName: string;
+  description: string;
+  sourceUrl: string;
+  version: string;
+  rendererUrl: string;
+  rendererSource: string;
+  enabled: boolean;
+  installedAt: string;
+};
+
+export const listCardPlugins = () => call<CardPluginRow[]>("/card-plugins");
+
+/** Install a card plugin from where it is published. The engine fetches the
+ *  manifest AND the renderer it names, and stores the renderer's source — see
+ *  plugincards.ts for why the snapshot rather than the URL is what runs. */
+export const installCardPlugin = (sourceUrl: string) =>
+  call<CardPluginRow>("/card-plugins/from-source", {
+    method: "POST", body: JSON.stringify({ sourceUrl }),
+  });
+
+export const removeCardPlugin = (id: string) =>
+  call<{ uninstalled: string }>(`/card-plugins/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const pluginItems = (id: string) =>
   call<PluginItem[]>(`/plugins/${encodeURIComponent(id)}/items`);
 export const inspectPlugin = (sourceUrl: string) =>

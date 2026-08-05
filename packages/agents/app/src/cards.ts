@@ -402,3 +402,197 @@ export const textCard: CardPlugin = {
 };
 
 registerCard(textCard);
+
+// --- Linear, drawn instead of restated -----------------------------------------
+//
+// A cycle is four numbers and a date range; a ticket list is rows with a
+// state each. Both came back as markdown bullet soup — accurate, and unread.
+// The same division of labour as the currency card: the MODEL emits one line
+// naming the card and the team or title, and every number, identifier, url
+// and status is read from the tool result it came from, because a model
+// transcribing fourteen fields through prose drops some of them at any size
+// worth running (see CardEvidence).
+//
+// The engine tells the model about these markers on the result of the very
+// call that produced the data (run.ts) — the same recency trick as the
+// find_tools recovery hint, and it costs tokens only when a Linear list
+// actually ran.
+
+/** A tool result, parsed even when the engine appended prose after the JSON —
+ *  which it does: briefing hints ride the result's tail. The JSON is the
+ *  prefix, so the parse walks back from the end to the last brace and tries
+ *  the longest prefix first. */
+function parseLoose(text: string): unknown {
+  const t = text.trim();
+  try { return JSON.parse(t); } catch { /* appended prose, or not JSON */ }
+  const from = t.search(/[[{]/);
+  if (from === -1) return null;
+  for (let end = t.length; end > from; end -= 1) {
+    const ch = t[end - 1];
+    if (ch !== "}" && ch !== "]") continue;
+    try { return JSON.parse(t.slice(from, end)); } catch { /* keep walking */ }
+  }
+  return null;
+}
+
+type LinearCycle = {
+  number?: number; name?: string; startsAt?: string; endsAt?: string;
+  isCurrent?: boolean;
+  issueCountHistory?: number[]; completedIssueCountHistory?: number[];
+  scopeHistory?: number[]; completedScopeHistory?: number[];
+};
+
+type LinearIssue = {
+  id?: string; title?: string; url?: string; status?: string;
+  statusType?: string; dueDate?: string | null;
+  priority?: { value?: number; name?: string };
+};
+
+/** The cycles in evidence: list_cycles answers a bare array of them. */
+function cyclesFromEvidence(evidence: CardEvidence): LinearCycle[] {
+  for (const text of evidence) {
+    const data = parseLoose(text);
+    if (Array.isArray(data) && data.length > 0
+        && typeof (data[0] as LinearCycle).number === "number"
+        && typeof (data[0] as LinearCycle).startsAt === "string") {
+      return data as LinearCycle[];
+    }
+  }
+  return [];
+}
+
+/** The issues in evidence: list_issues answers { issues: [...] }. */
+function issuesFromEvidence(evidence: CardEvidence): LinearIssue[] {
+  for (const text of evidence) {
+    const data = parseLoose(text) as { issues?: unknown } | null;
+    if (data !== null && Array.isArray(data.issues) && data.issues.length > 0
+        && typeof (data.issues[0] as LinearIssue).title === "string") {
+      return data.issues as LinearIssue[];
+    }
+  }
+  return [];
+}
+
+const last = (ns: number[] | undefined): number =>
+  Array.isArray(ns) && ns.length > 0 && isFinite(ns[ns.length - 1]) ? ns[ns.length - 1] : 0;
+
+const day = (iso: string | undefined): string => {
+  if (typeof iso !== "string" || iso === "") return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
+/** The state chip's ink, by Linear's own statusType vocabulary. */
+function stateInk(statusType: string): { ink: string; bg: string } {
+  if (statusType === "completed") return { ink: "#2f8a4c", bg: "rgba(47,138,76,.12)" };
+  if (statusType === "started") return { ink: "#b7791f", bg: "rgba(183,121,31,.12)" };
+  if (statusType === "canceled") return { ink: "#8a8f98", bg: "rgba(138,143,152,.12)" };
+  return { ink: "#6b7280", bg: "rgba(107,114,128,.12)" }; // backlog, unstarted
+}
+
+const CARD_BORDER = "var(--nuraly-border-color,rgba(128,128,128,.25))";
+
+/** [LINEAR_CYCLE]{"team":"Aymen"}[/LINEAR_CYCLE] — data from evidence. */
+export const linearCycleCard: CardPlugin = {
+  id: "linear-cycle-card",
+  htmlTags: [{ name: "linear-cycle", open: "[LINEAR_CYCLE]", close: "[/LINEAR_CYCLE]" }],
+  claimsShape(d: Record<string, unknown>): boolean {
+    return d.kind === "cycle" || (typeof d.team === "string" && !("title" in d) && !("body" in d));
+  },
+  renderHtmlBlock(name: string, content: string, evidence: CardEvidence = []): string {
+    if (name !== "linear-cycle") return "";
+    let d: { team?: string };
+    try { d = JSON.parse(content) as { team?: string }; } catch { return ""; }
+    const cycles = cyclesFromEvidence(evidence);
+    // The current one, or the newest — the card is "where are we", not an
+    // archive browser.
+    const cycle = cycles.find((c) => c.isCurrent === true) ?? cycles[cycles.length - 1];
+    if (!cycle) return "";
+
+    const team = typeof d.team === "string" && d.team.trim() !== ""
+      ? esc(d.team.slice(0, 48)) : "";
+    const title = cycle.name && cycle.name.trim() !== ""
+      ? esc(String(cycle.name).slice(0, 64)) : `Cycle ${cycle.number ?? "?"}`;
+    const span = [day(cycle.startsAt), day(cycle.endsAt)].filter((s) => s !== "").join(" – ");
+    const scope = last(cycle.scopeHistory) || last(cycle.issueCountHistory);
+    const done = last(cycle.completedScopeHistory) || last(cycle.completedIssueCountHistory);
+    const issues = last(cycle.issueCountHistory);
+    const doneIssues = last(cycle.completedIssueCountHistory);
+    const pct = scope > 0 ? Math.round((done / scope) * 100) : 0;
+
+    return `<div data-linear-card="cycle" style="margin:10px 0;padding:14px 16px;border:1px solid ${CARD_BORDER};border-radius:12px;max-width:440px;font-family:inherit">`
+      + `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">`
+      + `<span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6">Linear${team === "" ? "" : " · " + team}</span>`
+      + (cycle.isCurrent === true ? `<span style="font-size:10.5px;font-weight:600;color:#2f8a4c;border:1px solid rgba(47,138,76,.4);border-radius:999px;padding:0 7px">current</span>` : "")
+      + `</div>`
+      + `<div style="font-size:18px;font-weight:600;line-height:1.3">${title}</div>`
+      + (span === "" ? "" : `<div style="font-size:12.5px;opacity:.65;margin-top:2px">${span}</div>`)
+      + `<div style="margin-top:10px;height:6px;border-radius:999px;background:rgba(128,128,128,.15);overflow:hidden">`
+      + `<div style="height:100%;width:${pct}%;border-radius:999px;background:#2f8a4c"></div></div>`
+      + `<div style="font-size:12.5px;opacity:.75;margin-top:6px">${doneIssues} of ${issues} issues done · ${pct}% of scope</div>`
+      + `</div>`;
+  },
+};
+
+registerCard(linearCycleCard);
+
+/** [LINEAR_ISSUES]{"title":"This cycle"}[/LINEAR_ISSUES] — rows from evidence.
+ *  Each row is a link to the issue in Linear, which is the interactivity that
+ *  matters: the next thing anybody does with a ticket list is open one. */
+export const linearIssuesCard: CardPlugin = {
+  id: "linear-issues-card",
+  htmlTags: [{ name: "linear-issues", open: "[LINEAR_ISSUES]", close: "[/LINEAR_ISSUES]" }],
+  claimsShape(d: Record<string, unknown>): boolean {
+    return d.kind === "issues";
+  },
+  renderHtmlBlock(name: string, content: string, evidence: CardEvidence = []): string {
+    if (name !== "linear-issues") return "";
+    let d: { title?: string };
+    try { d = JSON.parse(content) as { title?: string }; } catch { return ""; }
+    const all = issuesFromEvidence(evidence);
+    if (all.length === 0) return "";
+    const shown = all.slice(0, 10);
+
+    const rows = shown.map((issue) => {
+      const key = esc(String(issue.id ?? "").slice(0, 16));
+      const title = esc(String(issue.title ?? "").slice(0, 120));
+      const st = String(issue.statusType ?? "");
+      const chip = stateInk(st);
+      const status = esc(String(issue.status ?? "").slice(0, 24));
+      const pr = issue.priority && typeof issue.priority.value === "number"
+        && issue.priority.value > 0
+        ? `<span style="font-size:11px;opacity:.55;flex:none">${esc(String(issue.priority.name ?? "").slice(0, 12))}</span>` : "";
+      const due = typeof issue.dueDate === "string" && issue.dueDate !== ""
+        ? `<span style="font-size:11px;opacity:.55;flex:none">due ${esc(day(issue.dueDate))}</span>` : "";
+      // The url is only trusted as a link when it is Linear's own host —
+      // evidence is tool output, and a link in a card should never be able to
+      // point a reader somewhere a tool result invented.
+      const url = String(issue.url ?? "");
+      const safe = /^https:\/\/linear\.app\//.test(url) ? esc(url) : "";
+      const open = safe === "" ? "<div" : `<a href="${safe}" target="_blank" rel="noopener noreferrer"`;
+      const shut = safe === "" ? "</div>" : "</a>";
+      const struck = st === "canceled" ? "text-decoration:line-through;opacity:.6;" : "";
+      return `${open} style="display:flex;align-items:center;gap:10px;padding:8px 12px;`
+        + `border-top:1px solid ${CARD_BORDER};color:inherit;text-decoration:none;cursor:${safe === "" ? "default" : "pointer"}">`
+        + `<span style="font:600 11.5px ui-monospace,monospace;opacity:.55;flex:none">${key}</span>`
+        + `<span style="flex:1;min-width:0;font-size:13.5px;${struck}overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</span>`
+        + pr + due
+        + `<span style="flex:none;font-size:11px;font-weight:600;color:${chip.ink};background:${chip.bg};border-radius:999px;padding:2px 9px">${status}</span>`
+        + `${shut}`;
+    }).join("");
+
+    const title = typeof d.title === "string" && d.title.trim() !== ""
+      ? esc(d.title.slice(0, 64)) : "Issues";
+    const more = all.length > shown.length
+      ? `<div style="padding:7px 12px;border-top:1px solid ${CARD_BORDER};font-size:12px;opacity:.6">and ${all.length - shown.length} more</div>` : "";
+
+    return `<div data-linear-card="issues" style="margin:10px 0;border:1px solid ${CARD_BORDER};border-radius:12px;max-width:640px;font-family:inherit;overflow:hidden">`
+      + `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px">`
+      + `<span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6">Linear · ${title}</span>`
+      + `<span style="flex:1"></span>`
+      + `<span style="font-size:11.5px;opacity:.55">${all.length} issue${all.length === 1 ? "" : "s"}</span>`
+      + `</div>${rows}${more}</div>`;
+  },
+};
+
+registerCard(linearIssuesCard);

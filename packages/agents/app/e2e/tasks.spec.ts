@@ -25,6 +25,7 @@
 
 import { expect, test } from "@playwright/test";
 import { loaded, open, shell } from "./console.js";
+import { enterConsole } from "./session.js";
 
 const PHONE = { width: 390, height: 844 };
 
@@ -154,4 +155,68 @@ test("the page stacks rather than shrinks on a phone", async ({ page }) => {
   const spills = await page.evaluate(() =>
     document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(spills).toBe(false);
+});
+
+// The other way in: the panel that floats over this page.
+//
+// Signed in, because it is hidden for anybody who cannot schedule at all — a
+// box that answers every message with "sign in first" teaches that worse than
+// the sentence above the form does. Skips rather than fails where the
+// deployment has no credentials to sign in with, which is the same rule
+// e2e/session.ts states for every spec that needs to be somebody.
+//
+// What is checked is what the shape has to be, and every part of it broke at
+// least once while the article page was being built: the panel FLOATS (the
+// page runs underneath it rather than stopping above it), it reserves the room
+// it takes (or the last row of the editor sits behind it forever), and it is
+// one panel rather than a scatter of loose bubbles with the page showing
+// between them.
+//
+// Read-only, like the rest of this file: typing into it costs a model call and
+// leaves a row that fires on a schedule. That path is exercised in the
+// engine's own suite (packages/agents/task-tools.test.ts) and by hand against
+// a deployment.
+test("the ask panel floats over the page, and the page leaves room for it", async ({ page }) => {
+  // Signed in, through whichever door this deployment leaves open — and the
+  // arrival is the helper's, not open()'s, because a visitor whose guest
+  // allowance is spent lands on /auth/login where there is no console at all.
+  if (!(await enterConsole(page))) { test.skip(true, "no credentials for this deployment"); }
+  await loaded(page);
+  await shell(page).locator("console-sidebar [data-nav=\"tasks\"]").click();
+  const tasks = tasksPage(page);
+  await expect(tasks).toBeVisible();
+
+  const dock = tasks.locator("ask-dock");
+  await expect(dock).toBeVisible();
+  // The surface itself, not the layer around it: the host carries the page's
+  // side and bottom padding, so its box is a little taller than the panel and
+  // the two are not interchangeable in a measurement.
+  const panel = await dock.evaluate((el) => {
+    const box = (el as Element & { shadowRoot: ShadowRoot | null })
+      .shadowRoot?.querySelector(".askcol")?.getBoundingClientRect();
+    return box === undefined ? null : { y: box.y, height: box.height };
+  });
+  const page_ = await tasks.boundingBox();
+  expect(panel?.height ?? 0).toBeGreaterThan(40);
+
+  // Floating means over something: the panel's top edge is inside the page's
+  // box, not below it. A panel that took a row of its own would sit flush at
+  // the bottom with the editor stopping above it — which is what this page had
+  // before, and what reads as a widget bolted under the content.
+  expect((panel?.y ?? 0)).toBeGreaterThan(page_?.y ?? 0);
+  expect((panel?.y ?? 0) + (panel?.height ?? 0)).toBeLessThanOrEqual(
+    (page_?.y ?? 0) + (page_?.height ?? 0) + 2);
+
+  // And the editor underneath reserves it. The measurement is published by
+  // ask-dock as --ask-space and spent as bottom padding; without it the Delete
+  // button is permanently behind the panel.
+  const reserved = await tasks.evaluate((el) =>
+    parseFloat(getComputedStyle(el).getPropertyValue("--ask-space") || "0"));
+  expect(reserved).toBeGreaterThan(panel!.height);
+
+  // One panel, not loose parts: the input box, the openers and everything else
+  // inside share a single bordered surface.
+  const surfaces = await dock.evaluate((el) =>
+    (el as Element & { shadowRoot: ShadowRoot | null }).shadowRoot?.querySelectorAll(".askcol").length ?? 0);
+  expect(surfaces).toBe(1);
 });

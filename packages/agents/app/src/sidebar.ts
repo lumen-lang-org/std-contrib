@@ -11,13 +11,54 @@ import { isAdmin } from "./api.js";
 export class ConsoleSidebar extends LitElement {
   static styles = css`
     :host { display: flex; flex-direction: column; height: 100%;
-            background: var(--bg-rail); border-right: 1px solid var(--border); }
+            background: var(--bg-rail);
+            /* No border. The rail and the ground around the floating sheet are
+               one continuous surface now, and a line down the middle of a
+               continuous surface is a line drawn on nothing — the sheet's own
+               edge is what separates the two. */
+            }
 
     /* Top: the wordmark, and the two things you do to the rail itself. */
     .top { display: flex; align-items: center; gap: 4px; padding: 12px 10px 6px; }
-    .brand { flex: 1; padding-left: 6px; font: 600 15px var(--display);
-             letter-spacing: -0.01em; }
-    .brand .dot { color: var(--brand); }
+    /* 26px, by way of 19 and 15. The wordmark was originally set at the size
+       of the rows under it and read as the first item in the list rather than
+       as the name over it — a product name that a nav item can be mistaken
+       for is doing neither job. 19 fixed that; 26 is where it stops being a
+       heading and becomes the mark, which is what a rail's top-left is for.
+       Weight 700 with it, and the tracking tightened a notch: a wordmark holds
+       together at a larger size only if it is set tighter, which is the same
+       pairing the login card's 40px hero uses. */
+    /* The collapse button, matching the header's icon buttons exactly.
+       It carried NO rule at all, so it drew as a bare <button> — a different
+       size and a different colour from the identical control in the header,
+       which reads as two different things rather than one control in two
+       places. Same 18px glyph, same foreground, same hover. */
+    /* Scoped under .top rather than a bare class: the .top button rule below
+       is (0,1,1) and a bare class is (0,1,0), so the first version of this
+       lost the cascade to it and changed nothing at all — the button kept the
+       muted colour and 5px padding that made it look unlike the identical
+       control in the header. */
+    .top .collapse { background: none; border: 0; color: var(--fg);
+                border-radius: 8px; padding: 8px; cursor: pointer; font: inherit;
+                --nuraly-icon-size: 18px; line-height: 1;
+                display: inline-grid; place-items: center;
+                transition: background-color .15s cubic-bezier(.23,1,.32,1); }
+    .top .collapse:hover { background: var(--bg-sunken); color: var(--fg); }
+
+    .brand { flex: 1; padding-left: 6px; font: 700 26px var(--display);
+             letter-spacing: -0.02em; color: inherit; text-decoration: none;
+             border-radius: 8px;
+             transition: opacity .15s cubic-bezier(.23,1,.32,1); }
+    .brand:hover { opacity: .72; }
+    /* The same period the home screen's mark wears, and the same colour at
+       the same instant: --nuraly-chatbot-brand-dot is set on
+       documentElement (console.ts's startDot), so both marks read one value
+       and drift together. It was --brand here, which is ink — so the rail
+       showed a black dot beside a hero showing a coloured one, and the one
+       wordmark this product has was two wordmarks.
+       --brand stays as the fallback, for a page that renders the rail with
+       no chatbot on it to run the timer (the sign-in and stats pages). */
+    .brand .dot { color: var(--nuraly-chatbot-brand-dot, var(--brand)); }
     .top button { background: none; border: 0; color: var(--muted); cursor: pointer;
                   padding: 5px; border-radius: 7px; display: grid; place-items: center; }
     .top button:hover { background: var(--bg-sunken); color: var(--fg); }
@@ -122,7 +163,12 @@ export class ConsoleSidebar extends LitElement {
   render() {
     return html`
       <div class="top">
-        <span class="brand">${BRAND}<span class="dot">.</span></span>
+        <!-- The wordmark is the way home, which is what every site has
+             taught people it is. A link and not a button: middle-click and
+             "open in new tab" are things people do to a logo, and a click
+             handler answers neither. -->
+        <a class="brand" href="/" aria-label=${`${BRAND} — go to the start`}
+          >${BRAND}<span class="dot">.</span></a>
         <button class="collapse" title="Collapse the sidebar"
           @click=${() => this.dispatchEvent(new CustomEvent("collapse"))}>
           <!-- "panel-left": the set has no "sidebar", and a name it does not
@@ -135,6 +181,30 @@ export class ConsoleSidebar extends LitElement {
            the eye runs down one list instead of crossing three widgets. -->
       <div class="item" data-nav="new" @click=${() => this.dispatchEvent(new CustomEvent("new-thread"))}>
         <nr-icon name="edit" size="small"></nr-icon><span>New conversation</span>
+      </div>
+      <!-- Conversations that will happen without you, which is why this sits
+           with the doing rather than with the two libraries below: a task is
+           the same act as the row above it, moved to a time you are not here.
+           "clock", checked against icon-paths — "schedule" and "alarm" are
+           both absent, and nr-icon draws the NAME when it has no glyph. -->
+      <div class="item" data-nav="tasks" @click=${() => this.dispatchEvent(new CustomEvent("open-tasks"))}>
+        <nr-icon name="clock" size="small"></nr-icon><span>Tasks</span>
+      </div>
+      <!-- What the crawl found, digested. First of the reading rows because
+           it is the one with something new on it every half hour; the two
+           libraries below it hold what is already yours. -->
+      <div class="item" data-nav="discover" @click=${() => this.dispatchEvent(new CustomEvent("open-discover"))}>
+        <!-- "globe", checked against icon-paths before it was used. "compass"
+             reads as the obvious choice and is NOT in the set, and nr-icon
+             draws the NAME when it has no glyph — so the rail would have worn
+             the word "compass" where a mark belongs. -->
+        <nr-icon name="globe" size="small"></nr-icon><span>Discover</span>
+      </div>
+      <!-- Everything this person has made, across every conversation. Beside
+           Knowledge because they are the two libraries: one of what was put
+           in, one of what came out. -->
+      <div class="item" data-nav="artifacts" @click=${() => this.dispatchEvent(new CustomEvent("open-library"))}>
+        <nr-icon name="folder" size="small"></nr-icon><span>Artifacts</span>
       </div>
       <div class="item" data-nav="knowledge" @click=${() => this.dispatchEvent(new CustomEvent("open-knowledge"))}>
         <nr-icon name="database" size="small"></nr-icon><span>Knowledge</span>
@@ -174,7 +244,7 @@ export class ConsoleSidebar extends LitElement {
             data-thread=${t.id}
             title=${t.title}
             @click=${() => this.dispatchEvent(new CustomEvent("pick-thread", { detail: { id: t.id } }))}>
-            ${t.title === "" ? t.agentId : t.title}
+            ${t.title === "" ? "New conversation" : t.title}
           </div>`)}
       </nav>
 
@@ -186,7 +256,7 @@ export class ConsoleSidebar extends LitElement {
                than no row. -->
           <div @click=${() => { this.menu = false; this.dispatchEvent(new CustomEvent("open-settings")); }}>Settings</div>
           ${isAdmin(this.me) ? html`
-            <div @click=${() => { this.menu = false; location.assign("/admin/models"); }}>Deployment settings</div>
+            <div @click=${() => { this.menu = false; location.assign("/admin/models"); }}>Admin console</div>
           ` : ""}
           ${this.me === null ? "" : this.me.anonymous === true ? html`
             <!-- A guest signs IN, not out: /logout would only mint them a new

@@ -17,8 +17,10 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import "./ui.js";
+import "./ask-dock.js";
+import { ChatSession } from "./chat-session.js";
 import {
-  AgentRow, RunDocument, TaskRow, listAgents, runDocument,
+  AgentRow, ModelChoice, RunDocument, TaskRow, listAgents, modelChoices, runDocument,
   listTasks, createTask, changeTask, runTaskNow, deleteTask } from "./api.js";
 
 // The words the engine accepts, offered where somebody is about to type. Not
@@ -30,6 +32,16 @@ const EXAMPLES = [
   "every monday at 09:15",
   "every 30 minutes",
   "every 6 hours",
+];
+
+// What the panel offers before anybody has typed in it. Whole requests rather
+// than topics: the point of the second way in is that a task can be described
+// in one sentence, and a chip that reads "scheduling" teaches nothing about
+// what this box takes.
+const OPENERS = [
+  "Every weekday at 08:00, summarise what changed in my Linear cycle",
+  "What do I have scheduled?",
+  "Every monday at 09:00, draft a plan for the week from my notes",
 ];
 
 type Draft = {
@@ -52,7 +64,11 @@ export class ConsoleTasks extends LitElement {
        a percentage height resolves against a parent that has not sized itself
        yet. The page rendered — one child in the shadow root — and could not be
        seen, which reads as "nothing happened" rather than as a layout bug. */
+    /* Relative, because the ask panel is positioned against this element
+       rather than taking a row of its own — the same arrangement the article
+       page uses, and the reason ask-dock can be shared at all. */
     :host { display: flex; height: 100%; min-height: 0; min-width: 0;
+            position: relative;
             overflow: hidden; background: var(--bg); color: var(--fg); }
 
     .page { flex: 1; min-width: 0; display: grid;
@@ -63,14 +79,31 @@ export class ConsoleTasks extends LitElement {
        most often done. */
     @media (max-width: 900px) {
       .page { grid-template-columns: 1fr; grid-template-rows: auto 1fr;
-              overflow-y: auto; }
-      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+              overflow-y: auto;
+              padding-bottom: calc(20px + var(--ask-space, 190px)); }
+      aside { border-right: 0; border-bottom: 1px solid var(--line);
+              padding-bottom: 28px; }
+      main { padding-bottom: 40px; }
     }
 
     aside { border-right: 1px solid var(--line); overflow-y: auto;
             padding: 22px 16px 28px; display: flex; flex-direction: column; gap: 14px; }
-    main { overflow-y: auto; padding: 24px 28px 40px;
+    /* The reserve at the foot is the panel's own measured height, published by
+       ask-dock as --ask-space. Without it the Delete button and the last run's
+       answer sit permanently behind the panel and cannot be scrolled clear —
+       and both columns scroll separately here, so both pay it. */
+    main { overflow-y: auto;
+           padding: 24px 28px calc(40px + var(--ask-space, 190px));
            display: flex; flex-direction: column; gap: 20px; }
+    aside { padding-bottom: calc(28px + var(--ask-space, 190px)); }
+    /* A little more of the screen than the article allows: here the
+       conversation IS the feature rather than a question about something else
+       on the page. */
+    ask-dock { --ask-max: min(38vh, 320px); --ask-width: 760px; }
+    /* Less of a phone. A conversation that takes two thirds of a small screen
+       has covered the list it is about — and the panel's own handle folds it
+       away entirely, which is the other half of the same answer. */
+    @media (max-width: 720px) { ask-dock { --ask-max: 30vh; } }
 
     h1 { margin: 0; font: 700 22px/1.25 var(--display); letter-spacing: -.01em; }
     h2 { margin: 0; font: 600 15px/1.3 var(--display); }
@@ -156,10 +189,62 @@ export class ConsoleTasks extends LitElement {
      wrong" and "this is not yours yet". */
   @state() private mayCreate = true;
 
+  /* --- the other way in --------------------------------------------------
+   *
+   * The form beside the list is one way to make a task and describing it is
+   * the other, and they are the same act: the engine gives this conversation
+   * the five task tools (task-tools.ts), so "every weekday at eight, summarise
+   * my Linear cycle" writes the same row this form writes, with the same
+   * refusals, and the list here reloads when the turn ends.
+   *
+   * It is an ordinary conversation — ChatSession, an ordinary thread, a row in
+   * the sidebar, an address of its own — and not a private scheduling widget.
+   * That matters beyond tidiness: the agent answering can also read what it
+   * already scheduled, pause one, and say what a task last replied, because
+   * those are tools rather than screens. */
+  @state() private choices: ModelChoice[] = [];
+  @state() private choiceId = "";
+  @state() private threadId = "";
+  @state() private talking = false;
+
+  private session = new ChatSession({
+    agentId: () => (this.agents.find((a) => a.isDefault) ?? this.agents[0])?.id ?? "",
+    modelChoiceId: () => this.choiceId,
+    onThreadOpened: (id: string) => { this.threadId = id; },
+    // A turn that has finished may have created, paused or deleted something.
+    // Reloading unconditionally rather than trying to read what the model did:
+    // the list is one cheap GET, and a page that shows a task the conversation
+    // just made is the whole point of putting the two side by side.
+    onTurnDone: () => { void this.refresh(); },
+  });
+  private unlisten: (() => void) | null = null;
+
   connectedCallback(): void {
     super.connectedCallback();
     if (this.draft !== "") { this.editing = { ...BLANK, instruction: this.draft }; }
+    this.unlisten = this.session.on("state:changed", () => {
+      this.talking = this.session.isTyping();
+      this.requestUpdate();
+    });
     void this.refresh();
+    void this.loadChoices();
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unlisten?.();
+    this.unlisten = null;
+  }
+
+  private async loadChoices(): Promise<void> {
+    this.choices = await modelChoices().catch(() => []);
+  }
+
+  /** What somebody typed into the panel. The thread is opened by the session
+   *  itself on the first send — a plain one, against the same agent the
+   *  console's own composer would use — so there is nothing to arrange here. */
+  private async say(text: string): Promise<void> {
+    await this.session.sendMessage(text);
   }
 
   private async refresh(): Promise<void> {
@@ -406,7 +491,30 @@ export class ConsoleTasks extends LitElement {
           ${this.problem === "" ? nothing : html`<p class="err" role="alert">${this.problem}</p>`}
           ${t === undefined ? nothing : this.renderPreview(t)}
         </main>
-      </div>`;
+      </div>
+
+      <!-- The second way in, floating over both columns: describe the task
+           instead of filling the form. Same element as the article page's
+           (src/ask-dock.ts), same conversation object as the console's, and
+           the same rows underneath — what makes it work is the engine giving
+           this turn the task tools, not anything on this page.
+           Hidden for somebody who cannot schedule at all: the sentence above
+           the form already says why, and a box that answers every message with
+           a refusal is a worse way to learn it. -->
+      ${!this.mayCreate ? nothing : html`
+        <ask-dock
+          .session=${this.session}
+          .busy=${this.talking}
+          placeholder="Describe a task — “every weekday at 08:00, …”"
+          .starters=${OPENERS}
+          note="Says what it scheduled, and the list updates."
+          href=${this.threadId === "" ? "" : `/c/${this.threadId}`}
+          hrefText="Open in the console →"
+          .choices=${this.choices}
+          .choiceId=${this.choiceId}
+          @pick-choice=${(e: CustomEvent) => { this.choiceId = e.detail.id as string; }}
+          @ask=${(e: CustomEvent) => { void this.say(e.detail.text as string); }}
+        ></ask-dock>`}`;
   }
 }
 

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "lumenjs dev --port 5173",
-    "build": "npm run check:templates && lumenjs build",
+    "build": "npm run check:templates && rm -rf .lumenjs && lumenjs build",
     "start": "lumenjs serve --port 8080",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",

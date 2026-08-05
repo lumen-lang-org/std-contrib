@@ -81,3 +81,37 @@ export function noteWrite(): void {
     try { fn(); } catch { /* one socket's problem, not the writer's */ }
   }
 }
+
+// --- the stream channel ------------------------------------------------------
+//
+// The same signal with a different trigger. `noteWrite` is the proxy seeing a
+// browser's mutation; `noteStream` is the ENGINE saying a streamed chunk just
+// landed — it POSTs /__engine_nudge (server/api-proxy.ts) from its own
+// streaming callback, so the cadence of the reply on screen is the cadence of
+// the model, not of a timer. Everything the header says about the write nudge
+// holds here unchanged: it carries nothing, each socket re-asks with its own
+// credentials, and the steps timer in sockets.ts stays as the fallback for a
+// chunk whose nudge never arrived.
+
+const STREAM_KEY = "__agentsConsoleStreamNudgeV1__";
+
+function streamListeners(): Set<Listener> {
+  const scope = globalThis as unknown as Record<string, unknown>;
+  const found = scope[STREAM_KEY];
+  if (found instanceof Set) return found as Set<Listener>;
+  const made = new Set<Listener>();
+  scope[STREAM_KEY] = made;
+  return made;
+}
+
+export function onStream(fn: Listener): () => void {
+  const set = streamListeners();
+  set.add(fn);
+  return () => { set.delete(fn); };
+}
+
+export function noteStream(): void {
+  for (const fn of [...streamListeners()]) {
+    try { fn(); } catch { /* a broken socket must not break its neighbours */ }
+  }
+}

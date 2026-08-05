@@ -66,6 +66,11 @@ type Param =
 
 const Q: Param = { kind: "text", max: 512 };
 const FILTERS: Record<string, Param> = {
+  // How the query matches — keyword, vector or hybrid. Forwarded like a
+  // filter because it rides the same picker row; the index ignores it until
+  // vector search ships there, which makes the control progressive rather
+  // than broken-until.
+  mode: { kind: "text", max: 8 },
   lang: { kind: "text", max: 8 },
   country: { kind: "text", max: 8 },
   category: { kind: "text", max: 48 },
@@ -88,6 +93,16 @@ interface Route {
    *  the endpoint the page was calling. Trimming the render alone would be
    *  hiding the numbers from the screen and not from anybody. */
   publicFields?: string[];
+  /** A whole-body reshape for a NON-operator, where dropping fields is not
+   *  enough — the answer has to be filtered by its contents.
+   *
+   *  `publicFields` above removes columns. This removes ROWS, which is what
+   *  /suggest needs: its answer mixes suggestions drawn from document titles
+   *  with suggestions drawn from what people have previously searched, and
+   *  only the first kind may be shown to somebody else. A field allowlist
+   *  cannot express that, and trimming it in the page would be hiding one
+   *  user's queries from the screen rather than from the next user. */
+  publicShape?: (body: string) => string;
 }
 
 const ROUTES: Route[] = [
@@ -145,10 +160,36 @@ const ROUTES: Route[] = [
     params: {},
   },
   {
-    path: "/suggest",
+    // The embedding pipeline's vitals — coverage, rate, ETA, index and disk
+    // sizes. Same tier as /nodes and for the same reason: it is a statement
+    // about the deployment's health and shape, not about the corpus. The
+    // endpoint is being built on the data node (GET /vectors); until it lands
+    // there this answers whatever the index answers, and the dashboard treats
+    // any non-200 or error body as "no panel" rather than as a fault.
+    path: "/vectors",
     operator: true,
     cache: false,
+    params: {},
+  },
+  {
+    /* Completions for what somebody is typing.
+     *
+     * Public, and corpus-only for the public — see `publicShape`. The index
+     * answers each suggestion with the `source` it came from: "titles" is the
+     * corpus, which is a fact about documents anybody may read, and
+     * "querylog" is what other people have searched, which is not. An
+     * operator reading the dashboard still gets both, because knowing what is
+     * being asked for is half of what that page is for.
+     *
+     * Cached, unlike before. A composer asks on nearly every keystroke, and
+     * two people typing the same prefix within the window is one request
+     * upstream — the same bargain the aggregates make, and it matters more
+     * here because the traffic is per-character rather than per-page. */
+    path: "/suggest",
+    operator: false,
+    cache: true,
     params: { q: Q, k: { kind: "int", min: 1, max: 20 } },
+    publicShape: corpusOnly,
   },
 ];
 
@@ -156,6 +197,33 @@ const ROUTES: Route[] = [
  *  hash is checked here rather than trusted: it is hex out of a `/retrieve`
  *  answer, so anything else is a caller inventing paths for the upstream. */
 const DOC = /^\/doc\/([0-9a-f]{4,64})$/;
+
+/** Suggestions the corpus itself can account for.
+ *
+ *  Anything whose `source` is not a document-derived one is dropped — an
+ *  allowlist rather than a blocklist of "querylog", so a source added
+ *  upstream later is withheld until somebody here decides it may be shown.
+ *  That is the safe direction for a field whose whole risk is that it might
+ *  one day carry what somebody typed.
+ *
+ *  A body this cannot parse is answered as no suggestions rather than passed
+ *  through: an unreadable answer is exactly when "just forward it" would leak
+ *  the thing this exists to withhold. */
+function corpusOnly(body: string): string {
+  const FROM_CORPUS = new Set(["titles", "title", "terms", "anchors", "entities"]);
+  try {
+    const parsed = JSON.parse(body) as { q?: string; suggestions?: unknown };
+    const rows = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+    const kept = rows.filter((row) => {
+      const one = row as { source?: unknown; text?: unknown };
+      return typeof one.text === "string" && one.text.trim() !== ""
+        && typeof one.source === "string" && FROM_CORPUS.has(one.source);
+    });
+    return JSON.stringify({ q: parsed.q ?? "", suggestions: kept });
+  } catch {
+    return JSON.stringify({ q: "", suggestions: [] });
+  }
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -345,8 +413,15 @@ export function searchProxy(): Middleware {
     // exit below trims identically — the stale path included, which is the one
     // easiest to forget.
     const fields = route.publicFields;
-    const full = fields === undefined || isOperator(req);
-    const cut = (body: string) => (full ? body : trim(body, fields as string[]));
+    const mine = isOperator(req);
+    const full = fields === undefined || mine;
+    const cut = (body: string) => {
+      const trimmed = full ? body : trim(body, fields as string[]);
+      // Row filtering after column trimming, and skipped for an operator —
+      // the two are independent, and a route may use either or both.
+      return route.publicShape !== undefined && !mine
+        ? route.publicShape(trimmed) : trimmed;
+    };
 
     // Rebuilt from the allowlist rather than forwarded. Order is the route's,
     // not the caller's, so the same question always produces the same cache

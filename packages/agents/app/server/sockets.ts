@@ -31,7 +31,7 @@
 // only inside a function body.
 
 import { engineUrl } from "./engine.js";
-import { onWrite } from "./nudge.js";
+import { onStream, onWrite } from "./nudge.js";
 // How this connection names itself when the browser holds a session cookie
 // rather than a header — `AUTH=builtin`. Nothing is installed behind this seam
 // in the other two modes, and `credentials()` below is then the whole answer
@@ -52,7 +52,17 @@ import { hasIdentityResolver, resolveIdentity } from "./identity.js";
 // event that happens when a person presses Enter.
 const THREADS_MS = 5_000;
 const ARTIFACTS_MS = 4_000;
-const STEPS_RUNNING_MS = 400;
+// 140, and it is the cadence, not a fallback — the push design this number
+// briefly leaned on is off. The engine nudging per streamed chunk (relay.ts,
+// POST /__engine_nudge) read as the right shape and CRASHED THE RUNTIME: a
+// synchronous http.request inside the model's streaming callback SIGABRTs
+// the Lumen process, reliably, on the first nudge of a turn. The engine-side
+// call is reverted; the /__engine_nudge door and noteStream stay, dormant,
+// for a runtime that can fire an outbound request from a stream handler.
+// Until then this poll is how the answer moves: 140ms is ~7 paints a second,
+// under the threshold where updates read as pasted blocks, and it only runs
+// at this rate while a turn is streaming for a socket watching it.
+const STEPS_RUNNING_MS = 140;
 const STEPS_IDLE_MS = 1_500;
 
 // The floor under a nudged question. A kick cancels the pending timer and
@@ -242,7 +252,7 @@ export function socket(ctx: Ctx) {
   // follower the rest of the time. Here one loop covers both, because the
   // answer itself says which is wanted.
   let running = false;
-  loop(() => (running ? STEPS_RUNNING_MS : STEPS_IDLE_MS), async () => {
+  const steps = loop(() => (running ? STEPS_RUNNING_MS : STEPS_IDLE_MS), async () => {
     if (watching === "") { running = false; return; }
     const id = watching;
     const body = await ask(`/threads/${encodeURIComponent(id)}/steps`);
@@ -285,6 +295,10 @@ export function socket(ctx: Ctx) {
   // browser is watching, which is the browser doing the writing, and their
   // loops already run at 400ms and 4s for it.
   cancels.push(onWrite(() => threads.kick()));
+  // The engine's chunk nudge. This is what makes the streamed answer arrive
+  // at the model's cadence rather than the timer's — the timer above is the
+  // fallback, at its own rate, exactly as the write nudge's rules require.
+  cancels.push(onStream(() => steps.kick()));
 
   // The browser says which conversation it is looking at. Everything watched
   // is forgotten on the way, so the first answer about the new one is always

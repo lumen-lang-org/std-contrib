@@ -10,23 +10,28 @@ import "./ui.js";
 import "./search-dash.js";
 import "./sidebar.js";
 import "./artifact-panel.js";
+import "./library.js";
+import "./discover.js";
+import "./discover-article.js";
+import { loadPluginRenderers } from "./plugin-cards.js";
 import "./knowledge.js";
 import "./canvas.js";
 import "./login-overlay.js";
 import "./model-picker.js";
 import "./settings.js";
+import "./tasks.js";
 import {
   AgentFull, ArtifactListing, Me, ModelChoice, ModelRow, ThreadListing, TurnArtifactRef, WireRef,
   QUOTA_SPENT, SIGNED_OUT, SkillRow, TemplateRow, artifactsByTurn, featuredSkills, getQuota, listAgents, listArtifacts,
   listModels, listThreads, modelChoices, previewUrl, listTemplateFiles, offerThread, remixThread, replayableThreads, startFromTemplate, transcript, templatePdf, templatesOfKind, whoami,
   ServerRow, listServers, listSkills, copySkillLocally, createServer, updateServer, serverTools, setServerTool,
   ConnectionRow, listConnections,
-  PluginRow, listPlugins, pluginItems, SkillFileRow, listSkillFiles, readBanner } from "./api.js";
+  PluginRow, listPlugins, CardPluginRow, listCardPlugins, pluginItems, SkillFileRow, listSkillFiles, readBanner, isAdmin } from "./api.js";
 import "./mcp-gallery.js";
 import { CATALOGUE, brandMark } from "./mcp-gallery.js";
 import type { CatalogueEntry, EntryStatus } from "./mcp-gallery.js";
 import { connectEntry, connectServer } from "./connect-flow.js";
-import { ChatSession } from "./chat-session.js";
+import { ChatSession, rememberFold } from "./chat-session.js";
 import * as live from "./live.js";
 
 
@@ -36,6 +41,13 @@ import * as live from "./live.js";
    a location for it (locations/agents.conf). */
 function currentId(): string {
   const m = /^\/c\/([^/?#]+)/.exec(location.pathname);
+  return m === null ? "" : decodeURIComponent(m[1]);
+}
+
+/** Which article the address names, "" for every other address. The feed's
+ *  own `/discover` answers "" too — it is the feed, not an article. */
+function currentArticle(): string {
+  const m = /^\/discover\/([^/?#]+)/.exec(location.pathname);
   return m === null ? "" : decodeURIComponent(m[1]);
 }
 
@@ -331,13 +343,121 @@ const RETRY_BUTTON = `
 /* Dress the chat component and only the chat component. Same `dressed` latch
    as softenFocusRings, under a second flag so the two passes do not cancel
    each other out on a root that both visit. */
+/* Completions, drawn inside the composer's own box.
+ *
+ * One card that grows: the field, a hairline the width of the box, then the
+ * rows. No border of their own and no radius — the container already has
+ * both, and a second outline is what made every earlier attempt read as two
+ * boxes stacked. The negative margins undo the container's own padding so the
+ * hairline and the row highlight run edge to edge, the way a divider inside a
+ * card does. */
+const CHAT_HINTS = `
+  .joule-hints {
+    display: flex; flex-direction: column;
+    /* The container's padding is 6px 8px 6px 20px — NOT symmetric. Undoing it
+       with -20px on both sides pushed the rows twelve pixels past the right
+       border, so the hover highlight ran outside the card's own outline and
+       the box looked like it had a seam down one side. Each side undoes the
+       padding it actually has. */
+    margin: 6px -8px -6px -20px;
+    border-top: 1px solid var(--nuraly-border-color, rgba(128,128,128,.22));
+    /* Bottom padding, because the negative margin above takes the card's own
+       away: without it the last row's text sits on the border it is inside. */
+    padding: 6px 0 10px;
+    max-height: 46vh; overflow-y: auto; overscroll-behavior: contain;
+  }
+  .joule-hint {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    text-align: left; padding: 9px 20px; border: 0; background: none;
+    font: inherit; font-size: 14.5px; color: inherit; cursor: pointer;
+  }
+  .joule-hint:hover, .joule-hint.on { background: rgba(128,128,128,.10); }
+  /* The last row carries the card's own corner, so a highlight on it cannot
+     square off the rounded bottom it sits in. */
+  .joule-hint:last-child { border-radius: 0 0 22px 22px; }
+  .joule-hint-mark { flex: none; opacity: .45; font-size: 15px; }
+  .joule-hint-text {
+    flex: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .joule-hint-had { opacity: .55; }
+  .joule-hint-text b { font-weight: 600; }
+`;
+
+/* Remember which folds the reader opened, from INSIDE the transcript's root.
+ *
+ * `toggle` is not composed. A non-composed event does not leave the shadow
+ * root it fired in at all — not in the bubble phase, and not in the capture
+ * phase either, because the path stops at the boundary. So a listener on the
+ * console host hears nothing however early it runs, which is what the first
+ * version of this did: it was registered in capture on the host, looked
+ * correct, and never fired once. The card came back shut from every rebuild
+ * and the measurement said so.
+ *
+ * Registered on the ROOT and not on the folds, because the folds are markup
+ * that is destroyed and rebuilt on every streamed chunk — a listener attached
+ * to one would go with it. The root outlives them.
+ *
+ * Once per root, flagged on the root itself: dressChat runs on every render. */
+/* Follow the newest message only while the reader is at the newest message.
+ *
+ * nr-chatbot scrolls to the bottom whenever `messages` changes, and during a
+ * streamed answer that is every chunk. Its own guard against fighting the
+ * reader only cancels the re-pinning it does while content settles; the jump
+ * itself is unconditional. So a reader who scrolled up to re-read something
+ * was hauled back to the live edge several times a second, and scrolling up
+ * during a reply was effectively impossible.
+ *
+ * Fixed from HERE rather than in the component. The component already offers
+ * the seam — `autoScroll` is a declared property — so the policy belongs to
+ * the app that has an opinion about it, and the component keeps doing the one
+ * thing it is good at: holding the bottom while markdown, fonts and images
+ * land late. Patching its internals would fork a dependency this console
+ * shares, for a decision that is this console's to make.
+ *
+ * 80px of slack, the same threshold the component uses, so a reader resting
+ * just short of the end is still followed; further up is a deliberate move
+ * away from the live edge and is left alone.
+ *
+ * Once per root: the scroller outlives every message in it. */
+function followTheEnd(chat: Element & { autoScroll?: boolean }) {
+  const root = chat.shadowRoot as (ShadowRoot & { following?: boolean }) | null;
+  if (root === null || root.following === true) { return; }
+  const list = root.querySelector(".messages");
+  if (list === null) { return; }
+  root.following = true;
+  const atEnd = () => list.scrollHeight - list.clientHeight - list.scrollTop < 80;
+  list.addEventListener("scroll", () => { chat.autoScroll = atEnd(); }, { passive: true });
+}
+
+function rememberFolds(root: ShadowRoot & { folded?: boolean }) {
+  if (root.folded === true) { return; }
+  root.folded = true;
+  root.addEventListener("toggle", (e: Event) => {
+    const el = e.target;
+    if (!(el instanceof HTMLDetailsElement)) { return; }
+    const key = el.getAttribute("data-fold");
+    // Folds this console did not write are left alone — a plugin card's own,
+    // say. Nothing here should be deciding for markup it does not own.
+    if (key === null || key === "") { return; }
+    rememberFold(key, el.open);
+  }, true);
+}
+
 function dressChat(root: ParentNode) {
   // As Element: the generated type for <nr-chatbot> does not declare
   // shadowRoot, though every element has one open here.
   const chat = root.querySelector("nr-chatbot") as Element | null;
   if (chat === null || chat.shadowRoot === null) { return; }
+  rememberFolds(chat.shadowRoot);
+  followTheEnd(chat as Element & { autoScroll?: boolean });
   adopt(chat.shadowRoot, CHAT_SKIN, "skinned");
   adopt(chat.shadowRoot, CHAT_SOURCES, "sourced");
+  // The completion rows live INSIDE this root — see drawHints — so their
+  // rules have to be handed to it. A stylesheet in the console cannot reach
+  // across a shadow boundary; custom properties can, which is what keeps the
+  // colours on the console's palette rather than introducing a second one.
+  adopt(chat.shadowRoot, CHAT_HINTS, "hinted");
   for (const el of chat.shadowRoot.querySelectorAll("nr-button")) {
     if (el.shadowRoot === null) { continue; }
     // The retry gets its own quieter sheet; every other button in here keeps
@@ -474,6 +594,39 @@ function offerable(a: { agentName?: string }): boolean {
   return !(a.agentName ?? "").startsWith("e2e-");
 }
 
+/** The deployment area's tabs, as links.
+ *
+ *  One row per nested route under /admin, in the order and grouping
+ *  src/settings.ts's TABS uses — the rail inside the page and this menu are
+ *  two views of one list, and a person who learns the order in one should not
+ *  have to learn it again in the other.
+ *
+ *  Deliberately a SECOND copy rather than an import of TABS: settings.ts pulls
+ *  in the whole settings implementation, and the header of every conversation
+ *  would then pay for a module nobody on this screen has opened. It is nine
+ *  strings; the cost of them drifting is a menu row that lands on the wrong
+ *  tab, which the e2e below catches. Importing the tab list here would cost
+ *  the console's first paint, which nothing catches.
+ *
+ *  `head` rows are headings and carry no link. */
+type AdminLink = { head?: string; label?: string; href?: string; icon?: string };
+
+const ADMIN_LINKS: AdminLink[] = [
+  { head: "Models" },
+  { label: "Models", href: "/admin/models", icon: "zap" },
+  { label: "Model menu", href: "/admin/model-menu", icon: "list" },
+  { label: "Providers", href: "/admin/providers", icon: "cloud" },
+  { head: "Capabilities" },
+  { label: "MCP", href: "/admin/mcp", icon: "code" },
+  { label: "Images", href: "/admin/images", icon: "box" },
+  { label: "Search", href: "/admin/search", icon: "search" },
+  { head: "Access" },
+  { label: "Sign-in", href: "/admin/sign-in", icon: "log-in" },
+  { head: "Operations" },
+  { label: "Tracing", href: "/admin/tracing", icon: "layers" },
+  { label: "Banner", href: "/admin/banner", icon: "bell" },
+];
+
 @customElement("agent-console")
 export class AgentConsole extends LitElement {
   static styles = css`
@@ -481,8 +634,104 @@ export class AgentConsole extends LitElement {
        is not a child of this shadow root, so a rule for the tag matches
        nothing — silently — and even :host did not carry them down in
        practice. head.html is where the palette already lives. */
-    :host { display: flex; height: 100%; }
+    /* The ground the sheet floats on, and the rail sits on the same one.
+     *
+     * Without this the inset around the centre column showed the page's white
+     * through it, so the sheet had a rounded corner and nothing to be rounded
+     * AGAINST — the frame read as a gap rather than as ground. The rail
+     * already paints --bg-rail; giving the host the same value makes the two
+     * continuous, and the white sheet is then the only raised surface. */
+    :host { display: flex; height: 100%; background: var(--bg-rail); }
     console-sidebar { width: 264px; flex: none; }
+    /* Hidden by the header's toggle on a wide screen. Removed from the
+       layout rather than narrowed to zero: the rail is a flex item with padding and
+       borders, and a zero-width one still paints a hairline where the column
+       used to be. */
+    :host(:not([railed])) console-sidebar { display: none; }
+    /* The rail, floated back for as long as the pointer is on it. A sheet
+       with a shadow rather than the column it usually is, because it is over
+       the page now and has to read as being over it. */
+    /* The rail, floated back for as long as the pointer is on it. A sheet
+       with a shadow rather than the column it usually is, because it is over
+       the page now and has to read as being over it. */
+    :host(:not([railed])[railpeek]) console-sidebar {
+      display: flex; position: fixed; inset: 8px auto 8px 8px; z-index: 46;
+      border-radius: 14px; overflow: hidden;
+      box-shadow: 0 0 32px -8px rgba(0,0,0,.32);
+    }
+
+    /* Floating over the column rather than in it, so no screen has to make
+       room for a control that is usually absent. */
+    .unrail { position: fixed; top: 14px; left: 14px; z-index: 40;
+              width: 32px; height: 32px; border-radius: 9px;
+              display: grid; place-items: center; cursor: pointer;
+              border: 1px solid var(--border); background: var(--bg);
+              color: var(--muted);
+              transition: color .15s cubic-bezier(.23,1,.32,1),
+                          border-color .15s cubic-bezier(.23,1,.32,1); }
+    .unrail:hover { color: var(--fg); border-color: var(--muted); }
+
+    /* --- motion -----------------------------------------------------------
+       One curve and three durations for the whole console, so surfaces that
+       do the same thing move the same way.
+
+       The curve is cubic-bezier(.23,1,.32,1) — an ease-out that leaves fast
+       and settles slowly. It was already on the hovers and on the drawer
+       before any of this; the keyframes below adopt it rather than inventing
+       a second feel. Nothing eases IN: a panel a person just asked for should
+       be most of the way there before they can notice it starting.
+
+       The durations are short on purpose. A menu is a response to a click and
+       has to feel like one, so it is .13s; a sheet that covers the page can
+       afford .2s because it is a bigger change and reads as such. Anything
+       past a quarter second stops being feedback and becomes a wait.
+
+       Only entrances are animated, and that is a limit of how these surfaces
+       are built rather than a preference: each one is rendered conditionally,
+       so on close the element is gone from the tree before a leaving
+       animation could run. Faking it would mean keeping dead nodes around and
+       timing their removal, which is a bug factory in exchange for 120ms
+       nobody is looking at — a dismissal is meant to feel instant.
+
+       Everything here is opacity and transform only. Both are composited, so
+       a phone animates them without laying the page out again; animating
+       height or top on the same surfaces would drop frames on exactly the
+       hardware where it shows most. */
+    @keyframes veil-in { from { opacity: 0; } }
+    /* A menu, growing from the control that opened it. The scale is small
+       enough to read as arrival rather than as zoom. */
+    @keyframes pop-in {
+      from { opacity: 0; transform: translateY(-4px) scale(.97); }
+    }
+    /* A sheet, rising. Further and slower than a menu because it covers. */
+    @keyframes sheet-in {
+      from { opacity: 0; transform: translate(-50%, 10px) scale(.985); }
+    }
+    /* Same rise for a sheet that is not centred, so it does not need the
+       -50% the gallery's own positioning carries. */
+    @keyframes rise-in {
+      from { opacity: 0; transform: translateY(10px) scale(.99); }
+    }
+    /* A count that has just changed. It draws the eye once, at the moment the
+       number is new, and then stops — which is the whole job of a badge. */
+    @keyframes badge-in {
+      from { opacity: 0; transform: scale(.4); }
+      60% { transform: scale(1.12); }
+    }
+
+    /* Reduced motion is honoured by removing the movement, not the surface.
+       Every rule above animates from a transformed, transparent state, so
+       switching them off must land the element at its resting position — and
+       animation: none does exactly that, because the resting state IS the
+       CSS. Transitions are not removed either, only collapsed to 1ms, so a
+       hover still answers instantly rather than not at all. */
+    @media (prefers-reduced-motion: reduce) {
+      .scrim.shelves, .gallery, .hmenu, .fly, .attach, .explore,
+      artifact-panel, .icon .badge {
+        animation: none !important;
+      }
+      * { transition-duration: .01ms !important; }
+    }
     /* The scrim behind a layer that covers. Two of them — the nav drawer and
        the files sheet — and each is what dismisses its own layer: a tap
        anywhere else. Hidden above the breakpoint, where neither layer covers
@@ -491,10 +740,39 @@ export class AgentConsole extends LitElement {
        scroll of the page under it. The scrim's job is to swallow what is
        behind it, and on a touch screen a gesture is as much "behind it" as a
        click is. */
+    /* The scrim behind a panel. Dimmed AND blurred, not only dimmed.
+       A flat 28% wash left every row of the page behind it perfectly legible,
+       so a panel over the Knowledge screen read as two screens fighting for
+       the same space rather than as one thing on top of another. The blur is
+       what says "this is behind" — the dimming alone only says "this is
+       darker". The webkit-prefixed copy comes first, for Safari. */
     .scrim { display: none; background: rgba(0,0,0,.28);
+             -webkit-backdrop-filter: blur(10px) saturate(.9);
+             backdrop-filter: blur(10px) saturate(.9);
              overscroll-behavior: contain; touch-action: none; }
+    /* The conversation column, as a sheet floating on the ground.
+     *
+     * The macOS reading: the window's ground shows at the edges, the content
+     * sits on a rounded card above it, and the separation is the inset and
+     * the corner rather than a line. That is why the rail keeps its own
+     * background here and this element takes the sheet colour — the border
+     * between the two columns stops being the thing doing the work.
+     *
+     * The radius is on the card, so the header's sticky band and the
+     * transcript both have to be clipped to it: without overflow:hidden the
+     * header's own background paints square over the top corners the moment
+     * it sticks, which is the one frame where the rounding matters. */
     .center { flex: 1; display: flex; flex-direction: column; min-width: 0;
-              position: relative; }
+              position: relative;
+              margin: 8px 8px 8px 0; border-radius: 14px;
+              background: var(--bg-chat);
+              border: 1px solid var(--border);
+              overflow: hidden; }
+    /* No inset on a phone: the rail is a drawer there, so the column IS the
+       window and an 8px frame around it is a border for its own sake. */
+    @media (max-width: 640px) {
+      .center { margin: 0; border-radius: 0; border: 0; }
+    }
     /* The bar across the bottom of an empty home, the way Kimi draws it: a
        thing to look at when you have nothing to type, rather than a screen of
        nothing under the composer. Theirs pairs a label on the left with a
@@ -545,7 +823,12 @@ export class AgentConsole extends LitElement {
        rather than as structure. The sticky background is what keeps the bar
        legible over scrolled content; the border was never doing that job. */
     header { display: flex; align-items: center; gap: 10px; padding: 10px 18px;
-             background: var(--bg);
+             /* The chat side sits on its own paper, a shade off the rail's
+                white, so the two columns read as two surfaces rather than one
+                sheet with a line drawn on it. Header and main carry the same
+                value: the header is sticky, so a different one would show as
+                a band sliding over the transcript. */
+             background: var(--bg-chat);
              /* Pinned. The chat pane is the thing meant to scroll, but on a
                 phone the document itself can scroll when content overflows,
                 and the bar carrying the drawer toggle and the conversation
@@ -613,9 +896,41 @@ export class AgentConsole extends LitElement {
             border-radius: 8px; padding: 8px; cursor: pointer; font: inherit;
             --nuraly-icon-size: 18px; line-height: 1;
             display: inline-grid; place-items: center;
-            transition: background-color .15s cubic-bezier(.23,1,.32,1); }
+            transition: background-color .15s cubic-bezier(.23,1,.32,1),
+                        transform .12s cubic-bezier(.23,1,.32,1); }
     .icon:hover { background: var(--bg-sunken); }
+    /* A press that is felt, not only seen. Every one of these buttons opens
+       something that takes a moment to arrive, and without this the click
+       lands in silence — the first thing that moves is the panel. .93 is the
+       smallest scale that still reads on a 34px target; larger buttons need
+       less, not more. Transitioned in both directions, so a press that is
+       dragged off the button returns rather than snapping. */
+    .icon:active { transform: scale(.93); }
     .icon[aria-pressed="true"] { background: var(--bg-sunken); }
+    /* How many files this conversation has made, on the folder that opens
+       them. Without it the rail is a door with nothing written on it: a
+       conversation that produced five documents and one that produced none
+       look identical, so the panel is opened to find out — or, more often,
+       never opened at all and the documents are never seen.
+       Counted, not a dot: "there is something in here" is half the answer,
+       and the number costs the same pixels. Two digits fit; past that it
+       says 99+, because a badge that keeps growing moves the header around
+       it.
+       The button is the positioning context, so the badge is placed against
+       the glyph rather than against the header. */
+    .icon.count { position: relative; }
+    .icon .badge { position: absolute; top: 2px; right: 1px; min-width: 15px;
+                   height: 15px; padding: 0 4px; box-sizing: border-box;
+                   border-radius: 999px; background: var(--accent);
+                   color: var(--accent-fg); font: 600 10px/15px var(--display);
+                   letter-spacing: 0; text-align: center;
+                   font-variant-numeric: tabular-nums;
+                   border: 1.5px solid var(--bg); pointer-events: none;
+                   /* Overshoots slightly and settles. The badge appears the
+                      moment a conversation writes its first file, which is
+                      exactly when it should be noticed once — a count that
+                      simply blinks into existence is missed. */
+                   animation: badge-in .22s cubic-bezier(.23,1,.32,1); }
     /* The header's own little menu — the artifact panel's kebab, one floor
        up. Anchored to the header (sticky is positioned, so absolute children
        measure against it); the scrim is what makes a click anywhere else a
@@ -624,12 +939,27 @@ export class AgentConsole extends LitElement {
     .hmenu { position: absolute; right: 14px; top: calc(100% - 4px); z-index: 45;
              min-width: 224px; background: var(--bg-card);
              border: 1px solid var(--border); border-radius: 12px; padding: 5px;
-             box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+             box-shadow: 0 10px 30px rgba(0,0,0,.18);
+             /* Origin at the top right, which is where the button that opened
+                it is. A menu that grows from its own trigger says which
+                control it belongs to without a pointer or a tail. */
+             transform-origin: top right;
+             animation: pop-in .13s cubic-bezier(.23,1,.32,1); }
     .hmenu button { display: flex; align-items: center; gap: 10px; width: 100%;
                     padding: 9px 11px; border: 0; border-radius: 8px;
                     background: none; font: inherit; font-size: 13.5px;
-                    color: var(--fg); cursor: pointer; text-align: left; }
+                    color: var(--fg); cursor: pointer; text-align: left;
+                    transition: background-color .13s cubic-bezier(.23,1,.32,1); }
     .hmenu button:hover { background: var(--bg-sunken); }
+    /* The operator menu is a list of destinations rather than one action,
+       so it gets the rail's own headings — same size, same tracking, same
+       muted ink as the group labels inside /admin, because it is the same
+       list seen from outside. */
+    .amenu { min-width: 208px; }
+    .amenu .amenu-head { font-size: 11px; letter-spacing: 0.09em;
+                         text-transform: uppercase; color: var(--muted);
+                         font-weight: 600; padding: 8px 11px 4px; }
+    .amenu .amenu-head:first-child { padding-top: 4px; }
     /* The guest strip: ration and door, worn in the header like the chips
        around it. The count is a bordered pill in muted ink — information, not
        a control — and the sign-in is the one filled mark in the bar, because
@@ -651,7 +981,7 @@ export class AgentConsole extends LitElement {
        button carries the feature alone and the count lives in its title and
        in the wall. */
     @media (max-width: 640px) { .guest-count { display: none; } }
-    main { flex: 1; min-height: 0; }
+    main { flex: 1; min-height: 0; background: var(--bg-chat); }
     /* The cards live in this element's own DOM, below the chat — never inside
        the component's messages. Its artifact mode re-extracts fences from the
        displayed text and matches them to rows by position, which is exactly
@@ -727,10 +1057,27 @@ export class AgentConsole extends LitElement {
            to its edges. */
         overflow: hidden; border-left: 0;
         box-shadow: 0 18px 48px -12px rgba(0,0,0,.35);
+        /* Only in here. Above the breakpoint the panel is a docked column and
+           a rise would be a column jumping in the layout; as a sheet over the
+           page it is the same gesture as the directory, and gets the same
+           motion. */
+        animation: rise-in .2s cubic-bezier(.23,1,.32,1);
       }
       .scrim.files { display: block; position: fixed; inset: 0; z-index: 45; }
     }
-    @media (min-width: 1025px) { .icon.nav { display: none; } }
+    @media (min-width: 1025px) {
+      /* Hidden again, and this time on purpose rather than by inheritance.
+         Showing it put TWO identical panel-left buttons sixty pixels apart —
+         the rail's own collapse control and this one — both doing the same
+         job, which reads as one of them being broken. The rail hides itself
+         with its own button; the floating .unrail brings it back. One control
+         in each state, which is one more than there used to be and one fewer
+         than I briefly shipped. */
+      .icon.nav { display: none; }
+      /* The rail is a column here, and its account menu already carries
+         Settings — see the comment on the button. */
+      .icon.settings-here { display: none; }
+    }
 
     /* --- phone -----------------------------------------------------------
        One column, and the second rail takes the whole screen: at this width a
@@ -831,6 +1178,64 @@ export class AgentConsole extends LitElement {
     main.empty.has-starts { justify-content: center; padding-top: 0;
                             padding-bottom: 0; }
     main.empty nr-chatbot { flex: 0 0 auto; height: auto; }
+
+    /* Compact: the answers extend the composer upward.
+     *
+     * The same content-sizing the empty home already uses — the card is as
+     * tall as what is in it — with a ceiling on the message list so it grows
+     * to a point and then scrolls. Everything here is the component's own
+     * public surface: the messages part on the list, and the inverted-scroll
+     * property for the column-reverse that keeps the newest line against the
+     * composer.
+     * Nothing reaches into the shadow root and nothing was patched.
+     *
+     * The card is anchored to the BOTTOM of the block rather than centred,
+     * which is what makes it grow upward: with the block centred, two lines of
+     * answer push the composer down half their height and the caret moves
+     * under the reader's hands mid-sentence.
+     */
+    main.compact { justify-content: flex-end; padding-bottom: 4vh; }
+    main.compact nr-chatbot { flex: 0 0 auto; height: auto; }
+    main.compact nr-chatbot::part(content) { flex: 0 0 auto; min-height: 0; }
+    /* One object, not two. Without this the conversation floats above the
+       composer as a separate block with a rule between them, which is a
+       transcript with a box under it — the opposite of the claim being made.
+       The border goes on the boxed area, which is the one wrapper holding both
+       — the content part turned out to be the message list alone, so a border
+       there enclosed the conversation and left the composer outside it. The
+       composer inside gives up its own. */
+    main.compact nr-chatbot::part(boxed-area) {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--nuraly-chatbot-input-bg, var(--bg-raised));
+      overflow: hidden;
+      max-width: 768px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    main.compact nr-chatbot::part(input-container) {
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      background: transparent;
+    }
+    main.compact nr-chatbot::part(messages) {
+      max-height: min(46vh, 440px);
+      overflow-y: auto;
+      /* The hairline the suggestion list has, mirrored: the drop-down is
+         separated from the composer below it, so the conversation is
+         separated from the composer above it. */
+      border-bottom: 1px solid var(--border);
+    }
+    /* The growth itself. A height that jumps is read as a re-layout; one that
+       moves is read as the card opening. The house curve, and off entirely
+       for anyone who asked for less motion. */
+    main.compact nr-chatbot::part(messages) {
+      transition: max-height .28s cubic-bezier(.23,1,.32,1);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      main.compact nr-chatbot::part(messages) { transition-duration: .01ms; }
+    }
     /* A ::part(boxed-area) rule sat here zeroing the chatbot's padding. It
        never applied — nr-chatbot exposes no parts — which is the only reason
        the home block ever sat at 16vh at all. Removed rather than kept as a
@@ -882,7 +1287,12 @@ export class AgentConsole extends LitElement {
        51/52 already had this right; this is the same band, so the two
        overlays cannot fight each other either. */
     .scrim.shelves { display: block; position: fixed; inset: 0; z-index: 49;
-                     background: rgba(0,0,0,.32); backdrop-filter: blur(2px); }
+                     background: rgba(0,0,0,.32); backdrop-filter: blur(2px);
+                     /* Slower than the panel it stands behind, and no
+                        movement: the page dims TO make room, and the sheet
+                        arrives in front of it. Both at once reads as one
+                        gesture rather than two things appearing. */
+                     animation: veil-in .2s cubic-bezier(.23,1,.32,1); }
     /* Wide enough to be a directory. At 560px the card grid fell to two
        columns on a 1500px screen and the panel read as a menu that had been
        stretched; a directory is something you browse, and browsing wants the
@@ -916,7 +1326,13 @@ export class AgentConsole extends LitElement {
               box-shadow: 0 24px 60px -12px rgba(0,0,0,.35);
               display: flex; flex-direction: column; overflow: hidden;
               left: 50%; transform: translateX(-50%); top: 8vh; bottom: 8vh;
-              width: min(980px, calc(100% - 48px)); }
+              width: min(980px, calc(100% - 48px));
+              /* The keyframe carries the -50% itself. A transform in a
+                 keyframe replaces the one in the rule rather than composing
+                 with it, so a rise written as translateY alone would drop the
+                 centring and the panel would fly in from half a screen to the
+                 right — which is what it did the first time. */
+              animation: sheet-in .2s cubic-bezier(.23,1,.32,1); }
     .gallery-head { display: flex; align-items: center; justify-content: space-between;
                    padding: 12px 10px 12px 16px; font-weight: 600;
                    border-bottom: 1px solid var(--border); }
@@ -959,14 +1375,18 @@ export class AgentConsole extends LitElement {
     .gallery-tabs { display: flex; align-items: center; gap: 4px;
                     min-width: 0; overflow-x: auto; scrollbar-width: none; }
     .gallery-tabs::-webkit-scrollbar { display: none; }
-    .gallery-tab { display: flex; align-items: center; gap: 7px; flex: none;
+    .gallery-tab { display: flex; align-items: center; gap: 6px; flex: none;
                    padding: 6px 10px; border: 0; border-radius: 9px;
                    background: none; font: inherit; font-weight: 600;
                    font-size: 14.5px; color: var(--faint); cursor: pointer;
                    transition: color .15s cubic-bezier(.23,1,.32,1),
                                background-color .15s cubic-bezier(.23,1,.32,1); }
     .gallery-tab:hover { color: var(--muted); background: var(--bg-sunken); }
-    .gallery-tab.on { color: var(--fg); background: var(--fill-1); }
+    /* --bg-sunken, which is what every other selected control in this file
+       sits on (.icon[aria-pressed], the menu rows). --fill-1 is a step
+       lighter and was the only wash of its kind here, so the chosen tab read
+       as fainter than a pressed button meaning the same thing. */
+    .gallery-tab.on { color: var(--fg); background: var(--bg-sunken); }
     /* One line saying what this shelf is. Three nouns that sound alike need
        it once, where somebody is looking at them. */
     .gallery-lede { margin: 12px 16px 0; color: var(--muted);
@@ -987,11 +1407,18 @@ export class AgentConsole extends LitElement {
        each connector row 6px past the panel's right edge, half of it clipped.
        Stretch is what a flex column does anyway, so the width goes too. */
     .attach, .attach-row { box-sizing: border-box; }
-    .attach { min-width: 264px; padding: 4px; display: flex; flex-direction: column; }
+    /* This panel is slotted into nr-dropdown, so the box around it is the
+       component's and this animates only what the console draws inside it.
+       Kept lighter than .hmenu for that reason — two nested surfaces each
+       doing a full pop is one motion too many in a corner this small. */
+    .attach { min-width: 264px; padding: 4px; display: flex; flex-direction: column;
+              transform-origin: bottom left;
+              animation: pop-in .12s cubic-bezier(.23,1,.32,1); }
     .attach-row { display: flex; align-items: center; gap: 10px;
                   font: inherit; font-size: 13.5px; color: var(--fg); text-align: left;
                   background: none; border: 0; border-radius: 8px; padding: 8px 10px;
-                  cursor: pointer; }
+                  cursor: pointer;
+                  transition: background-color .13s cubic-bezier(.23,1,.32,1); }
     .attach-row:hover { background: var(--bg-sunken); }
     /* A connector row is not itself pressable — the switch inside it is — so it
        must not take the hover of something that acts on click. */
@@ -1024,7 +1451,14 @@ export class AgentConsole extends LitElement {
            box-sizing: border-box; background: var(--bg-card);
            border: 1px solid var(--border); border-radius: 12px;
            box-shadow: 0 12px 32px rgba(23,23,26,0.16);
-           display: flex; flex-direction: column; }
+           display: flex; flex-direction: column;
+           /* A submenu grows from the row that opened it, so its origin is the
+              left edge — the side it is attached to. It is also the fastest
+              surface here: it appears while the menu it belongs to is already
+              on screen, and a second wait inside an open menu feels like lag
+              rather than like motion. */
+           transform-origin: top left;
+           animation: pop-in .12s cubic-bezier(.23,1,.32,1); }
     .fly .attach-row.on { color: var(--brand); }
     .fly .attach-row.on nr-icon { color: var(--brand); }
     .fly-find { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -1088,11 +1522,26 @@ export class AgentConsole extends LitElement {
     .shelf-problem { margin: 0 16px 16px; font-size: 12.5px; color: var(--danger); }
     /* How many, beside the name. Both references carry the number rather than
        making you count the cards, and it is the fastest way to see that a
-       filter is hiding most of them. */
-    .gallery-count { font-size: 11px; font-weight: 600; letter-spacing: 0;
-                     color: var(--faint); background: var(--fill-1);
-                     border: 1px solid var(--border); border-radius: 999px;
-                     padding: 1px 7px; text-transform: none; }
+       filter is hiding most of them.
+
+       Ink, not a pill. It was an outlined capsule, which made four bordered
+       chips sit in the one row of this console that is supposed to be text —
+       the note above .gallery-tabs says the tabs are "separated by nothing
+       but weight and ink", and a border per count is exactly what that rules
+       out. It was also the only place in the app that draws a count that way:
+       settings.ts's group and candidate counts are muted numerals beside a
+       label, and this now reads like them.
+       Quieter than the label deliberately. The word is what you press; the
+       number is what you glance at. A zero especially — "Plugins 0" inside a
+       ring announced an empty shelf, where the same 0 in faint ink just
+       answers a question nobody asked twice.
+       Tabular figures so 13 and 8 keep the label ahead of them from shifting
+       as a filter counts down. */
+    .gallery-count { font-size: 12.5px; font-weight: 500; letter-spacing: 0;
+                     color: var(--faint); font-variant-numeric: tabular-nums;
+                     text-transform: none; }
+    .gallery-tab:hover .gallery-count { color: var(--muted); }
+    .gallery-tab.on .gallery-count { color: var(--muted); }
     .gallery-find { display: flex; align-items: center; gap: 8px;
                     margin: 12px 16px 0; padding: 8px 12px; border-radius: 10px;
                     border: 1px solid var(--border); color: var(--faint); }
@@ -1126,6 +1575,49 @@ export class AgentConsole extends LitElement {
                  border-radius: 10px; background: none; font: inherit;
                  color: var(--fg); cursor: pointer; }
     .slash-row:hover { background: var(--bg-sunken); }
+    /* The completion list: the composer's own surface, continued.
+       No shadow and no top radius — the join has to read as one box, and a
+       second shadow under the composer's own draws a seam exactly where the
+       design says there is none. */
+    .hints { position: fixed; z-index: 45;
+             background: var(--bg-card);
+             border: 1px solid var(--border); border-top: 0;
+             /* 24px, matching the composer's own corner — see composerCard. */
+             border-radius: 0 0 24px 24px;
+             padding: 6px 0 8px;
+             display: flex; flex-direction: column;
+             max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; }
+    /* Opening upward: every edge that made the join swaps ends.
+       NOT column-reverse. That was here to move the divider to the bottom and
+       it also reversed the ROWS — the best match ended up furthest from the
+       field and the arrow keys walked the list backwards. The divider moves
+       with a second pseudo-element instead, which is what one is for. */
+    .hints.up { border-top: 1px solid var(--border); border-bottom: 0;
+                border-radius: 24px 24px 0 0;
+                padding: 8px 0 6px; }
+    /* A separator that stops short of the edges, so the rule reads as
+       dividing the list from the field rather than as the box's own border.
+       It sits against whichever edge the composer is on: ::before when the
+       list hangs below it, ::after when it stands above. */
+    .hints::before { content: ""; display: block; height: 1px; margin: -6px 14px 6px;
+                     background: var(--border); }
+    .hints.up::before { display: none; }
+    .hints.up::after { content: ""; display: block; height: 1px; margin: 6px 14px -6px;
+                       background: var(--border); }
+    .hint { display: flex; align-items: center; gap: 12px; width: 100%;
+            text-align: left; padding: 9px 16px; border: 0; background: none;
+            font: inherit; font-size: 14.5px; color: var(--fg); cursor: pointer; }
+    .hint:hover, .hint.on { background: var(--bg-sunken); }
+    /* A completion is one line and never wraps: the list is scanned down its
+       left edge, and a row that becomes two breaks that column for every row
+       under it. */
+    .hint-text { flex: 1; min-width: 0; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+    /* What you already typed, held back; the completion in the reading
+       weight. */
+    .hint-had { color: var(--muted); }
+    .hint-text b { font-weight: 600; }
+    .hints nr-icon { color: var(--muted); flex: none; }
     .slash-row.on { background: var(--bg-user); }
     .slash-text { display: flex; flex-direction: column; gap: 1px;
                   min-width: 0; }
@@ -1192,24 +1684,46 @@ export class AgentConsole extends LitElement {
     .starts-back:hover { background: var(--bg-sunken); color: var(--fg); }
     .starts-page h2 { font-size: 20px; font-weight: 650; margin: 0 0 6px; }
     .starts-intro { color: var(--muted); margin: 0 0 20px; max-width: 60ch; }
-    .offer-grid { display: grid; gap: 12px;
-                  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-    .offer { display: flex; flex-direction: column; gap: 6px; padding: 14px;
-             border: 1px solid var(--border); border-radius: 12px;
-             background: var(--bg-card); }
-    .offer-name { font-size: 14px; font-weight: 600; line-height: 1.35;
+    /* The search field, the shape the artifacts library gives one — the two
+       pages do the same job and should not look like two products. */
+    .starts-find { display: flex; align-items: center; gap: 10px;
+                   border: 1px solid var(--border); border-radius: 12px;
+                   padding: 10px 14px; background: var(--bg); margin: 0 0 20px;
+                   max-width: 520px; }
+    .starts-find:focus-within { border-color: var(--muted); }
+    .starts-find input { flex: 1; min-width: 0; border: 0; background: none;
+                         padding: 0; font: inherit; font-size: 14.5px;
+                         color: inherit; outline: none; }
+    .starts-find nr-icon { color: var(--muted); flex: none; }
+
+    .offer-grid { display: grid; gap: 14px;
+                  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+                  align-content: start; }
+    /* The whole card opens it, so the whole card has to look pressable. No
+       overflow:hidden — see the artifacts library for what that costs a grid
+       item: it zeroes the element's intrinsic height and every row collapses
+       to its borders. */
+    .offer { display: flex; flex-direction: column; gap: 6px; padding: 16px;
+             min-height: 118px;
+             border: 1px solid var(--border); border-radius: 14px;
+             background: var(--bg); cursor: pointer;
+             transition: border-color .15s cubic-bezier(.23,1,.32,1),
+                         transform .15s cubic-bezier(.23,1,.32,1); }
+    .offer:hover { border-color: var(--muted); transform: translateY(-1px); }
+    .offer:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .offer-name { font-size: 15px; font-weight: 600; line-height: 1.35;
                   overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3;
                   -webkit-box-orient: vertical; }
-    .offer-meta { font-size: 12px; color: var(--muted); }
-    .offer-remix { margin-top: 6px; align-self: flex-start; font: inherit;
-                   font-size: 13px; padding: 6px 16px; cursor: pointer;
-                   border: 1px solid var(--border); border-radius: 999px;
-                   background: var(--bg-card); color: var(--fg); }
-    .offer-acts { display: flex; gap: 8px; margin-top: 6px; }
-    .offer-open { font: inherit; font-size: 13px; padding: 6px 16px; cursor: pointer;
-                  border: 0; border-radius: 999px; background: var(--accent);
-                  color: var(--accent-fg); }
-    .offer-open:hover { background: var(--accent-hover); }
+    .offer-meta { font-size: 12.5px; color: var(--muted); }
+    /* Pushed to the foot so every card's action sits on one line however long
+       the titles above them run. */
+    .offer-acts { display: flex; gap: 8px; margin-top: auto; padding-top: 10px; }
+    .offer-remix { font: inherit; font-size: 13px; padding: 5px 14px;
+                   cursor: pointer; border: 1px solid var(--border);
+                   border-radius: 999px; background: none; color: var(--muted);
+                   transition: color .15s cubic-bezier(.23,1,.32,1),
+                               border-color .15s cubic-bezier(.23,1,.32,1); }
+    .offer-remix:hover { color: var(--fg); border-color: var(--muted); }
     /* The banner that stands where the composer would be. */
     .borrowed { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
                 max-width: 768px; margin: 0 auto 14px; padding: 12px 16px;
@@ -1217,6 +1731,20 @@ export class AgentConsole extends LitElement {
                 background: var(--bg-rail); color: var(--muted); font-size: 13.5px; }
     .offer-remix:hover { background: var(--bg-user); border-color: var(--muted); }
     .caps { min-height: 32px; box-sizing: content-box; }
+    /* Out of the way while the composer is suggesting.
+     *
+     * The card grows downward over this row, and the pills kept drawing —
+     * their icons showed THROUGH the list, between the suggestions, because
+     * the row comes later in the document and neither box claims a stacking
+     * order. Hiding it rather than stacking the card over it: these are a
+     * shortcut for somebody who has not started, and somebody typing a query
+     * has started. Hidden by visibility rather than display, so the row keeps
+     * its reserved height and the card does not jump when the list closes. */
+    main.hinting .caps { visibility: hidden; }
+    /* And the phone's Explore bar, for the same reason and with the same
+       reservation: it sits under the composer at narrow widths, the card
+       grows over it, and its text drew through the suggestions. */
+    main.hinting .explore { visibility: hidden; }
     /* align-items, and it is not cosmetic. A flex row stretches its children
        to its own height by default, and this row reserves height it may not
        have filled yet — so every pill grew to the reserved 49px and looked
@@ -1293,8 +1821,15 @@ export class AgentConsole extends LitElement {
             background: var(--bg-card); color: var(--fg); cursor: pointer;
             font: inherit; text-align: left; max-width: 260px;
             transition: border-color .15s cubic-bezier(.23,1,.32,1),
-                        box-shadow .15s cubic-bezier(.23,1,.32,1); }
-    .card:hover { border-color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+                        box-shadow .15s cubic-bezier(.23,1,.32,1),
+                        transform .15s cubic-bezier(.23,1,.32,1); }
+    /* A pixel. The card already answers a hover with its border and a shadow;
+       the lift is what makes those two read as one object rising rather than
+       as two properties changing. More than 1px and the row of cards ripples
+       as the pointer crosses it. */
+    .card:hover { border-color: var(--accent); box-shadow: 0 3px 8px rgba(0,0,0,.08);
+                  transform: translateY(-1px); }
+    .card:active { transform: translateY(0); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
     .card .card-name { font-size: 13px; font-weight: 600; max-width: 100%;
                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .card .card-meta { font: 11.5px var(--mono); color: var(--muted); }
@@ -1403,9 +1938,32 @@ export class AgentConsole extends LitElement {
      links address it by that word. */
   @state() private rail: "" | "artifacts" = "";
   @state() private settings = false;
-  @state() private view: "chat" | "knowledge" | "canvas" | "starts" = "chat";
+  /* What the composer held when somebody chose "Schedule this", so the form
+     opens with the instruction already in it. Cleared on the way out, or
+     arriving from the rail later would resurrect a sentence from an hour
+     ago. */
+  @state() private taskDraft = "";
+  /* Whether this conversation is being had in the composer card rather than
+     on a page of its own. True for one begun here; false for one opened from
+     the rail, which is a transcript to read rather than a sentence in
+     progress. */
+  @state() private compact = true;
+  @state() private view: "chat" | "knowledge" | "canvas" | "starts" | "library" | "discover" | "article" | "tasks" = "chat";
+
+  /* Which article, when the view is "article".
+   *
+   * A view inside the console rather than a page of its own, for the reason
+   * Discover itself is one: moving between two of this app's screens must not
+   * throw away the shell, the sidebar, the socket and the signed-in identity
+   * and rebuild them. It still has an ADDRESS — see `openArticle` — because a
+   * story is the most linkable thing on the site. */
+  @state() private articleId = "";
   /* What other people have offered, loaded when the page opens. */
   @state() private offers: ThreadListing[] = [];
+  /* What is typed into the Starting points filter. Its own field rather than
+     sharing the gallery's: the two lists are on screen at different times, and
+     a filter that survived from one to the other would read as a bug. */
+  @state() private startsFind = "";
   /* False while reading a conversation somebody else offered. The engine
      decides this — the console never sees an owner tag — and it is what
      swaps the composer for a Remix banner. */
@@ -1435,6 +1993,34 @@ export class AgentConsole extends LitElement {
   /* Reflected, because the drawer and its scrim are styled from the host —
      a boolean in a template cannot reach the sidebar element's own transform. */
   @property({ type: Boolean, reflect: true }) nav = false;
+
+  /* Whether the rail is showing on a WIDE screen.
+   *
+   * `nav` is the phone drawer and only does anything under 1024px, so above
+   * that the toggle button in the header flipped a flag nothing read — one
+   * control, doing nothing, on every desktop. This is the other half: below
+   * 1024 the button opens the drawer, above it the button hides the column.
+   * Reflected so the rules can be written against the host. */
+  @property({ type: Boolean, reflect: true }) railed = true;
+
+  /* Peeking at a hidden rail.
+   *
+   * Hiding the rail buys width and costs reach: every conversation and every
+   * screen in the app was one click away and is now two, with a hidden panel
+   * in between. Hovering the toggle floats the real rail back over the page
+   * so it can be read and clicked without being brought back for good — the
+   * column stays wide, and the thing you wanted is still one movement away.
+   *
+   * The SAME element, floated, rather than a second copy: console-sidebar
+   * holds the conversation list and its pollers, and mounting it twice would
+   * be two of both. */
+  @property({ type: Boolean, reflect: true }) railPeek = false;
+
+  /** What the header's toggle does, which depends on how wide the window is. */
+  private toggleRail(): void {
+    if (window.matchMedia("(max-width: 1024px)").matches) { this.nav = !this.nav; }
+    else { this.railed = !this.railed; }
+  }
   /* Set by pages/c/[id].ts. Empty on `/`, where index.ts renders the same
      element with nothing to say about which conversation is open. */
   @property({ attribute: false }) conversation = "";
@@ -1480,6 +2066,18 @@ export class AgentConsole extends LitElement {
      rather than "" because "" is a real state — the moment after the slash,
      when every skill matches. */
   @state() private slash: string | null = null;
+  /* Completions for what is being typed, from the deployment's own index.
+     Empty when there is nothing to offer, which is most of the time — a
+     suggestion list that draws for every keystroke is a list nobody reads. */
+  @state() private hints: string[] = [];
+  /* Which hint the arrow keys are on; -1 for none, which is the state after
+     typing and before pressing anything. */
+  @state() private hintAt = -1;
+  /* The keystroke a fetch is in flight for, so a slower answer for an older
+     prefix cannot overwrite a newer one — the classic out-of-order race, and
+     the reason a suggestion list flickers between two prefixes. */
+  private hintFor = "";
+  private hintTimer = 0;
   /* Every skill, not just the featured few the chips draw. Fetched the first
      time the gallery is opened rather than on load: a console that nobody
      asks is a console that should not have asked. */
@@ -1511,11 +2109,17 @@ export class AgentConsole extends LitElement {
      as an ordinary repo-sourced skill, so without the receipts there is no way
      to tell one that came from a bundle from one somebody synced by hand. */
   @state() private plugins: PluginRow[] = [];
+  // The card plugins, listed beside the bundles — see listCardPlugins.
+  @state() private cardPlugins: CardPluginRow[] = [];
   /* Which agent the graph view opens selected on — set by the card that
      opened it, cleared by nothing: the canvas ignores it after first load. */
   @state() private canvasFocus = "";
   /* The header's three-dot menu. */
   @state() private hmenu = false;
+  /* The operator's shortcut menu, open or shut. Its own flag rather than
+     a shared "which menu" enum: the two live at opposite ends of the
+     header and closing one to open the other is a frame of nothing. */
+  @state() private amenu = false;
   @state() private pluginOf = new Map<string, string>();
 
   /* Seeding happens here and not in connectedCallback, and that is the whole
@@ -1528,8 +2132,25 @@ export class AgentConsole extends LitElement {
      lifecycle hook that only the browser runs.
      Once, guarded: willUpdate runs on every property change, and re-applying a
      transcript would throw away whatever the conversation has become since. */
+  private seededView = false;
   private seeded = false;
   willUpdate(): void {
+    /* The route's own screen, applied before the first render — on the server
+       as well as in the browser. Assigned rather than compared-and-assigned
+       because `view` is state the person then changes by clicking, and
+       `startView` is only ever the opening position: the guard is `seededView`,
+       not a re-read of the property. */
+    if (!this.seededView && this.startView !== "") {
+      this.seededView = true;
+      this.view = this.startView as typeof this.view;
+      if (this.startView === "article") { this.articleId = this.openArticleAt; }
+      /* Starting points is the one screen whose CONTENT is fetched by the
+         thing that opens it rather than by the element itself — there is no
+         <starts-page>, it is markup this component draws from `offers`. So
+         arriving at the address has to do what clicking the rail row does, or
+         the route renders the frame around an empty list. */
+      if (this.startView === "starts") { void this.openStarts(); }
+    }
     if (this.seeded) { return; }
     const seed = seedOf(this.seedTurns);
     if (seed.turns.length === 0) { return; }
@@ -1541,7 +2162,7 @@ export class AgentConsole extends LitElement {
     // on the server too, and a composer that paints "Default" and then flips
     // to "Thinking" a round trip later is worse than one that waits.
     this.choiceId = seed.modelChoiceId;
-    this.session.apply(seed.turns as never, this.seedPast as never);
+    void this.session.apply(seed.turns as never, this.seedPast as never);
   }
 
   async connectedCallback() {
@@ -1556,11 +2177,65 @@ export class AgentConsole extends LitElement {
     // seeding note above); on the server there is no document to touch.
     document.title = BRAND;
     this.startDot();
+    // Arriving ON /settings: open it, without pushing the address it already
+    // has. openSettings() would push a duplicate entry and make Back a no-op
+    // for the first press.
+    if (this.openSettingsAt !== "") {
+      this.settingsTab = this.openSettingsAt;
+      this.settings = true;
+    }
+    /* Arriving ON /discover or /discover/<id>. Read from the address rather
+       than only from the property so both doors work: the route page hands
+       the id in, and a push from the feed changes the path without
+       re-rendering the page. No pushState — the address is already this. */
+    const landed = this.openArticleAt !== "" ? this.openArticleAt : currentArticle();
+    if (landed !== "") {
+      this.articleId = landed;
+      this.view = "article";
+    } else if (location.pathname === "/discover" || location.pathname === "/discover/") {
+      this.view = "discover";
+    } else if (location.pathname === "/tasks" || location.pathname === "/tasks/") {
+      // Arriving on the address rather than navigating to it. No pushState —
+      // the address is already this one.
+      this.view = "tasks";
+    }
+    // Back and forward through Settings. The overlay is a place now, so the
+    // browser's own controls have to move between it and the conversation —
+    // a panel that a URL opens and Back cannot close is worse than one with
+    // no URL at all.
+    window.addEventListener("popstate", () => {
+      const path = location.pathname;
+      if (path.startsWith("/settings")) {
+        const asked = path.slice("/settings".length).replace("/", "").trim();
+        this.settingsTab = asked === ""
+          ? "Preferences"
+          : asked[0].toUpperCase() + asked.slice(1).toLowerCase();
+        this.settings = true;
+      } else {
+        this.settings = false;
+      }
+    });
+    // The plugin renderers, into their sandbox. Fire-and-forget: a transcript
+    // that renders before a module lands shows the marker line as text, which
+    // is the ordinary degradation, for one page load's race at most.
+    void loadPluginRenderers();
     this.session.on("state:changed", () => { this.busy = this.session.isTyping(); });
     // Asked before the lists, and never awaited alongside them: a 401 from the
     // list calls navigates to the login, and the answer to this one decides
     // what the rail may even offer.
     window.addEventListener(SIGNED_OUT, () => { this.signedOut = true; });
+    // The list is placed with measured coordinates, so it has to be measured
+    // again when the box it is measured against moves. Only while it is open,
+    // and a re-render is all it takes — the position is computed in render.
+    window.addEventListener("resize", () => {
+      if (this.hints.length > 0) { this.requestUpdate(); }
+    });
+    // A phone keyboard opening does not always fire `resize` — it resizes the
+    // VISUAL viewport, which has its own event. Without this the list keeps
+    // the position it was measured for before the keyboard appeared.
+    window.visualViewport?.addEventListener("resize", () => {
+      if (this.hints.length > 0) { this.requestUpdate(); }
+    });
     // The guest wall, beside the sign-out for the same reason: `call` cannot
     // know who holds the shell. Soft where SIGNED_OUT is hard — the thread
     // stays readable, and dismissing it is allowed. Not latched: a guest who
@@ -1577,6 +2252,29 @@ export class AgentConsole extends LitElement {
     });
     // Back and Forward move between conversations rather than out of the app.
     window.addEventListener("popstate", () => {
+      /* Discover's addresses are handled first and RETURN, because the line
+         below reads "no conversation in the path" as "start a fresh one" —
+         which, arriving on /discover or /discover/<id>, would throw away the
+         feed and show an empty composer instead. Back out of an article has
+         to land on the feed. */
+      const article = currentArticle();
+      if (article !== "") {
+        this.articleId = article;
+        this.view = "article";
+        return;
+      }
+      if (location.pathname === "/discover" || location.pathname === "/discover/") {
+        this.articleId = "";
+        this.view = "discover";
+        return;
+      }
+      if (location.pathname === "/tasks" || location.pathname === "/tasks/") {
+        this.view = "tasks";
+        return;
+      }
+      if (this.view === "article" || this.view === "discover" || this.view === "tasks") {
+        this.view = "chat";
+      }
       const id = currentId();
       if (id === "") { this.fresh(); } else if (id !== this.threadId) { void this.open(id); }
     });
@@ -1787,6 +2485,7 @@ export class AgentConsole extends LitElement {
     dressChat(this.renderRoot);
     void this.dock();
     this.watchComposerKeys();
+    this.drawHints();
   }
 
   /* Enter, before the composer gets it.
@@ -2002,6 +2701,324 @@ export class AgentConsole extends LitElement {
      of a whole reply. So thinking is something a person turns on for a
      question that deserves it, not a tax on every "hi". */
   @state() private thinkOn = false;
+
+  /* Open, filter or close the slash menu as the composer changes.
+
+     The rule is narrow on purpose: a lone "/word" and nothing else. Anything
+     with a space in it is a sentence that happens to start with a slash — a
+     path, a fraction, a date — and a menu that opened over those would be in
+     the way far more often than it helped. `input` is composed, so this fires
+     from inside the component's shadow root without the component knowing. */
+  private onComposerInput() {
+    // The full list is what the menu searches, and it is fetched the first
+    // time a slash is typed rather than on load — same reasoning as the
+    // gallery: a console nobody asks should not have asked.
+    if (this.allSkills.length === 0) { void this.loadAllSkills(); }
+    const text = (this.composerBox()?.textContent ?? "").replace(/ /g, " ");
+    const m = /^\/([\w-]*)$/.exec(text.trim());
+    this.slash = m === null ? null : m[1].toLowerCase();
+    this.askHints(text.trim());
+  }
+
+  /* Completions, debounced.
+   *
+   * 140ms, which is about the gap between keystrokes at a normal typing
+   * speed: fast enough that a pause produces a list, slow enough that typing
+   * a word is one request rather than six. The index is a shared service and
+   * a composer is the one place in this console that could ask it per
+   * character.
+   *
+   * Only for a short prefix. Suggestions are titles out of the corpus, and
+   * they answer "what is this thing called" — a question somebody is asking
+   * in the first few words. Past that a person is writing a sentence, and a
+   * dropdown over what they are writing is in the way.
+   *
+   * Never while the slash menu is up: two lists over one composer, and the
+   * arrow keys would belong to neither. */
+  private askHints(text: string): void {
+    window.clearTimeout(this.hintTimer);
+    /* Only on the empty home, never inside a conversation.
+     *
+     * Completions answer "what is this thing called" — the question somebody
+     * is asking when they arrive with nothing on screen. Mid-conversation the
+     * composer is a reply box: what goes in it is a follow-up to what is
+     * above, not a title from an index, and a list of corpus titles over a
+     * transcript is a suggestion about the wrong thing.
+     *
+     * It also settles the geometry. The docked composer has no room beneath
+     * it, so a card that grows there has to grow upward over the transcript,
+     * pinned by its bottom edge — a second anchoring rule, its own drift to
+     * correct, and a list covering the answer somebody is reading. Not
+     * offering it is better than placing it well. */
+    const ask = text.length >= 2 && text.length <= 48
+      && this.threadId === ""
+      && this.slash === null && !text.includes("\n");
+    if (!ask) { this.hints = []; this.hintAt = -1; this.hintFor = ""; return; }
+    this.hintTimer = window.setTimeout(() => { void this.fetchHints(text); }, 140);
+  }
+
+  private async fetchHints(text: string): Promise<void> {
+    this.hintFor = text;
+    try {
+      const res = await fetch(
+        `/search-api/suggest?q=${encodeURIComponent(text)}&k=6`,
+        { credentials: "same-origin" });
+      if (!res.ok) { return; }
+      const body = await res.json() as { suggestions?: { text?: string }[] };
+      // The answer for a prefix nobody is typing any more is dropped rather
+      // than shown: without this the list flickers back to an older word
+      // whenever an earlier request lands second.
+      if (this.hintFor !== text) { return; }
+      const seen = new Set<string>();
+      const rows: string[] = [];
+      for (const one of body.suggestions ?? []) {
+        const said = (one.text ?? "").trim();
+        // Nothing that merely repeats what is already typed, and nothing so
+        // long it wraps the row — a title of a hundred characters is not a
+        // completion, it is a search result.
+        if (said === "" || said.length > 72) { continue; }
+        if (said.toLowerCase() === text.toLowerCase()) { continue; }
+        const key = said.toLowerCase();
+        if (seen.has(key)) { continue; }
+        seen.add(key);
+        rows.push(said);
+      }
+      // Six on a desktop, four on a phone. The cap above keeps the card
+      // inside the screen by scrolling; this keeps it from needing to — a
+      // list you have to scroll to see the fourth suggestion is a list whose
+      // fourth suggestion nobody reads.
+      this.hints = rows.slice(0, window.innerWidth <= 640 ? 4 : 6);
+      this.hintAt = -1;
+    } catch {
+      // An index that cannot be reached costs suggestions and nothing else.
+      this.hints = [];
+    }
+  }
+
+  /** Take a suggestion — into the composer, or straight out as a message.
+   *
+   *  `send` is what separates a POINTER from a KEYBOARD. Pressing a row with
+   *  a mouse or a thumb is a whole decision: the hand has left the keys, the
+   *  row was read and chosen, and asking for one more press on a send button
+   *  is asking somebody to confirm what they just did. Arrowing to a row and
+   *  pressing Enter is the same decision, so that sends too — but Tab is not,
+   *  it is "complete this and let me keep typing", so it fills the composer
+   *  and stops there. */
+  private takeHint(said: string, send = false): void {
+    const box = this.composerBox();
+    if (box === null) { return; }
+    box.textContent = said;
+    this.hints = [];
+    this.hintAt = -1;
+    box.focus();
+    // Caret to the end, so the next keystroke continues the phrase rather
+    // than landing in front of it.
+    const range = document.createRange();
+    range.selectNodeContents(box);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+
+    if (send) {
+      // Through the session, the way Enter in the composer goes — not by
+      // synthesising a keystroke. A fake Enter would have to be aimed at the
+      // component's own handler inside its shadow root, and would then be a
+      // second path to sending that could drift from the first.
+      box.textContent = "";
+      void this.session.sendMessage(said);
+    }
+  }
+
+  private async loadAllSkills(): Promise<void> {
+    if (this.allSkills.length > 0) return;
+    this.allSkills = await listSkills().catch(() => []);
+  }
+
+  /* Choosing from the slash menu: pin the skill and take the "/…" back out.
+     The composer is emptied rather than left holding the typed name — the name
+     was the way of asking, not part of the message, and leaving it would send
+     "/make-doc" to the model as if it were a sentence. */
+  private pickSlash(row: SlashRow) {
+    if (row.kind === "agent") {
+      this.agentId = row.key;
+    } else {
+      void this.pin(row.key);
+    }
+    const label = row.kind === "agent" ? row.name : row.key;
+    const box = this.composerBox();
+    if (box !== null) {
+      // Left in the box, not cleared. A pin with an empty composer reads as
+      // nothing having happened; the command staying put is what says the
+      // choice landed. ChatSession takes this exact string back off the front
+      // of the next send, so it is visible without being said.
+      const prefix = "/" + label + " ";
+      this.session.slashPrefix = prefix;
+      box.textContent = prefix;
+      const at = document.createRange();
+      at.selectNodeContents(box);
+      at.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(at);
+      // The component tracks its own emptiness for the placeholder and the
+      // send button, and it learns about this edit the same way it learns
+      // about typing.
+      box.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      box.focus();
+    }
+    this.slash = null;
+  }
+
+  /* Keys the slash menu owns while it is open, and only then.
+
+     Enter is the one that matters: with the menu up it takes the first match
+     instead of sending, because "/make-doc" is not a message and sending it
+     would put a command in the transcript. Escape dismisses without touching
+     what was typed, so a slash that was genuinely the start of a sentence can
+     be carried on with. Everything else falls through to the component —
+     stopping keys it needs is how a composer stops accepting text. */
+  /** Put the phone's keyboard away once a message is on its way.
+   *
+   *  On a touch screen the keyboard is half the viewport, and after sending
+   *  there is nothing to type into — the answer is arriving above it, behind
+   *  the very panel that is covering it. Every messaging app on a phone
+   *  dismisses on send for this reason.
+   *
+   *  Only on touch, and only where a pointer is coarse. On a desktop the
+   *  focus belongs where it is: sending is Enter, the next message is more
+   *  typing, and stealing focus would mean reaching for the mouse between
+   *  every turn. `matchMedia` rather than a width test, because the question
+   *  is what is doing the pointing, not how wide the window is — a narrow
+   *  desktop window has a keyboard that is already out of the way.
+   *
+   *  The composer lives in nr-chatbot's shadow root, so this blurs whatever
+   *  the document says is active: a blur is what closes the keyboard, and
+   *  activeElement is the one handle that crosses the boundary without
+   *  reaching into the component's internals. */
+  private dropKeyboard(): void {
+    if (!window.matchMedia("(pointer: coarse)").matches) { return; }
+    const active = document.activeElement as HTMLElement | null;
+    active?.blur?.();
+    // The component may return focus to its own input as it clears the box —
+    // the blur has to land after that, or the keyboard springs straight back.
+    window.setTimeout(() => {
+      const again = document.activeElement as HTMLElement | null;
+      again?.blur?.();
+    }, 50);
+  }
+
+  /* Bound once, so the capture listener can be taken off again. */
+  private readonly composerKey = (e: KeyboardEvent) => { this.onComposerKey(e); };
+
+  private onComposerKey(e: KeyboardEvent) {
+    /* The completion list answers the arrows, Enter, Tab and Escape — in
+     * capture, for the reason the whole handler runs there: the component's
+     * own Enter is bound inside its shadow root and would send the message
+     * before a bubbling listener ever saw the key.
+     *
+     * Enter only takes a suggestion when one is HIGHLIGHTED. Enter with the
+     * list open and nothing chosen sends what was typed, which is what a
+     * person who ignored the list means by it — a list that swallows the
+     * first Enter is a list that makes people afraid of it. Tab takes the
+     * first suggestion without needing an arrow key first, the way a shell
+     * completes. */
+    if (this.hints.length > 0 && this.slash === null) {
+      if (e.key === "Escape") {
+        this.hints = []; this.hintAt = -1; e.stopPropagation(); return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); e.stopPropagation();
+        // The cursor walks -1 (nothing chosen) through the last row and back
+        // to -1, so a person can arrow past the end and get their own typing
+        // back rather than being trapped in the list. Written as a shift of
+        // the whole range by one instead of two special cases at the edges.
+        const n = this.hints.length;
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        this.hintAt = ((this.hintAt + 1 + step) + (n + 1)) % (n + 1) - 1;
+        return;
+      }
+      if (e.key === "Tab" && !e.shiftKey) {
+        e.preventDefault(); e.stopPropagation();
+        this.takeHint(this.hints[Math.max(0, this.hintAt)]);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && this.hintAt >= 0) {
+        e.preventDefault(); e.stopPropagation();
+        this.takeHint(this.hints[this.hintAt], true);
+        return;
+      }
+    }
+
+    if (this.slash === null) return;
+    if (e.key === "Escape") { this.slash = null; e.stopPropagation(); return; }
+    if (e.key !== "Enter" || e.shiftKey) return;
+    const rows = this.slashMatches();
+    if (rows.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.pickSlash(rows[0]);
+  }
+
+  /* The rows a slash query matches, in the order the menu draws them. */
+  private slashMatches(): SlashRow[] {
+    const q = this.slash ?? "";
+    const skill = (s: SkillRow): SlashRow => ({
+      kind: "skill", key: s.skillName, name: s.skillName, why: s.description,
+      icon: capIcon(s.skillName), on: this.pinned === s.skillName,
+    });
+    // Agents, but only where choosing one still means anything.
+    //
+    // The header offers its picker on a NEW conversation and prints a name on
+    // an existing one, because the agent answering a thread is fixed once that
+    // thread exists. A slash row that switched it mid-conversation would be
+    // offering something the rest of the console refuses, so this follows the
+    // same condition rather than inventing a second rule.
+    //
+    // Servers are deliberately absent. An MCP server is attached to an agent
+    // in Settings; there is no per-conversation act to perform on one, and a
+    // row that only reports something is a row that does nothing when pressed
+    // — the same reason the gallery lists them without making them choosable.
+    const agents: SlashRow[] = this.threadId !== "" ? [] : this.agents.map((a) => ({
+      kind: "agent", key: a.id, name: a.agentName,
+      why: a.description === "" ? "Agent" : a.description,
+      icon: "user", on: a.id === this.agentId,
+    }));
+    // A bare slash offers the shelf, not the warehouse. Every skill on a
+    // deployment with fourteen of them is a menu that covers the composer and
+    // asks you to read it — and the featured ones are already the operator's
+    // answer to "which of these does anyone want". Typing widens the search to
+    // all of them, which is the point at which you have said what you are
+    // looking for.
+    if (q === "") return this.capabilities.map(skill).slice(0, SLASH_ROWS);
+    const hits = [
+      ...this.allSkills.filter((s) =>
+        (s.skillName + " " + s.description).toLowerCase().includes(q)).map(skill),
+      ...agents.filter((a) => (a.name + " " + a.why).toLowerCase().includes(q)),
+    ];
+    return hits.slice(0, SLASH_ROWS);
+  }
+
+  /* What the + menu's rows do. nr-chatbot handles the two file rows itself and
+     leaves the rest to whoever is listening; this is that listener. Unknown
+     ids fall through on purpose — the component may grow rows of its own. */
+  private async onAttachPick(e: Event) {
+    const id = (e as CustomEvent).detail?.item?.id as string | undefined;
+    if (id === "pick:skills") { await this.openShelf("skills"); }
+    else if (id === "pick:connectors") { await this.openShelf("connectors"); }
+    else if (id === "pick:plugins") { await this.openShelf("plugins"); }
+  }
+
+  /* The slash menu, over the composer.
+
+     A list and not the gallery's cards: this one is read while typing, with
+     the answer usually one or two rows down, and a grid of cards would push
+     the third match off a phone. It is the same content in the shape the
+     moment calls for.
+
+     Fixed and bottom-anchored rather than positioned against the composer:
+     the composer moves as it grows, and a menu that has to be re-measured
+     every keystroke is a menu that lags a keystroke behind. */
 
   private searchDefaulted = false;
   private defaultSearchOn() {
@@ -2255,6 +3272,8 @@ export class AgentConsole extends LitElement {
   }
 
   private async open(id: string) {
+    // Opening one from the rail is reading, not composing: it gets the page.
+    this.compact = false;
     this.route(id);
     this.threadId = id;
     this.railClosed = false;
@@ -2280,6 +3299,7 @@ export class AgentConsole extends LitElement {
   }
 
   private fresh() {
+    this.compact = true;
     this.route("");
     this.threadId = ""; this.turnRefs = []; this.railClosed = false; this.session.fresh();
     this.takeComposer();
@@ -2497,7 +3517,9 @@ export class AgentConsole extends LitElement {
     return html`
       <div class="attach" slot="attach-menu" role="menu"
         @mouseleave=${() => { this.attachSub = ""; }}>
-        <button class="attach-row" role="menuitem" @click=${() => this.pickFile()}>
+        <button class="attach-row" role="menuitem"
+          @mouseenter=${() => { this.attachSub = ""; }}
+          @click=${() => this.pickFile()}>
           <nr-icon name="paperclip" size="small"></nr-icon><span class="attach-label">Add files &amp; photos</span>
         </button>
         <!-- A chevron promises a submenu, so it has to open one. It used to
@@ -2516,14 +3538,60 @@ export class AgentConsole extends LitElement {
           </button>
           ${this.attachSub !== "skills" ? nothing : this.skillFlyout()}
         </div>
+        <!-- The half-written message, made recurring. Reached from the
+             composer because that is where the sentence already is: a person
+             who has typed "summarise my Linear cycle" and then wants it every
+             morning should not have to type it again somewhere else.
+
+             The draft is READ out of the chatbot's shadow root and never
+             written to. The component is vendored and is not ours to patch;
+             what it offers is this slot, and taking a copy of what is on
+             screen is the whole of what this needs. -->
         <button class="attach-row" role="menuitem"
-          @click=${() => { this.shutAttach(); void this.openShelf("connectors"); }}>
+          @mouseenter=${() => { this.attachSub = ""; }}
+          @click=${() => {
+            const draft = this.draftText();
+            this.shutAttach();
+            this.taskDraft = draft;
+            this.goTasks();
+          }}>
+          <nr-icon name="clock" size="small"></nr-icon><span class="attach-label">Schedule this</span>
+        </button>
+        <button class="attach-row" role="menuitem"
+          @mouseenter=${() => { this.attachSub = ""; }}
+          @click=${() => { this.shutAttach(); this.openSettings("Connectors"); }}>
           <nr-icon name="share" size="small"></nr-icon><span class="attach-label">Manage connectors</span>
         </button>
         ${this.servers.length === 0 ? nothing : html`
           <div class="attach-rule"></div>
           ${this.servers.map((s) => this.attachConnector(s))}`}
       </div>`;
+  }
+
+  /* Going to the task page.
+   *
+   *  A push and not a replace: /tasks is a place, so Back returns to whatever
+   *  was on screen — the conversation, usually — exactly as it does for
+   *  Settings. The path is pushed only when it is not already the address,
+   *  because arriving ON /tasks runs this too and a duplicate entry means one
+   *  Back press that appears to do nothing. */
+  private goTasks(): void {
+    this.view = "tasks";
+    if (location.pathname !== "/tasks") { history.pushState({ tasks: true }, "", "/tasks"); }
+  }
+
+  /* What is in the composer right now, or "".
+
+     Read through the chatbot's shadow root, the same way `composerCard` finds
+     the input card. `document.querySelector` answers null for anything in
+     here — every one of these elements lives in a shadow root — and the
+     component exposes no property for its draft. Reading is where this stops:
+     writing into somebody else's shadow DOM is how a vendored component gets
+     patched by accident. */
+  private draftText(): string {
+    const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
+    const box = chat?.shadowRoot?.querySelector("[contenteditable]") as HTMLElement | null;
+    return (box?.innerText ?? "").trim();
   }
 
   /* The skills submenu.
@@ -2582,9 +3650,12 @@ export class AgentConsole extends LitElement {
      was invisible — the box was there and the pixels were cut off. Fixed
      escapes the clip; the coordinates are the price. */
   private openSub(which: string, e: Event, hovering = false): void {
-    // Hover opens and never closes: a pointer crossing the row on its way to
-    // the connectors below would otherwise flicker the submenu open and shut.
-    // Closing is the click's job, or leaving the menu's.
+    // Hover opens and never closes ITSELF: a pointer crossing this row on its
+    // way down would otherwise flicker the submenu open and shut. What closes
+    // it is landing on a DIFFERENT row — each sibling clears `attachSub` on
+    // mouseenter — or clicking, or leaving the menu. Without that the flyout
+    // stayed open over the rows below it, so the menu showed two levels at
+    // once and the pointer was inside neither.
     if (this.attachSub === which) { if (!hovering) { this.attachSub = ""; } return; }
     this.subFind = "";
     const button = e.currentTarget as HTMLElement;
@@ -2628,7 +3699,8 @@ export class AgentConsole extends LitElement {
     const unusable = s.authKind !== "" && s.authKind !== "none"
       && (held?.state ?? "none") === "none";
     return html`
-      <div class="attach-row conn-row" role="menuitem">
+      <div class="attach-row conn-row" role="menuitem"
+        @mouseenter=${() => { this.attachSub = ""; }}>
         <span class="attach-mark" style=${entry === undefined ? "" : `color:${entry.tint}`}>
           ${entry === undefined
             ? html`<nr-icon name="plug" size="small"></nr-icon>`
@@ -2740,147 +3812,180 @@ export class AgentConsole extends LitElement {
     // properties and not the HTMLElement half — asking it for shadowRoot is a
     // compile error even though every element has one.
     const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
-    return chat?.shadowRoot?.querySelector(".input-box__input") as HTMLElement | null;
+    // `?? null` for the reason composerCard() spells out: the optional chain
+    // yields undefined and the cast claims null, so a caller's `=== null`
+    // check passes something that is not an element.
+    return (chat?.shadowRoot?.querySelector(".input-box__input") as HTMLElement | null) ?? null;
   }
 
-  /* Open, filter or close the slash menu as the composer changes.
-
-     The rule is narrow on purpose: a lone "/word" and nothing else. Anything
-     with a space in it is a sentence that happens to start with a slash — a
-     path, a fraction, a date — and a menu that opened over those would be in
-     the way far more often than it helped. `input` is composed, so this fires
-     from inside the component's shadow root without the component knowing. */
-  private onComposerInput() {
-    // The full list is what the menu searches, and it is fetched the first
-    // time a slash is typed rather than on load — same reasoning as the
-    // gallery: a console nobody asks should not have asked.
-    if (this.allSkills.length === 0) { void this.loadAllSkills(); }
-    const text = (this.composerBox()?.textContent ?? "").replace(/ /g, " ");
-    const m = /^\/([\w-]*)$/.exec(text.trim());
-    this.slash = m === null ? null : m[1].toLowerCase();
-  }
-
-  private async loadAllSkills(): Promise<void> {
-    if (this.allSkills.length > 0) return;
-    this.allSkills = await listSkills().catch(() => []);
-  }
-
-  /* Choosing from the slash menu: pin the skill and take the "/…" back out.
-     The composer is emptied rather than left holding the typed name — the name
-     was the way of asking, not part of the message, and leaving it would send
-     "/make-doc" to the model as if it were a sentence. */
-  private pickSlash(row: SlashRow) {
-    if (row.kind === "agent") {
-      this.agentId = row.key;
-    } else {
-      void this.pin(row.key);
-    }
-    const label = row.kind === "agent" ? row.name : row.key;
-    const box = this.composerBox();
-    if (box !== null) {
-      // Left in the box, not cleared. A pin with an empty composer reads as
-      // nothing having happened; the command staying put is what says the
-      // choice landed. ChatSession takes this exact string back off the front
-      // of the next send, so it is visible without being said.
-      const prefix = "/" + label + " ";
-      this.session.slashPrefix = prefix;
-      box.textContent = prefix;
-      const at = document.createRange();
-      at.selectNodeContents(box);
-      at.collapse(false);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(at);
-      // The component tracks its own emptiness for the placeholder and the
-      // send button, and it learns about this edit the same way it learns
-      // about typing.
-      box.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-      box.focus();
-    }
-    this.slash = null;
-  }
-
-  /* Keys the slash menu owns while it is open, and only then.
-
-     Enter is the one that matters: with the menu up it takes the first match
-     instead of sending, because "/make-doc" is not a message and sending it
-     would put a command in the transcript. Escape dismisses without touching
-     what was typed, so a slash that was genuinely the start of a sentence can
-     be carried on with. Everything else falls through to the component —
-     stopping keys it needs is how a composer stops accepting text. */
-  /* Bound once, so the capture listener can be taken off again. */
-  private readonly composerKey = (e: KeyboardEvent) => { this.onComposerKey(e); };
-
-  private onComposerKey(e: KeyboardEvent) {
-    if (this.slash === null) return;
-    if (e.key === "Escape") { this.slash = null; e.stopPropagation(); return; }
-    if (e.key !== "Enter" || e.shiftKey) return;
-    const rows = this.slashMatches();
-    if (rows.length === 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    this.pickSlash(rows[0]);
-  }
-
-  /* The rows a slash query matches, in the order the menu draws them. */
-  private slashMatches(): SlashRow[] {
-    const q = this.slash ?? "";
-    const skill = (s: SkillRow): SlashRow => ({
-      kind: "skill", key: s.skillName, name: s.skillName, why: s.description,
-      icon: capIcon(s.skillName), on: this.pinned === s.skillName,
-    });
-    // Agents, but only where choosing one still means anything.
+  /** The composer's own bordered box — `.input-container`, the element that
+   *  draws the rounded outline a person sees. `.input-box` is its outer
+   *  wrapper and carries padding, which is why joining to that one left a
+   *  band of empty space while every measurement said the edges met. The
+   *  completion rows are appended INTO this, so the card encloses them. */
+  private composerCard(): HTMLElement | null {
+    const chat = this.renderRoot.querySelector("nr-chatbot") as Element | null;
+    // `?? null`, and it is load-bearing. An optional chain that short-circuits
+    // yields UNDEFINED; the cast on the end says null. Every caller checks
+    // `=== null`, so undefined walks past all of them and the next line reads
+    // a property off it.
     //
-    // The header offers its picker on a NEW conversation and prints a name on
-    // an existing one, because the agent answering a thread is fixed once that
-    // thread exists. A slash row that switched it mid-conversation would be
-    // offering something the rest of the console refuses, so this follows the
-    // same condition rather than inventing a second rule.
+    // There is no chatbot exactly when the centre column is something else —
+    // the Knowledge page and the Starting points page — so this fires on those
+    // two screens and nowhere else, from `updated`, several times per visit.
+    // The screens look fine while filling the console with uncaught errors.
     //
-    // Servers are deliberately absent. An MCP server is attached to an agent
-    // in Settings; there is no per-conversation act to perform on one, and a
-    // row that only reports something is a row that does nothing when pressed
-    // — the same reason the gallery lists them without making them choosable.
-    const agents: SlashRow[] = this.threadId !== "" ? [] : this.agents.map((a) => ({
-      kind: "agent", key: a.id, name: a.agentName,
-      why: a.description === "" ? "Agent" : a.description,
-      icon: "user", on: a.id === this.agentId,
-    }));
-    // A bare slash offers the shelf, not the warehouse. Every skill on a
-    // deployment with fourteen of them is a menu that covers the composer and
-    // asks you to read it — and the featured ones are already the operator's
-    // answer to "which of these does anyone want". Typing widens the search to
-    // all of them, which is the point at which you have said what you are
-    // looking for.
-    if (q === "") return this.capabilities.map(skill).slice(0, SLASH_ROWS);
-    const hits = [
-      ...this.allSkills.filter((s) =>
-        (s.skillName + " " + s.description).toLowerCase().includes(q)).map(skill),
-      ...agents.filter((a) => (a.name + " " + a.why).toLowerCase().includes(q)),
-    ];
-    return hits.slice(0, SLASH_ROWS);
+    // This has now been fixed twice: once when joinHints threw on it, and
+    // again after the function was edited for `.input-container` and the cast
+    // came back with the edit. If it is touched a third time, keep the `??`.
+    return (chat?.shadowRoot?.querySelector(".input-container") as HTMLElement | null) ?? null;
   }
 
-  /* What the + menu's rows do. nr-chatbot handles the two file rows itself and
-     leaves the rest to whoever is listening; this is that listener. Unknown
-     ids fall through on purpose — the component may grow rows of its own. */
-  private async onAttachPick(e: Event) {
-    const id = (e as CustomEvent).detail?.item?.id as string | undefined;
-    if (id === "pick:skills") { await this.openShelf("skills"); }
-    else if (id === "pick:connectors") { await this.openShelf("connectors"); }
-    else if (id === "pick:plugins") { await this.openShelf("plugins"); }
+
+  /* The completion list, INSIDE the composer's own box.
+   *
+   * Not a panel under it. The design this follows is one card that grows: the
+   * field, a full-width hairline, then the suggestions — one border around
+   * all of it, no second rounded box, no seam to align. Every version of this
+   * that positioned a separate element next to the composer was two boxes
+   * pretending, and it read as two boxes however carefully the edges were
+   * measured, because it was two boxes.
+   *
+   * So the rows are appended into `.input-container` in nr-chatbot's shadow
+   * root — the element that draws the border — and the card encloses them
+   * because they are its children. Built with DOM calls rather than a Lit
+   * template: this is somebody else's shadow root, Lit renders into roots it
+   * owns, and a template here would need its own render target inside a tree
+   * the component rebuilds. `textContent` for every string, so a suggestion
+   * cannot carry markup even though it comes from our own index.
+   *
+   * Rebuilt only when the rows or the cursor actually change — `updated` runs
+   * on every render, and rebuilding this on each keystroke would take the
+   * focus out of the field mid-word. */
+  private hintsDrawn = "";
+  private drawHints(): void {
+    const card = this.composerCard();
+    if (card === null) { return; }
+    // The column that holds the wordmark and the composer. `main.empty` is a
+    // centred flex, so anything that grows inside it moves everything above
+    // it upward — see the pin below.
+    const column = this.renderRoot.querySelector("main") as HTMLElement | null;
+
+    const held = card.querySelector(".joule-hints") as HTMLElement | null;
+    const want = this.hints.length === 0 ? "" : `${this.hintAt}:${this.hints.join("\u0000")}`;
+    if (want === this.hintsDrawn && (want === "") === (held === null)) { return; }
+    this.hintsDrawn = want;
+
+    if (this.hints.length === 0) {
+      held?.remove();
+      // Give the column back to the layout.
+      card.style.transform = "";
+      if (column !== null) {
+        column.style.justifyContent = "";
+        column.style.paddingTop = "";
+      }
+      return;
+    }
+
+    /* Hold the whole column still, not just the card.
+     *
+     * `main.empty` centres the wordmark and the composer as one group, so a
+     * card that grows pushes BOTH up by half its growth — the wordmark drifts
+     * toward the top of the window and the line being typed slides out from
+     * under the cursor. An earlier version pinned the card alone with a
+     * transform, which fixed the field and left the wordmark moving: the same
+     * bug, half solved, and more obvious for it.
+     *
+     * So the centring is swapped for the offset it had produced, measured the
+     * moment the list opens and held for as long as it is open. Everything
+     * above the card stays exactly where it was and the card grows downward
+     * into the space below, which is what centring was going to leave empty
+     * anyway. */
+    if (column !== null && held === null) {
+      const free = Math.round(
+        (column.firstElementChild?.getBoundingClientRect().top ?? 0)
+        - column.getBoundingClientRect().top);
+      if (free > 0) {
+        column.style.justifyContent = "flex-start";
+        column.style.paddingTop = `${free}px`;
+      }
+    }
+
+    const box = held ?? document.createElement("div");
+    box.className = "joule-hints";
+    box.setAttribute("role", "listbox");
+    box.setAttribute("aria-label", "Suggestions");
+    box.textContent = "";
+
+    const typed = (this.composerBox()?.textContent ?? "").trim();
+    for (const [i, said] of this.hints.entries()) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = i === this.hintAt ? "joule-hint on" : "joule-hint";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", i === this.hintAt ? "true" : "false");
+
+      const mark = document.createElement("span");
+      mark.className = "joule-hint-mark";
+      mark.textContent = "\u2315"; // a magnifier, drawn as text: no icon set reaches in here
+      row.append(mark);
+
+      const text = document.createElement("span");
+      text.className = "joule-hint-text";
+      // What was typed, held back; the completion in the reading weight. Two
+      // spans and textContent, so the split can never become markup.
+      if (typed !== "" && said.toLowerCase().startsWith(typed.toLowerCase())) {
+        const had = document.createElement("span");
+        had.className = "joule-hint-had";
+        had.textContent = said.slice(0, typed.length);
+        const rest = document.createElement("b");
+        rest.textContent = said.slice(typed.length);
+        text.append(had, rest);
+      } else {
+        text.textContent = said;
+      }
+      row.append(text);
+
+      // The pointer chooses AND sends — see takeHint. mousedown is prevented
+      // so the field does not lose focus before the click lands.
+      row.addEventListener("mousedown", (e) => e.preventDefault());
+      row.addEventListener("click", () => { void this.takeHint(said, true); });
+      box.append(row);
+    }
+
+    if (held === null) { card.append(box); }
+
+    /* How tall the list may be, measured against what is actually visible.
+     *
+     * The card grows to hold its rows, and on a phone six rows plus the field
+     * and the tool row is taller than the screen — so the card outgrew the
+     * viewport and pushed the very field being typed in off the top. A
+     * suggestion list that hides the words it is completing is worse than no
+     * list.
+     *
+     * `visualViewport` and not `vh`: with a keyboard up, vh is still the
+     * whole screen and the space a person can see is roughly half of it. What
+     * is left for the list is whatever the visible viewport has after the
+     * field, the tool row and a margin — floored, so it never collapses to
+     * nothing, and only applied when it actually bites. */
+    const view = window.visualViewport?.height ?? window.innerHeight;
+    const above = card.getBoundingClientRect().top;
+    const room = Math.round(view - above - 140);
+    box.style.maxHeight = `${Math.max(132, room)}px`;
+
+    // And if the card still runs past the bottom — a docked composer in a
+    // conversation grows upward, but a centred one on the home screen grows
+    // both ways — bring it back into view rather than leaving the person
+    // typing at an edge they cannot see.
+    // And if the card still runs past an edge — a phone with the keyboard up
+    // has little room either way — bring it back rather than leaving somebody
+    // typing at an edge they cannot see.
+    const after = card.getBoundingClientRect();
+    if (after.bottom > view || after.top < 0) {
+      card.scrollIntoView({ block: "nearest" });
+    }
   }
 
-  /* The slash menu, over the composer.
-
-     A list and not the gallery's cards: this one is read while typing, with
-     the answer usually one or two rows down, and a grid of cards would push
-     the third match off a phone. It is the same content in the shape the
-     moment calls for.
-
-     Fixed and bottom-anchored rather than positioned against the composer:
-     the composer moves as it grows, and a menu that has to be re-measured
-     every keystroke is a menu that lags a keystroke behind. */
   private slashMenu() {
     if (this.slash === null) return nothing;
     const rows = this.slashMatches();
@@ -2985,6 +4090,109 @@ export class AgentConsole extends LitElement {
       </div>`;
   }
 
+  /** Which tab the Settings overlay opens on. */
+  @state() private settingsTab = "Preferences";
+
+  /* Set by pages/settings/[[tab]].ts, which is the /settings route. A
+     property rather than a router read: the console is mounted by three
+     different pages and none of the others should have to know this exists.
+     Empty — every other page — leaves Settings closed, as before. */
+  @property({ attribute: false }) openSettingsAt = "";
+
+  /* Arriving ON an article's own address, handed in by pages/discover/[id].ts.
+   * A property rather than a router read, for the reason `openSettingsAt`
+   * carries: the console is mounted by several pages and none of the others
+   * should have to know this exists. Empty — every other page — leaves the
+   * console where it was. */
+  @property({ attribute: false }) openArticleAt = "";
+
+  /* Which screen this page IS, decided by the route rather than by a click.
+   *
+   * A property and not a `location.pathname` read, and that difference is
+   * what makes these routes server-render at all: `connectedCallback` never
+   * runs on the server, so a view chosen there is a view the first paint does
+   * not have. `willUpdate` runs in both places, reads this, and the server
+   * emits the real screen instead of an empty shell that fills in a beat
+   * later. Empty — the conversation routes — leaves the console on chat. */
+  @property({ attribute: false }) startView = "";
+
+  /** The Discover feeds, read by the route's loader. Same bargain as
+   *  `seedTurns`: on screen in the first frame, then refreshed by the element
+   *  itself so a page held open does not go stale. */
+  @property({ attribute: false }) seedFeeds: unknown = null;
+
+  /** One article, likewise. */
+  @property({ attribute: false }) seedArticle: unknown = null;
+
+  /* Open Settings, and put it in the address bar.
+   *
+   * The directory overlay (the Skills/Agents/Connectors tabs) is for picking
+   * something mid-sentence — it hands the conversation a skill or an agent
+   * and closes. Settings is where those things are MANAGED, and the two had
+   * drifted into answering the same questions from two different surfaces:
+   * the rail's Agents row opened the picker, so "change what this agent can
+   * reach" needed a different door than the one you had just used.
+   *
+   * So the rail goes to Settings, and Settings has an address: /settings and
+   * /settings/<tab>. A panel worth linking to is worth a URL — and the back
+   * button then closes it, which is what every person tries first. */
+  private openSettings(tab: string) {
+    this.settingsTab = tab;
+    this.settings = true;
+    this.gallery = "";
+    const path = tab === "Preferences" ? "/settings" : `/settings/${tab.toLowerCase()}`;
+    if (location.pathname !== path) {
+      history.pushState({ settings: tab }, "", path);
+    }
+  }
+
+  /** Close Settings and give the address back to the conversation. */
+  private closeSettings() {
+    this.settings = false;
+    if (location.pathname.startsWith("/settings")) {
+      const back = this.threadId === "" ? "/" : `/c/${this.threadId}`;
+      history.pushState({}, "", back);
+    }
+  }
+
+  /* Open an article, and put it in the address bar.
+   *
+   * Settings' bargain, for the same reason: a story is a thing people send
+   * each other, so it needs a URL, and once it has one Back has to close it.
+   * `/discover/<id>` is served by a route of its own (pages/discover/[id].ts)
+   * so a cold link lands here rather than on a 404 — but a click from the
+   * feed never navigates, it pushes. */
+  private openArticle(id: string) {
+    this.articleId = id;
+    this.view = "article";
+    this.nav = false;
+    const path = `/discover/${encodeURIComponent(id)}`;
+    if (location.pathname !== path) {
+      history.pushState({ article: id }, "", path);
+    }
+  }
+
+  /* Switch to a screen AND put it in the address bar.
+   *
+   * The rail used to flip `view` and leave the URL alone, so every standalone
+   * screen was a place you could be and not a place you could link to — Back
+   * left the app, a reload lost where you were, and /tasks answered the chat
+   * home. One call does both now, and the route files under pages/ answer the
+   * same addresses cold. */
+  private go(view: string, path: string) {
+    this.view = view as typeof this.view;
+    if (location.pathname !== path) { history.pushState({ view }, "", path); }
+  }
+
+  /** Back to the feed, and give the address back to it. */
+  private closeArticle() {
+    this.view = "discover";
+    this.articleId = "";
+    if (location.pathname.startsWith("/discover/")) {
+      history.pushState({}, "", "/discover");
+    }
+  }
+
   private openShelf(shelf: Shelf) {
     this.galleryFind = "";
     this.skillOpen = "";
@@ -3012,6 +4220,7 @@ export class AgentConsole extends LitElement {
     }
     if (this.plugins.length === 0) {
       this.plugins = await listPlugins().catch(() => []);
+      this.cardPlugins = await listCardPlugins().catch(() => []);
       const owner = new Map<string, string>();
       for (const p of this.plugins) {
         const items = await pluginItems(p.id).catch(() => []);
@@ -3048,11 +4257,21 @@ export class AgentConsole extends LitElement {
         from: this.provenance(s.id, "local", ""),
       }));
     }
-    return this.plugins.map((p) => ({
+    // Both kinds, in one shelf. A card plugin says so in its provenance line
+    // rather than in a fifth tab: what a person wants from this list is "what
+    // did I install", and splitting that by which table it landed in is the
+    // implementation talking.
+    const cards: GalleryRow[] = this.cardPlugins.map((p) => ({
+      key: p.id, name: p.pluginName, why: p.description,
+      on: false, icon: "credit-card", source: "repo", id: p.id,
+      from: (p.enabled ? "Cards" : "Cards · off")
+        + (p.version === "" ? "" : " · v" + p.version),
+    }));
+    return cards.concat(this.plugins.map((p) => ({
       key: p.id, name: p.pluginName, why: p.description, on: false,
       icon: "cube", source: "repo", id: p.id,
       from: p.version === "" ? "Installed" : "Installed · v" + p.version,
-    }));
+    })));
   }
 
   /* The line under a card's name. A plugin's receipt wins over the row's own
@@ -3499,6 +4718,28 @@ export class AgentConsole extends LitElement {
      conversation, and the flag offers its files as a starting point, not its
      transcript as reading. */
   private startsPage() {
+    /* The same page furniture as the artifacts library, deliberately.
+     *
+     * These are the console's two browse-and-search pages and they were built
+     * a month apart into two different shapes: this one had a bare heading,
+     * cards the size of a chip, no way to search, and the agent's ROW ID
+     * printed under each title — "a-docflow-gemini", a database key sitting
+     * where a person's eye goes for "who made this". Same job, same
+     * furniture.
+     *
+     * The agent is resolved to its name here rather than inside the card:
+     * the list is already loaded, and a card that looks something up renders
+     * empty on first paint. */
+    const named = (id: string) => {
+      const held = this.agents.find((a) => a.id === id);
+      return held === undefined || held.agentName === "" ? "" : held.agentName;
+    };
+    const q = this.startsFind.trim().toLowerCase();
+    const shown = q === ""
+      ? this.offers
+      : this.offers.filter((o) =>
+          (o.title + " " + named(o.agentId)).toLowerCase().includes(q));
+
     return html`
       <div class="starts-page">
         <!-- The way out. This view replaces the whole conversation column, so
@@ -3513,28 +4754,54 @@ export class AgentConsole extends LitElement {
         <h2>Starting points</h2>
         <p class="starts-intro">Conversations people have offered to start from.
           Remixing one opens a conversation of your own with its files already in it.</p>
+
+        ${this.offers.length < 5 ? nothing : html`
+          <label class="starts-find">
+            <nr-icon name="search" size="small"></nr-icon>
+            <input type="text" .value=${this.startsFind}
+              placeholder="Search starting points…" aria-label="Search starting points"
+              @input=${(e: Event) => {
+                this.startsFind = (e.target as HTMLInputElement).value; }}>
+          </label>`}
+
         ${this.offers.length === 0
           ? html`<p class="empty">Nothing is on offer yet. Open a conversation you
               are pleased with and press the share button in its header.</p>`
-          : html`<div class="offer-grid">
-              ${this.offers.map((o) => html`
-                <div class="offer">
-                  <!-- A card with a blank name is a card nobody can choose.
-                       An offered conversation usually has a title by now (the
+          : shown.length === 0
+            ? html`<p class="empty">Nothing matches “${this.startsFind.trim()}”.</p>`
+            : html`<div class="offer-grid">
+              ${shown.map((o) => html`
+                <!-- The CARD opens it; Remix is the second, quieter act. Two
+                     buttons of equal weight made a person choose between two
+                     verbs before they knew what they were choosing — and the
+                     heavier of the two was the one that only reads. -->
+                <div class="offer" role="button" tabindex="0"
+                  title=${o.title === "" ? "Untitled conversation" : o.title}
+                  @click=${() => { void this.openOffered(o.id); }}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void this.openOffered(o.id);
+                    }
+                  }}>
+                  <!-- A card with a blank name is a card nobody can choose. An
+                       offered conversation usually has a title by now (the
                        engine names one from its first message), but one whose
-                       naming call never landed still has to read as something. -->
+                       naming call never landed still has to read as
+                       something. -->
                   <div class="offer-name">${o.title === "" ? "Untitled conversation" : o.title}</div>
-                  <div class="offer-meta">${o.agentId}</div>
+                  <div class="offer-meta">
+                    ${named(o.agentId) === ""
+                      ? html`<span>Shared conversation</span>`
+                      : html`<span>${named(o.agentId)}</span>`}
+                  </div>
                   <div class="offer-acts">
-                    <!-- Open reads it; Remix copies it. Both, because choosing
-                         a starting point without looking at it first is
-                         choosing by its title alone. -->
-                    <button class="offer-open" @click=${() => { void this.openOffered(o.id); }}>
-                      Open
-                    </button>
-                    <button class="offer-remix" @click=${() => { void this.remix(o.id); }}>
-                      Remix
-                    </button>
+                    <button class="offer-remix" @click=${(e: Event) => {
+                      // The card behind this one opens; this copies. Without
+                      // stopping the bubble a Remix would do both.
+                      e.stopPropagation();
+                      void this.remix(o.id);
+                    }}>Remix</button>
                   </div>
                 </div>`)}
             </div>`}
@@ -3542,7 +4809,13 @@ export class AgentConsole extends LitElement {
   }
 
   private async openStarts(): Promise<void> {
-    this.view = "starts";
+    // Address as well as view — /starting-points is a route now, so a link to
+    // it lands here and Back leaves it.
+    /* `/starts` and not `/starting-points`: the hyphenated path answered 404
+       at the EDGE while the container served it 200, so something in front of
+       this app does not pass it. Single-segment paths all pass, and the name
+       is no worse. */
+    this.go("starts", "/starts");
     this.nav = false;
     this.offers = await replayableThreads().catch(() => []);
   }
@@ -3725,6 +4998,34 @@ export class AgentConsole extends LitElement {
     const path = e.composedPath() as HTMLElement[];
     const diff = path.find((el) => el?.getAttribute?.("data-diff-path"));
     const card = path.find((el) => el?.getAttribute?.("data-open-path"));
+
+    /* A control ON a card, asking for something to be done.
+     *
+     * The card COMPOSES A TURN rather than calling anything: pressing "Move
+     * to In Progress" sends the sentence a person would have typed, and the
+     * model calls the tool. Chosen over letting a card reach the connector
+     * directly, and the reason is what each option costs. A direct call needs
+     * the sandbox to have network and a credential — the two things the
+     * sandbox exists to deny. A card→engine write path avoids that but
+     * changes state with no conversation around it: nothing in the transcript
+     * records that the issue moved, and the record IS the point of doing this
+     * in a chat rather than in Linear.
+     *
+     * Going through the composer means an action from a card is
+     * indistinguishable from one a person asked for — same tools, same
+     * grant, same steps card, same audit trail. It costs a model round trip
+     * for what looks like a dropdown, and that is the honest price.
+     *
+     * The text is the plugin's, and it is a MESSAGE, never markup: it goes
+     * through the same send path as typing, so nothing here can inject
+     * anything the composer could not. */
+    const acts = path.find((el) => el?.getAttribute?.("data-card-send"));
+    if (acts) {
+      const said = acts.getAttribute("data-card-send") ?? "";
+      if (said.trim() !== "") { await this.session.sendMessage(said.trim()); }
+      return;
+    }
+
     if (!diff && !card) return;
     this.rail = "artifacts";
     this.railClosed = false;
@@ -3780,7 +5081,7 @@ export class AgentConsole extends LitElement {
       <div class="scrim nav" @click=${() => { this.nav = false; }}></div>
       <!-- The account menu raises two different things and the rail knows the
            difference: "Preferences" is this event, a person's own panel, and
-           "Deployment settings" navigates to /admin from the rail itself. It
+           "Admin console" navigates to /admin from the rail itself. It
            was briefly one event doing the second job, which is why pressing
            Preferences opened the operator's page.
 
@@ -3800,28 +5101,63 @@ export class AgentConsole extends LitElement {
       </div>`}
 
       <console-sidebar
+        @mouseleave=${() => { this.railPeek = false; }}
         .threads=${this.threads}
         .activeId=${this.threadId}
         .me=${this.me}
         @pick-thread=${(e: CustomEvent) => { this.view = "chat"; this.nav = false; this.open(e.detail.id); }}
         @new-thread=${() => { this.view = "chat"; this.nav = false; this.fresh(); }}
-        @collapse=${() => { this.nav = false; }}
-        @open-settings=${() => { this.nav = false; this.settings = true; }}
+        @collapse=${() => { this.toggleRail(); }}
+        @open-settings=${() => { this.nav = false; this.openSettings("Preferences"); }}
         @open-signin=${() => { this.nav = false; this.signIn = true; }}
-        @open-knowledge=${() => { this.nav = false; this.view = "knowledge"; }}
+        @open-knowledge=${() => { this.nav = false; this.go("knowledge", "/knowledge"); }}
+        @open-library=${() => { this.nav = false; this.go("library", "/artifacts"); }}
+        @open-discover=${() => { this.nav = false; this.articleId = ""; this.go("discover", "/discover"); }}
         @open-canvas=${() => { this.view = "canvas"; }}
         @open-starts=${() => { this.nav = false; void this.openStarts(); }}
-        @open-agents=${() => { this.nav = false; void this.openShelf("agents"); }}
-        @open-connectors=${() => { this.nav = false; void this.openShelf("connectors"); }}
+        @open-tasks=${() => { this.nav = false; this.taskDraft = ""; this.goTasks(); }}
+        @open-agents=${() => { this.nav = false; this.openSettings("Agents"); }}
+        @open-connectors=${() => { this.nav = false; this.openSettings("Connectors"); }}
       ></console-sidebar>
 
-      <div class="center">
-        ${this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
+      <!-- The two Discover events are caught HERE rather than on each
+           element, because they travel between two sibling views: the feed
+           raises "open-article" and is then replaced by the article, which
+           raises "close-article" and is replaced by the feed. A listener on
+           either one would be listening on the element that is going away. -->
+      <!-- The way back, when the rail is hidden.
+           The rail's own collapse button lives inside the rail, so once the
+           rail is gone so is it; and the header's toggle is inside the CHAT
+           branch, so Discover, Tasks, Artifacts and Knowledge never had one at
+           all. A person who collapsed the rail on any of those screens had no
+           control anywhere on the page to bring it back. This one sits on the
+           shell, outside every branch, and exists only while there is
+           something to undo. -->
+      ${this.railed ? "" : html`
+        <button class="unrail" title="Sidebar"
+          @mouseenter=${() => { this.railPeek = true; }}
+          @focus=${() => { this.railPeek = true; }}
+          @click=${() => { this.railPeek = false; this.toggleRail(); }}>
+          <nr-icon name="panel-left" size="small"></nr-icon>
+        </button>`}
+
+      <div class="center"
+        @open-article=${(e: CustomEvent) => this.openArticle(e.detail.id as string)}
+        @close-article=${() => this.closeArticle()}>
+        ${this.view === "article" ? html`<discover-article
+              .storyId=${this.articleId}
+              .seed=${this.seedArticle}
+              .agentId=${this.agentId}
+              .choiceId=${this.choiceId}></discover-article>`
+          : this.view === "discover" ? html`<discover-page .seed=${this.seedFeeds}></discover-page>`
+          : this.view === "tasks" ? html`<console-tasks .draft=${this.taskDraft}></console-tasks>`
+          : this.view === "library" ? html`<artifact-library></artifact-library>`
+          : this.view === "knowledge" ? html`<knowledge-page></knowledge-page>`
           : this.view === "canvas" ? html`<agent-canvas .focusAgent=${this.canvasFocus}></agent-canvas>`
           : this.view === "starts" ? this.startsPage() : html`
         <header>
           <button class="icon nav" title="Conversations"
-            @click=${() => { this.nav = !this.nav; }}>
+            @click=${() => { this.toggleRail(); }}>
             <nr-icon name="panel-left" size="medium"></nr-icon>
           </button>
           <!-- Starting a conversation was reachable only from inside the
@@ -3868,8 +5204,72 @@ export class AgentConsole extends LitElement {
               @click=${() => { this.hmenu = !this.hmenu; }}>
               <nr-icon name="more-vertical" size="medium"></nr-icon>
             </button>`}
-          <button class="icon" title="Artifacts" aria-pressed=${this.rail === "artifacts"}
-            @click=${() => this.show("artifacts")}><nr-icon name="folder" size="medium"></nr-icon></button>
+          <!-- The operator's way in, and only theirs.
+               isAdmin reads null as "community deployment, everyone is the
+               operator", which is the same reading the rail's Deployment row
+               makes — so this appears on a box with no sign-in at all, and
+               that is correct: there is nobody to hide it from.
+
+               A cpu glyph, not a cog. The cog is Settings — the row in the
+               account menu, a different place — and two cogs in one header
+               would be two names for one idea. This is the machine the
+               deployment runs as, which is what is behind the door.
+
+               Checked against icon-paths before it was used, and it is the
+               second name tried: "sliders" reads as the obvious choice and is
+               not in the set, which nr-icon renders by printing that WORD
+               where the mark should be. -->
+          ${!isAdmin(this.me) ? nothing : html`
+            <button class="icon" title="Deployment" aria-expanded=${this.amenu}
+              @click=${() => { this.amenu = !this.amenu; this.hmenu = false; }}>
+              <nr-icon name="cpu" size="medium"></nr-icon>
+            </button>`}
+          <!-- Settings, on a phone only.
+               The note above says two cogs in one header would be two names
+               for one idea, and it is right — on a DESKTOP, where the cog is
+               a row in the account menu at the bottom of a rail that is
+               always on screen. Below 1025px that rail is an off-canvas
+               drawer, so the same row costs opening the drawer, finding the
+               account block and reading a menu: three moves to reach the
+               place a person goes to change how their console behaves. The
+               header is the only chrome a phone keeps, so this is where it
+               belongs there — and it is hidden at widths where the rail is a
+               column, which is what keeps it from being the second cog. -->
+          <button class="icon settings-here" title="Settings"
+            @click=${() => { this.hmenu = false; this.openSettings("Preferences"); }}>
+            <nr-icon name="settings" size="medium"></nr-icon>
+          </button>
+          <!-- The count comes from cards(), which is the same join the cards
+               under the messages are drawn from — one entry per artifact at
+               its newest version, so a file saved eight times counts once.
+               No badge at zero: an empty conversation should not wear a 0. -->
+          <button class="icon count" title=${this.cards().length === 0 ? "Artifacts"
+              : `Artifacts (${this.cards().length})`}
+            aria-pressed=${this.rail === "artifacts"}
+            @click=${() => this.show("artifacts")}><nr-icon name="folder" size="medium"></nr-icon>${
+            this.cards().length === 0 ? nothing
+              : html`<span class="badge" aria-hidden="true">${
+                  this.cards().length > 99 ? "99+" : this.cards().length}</span>`}</button>
+          ${!this.amenu ? nothing : html`
+            <div class="hmenu-scrim" @click=${() => { this.amenu = false; }}></div>
+            <!-- Every tab of the deployment area, at its own address. The
+                 first row is the area itself and the rest are the nested
+                 routes under it, so this menu is a shortcut past a screen
+                 rather than a second navigation to keep in step — the rail
+                 inside /admin is still the way around once you are there.
+
+                 Grouped exactly as that rail groups them (src/settings.ts's
+                 TABS), because a person who learns the order in one place
+                 should not have to learn it again in the other. -->
+            <div class="hmenu amenu" role="menu">
+              ${ADMIN_LINKS.map((row) => row.head !== undefined
+                ? html`<div class="amenu-head">${row.head}</div>`
+                : html`
+                  <button role="menuitem"
+                    @click=${() => { this.amenu = false; location.assign(row.href!); }}>
+                    <nr-icon name=${row.icon!} size="small"></nr-icon>${row.label}
+                  </button>`)}
+            </div>`}
           ${!this.hmenu ? nothing : html`
             <div class="hmenu-scrim" @click=${() => { this.hmenu = false; }}></div>
             <div class="hmenu" role="menu">
@@ -3893,8 +5293,20 @@ export class AgentConsole extends LitElement {
             </button>
           </div>
         </div>`}
-        <main class=${this.session.getState().messages.length === 0
-          ? (this.starts.length > 0 ? "empty has-starts" : "empty") : ""}>
+        <main class=${[
+          this.session.getState().messages.length === 0
+            ? (this.starts.length > 0 ? "empty has-starts" : "empty") : "",
+          // A conversation begun here keeps the card. The answers extend the
+          // composer upward instead of replacing the page with a transcript —
+          // the suggestion list drops down, the conversation grows up, and the
+          // two are the same object. Dropped the moment an OLD conversation is
+          // opened from the rail: that is a transcript somebody came to read,
+          // not a sentence they are still in the middle of.
+          this.compact && this.session.getState().messages.length > 0 ? "compact" : "",
+          // The composer is suggesting, so the layout under it gets out of
+          // the way — see `main.hinting .caps`.
+          this.hints.length > 0 ? "hinting" : "",
+        ].filter((c) => c !== "").join(" ")}>
           <!-- The session is the controller. Messages are not passed in: the
                component reads them from the controller's state, and a second
                binding would fight it. The message-sent event is not listened
@@ -3923,8 +5335,13 @@ export class AgentConsole extends LitElement {
                only the second reached the link. A search answer with
                citations is always past 600 chars, so "all links need two
                taps" was this fold. -->
+          <!-- invertedScroll is column-reverse inside the message list, so in
+               compact mode the newest line sits against the composer and the
+               older ones travel upward. The component's own property; the
+               card's ceiling is a max-height on its messages part. -->
           <nr-chatbot class=${this.session.getState().messages.length > 0 ? "talking" : ""}
             @click=${(e: Event) => { void this.chipClick(e); }}
+            @nr-chatbot-message-sent=${() => { this.dropKeyboard(); }}
             @nr-dropdown-item-click=${(e: Event) => { void this.onAttachPick(e); }}
             @input=${() => { this.onComposerInput(); }}
             .controller=${this.session}
@@ -3932,6 +5349,7 @@ export class AgentConsole extends LitElement {
             .isQueryRunning=${this.busy}
             enable-file-upload
             boxed
+            .invertedScroll=${this.compact && this.session.getState().messages.length > 0}
             welcome-message=${WORDMARK}
             placeholder="Ask ${this.agentName()}…"
             attach-icon="plus"
@@ -3967,7 +5385,15 @@ export class AgentConsole extends LitElement {
         </div>`}`}
       </div>
 
-      ${this.rail === "artifacts"
+      <!-- The files panel belongs to a CONVERSATION and to nothing else.
+           It draws this conversation's artifacts, so on the artifacts library
+           — a page about every conversation — it was a second, narrower list
+           of one thread's files beside a grid of all of them, with no way to
+           tell which thread it belonged to. The same holds for Knowledge and
+           the agent graph: those views replace the conversation column, and a
+           panel about a conversation that is not on screen is a panel about
+           nothing. -->
+      ${this.rail === "artifacts" && this.view === "chat"
         ? html`
           <!-- Rendered with the panel rather than always, unlike the drawer's:
                the drawer element is permanent and only transformed off screen,
@@ -3990,14 +5416,20 @@ export class AgentConsole extends LitElement {
            check. There was briefly a third, separate Preferences panel;
            merged, because two gears beside each other in one menu is a
            choice nobody should have to make. -->
-      ${this.settings ? html`<console-settings .me=${this.me} @close=${() => {
-        this.settings = false;
-        // The settings tab says a change takes effect on the next message with
-        // no restart. That was only true of the server: the header, the agent
-        // picker and the placeholder all read a list fetched once at startup,
-        // so a rename or a disable was invisible here until a page reload.
-        void this.reloadAgents();
-      }}></console-settings>` : ""}
+      <!-- Settings is an OVERLAY and deliberately not a page. It is somewhere
+           you go, change one thing and leave; it has no content of its own to
+           link to, and giving it an address made Back mean two different
+           things depending on how you got there. The app stays behind it,
+           blurred by the scrim, which is what says "you are still here". -->
+      ${this.settings ? html`<console-settings .me=${this.me} .tab=${this.settingsTab as never}
+        @close=${() => {
+          this.closeSettings();
+          // A rename or a disable was invisible here until a reload: the
+          // header, the agent picker and the placeholder all read a list
+          // fetched once at startup.
+          void this.reloadAgents();
+        }}></console-settings>` : ""}
+
     `;
   }
 }
