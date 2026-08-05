@@ -1,8 +1,8 @@
-// Tasks, at its own address.
+// Artifacts, at its own address.
 //
 // A standalone screen of the console, and every standalone screen needs a URL:
 // without one it cannot be linked, reloaded, bookmarked, or reached by Back —
-// and /tasks answered the chat home, which reads as the page having lost its
+// and /artifacts answered the chat home, which reads as the page having lost its
 // data rather than as the page not existing.
 //
 // The reasoning every route file here shares — why the shadow root stays, why
@@ -24,8 +24,8 @@ export async function loader(): Promise<Record<string, never>> {
   return {};
 }
 
-export class PageTasks extends LitElement {
+export class PageArtifacts extends LitElement {
   render() {
-    return html`<agent-console .startView=${"tasks"}></agent-console>`;
+    return html`<agent-console .startView=${"library"}></agent-console>`;
   }
 }

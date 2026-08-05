@@ -48,6 +48,12 @@ const TAB_OF: Record<string, string> = {
   "mcp": "MCP",
   "sign-in": "Sign-in",
   "tracing": "Tracing",
+  // Banner and Search were missing, so /admin/banner and /admin/search both
+  // silently opened Models — a link that looks like it works and lands
+  // somewhere else. Every admin-zone tab in src/settings.ts belongs here; the
+  // header's operator menu links all of them, which is how the gap showed up.
+  "banner": "Banner",
+  "search": "Search",
 };
 
 type LoaderArgs = { params: { tab?: string } };

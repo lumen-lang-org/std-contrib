@@ -20,6 +20,17 @@ type Middleware = (req: { url?: string }, res: {
 }, next: () => void) => void;
 
 const SERVED: Record<string, { file: string; mime: string }> = {
+  // The SVG mark is what a current browser takes — it is the one that follows
+  // the tab strip's theme, so the J is ink on a light strip and white on a
+  // dark one rather than a black square either way.
+  //
+  // NOT at /favicon.svg, which is the name the framework's own <link> uses
+  // (dist/dev-server/index-html.js emits it and this app has no file behind
+  // it). That path answers with the SPA's HTML, and a browser handed HTML
+  // where an image was promised shows no icon at all — which is what joule.sh
+  // did until this line existed. Ours is declared later in head.html and a
+  // later rel=icon wins, so the framework's tag is left alone.
+  "/mark.svg": { file: "mark.svg", mime: "image/svg+xml" },
   "/favicon.ico": { file: "favicon-32.png", mime: "image/png" },
   "/favicon-32.png": { file: "favicon-32.png", mime: "image/png" },
   "/apple-touch-icon.png": { file: "apple-touch-icon.png", mime: "image/png" },

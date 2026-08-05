@@ -311,7 +311,7 @@ export async function readSession(req: IncomingMessage): Promise<AuthUser | null
     const { verifyAccessToken } = await import("@nuraly/lumenjs/dist/auth/token.js");
     try {
       const user = verifyAccessToken(bearer.slice(7), secret);
-      if (user) return user as AuthUser;
+      if (user) return promote(user as AuthUser);
     } catch { /* not a token we issued — try the cookies */ }
   }
 
@@ -323,7 +323,7 @@ export async function readSession(req: IncomingMessage): Promise<AuthUser | null
     const { verifyAccessToken } = await import("@nuraly/lumenjs/dist/auth/token.js");
     try {
       const user = verifyAccessToken(decodeURIComponent(edge[1]), secret);
-      if (user) return user as AuthUser;
+      if (user) return promote(user as AuthUser);
     } catch { /* fall through to the sealed session */ }
   }
 
@@ -347,7 +347,35 @@ export async function readSession(req: IncomingMessage): Promise<AuthUser | null
     }
   }
 
-  return opened.user as AuthUser;
+  return promote(opened.user as AuthUser);
+}
+
+/** The account's roles, plus `admin` when the environment says so.
+ *
+ *  Applied HERE and not only where the X-USER document is built, which is where
+ *  it used to live alone. That was survivable while the only reader was the
+ *  engine; it stopped being survivable when `pages/_middleware.ts` grew a real
+ *  authorisation table, because that table reads `req.nkAuth.user.roles` —
+ *  `hydrateIdentity`'s copy, straight off this function — and `registerUser`
+ *  puts `roles: []` on every row it writes. An operator named in
+ *  AUTH_BUILTIN_ADMINS would have been refused the admin area and every
+ *  configuration route by the console, while the engine behind it considered
+ *  them an admin. One promotion, at the point identity is established, so every
+ *  consumer is looking at the same person.
+ *
+ *  Called on ALL THREE of `readSession`'s returns, which is the part that was
+ *  wrong the first time: the sealed session is the LAST thing it tries, and a
+ *  browser that has just signed in holds `nk-access-token` too — so the edge
+ *  branch returned first, unpromoted, and the admin area stayed shut for the
+ *  one account it had just been opened for. A function with three exits needs
+ *  the invariant on three exits. */
+function promote(user: AuthUser): AuthUser {
+  const email = typeof user.email === "string" ? user.email.toLowerCase() : "";
+  const roles = Array.isArray(user.roles) ? [...user.roles] : [];
+  if (email !== "" && adminEmails().has(email) && !roles.includes("admin")) {
+    roles.push("admin");
+  }
+  return { ...user, roles };
 }
 
 // --- the identity document ---------------------------------------------------
@@ -427,6 +455,53 @@ export function xUserDocument(user: AuthUser): string {
 
 // --- the framework's own routes ----------------------------------------------
 
+/** The request line, rewritten to the absolute URL the BROWSER used.
+ *
+ *  This is the fifth join, and it exists for one line in the framework:
+ *
+ *      const url = new URL(req.url || '/', `http://${req.headers.host}`);
+ *
+ *  — `auth/routes.js`, and the scheme in it is a literal. Every OAuth leg is
+ *  derived from that `url`: `routes/login.js` builds the authorization URL's
+ *  `redirect_uri` as `${url.origin}${config.routes.callback}`, and
+ *  `routes/oidc-callback.js` rebuilds the same string to send with the token
+ *  exchange. Behind TLS termination that is `http://lumen-agents.the-agent.dev/
+ *  __nk_auth/callback` — a callback the provider will refuse to register and
+ *  which would send an authorization code across the open internet if it did.
+ *
+ *  The fix is not to patch that line. `new URL()` ignores its base when the
+ *  first argument is already absolute, so handing the framework an absolute
+ *  request line makes its own arithmetic come out right — pathname, search and
+ *  origin all as the browser sees them, both legs agreeing because both read
+ *  the same `url`.
+ *
+ *  The scheme comes from `X-Forwarded-Proto`, which the gateway sets (and
+ *  therefore overwrites, so a client cannot choose it) in
+ *  snippets/proxy-headers.conf. Absent — a laptop reaching this directly — the
+ *  answer is http and nothing changes, which is what makes this safe to leave
+ *  on in every deployment rather than switching it with an env var.
+ *
+ *  Returns `null` when there is nothing to change, so the caller can leave
+ *  `req.url` alone rather than rewriting it to an equivalent string. */
+function absoluteRequestLine(req: IncomingMessage): string | null {
+  const path = req.url ?? "/";
+  // Already absolute (nothing in this app does this today, but a second
+  // rewriter arriving later should not produce `https://host/https://host/…`).
+  if (/^https?:\/\//i.test(path)) return null;
+
+  const forwarded = req.headers["x-forwarded-proto"];
+  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded) ?? "";
+  // A proxy chain may append rather than replace; the first entry is the one
+  // the browser spoke.
+  const proto = first.split(",")[0]?.trim().toLowerCase() ?? "";
+  if (proto !== "https") return null;
+
+  const host = req.headers.host;
+  if (typeof host !== "string" || host === "") return null;
+
+  return `https://${host}${path}`;
+}
+
 /** `/__nk_auth/*` — login, signup, logout, and the rest of the set.
  *
  *  Answers `true` when it took the request. `req.nkAuth` is set first because
@@ -441,5 +516,18 @@ export async function handleAuth(
   const config = authConfig(await redirectProviders(await socialProviders()));
   (req as any).nkAuth = user ? { user } : null;
   const { handleAuthRoutes } = await import("@nuraly/lumenjs/dist/auth/routes.js");
-  return handleAuthRoutes(config, req, res, db);
+
+  // Always restored, taken or not. The framework has read `req.url` by the time
+  // it returns, and everything after this point — the page router, the proxy —
+  // reads it as a path; one left absolute would be a 404 that happens only
+  // behind TLS, which is the worst kind to go looking for.
+  const original = req.url;
+  const absolute = absoluteRequestLine(req);
+  if (absolute === null) return handleAuthRoutes(config, req, res, db);
+  req.url = absolute;
+  try {
+    return await handleAuthRoutes(config, req, res, db);
+  } finally {
+    req.url = original;
+  }
 }

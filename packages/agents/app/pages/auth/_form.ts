@@ -15,7 +15,14 @@
 // `/__nk_auth/signup`, from `auth/config.ts`'s ROUTE_DEFAULTS. The paths are
 // repeated in server/auth-builtin.ts's config and the two lists have to agree.
 
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, unsafeCSS } from "lit";
+// The provider list, the marks and the URL. Shared with src/login-overlay.ts,
+// which is the console's other login surface — a provider that appeared on one
+// and not the other would be a bug nobody would think to look for. It is that
+// module and not the overlay itself because a page is evaluated on the server
+// too, and the overlay carries a `customElements.define` at module scope.
+import { askLoginConfig, mark, renderChallenge, startUrl, SOCIAL_CSS,
+  type Challenge, type Social } from "../../src/social-login.js";
 
 // The LumenUI registration list, whole and unmodified.
 //
@@ -75,16 +82,49 @@ export class AuthCard extends LitElement {
     mode: { type: String },
     busy: { state: true },
     error: { state: true },
+    social: { state: true },
+    challenge: { state: true },
   };
 
   /** "login" or "signup". */
   mode: "login" | "signup" = "login";
   busy = false;
   error = "";
+  /** The providers this deployment can honour. Empty until the ask below
+   *  answers, and empty forever where none are configured — so the password
+   *  form paints at once and the buttons arrive rather than being waited on. */
+  social: Social[] = [];
+  /** The bot challenge this deployment renders, or null where there is none.
+   *  Same shape and same source as the overlay's. */
+  challenge: Challenge | null = null;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    // The challenge is asked for on BOTH cards, unlike the provider buttons
+    // below it. pages/_middleware.ts challenges /__nk_auth/login and
+    // /__nk_auth/signup alike, so a signup card that drew no widget would post
+    // without a token and be refused — which is exactly what this whole page
+    // did until now, on both routes: the overlay in src/login-overlay.ts drew
+    // the challenge and this card did not, so turning the challenge on broke
+    // /auth/login and /auth/signup while the console's own sign-in kept
+    // working. Two surfaces, one contract.
+    void askLoginConfig().then((c) => {
+      this.challenge = c.challenge;
+      // Only on the login card. Signing up through a provider is the
+      // provider's own signup, so the button would say "Continue with GitHub"
+      // and mean something different on each of the two cards this class
+      // draws.
+      if (this.mode === "login") { this.social = c.providers; }
+    });
+  }
 
   #email = "";
   #password = "";
   #name = "";
+  /* The last token the widget handed over. Empty until it solves, and emptied
+     again when it expires — a stale token is refused for a reason the person
+     cannot see, so it is better to send none. */
+  #captcha = "";
 
   static styles = css`
     /* Kimi's hero surface: a white card on the warm ground, 24px radius, the
@@ -135,6 +175,13 @@ export class AuthCard extends LitElement {
            color: var(--muted); }
     .alt a { color: var(--fg); font-weight: 600; text-decoration: none; }
     .alt a:hover { text-decoration: underline; }
+
+    /* The providers an operator configured. Styled once in
+       src/social-login.ts so the overlay draws the same row; the two rules
+       below are this card's own spacing, which its flow does not give it. */
+    ${unsafeCSS(SOCIAL_CSS)}
+    .social { margin-bottom: 16px; }
+    .or { margin-bottom: 16px; }
   `;
 
   #field(id: string, label: string, type: string, on: (v: string) => void) {
@@ -167,7 +214,14 @@ export class AuthCard extends LitElement {
         // `accept: application/json` is what puts the framework's route in
         // cookie-and-JSON mode rather than answering a 302 — see
         // auth/routes/login.js. The Set-Cookie rides along either way.
-        headers: { "content-type": "application/json", accept: "application/json" },
+        // The challenge token as a header, not a form field. server/captcha.ts
+        // reads x-captcha-token and says why at length: the framework owns the
+        // body of these two routes, so adding a member to it would be adding a
+        // field to somebody else's schema.
+        headers: {
+          "content-type": "application/json", accept: "application/json",
+          ...(this.#captcha === "" ? {} : { "x-captcha-token": this.#captcha }),
+        },
         body: JSON.stringify(
           signup
             ? { email: this.#email, password: this.#password, name: this.#name }
@@ -199,9 +253,30 @@ export class AuthCard extends LitElement {
         <span class="brand">Agents<span class="dot">.</span></span>
         <h1>${signup ? "Create an account" : "Sign in"}</h1>
 
+        <!-- Above the fields, not below them: somebody who has an account with
+             one of these is done in one press, and burying the shortcut under
+             a form they do not need to fill is the wrong order. -->
+        ${this.social.length === 0 ? "" : html`
+          <div class="social">
+            ${this.social.map((p) => html`
+              <a class="prov" href=${startUrl(p, returnTo())}>
+                ${mark(p)}
+                <span>Continue with ${p.label}</span>
+              </a>`)}
+          </div>
+          <div class="or"><span>or</span></div>`}
+
         ${signup ? this.#field("a-name", "Name", "text", (v) => { this.#name = v; }) : ""}
         ${this.#field("a-email", "Email", "email", (v) => { this.#email = v; })}
         ${this.#field("a-password", "Password", "password", (v) => { this.#password = v; })}
+
+        <!-- The widget draws into a light-DOM child projected here, not into
+             this shadow root. Turnstile renders an iframe and reads the
+             document around it; src/login-overlay.ts reached the same
+             arrangement and this follows it rather than discovering the same
+             thing twice. Empty and zero-height where no challenge is
+             configured, which is every deployment that has not turned one on. -->
+        <slot name="challenge"></slot>
 
         <button id="a-submit" class="go" ?disabled=${this.busy} @click=${() => void this.#submit()}>
           ${this.busy ? "Working…" : signup ? "Create account" : "Sign in"}
@@ -219,5 +294,21 @@ export class AuthCard extends LitElement {
             : html`No account yet? <a href="/auth/signup">Create one</a>`}
         </p>
       </div>`;
+  }
+
+  /** Parent a light-DOM host for the widget and let the provider draw into it.
+   *
+   *  In `updated` rather than `firstUpdated` because the challenge arrives
+   *  from a fetch and the first render almost never has it. Guarded by the
+   *  host already existing, so re-rendering costs a querySelector and the
+   *  widget is never drawn twice — a second render would leave two challenges
+   *  on the card and only one of them wired to the token. */
+  updated(): void {
+    if (this.challenge === null || this.querySelector("[slot=challenge]") !== null) { return; }
+    const host = document.createElement("div");
+    host.setAttribute("slot", "challenge");
+    this.appendChild(host);
+    void renderChallenge(this.challenge, host, (token) => { this.#captcha = token; })
+      .catch(() => { /* blocked or offline — the server decides, see captcha.ts */ });
   }
 }

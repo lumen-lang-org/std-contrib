@@ -30,7 +30,7 @@ import { engineTarget as target, stripTrailingSlash } from "./engine.js";
 // through, so the socket pollers stop discovering it on a timer. It changes no
 // rule below and forwards no data — see server/nudge.ts for why a bare signal
 // is the only shape this may take.
-import { noteWrite } from "./nudge.js";
+import { noteStream, noteWrite } from "./nudge.js";
 
 type Next = (err?: unknown) => void;
 type Middleware = (
@@ -90,8 +90,29 @@ function match(url: string): Rule | null {
   return null;
 }
 
+/** The engine saying a streamed chunk landed — see server/nudge.ts.
+ *
+ *  Answered here, ahead of every proxy rule, because it must never go
+ *  upstream: the engine is the caller. Refused unless it arrived DIRECTLY
+ *  from a private address — a request that came through the gateway carries
+ *  X-Forwarded-For, and a public caller allowed to fire this at will could
+ *  make every socket poll on their schedule. The signal carries nothing, so
+ *  there is nothing else to check. */
+function engineNudge(req: IncomingMessage, res: ServerResponse): boolean {
+  if ((req.url ?? "").split("?")[0] !== "/__engine_nudge") return false;
+  const fwd = req.headers["x-forwarded-for"];
+  const from = req.socket?.remoteAddress ?? "";
+  const direct = fwd === undefined
+    && (/^(::ffff:)?(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(from) || from === "::1");
+  res.writeHead(direct ? 204 : 403, { "content-length": "0" });
+  res.end();
+  if (direct) noteStream();
+  return true;
+}
+
 export function apiProxy(): Middleware {
   return (req, res, next) => {
+    if (engineNudge(req, res)) return;
     const url = req.url ?? "/";
     const rule = match(url);
     if (!rule) return next();

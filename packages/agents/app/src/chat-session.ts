@@ -28,6 +28,7 @@
 import { LiveStep, RoundSteps, Thought, TranscriptTurn, TurnArtifactRef, WireRef, artifactsByTurn, cancelTurn, openThread, say, threadSteps, transcript, uploadFileArtifact } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { renderWithCards } from "./cards.js";
+import { preparePluginCards } from "./plugin-cards.js";
 import * as live from "./live.js";
 import { diffLines } from "./diff.js";
 import hljs from "highlight.js/lib/core";
@@ -222,7 +223,49 @@ export function refCards(refs: WireRef[]): string {
   return `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${cards}</div>`;
 }
 
-export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
+/* Which folds the reader has opened or shut by hand, by key.
+ *
+ * This exists because a `details` element does NOT own its state here, and the
+ * comment further down that said it did was wrong in the one case that
+ * matters. The browser owns it only while the element survives; every card in
+ * this file is text inside a string that is handed to the component and
+ * re-parsed by unsafeHTML whenever it changes — and it changes on every
+ * streamed chunk. So the element is destroyed and rebuilt several times a
+ * second during a round, each time carrying whatever the markup said, and a
+ * card the reader opened snapped shut under their hands. The nested rows were
+ * worse: skill, script and failed-call folds are emitted with no `open` at
+ * all, so opening one lasted until the next chunk.
+ *
+ * A Map and not a field on the message: the message objects are rebuilt too.
+ * Keyed by round, so the choice carries across the moment the live card is
+ * replaced by the settled transcript — the same card, drawn twice, and the
+ * hand-off is exactly when a reader is most likely to be looking at it.
+ *
+ * Absent means "no opinion" and the default applies. That is three states and
+ * not two: a reader who has never touched a card should still get open while
+ * it runs and shut once it is a receipt. */
+const folds = new Map<string, boolean>();
+
+/** The key a round's folds are stored under. One function so the live path
+ *  and the transcript path cannot drift into two spellings of the same round. */
+export function foldKey(seq: number): string {
+  return `r${seq}`;
+}
+
+/** Record what the reader did to one fold. Called by the console's toggle
+ *  listener; `toggle` does not bubble, so it is heard in the capture phase. */
+export function rememberFold(key: string, open: boolean): void {
+  folds.set(key, open);
+}
+
+/** The `open` attribute for a fold: the reader's choice if they have one, the
+ *  caller's default otherwise. */
+function foldAttr(key: string, byDefault: boolean): string {
+  const chose = folds.get(key);
+  return (chose === undefined ? byDefault : chose) ? " open" : "";
+}
+
+export function stepsCard(steps: LiveStep[], thoughts: Thought[] = [], key = "live"): string {
   if (steps.length === 0 && thoughts.length === 0) return "";
   const running = steps.filter((s) => s.running).length;
   // "working" rather than "thinking" while there is nothing to count: the block
@@ -255,16 +298,18 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
     if (rounds.size > 1) {
       body += `<div style="${ROW};opacity:.5">exchange ${rotation + 1}</div>`;
     }
-    for (const thought of (thinking.get(`${rotation}`) ?? [])) {
+    for (const [n, thought] of (thinking.get(`${rotation}`) ?? []).entries()) {
       // Collapsed by default: it is context for a person who wants it, not the
       // answer, and an open block of reasoning above every reply buries the
       // reply.
       const who = thought.depth > 0 ? "the sub-agent is thinking" : "thinking";
       const pad = thought.depth > 0 ? `padding-left:${12 + thought.depth * 18}px;` : "";
-      body += `<details style="${THINK};${pad}"><summary style="cursor:pointer;opacity:.6">${who}</summary>`
+      const think = `${key}:t${rotation}:${n}`;
+      body += `<details data-fold="${think}" style="${THINK};${pad}"${foldAttr(think, false)}>`
+        + `<summary style="cursor:pointer;opacity:.6">${who}</summary>`
         + `<div style="${THINK_TEXT}">${escapeHtml(thought.text)}</div></details>`;
     }
-    for (const s of calls) {
+    for (const [i, s] of calls.entries()) {
       // The mark carries its verdict in color as well as shape: a check is
       // only reassuring when it is visibly not a cross at a glance.
       const mark = s.running ? "&#8230;"
@@ -278,7 +323,7 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
       // opening into the old and new text. The row stores those as fields.
       const edit = s.name === "edit_artifact" ? editFields(s.args) : null;
       if (edit) {
-        body += `<details class="tool-call edit" style="${indent}">`
+        body += `<details class="tool-call edit" data-fold="${key}:${rotation}:${i}" style="${indent}"${foldAttr(`${key}:${rotation}:${i}`, false)}>`
           + `<summary style="${ROW};cursor:pointer;list-style:none"><span>${mark}</span>`
           + `<span class="tool-name" style="${NAME}">Edited ${escapeHtml(edit.path)}</span>`
           + `<span style="flex:1"><span style="color:#2f8a4c">+${edit.added}</span>`
@@ -308,7 +353,7 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
         if (taught === "") {
           body += `<div class="tool-call skill" style="${ROW};${indent}">${head}</div>`;
         } else {
-          body += `<details class="tool-call skill" style="${indent}">`
+          body += `<details class="tool-call skill" data-fold="${key}:${rotation}:${i}" style="${indent}"${foldAttr(`${key}:${rotation}:${i}`, false)}>`
             + `<summary style="${ROW};cursor:pointer;list-style:none">${head}</summary>`
             + `<div style="${DIFF}">${escapeHtml(taught)}</div></details>`;
         }
@@ -327,7 +372,7 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
           + `${escapeHtml(c.path)} v${c.version}</button>`).join(" ");
         const what = `Ran ${escapeHtml(script.language || "script")}`
           + (script.paths.length > 0 ? ` on ${script.paths.map(escapeHtml).join(", ")}` : "");
-        body += `<details class="tool-call script" style="${indent}">`
+        body += `<details class="tool-call script" data-fold="${key}:${rotation}:${i}" style="${indent}"${foldAttr(`${key}:${rotation}:${i}`, false)}>`
           + `<summary style="${ROW};cursor:pointer;list-style:none"><span>${mark}</span>`
           + `<span class="tool-name" style="${NAME}">${what}</span>`
           + `<span style="flex:1;min-width:0"></span>`
@@ -344,7 +389,7 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
       // A failed call with a stored reply opens: the row alone says only that
       // it failed, and "why" was the one question the card could not answer.
       if (!s.running && !s.ok && s.result) {
-        body += `<details class="tool-call failed" style="${indent}">`
+        body += `<details class="tool-call failed" data-fold="${key}:${rotation}:${i}" style="${indent}"${foldAttr(`${key}:${rotation}:${i}`, true)}>`
           + `<summary style="${ROW};cursor:pointer;list-style:none"><span>${mark}</span>`
           + `<span class="tool-name" style="${NAME}">${escapeHtml(s.name)}</span>`
           + `<span style="${ARGS}">${escapeHtml(detail)}</span>`
@@ -358,7 +403,33 @@ export function stepsCard(steps: LiveStep[], thoughts: Thought[] = []): string {
         + `<span class="tool-ms" style="${MS}">${took}</span></div>`;
     }
   }
-  return `<div class="tool-card" style="${CARD}"><div class="tool-card-head" style="${HEAD}">${head}</div>${body}</div>`;
+  /* Open while the round runs, shut once it is done.
+   *
+   * A finished round's calls are a receipt: worth having, worth opening, not
+   * worth the top half of the screen every time you scroll past an answer.
+   * Four exchanges of thinking blocks pushed the actual reply below the fold
+   * — the card was louder than the thing it was about.
+   *
+   * Open while anything is running, so a person watching a round work sees it
+   * work; shut afterwards, and the summary still says what happened.
+   *
+   * That is the DEFAULT and no longer the whole story. The note that used to
+   * stand here said the browser owns the open state and it survives the
+   * message being re-rendered. Half of that is true and the half that is not
+   * was the bug: the element survives only if the element survives, and this
+   * card is text in a string that unsafeHTML re-parses whenever it changes —
+   * which is every streamed chunk. So the card was rebuilt several times a
+   * second from markup that said "open" while the round ran, and said nothing
+   * once it stopped. A reader who shut it mid-round watched it spring open
+   * again; a reader who opened it watched it slam shut at the end.
+   *
+   * foldAttr is what fixes that: a choice the reader has made outranks the
+   * default, and it is kept outside the markup because the markup is what
+   * keeps being thrown away. */
+  return `<details class="tool-card" data-fold="${key}" style="${CARD}"`
+    + `${foldAttr(key, running > 0 || steps.length === 0)}>`
+    + `<summary class="tool-card-head" style="${HEAD};cursor:pointer;list-style:none">${head}</summary>`
+    + `${body}</details>`;
 }
 
 // What a waiting question wears until its turn comes. Markup rather than a
@@ -472,8 +543,22 @@ export type TrayFile = {
    CardEvidence in cards.ts — the model names the card, the tool supplies
    what is long or numeric. */
 function toolEvidence(steps: readonly LiveStep[]): string[] {
-  return steps.filter((s) => s.name === "run_script" && !s.running && s.ok)
-    .map((s) => s.result ?? "").filter((t) => t !== "");
+  // Scripts as they always were — their output is prose that may carry a JSON
+  // line, and the currency card greps for it — plus any other call that
+  // answered in JSON, which is how the Linear cards read cycles and issues
+  // straight out of list_cycles/list_issues results. The JSON check keeps
+  // skill instructions and prose results out of the evidence a card scans;
+  // parsing is the card's job (parseLoose in cards.ts, because the engine
+  // appends briefing prose to some results).
+  return steps.filter((s) => !s.running && s.ok)
+    .map((s) => ({ name: s.name, text: s.result ?? "" }))
+    .filter(({ name, text }) => {
+      if (text === "") return false;
+      if (name === "run_script") return true;
+      const head = text.trimStart()[0];
+      return head === "{" || head === "[";
+    })
+    .map(({ text }) => text);
 }
 
 export class ChatSession {
@@ -515,6 +600,13 @@ export class ChatSession {
     void cancelTurn(this.threadId).catch(() => undefined);
   }
   private live: LiveStep[] = [];
+  /* Which round the live card is drawing, as the key its folds are stored
+     under. -1 until a round has said. It matters because the live card and the
+     settled transcript card are the SAME card drawn twice from different
+     sources, and a reader who opened it while it ran should not watch it shut
+     the instant the transcript replaces it — which is the one moment they are
+     certain to be looking at it. */
+  private liveSeq = -1;
   private thoughts: Thought[] = [];
   private polling = 0;
   // The placeholder turn the card is drawn into while the round runs.
@@ -575,9 +667,10 @@ export class ChatSession {
       // `watching` by the time the reply settles.
       if (round.seq >= 0 && round.seq <= this.doneSeq) return;
       this.live = round.steps;
+      this.liveSeq = round.seq;
       this.thoughts = round.thoughts ?? [];
       this.partial = round.partial ?? "";
-      this.paintLive();
+      this.schedulePaint();
       this.emit("steps:changed", round);
       return;
     }
@@ -757,6 +850,7 @@ export class ChatSession {
       this.partial = "";
       this.doneSeq = Math.max(this.doneSeq, reply.seq);
       this.live = reply.steps ?? [];
+      this.liveSeq = reply.seq;
       this.thoughts = reply.thoughts ?? [];
       this.emit("steps:changed", { seq: reply.seq, running: false, steps: this.live });
       this.liveId = "";
@@ -778,12 +872,21 @@ export class ChatSession {
       this.followups = reply.ok && this.searched()
         ? split.items.map((t, n) => ({ id: `fu-${reply.seq}-${n}`, text: t }))
         : EMPTY_SUGGESTIONS;
+      // The plugin pass first — async, through the sandbox — then the
+      // synchronous built-in pipeline over whatever it left as text. A block
+      // the pass replaced is already safe HTML; a block it left is text like
+      // it always was. See plugin-cards.ts.
+      // Cards out, tokens in; the pipeline escapes everything; cards back.
+      // Inserting the HTML before the escape pass is what put a wall of
+      // `<div style="…` in a person's transcript — see preparePluginCards.
+      const plugged = await preparePluginCards(split.text, toolEvidence(this.live));
       this.replaceLive({
         id: reply.runId,
         sender: "bot",
-        text: stepsCard(this.live, this.thoughts)
-          + renderWithCards(split.text, (s) => renderMarkdown(escapeHtml(s)),
-                            toolEvidence(this.live))
+        text: stepsCard(this.live, this.thoughts, foldKey(this.liveSeq))
+          + plugged.restore(renderWithCards(plugged.text,
+                            (s) => renderMarkdown(escapeHtml(s)),
+                            toolEvidence(this.live)))
           + refCards(saved),
         refs: reply.refs,
         error: !reply.ok,
@@ -815,6 +918,16 @@ export class ChatSession {
   async ensureThread(): Promise<string> {
     if (this.threadId === "") {
       this.threadId = (await openThread(this.bridge.agentId())).id;
+      // The turn that opened this thread stamped `typingThread` before the id
+      // existed, so the stamp says "" and isTyping() — which compares stamp to
+      // id — answered false for the whole first turn of every new
+      // conversation: no working indicator, ever, exactly there. The stamp
+      // follows the id it was always meant to name. Found by the recorded
+      // conversation spec, which watched turn one settle in four seconds with
+      // no skeleton while three later turns showed one.
+      if (this.state.isTyping && this.typingThread === "") {
+        this.typingThread = this.threadId;
+      }
       live.watch(this.threadId);
       this.bridge.onThreadOpened(this.threadId);
     }
@@ -913,6 +1026,7 @@ export class ChatSession {
           this.push({ id: liveId, sender: "bot", text: "", refs: EMPTY });
         }
         this.live = round.steps;
+      this.liveSeq = round.seq;
         this.thoughts = round.thoughts ?? [];
         this.paintLive();
         this.emit("steps:changed", round);
@@ -930,6 +1044,7 @@ export class ChatSession {
           this.push({ id: liveId, sender: "bot", text: "", refs: EMPTY });
         }
         this.live = round.steps;
+      this.liveSeq = round.seq;
         this.thoughts = round.thoughts ?? [];
         this.paintLive();
         return;
@@ -964,7 +1079,7 @@ export class ChatSession {
     // session keeps the fact and the console decides when to adopt it — which
     // it does on an explicit open, and nowhere else.
     this.remembered = said.modelChoiceId;
-    this.apply(said.messages, past, byTurn);
+    await this.apply(said.messages, past, byTurn);
   }
 
   /** What this conversation last ran on, as of the last read of it. "" for the
@@ -985,7 +1100,7 @@ export class ChatSession {
    *  rather than an empty pane a round trip wide. There is deliberately only
    *  one copy of this join — a second one in a loader would drift, and the
    *  drift shows up as a conversation claiming work it does not display. */
-  apply(
+  async apply(
     turns: TranscriptTurn[],
     past: Pick<RoundSteps, "steps" | "thoughts">,
     /* The by-turn join, because the transcript's own refs arrive empty from
@@ -994,7 +1109,7 @@ export class ChatSession {
        source has it. Optional so the SSR loader, which fetches two things,
        keeps working; the client re-applies with all three. */
     byTurn: TurnArtifactRef[] = [],
-  ): void {
+  ): Promise<void> {
 
     // A round's rows carry the seq of the turn that *opened* it — the question —
     // while the answer is stored further along, past the tool turns the reader
@@ -1015,7 +1130,7 @@ export class ChatSession {
     this.doneSeq = pending.length > 0 ? pending[pending.length - 1] : -1;
     this.renderedSeq = turns.length > 0 ? Math.max(...turns.map((t) => t.seq)) : -1;
 
-    this.setMessages(turns.map((t, i) => {
+    this.setMessages(await Promise.all(turns.map(async (t, i) => {
       let card = "";
       // Hoisted out of the branch below: the step rows draw the card AND
       // feed the cards their numbers, so both need them (see toolEvidence).
@@ -1025,8 +1140,16 @@ export class ChatSession {
         while (pending.length > 0 && pending[0] < t.seq) mine.push(pending.shift()!);
         steps = mine.flatMap((s) => rounds.get(s)!.steps);
         const thoughts = mine.flatMap((s) => rounds.get(s)!.thoughts);
-        card = stepsCard(steps, thoughts);
+        // Keyed by the round, not by the turn's position: a fold the reader
+        // opened while the round streamed is the same fold here, and an index
+        // would rename it at exactly the wrong moment.
+        card = stepsCard(steps, thoughts, foldKey(mine.length > 0 ? mine[0] : t.seq));
       }
+      // Named `past` because `plugged` reads oddly beside the round's own
+      // `pending`; it is the same two-pass dance as the live path above.
+      const past = t.role === "user"
+        ? { text: "", restore: (r: string) => r }
+        : await preparePluginCards(splitFollowups(t.text).text, toolEvidence(steps));
       let saved: WireRef[] = t.refs ?? [];
       if (t.role !== "user" && saved.length === 0) {
         const mine: WireRef[] = [];
@@ -1040,13 +1163,13 @@ export class ChatSession {
         id: `t${i}`,
         sender: t.role === "user" ? "user" : "bot" as const,
         text: t.role === "user" ? escapeHtml(t.text)
-          : card + renderWithCards(splitFollowups(t.text).text,
-              (s) => renderMarkdown(escapeHtml(s)), toolEvidence(steps))
+          : card + past.restore(renderWithCards(past.text,
+              (s) => renderMarkdown(escapeHtml(s)), toolEvidence(steps)))
             + refCards(saved),
         refs: t.refs,
         timestamp: new Date().toISOString(),
       };
-    }));
+    })));
   }
 
   /** Start a fresh conversation. Nothing is stored until something is said. */
@@ -1069,22 +1192,81 @@ export class ChatSession {
     return this.threadId;
   }
 
+  /** Whether the conversation ON SCREEN is waiting on a turn.
+   *
+   *  Thread-aware on purpose — see `typingThread`. A run this session started
+   *  in another conversation is still running and still tracked; it just does
+   *  not put a working indicator on a thread that is not it. */
   isTyping(): boolean {
-    return this.state.isTyping;
+    return this.state.isTyping && this.typingThread === this.threadId;
   }
 
   // --- internals ------------------------------------------------------------
 
   // Redraw the card inside the in-flight turn. A new array each time, because
   // the component compares state objects to decide whether to render.
+  /* The reveal loop: what makes arriving text read as TYPED rather than as
+   * pasted.
+   *
+   * More polling could not do this, and the numbers say why: the socket
+   * delivers the partial every ~140ms, and a local model at ~100 tokens a
+   * second puts ~15 tokens in each delivery — a line at a time, painted as a
+   * line, which a person reads as "block by block" however often it happens.
+   * The hosted assistants smooth the same bursty arrivals by revealing them:
+   * the text is on hand before it is on screen, and the screen catches up at
+   * a rate the eye reads as typing.
+   *
+   * So: `revealShown` is how much of the partial the person has been shown,
+   * and a 33ms loop advances it by an eighth of the backlog each tick (floor
+   * of three characters). Proportional catch-up is the part that matters —
+   * a thinking pause leaves a small backlog and a slow, word-ish reveal,
+   * while a big burst reveals fast and never falls far behind; either way
+   * the screen is within ~250ms of the data, so nothing here makes the
+   * answer feel slower than it is.
+   *
+   * Each tick paints at most once (33ms ≈ 30fps), which keeps the markdown
+   * re-parse paintLive warns about bounded regardless of how fast the model
+   * or the feed runs. The loop retires itself the moment the reply lands:
+   * paintLive owns the settled repaint, and `liveId === ""` is that signal.
+   *
+   * A new round resets the clip: the partial SHRINKS when a fresh round
+   * begins, and clamping revealShown to the new length is what stops a
+   * stale, longer clip from flashing the whole new answer at once. */
+  private revealShown = 0;
+  private revealTimer = 0;
+
+  private schedulePaint(): void {
+    if (this.revealTimer !== 0) return;
+    this.revealTimer = window.setInterval(() => {
+      if (this.liveId === "") {
+        window.clearInterval(this.revealTimer);
+        this.revealTimer = 0;
+        this.revealShown = 0;
+        return;
+      }
+      const full = splitFollowups(this.partial).text.length;
+      if (this.revealShown > full) { this.revealShown = full; }
+      if (this.revealShown === full) { return; }
+      const backlog = full - this.revealShown;
+      this.revealShown += Math.max(3, Math.ceil(backlog / 8));
+      if (this.revealShown > full) { this.revealShown = full; }
+      this.paintLive();
+    }, 33);
+  }
+
   private paintLive(): void {
     if (this.liveId === "") return;
-    const card = stepsCard(this.live, this.thoughts);
+    const card = stepsCard(this.live, this.thoughts, foldKey(this.liveSeq));
     // The answer, being typed. Markdown because the final rendering is
     // markdown — text that reflows at the end reads as a glitch — but no
     // cards mid-stream: a half-streamed [CURRENCY] block is not a card yet,
     // and the landed reply renders them properly. The bar is a cursor.
-    const shown = splitFollowups(this.partial).text;
+    const whole = splitFollowups(this.partial).text;
+    // Clipped to what the reveal loop has let through — see schedulePaint.
+    // While the turn runs the clip trails the data by design; the settled
+    // reply never passes through here, so nothing is ever withheld from a
+    // finished answer.
+    const shown = this.revealTimer !== 0 ? whole.slice(0, this.revealShown) : whole;
     const typing = shown === "" ? ""
       // No trailing block cursor. It was a caret glyph appended to the
       // streamed text, and it sat on its own line whenever the partial ended
@@ -1116,8 +1298,23 @@ export class ChatSession {
     this.emit("state:changed", this.state);
   }
 
+  /* Which conversation the turn in flight belongs to.
+   *
+   * One session serves every conversation this tab opens, so `isTyping` on
+   * its own says "a turn is running somewhere", not "a turn is running HERE".
+   * Send in one conversation, switch to another while it works, and the
+   * second conversation drew "Agent is working" over a thread that was doing
+   * nothing — the flag followed the reader instead of staying with the run.
+   *
+   * Recorded when the turn starts, compared when the UI asks. The RAW flag is
+   * what the internals keep using (ingest, the composer's queue, the
+   * follow-tick guard): those are about "is this session mid-send", which is
+   * genuinely session-wide. Only the question the screen asks is per-thread. */
+  private typingThread = "";
+
   private setTyping(on: boolean): void {
     if (this.state.isTyping === on) return;
+    this.typingThread = on ? this.threadId : "";
     this.state = { ...this.state, isTyping: on, isProcessing: on };
     this.emit("state:changed", this.state);
     this.emit(on ? "typing:start" : "typing:end", {});

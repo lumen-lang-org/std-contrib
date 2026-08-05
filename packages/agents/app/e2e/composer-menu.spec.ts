@@ -202,7 +202,13 @@ test("Manage connectors closes the menu behind it", async ({ page }) => {
 
   // It used to open the directory and leave the dropdown sitting on top of the
   // thing it had just opened.
-  expect(await seen(page, ".gallery"), "the directory opened").toBeTruthy();
+  //
+  // The destination moved — it opens the Settings overlay on the Connectors
+  // tab now, not the `.gallery` directory — and this spec went red naming the
+  // old element. The assertion that matters is unchanged and is the second
+  // one: whatever this row opens, the menu it was pressed from must not still
+  // be sitting on top of it.
+  expect(await seen(page, "console-settings"), "connectors settings opened").toBeTruthy();
   const stillOpen = await page.evaluate(([src]) => {
     const panel = (new Function("return " + src)())(".attach") as HTMLElement | null;
     if (panel === null) { return false; }

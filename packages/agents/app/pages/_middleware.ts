@@ -44,9 +44,12 @@
 import os from "node:os";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { setIdentityResolver } from "../server/identity.js";
+import { guestFromCookie, resolveGuest } from "../server/guest.js";
+import { siteChallenge, verifyRequest } from "../server/captcha.js";
 import {
   handleAuth,
   readSession,
+  socialProviders,
   xUserDocument,
   type AuthUser,
 } from "../server/auth-builtin.js";
@@ -197,6 +200,64 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(text);
 }
 
+// --- what the login form may offer ----------------------------------------------
+//
+// The Sign-in screen in the admin area promises that "each provider added here
+// becomes a button beside" the password form. This route is what makes that
+// sentence true, and it is a fourth seam of exactly the shape the header
+// describes: `src/login-overlay.ts` asks one path and draws what comes back,
+// never learning which mode it is running under. Each mode answers for itself:
+//
+//   * `builtin`  the rows an operator configured in the engine, narrowed to
+//                the ones that could actually complete — enabled, with a
+//                client and a stored secret. A button that lands on
+//                `invalid_client` is worse than no button, which is the same
+//                judgement the admin screen's own footnote makes.
+//   * `none`     nobody signs in, so there is nothing to sign in with.
+//   * `proxy`    the gateway owns `/__nk_auth/*` and its own list of
+//                providers; on joule.sh that is nuraly's app, which has never
+//                heard of a row in this engine (GATEWAY.md). A button here
+//                would redirect a person into an app that would refuse them,
+//                so the honest answer is none.
+//
+// The answer carries an id and a label and nothing else. The client id is
+// public in the sense that it ends up in a redirect anyway, but it has no
+// business in a document served to a visitor who has not pressed anything, and
+// the secret must never leave the server at all.
+/** The credential routes a bot gains something from: one creates an account,
+ *  the other claims one. Everything else under /__nk_auth/ is a session
+ *  operation by somebody who already holds a cookie. */
+const CHALLENGED = new Set(["/__nk_auth/login", "/__nk_auth/signup"]);
+
+const PROVIDERS_PATH = "/auth/providers";
+
+/** `GET /auth/providers` — the buttons this deployment can honour. */
+const offerProviders: Middleware = (req, res, next) => {
+  if ((req.url ?? "/").split("?")[0] !== PROVIDERS_PATH) return next();
+  if (AUTH !== "builtin") return json(res, 200, { providers: [] });
+  void (async () => {
+    try {
+      const rows = await socialProviders();
+      json(res, 200, {
+        providers: rows
+          .filter((p) => p.clientId.trim() !== "" && p.clientSecret.trim() !== "")
+          .map((p) => ({ id: p.id, label: p.label, kind: p.kind ?? "oidc" })),
+        // The bot challenge rides along on the route the login card already
+        // asks, rather than getting one of its own: both answer the same
+        // question — what does this deployment's sign-in form need to draw —
+        // and a second fetch would be a second round trip before the first
+        // keystroke. The SITE key only; the secret never leaves the server.
+        challenge: await siteChallenge(),
+      });
+    } catch {
+      // The same silence `socialProviders` keeps, for the same reason: an
+      // engine that cannot be reached should cost the social buttons, never
+      // the password form underneath them.
+      json(res, 200, { providers: [] });
+    }
+  })();
+};
+
 // --- none ----------------------------------------------------------------------
 //
 // Nothing. Not a middleware that does nothing — no middleware at all, so the
@@ -343,6 +404,25 @@ const builtinAuth: Middleware = (req, res, next) => {
     // Login, signup, logout and the rest. Before the guard, or signing in
     // would require being signed in.
     if ((req.url ?? "/").startsWith("/__nk_auth/")) {
+      // The bot challenge, on the two routes that create or claim an account
+      // and on nothing else. Logout, /me and the token routes are not places a
+      // bot gains anything, and a challenge on them would fire on ordinary
+      // navigation where no widget has been rendered to answer it.
+      if (CHALLENGED.has(path) && !READ_ONLY.has((req.method ?? "GET").toUpperCase())) {
+        const verdict = await verifyRequest(req);
+        if (verdict !== "ok") {
+          // 400 rather than 403: the framework's own failures on these routes
+          // are 400/401 and `src/login-overlay.ts` already renders `error`
+          // from the body, so this arrives as a sentence on the card rather
+          // than as a status nobody wrote a branch for.
+          json(res, 400, {
+            error: verdict === "missing"
+              ? "Complete the challenge and try again."
+              : "That challenge could not be verified. Try again.",
+          });
+          return;
+        }
+      }
       if (await handleAuth(req, res, user)) return;
       return next();
     }
@@ -362,7 +442,35 @@ const builtinAuth: Middleware = (req, res, next) => {
       return next();
     }
 
-    // Nobody is signed in.
+    // Nobody is signed in — but on a deployment that offers guests, "nobody"
+    // is still somebody.
+    //
+    // Below the signed-in branch and never beside it: a browser holding both
+    // cookies after signing in is its user, which is the ordering
+    // server/guest.ts is written around and the reason the guest lookup is not
+    // hoisted above `readSession`.
+    //
+    // A guest is a real owner tag as far as the engine is concerned, so this
+    // stamps X-USER exactly the way the branch above does. What it is NOT is a
+    // session: `hydrateIdentity` is left to see nothing, so the page renders
+    // signed-out, `isAdmin` stays false, and `guardEngineRoutes` refuses every
+    // operator write with the same 403 it gives a stranger.
+    const guest = resolveGuest(req);
+    if (guest !== null) {
+      if (guest.setCookie) res.setHeader("set-cookie", guest.setCookie);
+      if (path === "/whoami") {
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(guest.xUser);
+        return;
+      }
+      req.headers["x-user"] = guest.xUser;
+      return next();
+    }
+
+    // No guest either: guests are off here, or this address has minted its
+    // allowance for the day. Both look the same on purpose — an anti-abuse
+    // counter that announced itself would be telling an abuser what to wait
+    // for, and a visitor cannot act on either answer.
     if (path === "/whoami" || reachesEngine(path)) {
       // 401 and not a redirect, because these are `fetch` calls: src/api.ts
       // turns a 401 into `/auth/login?returnTo=…` itself, which is the seam
@@ -402,8 +510,21 @@ function installSocketIdentity(): void {
   setIdentityResolver(async (headers) => {
     // readSession reads nothing but `headers`; the cast says so rather than
     // pretending a handshake is a request.
-    const user = await readSession({ headers } as unknown as IncomingMessage);
-    return user ? xUserDocument(user) : "";
+    const req = { headers } as unknown as IncomingMessage;
+    const user = await readSession(req);
+    if (user) return xUserDocument(user);
+    // A guest gets the live feed too — it carries the streaming answer now, and
+    // a guest watching "Agent is working…" while everyone else watches the text
+    // arrive is a worse product for exactly the people a public host is for.
+    // Safe by construction: the socket forwards whatever identity this returns
+    // on every engine ask, and the engine scopes reads to it — the same
+    // authorisation the guest's own polling already exercises.
+    //
+    // Cookie-only by construction as well: `resolveGuest` mints when it finds
+    // none, and a handshake has nowhere to put a Set-Cookie the browser would
+    // keep. That is not a gap — the socket opens after the page has loaded, and
+    // the page load is what minted the cookie this reads.
+    return guestFromCookie(req)?.xUser ?? "";
   });
 }
 
@@ -476,27 +597,117 @@ function hydrateIdentity(read: (req: IncomingMessage) => Promise<unknown>): Midd
 // This is a floor, not a replacement for the gateway's check. A caller who
 // reaches `:8100` directly still bypasses everything, which is why
 // "`:8100` must never be directly reachable" stays a launch gate.
-const OPERATOR_PATHS = [
-  "/api/models",
-  "/api/model-configs",
-  "/api/model-choices",
-  "/api/model-routers",
-  "/api/providers",
+// --- what replaced the gateway's table, and why it had to be a table -------------
+//
+// The paragraph above describes a FLOOR: five prefixes, writes only, added while
+// the gateway in front still ran its own per-route check and refused everything
+// it did not recognise. That gateway check is gone — locations/agents.conf and
+// locations/joule.conf are plain reverse proxies now, because identity moved
+// here — so a floor is all there is, and a floor is not what was protecting
+// these routes.
+//
+// Measured rather than reasoned about, on joule.sh, as an anonymous guest:
+//
+//   GET  /api/model-configs   200     the operator's model table
+//   GET  /api/model-routers   200
+//   GET  /api/providers       200
+//   POST /api/skills          400     ← the engine ACCEPTED it and rejected the
+//   PUT  /api/banner          400       body: authorisation passed, and a valid
+//                                       body would have written
+//
+// The old file was default-CLOSED: its `location /` was the engine behind
+// `authenticateRequired` + `requireRole("admin")`, and every route a guest or an
+// ordinary user could reach was named explicitly. That property is the thing
+// worth porting, not the individual lines — a route the engine grows tomorrow
+// must not become reachable by growing it.
+//
+// So this is the same shape: an allowlist per tier, and admin for everything
+// else. It is transcribed from the two conf files rather than invented, and the
+// comments naming why each entry is a guest route are theirs.
+
+/** Requests any visitor may make, guests included.
+ *
+ *  Console boot calls every one of these before anybody has signed in, which is
+ *  what makes them the guest set: the agent picker, the model menu, the quota
+ *  readout the guest strip renders, the banner, and a conversation. Reads only —
+ *  every method check below is deliberate and matches the lua's. */
+const GUEST_GETS = [
+  "/api/agents",
+  "/api/models/choices",
+  "/api/quota",
+  "/api/banner",
+  "/api/skills",
+  "/api/prompts",
+  "/api/templates",
+  "/api/servers",
+  "/api/plugins",
+  // Which markers become cards, and their renderer snapshots — config with no
+  // secret in it, and a guest's transcript draws cards too.
+  "/api/card-plugins",
+  /* Discover. Public by nature and by content: it is a digest of pages a
+     crawler fetched off the open web, written on a schedule, identical for
+     everybody. Behind the sign-in it was a front page that only members could
+     read — and the whole point of a front page is that it is the thing
+     somebody sees BEFORE they have an account.
+     `claims` matches by prefix, so this also opens GET /api/discover/feeds —
+     the topics and the searches behind them, which is the same public fact
+     one step earlier. The writes on that path are POST and DELETE, and the
+     guest tier admits neither. */
+  "/api/discover",
 ];
+
+/** Conversations — the one place a guest may WRITE, because holding a
+ *  conversation is the entire point of letting them in. The engine scopes every
+ *  row to the `guest:` tag in X-USER, so a guest writes only their own. */
+const GUEST_THREADS = ["/api/threads", "/preview/"];
+
+/** Signed in, no admin role: the guest set plus their own stored credentials.
+ *
+ *  `/servers/<id>/mine` is deliberately NOT a guest route and the lua says why —
+ *  it is the caller's own connector credential, which is exactly what an
+ *  unaccountable identity must not hold.
+ *
+ *  A pattern rather than a prefix, and it MUST be tested before the catalog
+ *  read below. The lua wrote it as a regex placed above the catalog regex with
+ *  a note that nginx takes the first match; expressing it here as the prefix
+ *  `/api/servers/` lost that ordering, because `/api/servers` is itself a guest
+ *  catalog read and claimed `/api/servers/x/mine` on the way past. Measured:
+ *  that returned 404 from the engine rather than 403 from here, which is
+ *  authorisation passing and only the row being absent. */
+const OWN_CREDENTIAL = /^\/api\/servers\/[^/]+\/mine$/;
+
+const USER_PREFIXES = ["/api/credentials"];
 
 const READ_ONLY = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** Whether this request would write one of the operator's tables. */
-function writesConfiguration(req: IncomingMessage): boolean {
-  if (READ_ONLY.has((req.method ?? "GET").toUpperCase())) return false;
-  const path = (req.url ?? "/").split("?")[0];
-  // A plain prefix, the way `server/api-proxy.ts` matches: `/api/models` claims
-  // `/api/models/m1` and `/api/modelsFOO` alike. Claiming too much here refuses
-  // a write; claiming too little lets one through, so the tie goes to refusing.
-  return OPERATOR_PATHS.some((p) => path.startsWith(p));
+/** A prefix match, the way `server/api-proxy.ts` matches — `/api/threads`
+ *  claims `/api/threads/abc`. Claiming too much refuses a legitimate call and
+ *  claiming too little lets one through, so where it is ambiguous the tie goes
+ *  to refusing and the console screen that breaks gets an entry of its own. */
+function claims(list: string[], path: string): boolean {
+  return list.some((p) => path === p || path.startsWith(p.endsWith("/") ? p : p + "/"));
 }
 
-/** Refuse a configuration write from somebody who is not an operator.
+type Tier = "guest" | "user" | "admin";
+
+/** The lowest tier that may make this request. */
+function requiredTier(req: IncomingMessage): Tier {
+  const path = (req.url ?? "/").split("?")[0];
+  const read = READ_ONLY.has((req.method ?? "GET").toUpperCase());
+
+  if (claims(GUEST_THREADS, path)) return "guest";
+  // BEFORE the catalog read, not after — see OWN_CREDENTIAL. Order is the
+  // security property here exactly as it was in the lua.
+  if (OWN_CREDENTIAL.test(path)) return "user";
+  if (claims(USER_PREFIXES, path)) return "user";
+  if (read && claims(GUEST_GETS, path)) return "guest";
+  // Everything else the engine serves is the operator's — including every write
+  // to the catalog, every model table, and any route added after this was
+  // written. Default closed is the property being kept.
+  return "admin";
+}
+
+/** Refuse an engine call the caller's tier does not reach.
  *
  *  Installed only in the modes that HAVE identities. In `AUTH=none` there is
  *  one operator, they own the box, and there is nobody to distinguish them
@@ -504,36 +715,81 @@ function writesConfiguration(req: IncomingMessage): boolean {
  *
  *  Absence of an identity in these modes is a refusal and not a pass: a request
  *  that arrives here with no session in `builtin`, or with no `X-USER` in
- *  `proxy`, is a request nobody authenticated. */
-function guardConfigWrites(): Middleware {
+ *  `proxy`, is a request nobody authenticated.
+ *
+ *  This is still not a replacement for a check in the engine. A caller who
+ *  reaches `:8100` directly bypasses it entirely, which is why "`:8100` must
+ *  never be directly reachable" stays a launch gate. */
+function guardEngineRoutes(): Middleware {
   return (req, res, next) => {
-    if (!writesConfiguration(req)) { next(); return; }
+    const path = (req.url ?? "/").split("?")[0];
+    if (!reachesEngine(path)) { next(); return; }
+
+    const need = requiredTier(req);
+    if (need === "guest") { next(); return; }
+
+    // The identity this chain already established, and nothing else — the
+    // guest branch in `builtinAuth` sets the header without an nkAuth, so a
+    // guest reads as "no user" here, which is what it is.
+    const held = (req as unknown as { nkAuth?: { user?: { roles?: unknown } } }).nkAuth;
+    const user = held?.user;
+    if (!user) {
+      json(res, 403, { error: "sign in to do that" });
+      return;
+    }
+    if (need === "user") { next(); return; }
+
+    const roles = user.roles;
+    if (Array.isArray(roles) && roles.includes("admin")) { next(); return; }
+    json(res, 403, {
+      error: "changing this deployment's configuration is an operator action",
+    });
+  };
+}
+
+/** The admin AREA, which the old gateway gated with the same role check.
+ *
+ *  Its screens are only as protected as the routes behind them and those are
+ *  guarded above — but a settings page that renders its chrome for a stranger
+ *  and then fills with 403s is a worse answer than not being there, and it was
+ *  a 200 for a guest until this existed. A navigation, so a redirect rather
+ *  than a JSON refusal. */
+function guardAdminPage(): Middleware {
+  return (req, res, next) => {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path !== "/admin" && !path.startsWith("/admin/")) { next(); return; }
     const held = (req as unknown as { nkAuth?: { user?: { roles?: unknown } } }).nkAuth;
     const roles = held?.user?.roles;
     if (Array.isArray(roles) && roles.includes("admin")) { next(); return; }
-    json(res, 403, {
-      error: "changing models, the model menu or a provider key is an operator action",
-    });
+    res.writeHead(302, { location: "/", "cache-control": "no-store" });
+    res.end();
   };
 }
 
 // --- the chain -------------------------------------------------------------------
 
 function build(): Middleware[] {
+  // Still nothing in `none` — including no `/auth/providers`. The route is a
+  // promise that a login form exists to put buttons on, and this is the mode
+  // where none does; a 404 and an empty list read the same to the overlay's
+  // fetch, and only one of them keeps this mode's "no middleware at all".
   if (AUTH === "none") return [];
   if (AUTH === "proxy") {
     guardProxyBind();
     // The gateway verified the token and stamped the header; parsing it here is
     // the whole of what this mode knows, and it is enough to hydrate the page.
-    return [refuseWhenPubliclyReached, hydrateIdentity(async (req) => {
+    return [offerProviders, refuseWhenPubliclyReached, hydrateIdentity(async (req) => {
       const raw = req.headers["x-user"];
       const text = Array.isArray(raw) ? raw[0] : raw;
       if (!text) { return null; }
       try { return JSON.parse(text); } catch { return null; }
-    }), guardConfigWrites()];
+    }), guardEngineRoutes(), guardAdminPage()];
   }
   installSocketIdentity();
-  return [builtinAuth, hydrateIdentity((req) => readSession(req)), guardConfigWrites()];
+  // Ahead of `builtinAuth`, which is what a signed-out visitor's request would
+  // otherwise be refused by — asking which providers exist is the one question
+  // that has to be answerable before signing in.
+  return [offerProviders, builtinAuth, hydrateIdentity((req) => readSession(req)), guardEngineRoutes(), guardAdminPage()];
 }
 
 /** Imported by `lumenjs.server.js`, which places it ahead of the proxy. */

@@ -206,6 +206,18 @@ export class SearchDash extends LitElement {
   // failed poll on purpose: zeros would read as a dead pipeline, which is a
   // different and much louder claim than "we could not ask".
   @state() private nodes: Nodes | null = null;
+  /* The embedding pipeline's vitals, from GET /vectors. null until the
+     endpoint answers — it is being built on the data node, so this panel is
+     progressive by design: absent upstream means absent here, never an error
+     card about a feature that has not shipped. */
+  @state() private vectors: Record<string, unknown> | null = null;
+  /* How a query matches: by the words (keyword), by the embedding
+     (vector), or both (hybrid). Rides the same query() the filters do, so
+     Search and RAG cannot disagree about what a mode means. The index
+     ignores parameters it has not learned, so until vector search ships on
+     the data node the two new modes answer exactly like keyword — the
+     control is progressive the same way the Vectors panel is. */
+  @state() private matchMode = "keyword";
   @state() private nodesAt = 0;
   @state() private nodesStale = false;
   /** One sample of per_minute_1m per poll, newest last. Forty is about ten
@@ -270,6 +282,51 @@ export class SearchDash extends LitElement {
       // Nothing is cleared. The panel dims and says when it last heard.
       this.nodesStale = true;
     }
+    try {
+      const v = await ask<Record<string, unknown>>("/vectors");
+      this.vectors = v && typeof v === "object" && !("error" in v) ? v : null;
+    } catch {
+      this.vectors = null;
+    }
+  }
+
+  /** The vectors panel, when the index serves one.
+   *
+   *  Reads defensively because the endpoint is younger than this panel: every
+   *  field is optional and a missing one renders as an em dash, so the panel
+   *  cannot crash the stats view whatever shape lands. */
+  private vectorsPanel() {
+    const v = this.vectors;
+    if (v === null) return nothing;
+    const num = (x: unknown): string => typeof x === "number" && isFinite(x) ? count(x) : "—";
+    const path = (o: unknown, k: string): unknown =>
+      o !== null && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined;
+    const coverage = v.coverage;
+    const embedded = path(coverage, "embedded");
+    const pending = path(coverage, "pending");
+    const rate = path(v.rate, "per_minute");
+    const eta = ((): string => {
+      const s2 = v.eta_sec;
+      if (typeof s2 !== "number" || !isFinite(s2) || s2 <= 0) return "—";
+      if (s2 < 5400) return `${Math.round(s2 / 60)}m`;
+      return `${(s2 / 3600).toFixed(1)}h`;
+    })();
+    const idx = path(v.storage, "index_disk_bytes");
+    const status = typeof v.status === "string" ? v.status : "—";
+    return html`
+      <section class="panel">
+        <header class="panel-head">
+          <h3>Vectors</h3>
+          <span class="of">${status}</span>
+        </header>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-key">embedded</span><span></span><span>${num(embedded)}</span><span></span></div>
+          <div class="bar-row"><span class="bar-key">pending</span><span></span><span>${num(pending)}</span><span></span></div>
+          <div class="bar-row"><span class="bar-key">rate / min</span><span></span><span>${num(rate)}</span><span></span></div>
+          <div class="bar-row"><span class="bar-key">ETA</span><span></span><span>${eta}</span><span></span></div>
+          <div class="bar-row"><span class="bar-key">index on disk</span><span></span><span>${typeof idx === "number" ? size(idx) : "—"}</span><span></span></div>
+        </div>
+      </section>`;
   }
 
   private async refresh(quiet = false): Promise<void> {
@@ -301,6 +358,7 @@ export class SearchDash extends LitElement {
     for (const [name, value] of Object.entries(this.filters)) {
       if (value !== "") p.append(name, value);
     }
+    if (this.matchMode !== "keyword") p.append("mode", this.matchMode);
     return p.toString();
   }
 
@@ -680,6 +738,7 @@ export class SearchDash extends LitElement {
         ${this.figure("Classified", `${share.toFixed(0)}%`,
           `${count(s.classified)} of ${count(s.docs)} · enrichment runs on a timer`)}
       </div>
+      ${this.vectorsPanel()}
       <p class="freshness">
         Newest page fetched ${ago(s.newest_fetch)} <span class="dim">(${when(s.newest_fetch)})</span>
         · crawl began ${when(s.oldest_fetch)}
@@ -757,6 +816,13 @@ export class SearchDash extends LitElement {
         .map((b) => ({ value: b.key, label: `${named(b.key, kind)} (${count(b.n)})` })));
     return html`
       <div class="filters">
+        ${this.pick({ id: "f-mode", label: "Match", value: this.matchMode,
+          options: [
+            { value: "keyword", label: "keyword" },
+            { value: "vector", label: "vector" },
+            { value: "hybrid", label: "hybrid" },
+          ],
+          on: (v) => { this.matchMode = v; } })}
         ${this.pick({ id: "f-lang", label: "Language", value: this.filters.lang,
           options: from(this.analytics?.by_lang, "lang"),
           on: (v) => { this.filters = { ...this.filters, lang: v }; } })}
@@ -941,7 +1007,20 @@ export class SearchDash extends LitElement {
        query box and a filter row came to 190px inside an 845px pane and left
        655px of nothing under them. The public page keeps its natural height:
        it is a document that ends, not a surface to fill. */
-    :host { display: block; color: var(--fg); }
+    :host {
+      display: block; color: var(--fg);
+      /* nr-input reads its own tokens and their defaults are a LIGHT theme:
+         --nr-text falls back to rgba(0,0,0,.88) and --nr-bg to #ffffff. The
+         console's dark palette never set them, so a typed query was near-black
+         ink on the dark field — legible only by selecting it. Custom
+         properties cross a shadow boundary, which is the whole reason the
+         component exposes these; naming them here dresses every field on this
+         screen from the console's own theme instead of restyling the
+         component. */
+      --nr-text: var(--fg);
+      --nr-bg: var(--bg-card);
+      --nr-placeholder: var(--muted);
+    }
     :host([mode="admin"]) { display: flex; flex-direction: column; min-height: 100%; }
     /* Every box here is border-box. Not a habit — the query field is
        width:100% inside a flex column with padding and a border, and under the

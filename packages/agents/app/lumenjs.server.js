@@ -31,11 +31,29 @@ import { staticAssets } from "./server/static-assets.ts";
 // half is an operator's, and it can only tell them apart once the chain above
 // has said who is asking. See the head of the file for the split.
 import { searchProxy } from "./server/search-proxy.ts";
+// The sandbox document plugin renderers run in. Before the auth chain like
+// the assets: it carries no identity, answers every mode, and its own CSP is
+// the whole point of serving it separately.
+import { pluginHost } from "./server/plugin-host.ts";
+// Story pictures, fetched by this server so the reader's browser never talks
+// to the publisher. Before the auth chain, with the assets and the plugin
+// host, for the same reason all three are: Discover is a public page, a
+// picture on it carries no identity, and the route takes a story id rather
+// than a url so there is nothing here to authorise.
+import { imageProxy } from "./server/image-proxy.ts";
+// The weather on the front page, fetched by this server for the same two
+// reasons the pictures are: the reader's browser never talks to a third party,
+// and one upstream call serves everybody in a city. Keyless upstream, so there
+// is no credential here to leak.
+import { weatherProxy } from "./server/weather-proxy.ts";
 
 // Assets first: /favicon.ico and /og.png carry no identity and proxy nowhere,
 // so nothing earlier in the chain has anything to say about them.
 export default [
   staticAssets(),
+  pluginHost(),
+  imageProxy(),
+  weatherProxy(),
   previewFrameCsp(),
   // After the framework's security headers, so the override sticks.
   openerPolicy(),

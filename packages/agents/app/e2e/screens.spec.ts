@@ -33,12 +33,20 @@ const ADMIN = [
 
 /** The surfaces the rail opens, and the element each one is only open when it
  *  has mounted. A node count cannot stand in for these: the console paints
- *  hundreds of nodes with nothing open at all. */
-const OPENS: Record<string, string> = {
-  knowledge: "knowledge-page",
-  agents: ".gallery",
-  connectors: ".gallery",
-  starts: ".starts-page",
+ *  hundreds of nodes with nothing open at all.
+ *
+ *  Agents and Connectors moved: they used to open the directory (`.gallery`)
+ *  and now open the Settings overlay on their own tab. This file went red
+ *  saying "agents opened .gallery" — which was the spec being out of date and
+ *  not the console being broken, and is exactly what it should say when a
+ *  surface is renamed under it. `tab` is asserted with the element for those
+ *  two, because `console-settings` mounting proves only that SOMETHING in
+ *  settings opened; landing on the wrong tab would pass otherwise. */
+const OPENS: Record<string, { el: string; tab?: string }> = {
+  knowledge: { el: "knowledge-page" },
+  agents: { el: "console-settings", tab: "Agents" },
+  connectors: { el: "console-settings", tab: "Connectors" },
+  starts: { el: ".starts-page" },
 };
 const RAIL = Object.keys(OPENS);
 
@@ -210,11 +218,51 @@ test("every surface the rail opens renders", async ({ page }) => {
     // already uses rather than guessed. The first version guessed
     // `console-knowledge`, which does not exist — the element is
     // `knowledge-page` — and the assertion failed for the right reason.
-    expect(await has(page, OPENS[nav]), `${nav} opened ${OPENS[nav]}`).toBeTruthy();
+    const want = OPENS[nav];
+    expect(await has(page, want.el), `${nav} opened ${want.el}`).toBeTruthy();
+    if (want.tab !== undefined) {
+      const on = await page.evaluate(() => {
+        const find = (sel: string, root: ParentNode = document, depth = 0): Element | null => {
+          if (depth > 16) { return null; }
+          for (const el of root.querySelectorAll("*")) {
+            if (el.matches(sel)) { return el; }
+            if (el.shadowRoot !== null) {
+              const hit = find(sel, el.shadowRoot, depth + 1);
+              if (hit !== null) { return hit; }
+            }
+          }
+          return null;
+        };
+        const settings = find("console-settings") as (Element & { shadowRoot: ShadowRoot | null }) | null;
+        return settings?.shadowRoot?.querySelector("aside .on")?.textContent?.trim() ?? null;
+      });
+      expect(on, `${nav} landed on the ${want.tab} tab`).toBe(want.tab);
+    }
     expect(await blankIcons(page), `${nav} drew every icon`).toEqual([]);
-    // Close whatever opened, so the next one starts from the same place.
+    // Back to the chat, so the next row starts from the same place.
+    //
+    // Escape alone is not enough and the difference is not cosmetic: the
+    // Knowledge page is a VIEW, not an overlay — it replaces the centre column
+    // and nothing dismisses it — so a sweep that only pressed Escape ran every
+    // row after Knowledge on top of the Knowledge page. It happened to still
+    // pass, which is the worst version of that.
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      const find = (sel: string, root: ParentNode = document, depth = 0): Element | null => {
+        if (depth > 16) { return null; }
+        for (const el of root.querySelectorAll("*")) {
+          if (el.matches(sel)) { return el; }
+          if (el.shadowRoot !== null) {
+            const hit = find(sel, el.shadowRoot, depth + 1);
+            if (hit !== null) { return hit; }
+          }
+        }
+        return null;
+      };
+      (find('[data-nav="new"]') as HTMLElement | null)?.click();
+    });
+    await page.waitForTimeout(900);
   }
   expect(seen.errors, "nothing threw across the rail").toEqual([]);
 });
