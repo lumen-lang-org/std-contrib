@@ -381,7 +381,14 @@ export class ConsoleTasks extends LitElement {
                 <button type="button" @click=${() => this.edit({ schedule: x })}>${x}</button>`)}
             </div>
             <div class="acts">
-              <nr-button type="submit" ?disabled=${this.busy === "save" || !this.mayCreate}>
+              <!-- An explicit click as well as the form's submit. nr-button
+                   renders its own button inside its own shadow root, and a
+                   button there does not participate in this form's submission
+                   — so the submit type looked right and did nothing at all.
+                   The attribute stays for the Enter key, which the form still
+                   handles. -->
+              <nr-button type="submit" ?disabled=${this.busy === "save" || !this.mayCreate}
+                @click=${(e: Event) => this.save(e)}>
                 ${this.busy === "save" ? "Saving…" : existing ? "Save changes" : "Schedule it"}
               </nr-button>
               ${!existing || t === undefined ? nothing : html`
