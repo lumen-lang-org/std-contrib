@@ -43,6 +43,12 @@
       "path": "packages/sqlite"
     },
     {
+      "name": "cron",
+      "version": "0.1.0",
+      "summary": "Timezone-aware next/previous firing for cron expressions, over vendored ccronexpr and the system zone database.",
+      "path": "packages/cron"
+    },
+    {
       "name": "markdown",
       "version": "0.1.0",
       "summary": "Pure-Lumen Markdown -> HTML renderer (no FFI); render(md).",
