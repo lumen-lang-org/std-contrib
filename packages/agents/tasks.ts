@@ -117,7 +117,12 @@ export function tasksMapping(): DbRepository {
 
 export function tasksPlan(db: Db): Migration[] {
   return [
-    migration("98", "tasks that run on a schedule",
+    // 99, not 98: discover.ts owns 98.1 through 98.5, and a migration that
+    // sorts below one already applied is refused outright — which took the
+    // engine down for as long as it took to notice. Check
+    // `SELECT version FROM plume_schema_history ORDER BY installed_rank DESC`
+    // before choosing a number, not after.
+    migration("99", "tasks that run on a schedule",
       createTableSql(db, tasksMapping())),
   ];
 }
