@@ -7,7 +7,7 @@
 // epoch milliseconds — an assertion that reads "expected 1774850400000" tells
 // a reader nothing, and every interesting bug in a scheduler is one hour wide.
 
-import { compile, nextFire, refuse, stampMs, TaskRow, MIN_EVERY_MINUTES } from "./tasks.ts";
+import { compile, isOnce, nextFire, onceInstant, refuse, stampMs, TaskRow, MIN_EVERY_MINUTES } from "./tasks.ts";
 import { civil } from "../cron/cron.ts";
 
 // Saturday 2026-03-28T12:00:00Z — a weekend, so day-of-week arithmetic has to
@@ -88,6 +88,39 @@ test("a one-off fires once and then has nothing left to do", () => {
   // firing it again on the next tick.
   let behind = nextFire(row, SAT + 7200000);
   expect(!behind.ok);
+});
+
+test("a date and a time is a single instant, in the person's own zone", () => {
+  let paris = onceInstant("on 2026-03-30 at 08:00", "Europe/Paris", SAT);
+  expect(paris.ok);
+  expect(civil("Europe/Paris", stampMs(paris.at) as i64) == "2026-03-30 08:00:00 CEST");
+
+  // The same words, another zone, another instant — an hour of difference that
+  // a client computing this itself would get wrong twice a year.
+  let tokyo = onceInstant("on 2026-03-30 at 08:00", "Asia/Tokyo", SAT);
+  expect(paris.at != tokyo.at);
+
+  // A year already gone. A cron expression carries no year, so without the
+  // check this reads as "the 30th of March coming up" and schedules a task the
+  // person did not ask for; the refusal names what it found instead.
+  let behind = onceInstant("on 2019-03-30 at 08:00", "UTC", SAT);
+  expect(!behind.ok);
+  expect(behind.error.indexOf("in the past") >= 0);
+
+  // A day that does not exist, refused by the library that knows the calendar
+  // rather than by arithmetic here.
+  expect(!onceInstant("on 2026-02-30 at 08:00", "UTC", SAT).ok);
+
+  // Shapes that are not this grammar at all.
+  expect(!onceInstant("on tomorrow at 08:00", "UTC", SAT).ok);
+  expect(!onceInstant("on 2026-03-30 at 8", "UTC", SAT).ok);
+  expect(!onceInstant("every day at 08:00", "UTC", SAT).ok);
+
+  // And which of the two grammars a phrase belongs to is decided once, here,
+  // rather than by each caller looking at the first word.
+  expect(isOnce("on 2026-03-30 at 08:00"));
+  expect(isOnce("  ON 2026-03-30 at 08:00 "));
+  expect(!isOnce("every monday at 09:15"));
 });
 
 test("a task nobody could run is refused where it can still be fixed", () => {

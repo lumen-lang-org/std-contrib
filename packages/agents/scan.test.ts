@@ -2,7 +2,7 @@
 //
 //   cd packages/agents && lumen test scan.test.ts
 
-import { jsonFind, jsonRaw, jsonText, jsonList, jsonValueAt, jsonUnescape, jsonStringMember, jsonComplete } from "./scan.ts";
+import { jsonFind, jsonRaw, jsonText, jsonList, jsonValueAt, jsonUnescape, jsonStringMember, jsonComplete, jsonFlag } from "./scan.ts";
 
 test("a member holding null is stepped over, not mistaken for the text", () => {
   // What a tool-calling reply looks like: the text is null and the answer is
@@ -168,4 +168,30 @@ test("a closing bracket has to match what it opened", () => {
   expect(!jsonComplete("{\"a\":{\"b\":1]}"));
   expect(!jsonComplete("}{"));
   expect(!jsonComplete("{\"a\":1}}"));
+});
+
+// --- flags ---------------------------------------------------------------
+
+test("a flag reads whether it was written as a boolean or as a string", () => {
+  // Both spellings arrive in practice: a console does JSON.stringify and
+  // sends a boolean; a settings row this API writes itself quotes it.
+  expect(jsonFlag("{\"enabled\":true}", "enabled", false));
+  expect(jsonFlag("{\"enabled\":\"true\"}", "enabled", false));
+  expect(!jsonFlag("{\"enabled\":false}", "enabled", true));
+  expect(!jsonFlag("{\"enabled\":\"false\"}", "enabled", true));
+});
+
+test("an absent flag is the caller's default, not false", () => {
+  // The difference between "turn it off" and "I did not mention it" — a merge
+  // that cannot tell them apart switches things off nobody touched.
+  expect(jsonFlag("{\"other\":1}", "enabled", true));
+  expect(!jsonFlag("{\"other\":1}", "enabled", false));
+  expect(jsonFlag("", "enabled", true));
+});
+
+test("a flag that is neither true nor false is not true", () => {
+  // null, a number, a string of something else: none of them is consent.
+  expect(!jsonFlag("{\"enabled\":null}", "enabled", true));
+  expect(!jsonFlag("{\"enabled\":1}", "enabled", true));
+  expect(!jsonFlag("{\"enabled\":\"yes\"}", "enabled", true));
 });

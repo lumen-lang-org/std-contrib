@@ -24,6 +24,11 @@ import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, 
 import { Migration, migration } from "../plume/migrate.ts";
 import { artifactBytesMax, threadBytesMax } from "./caps.ts";
 import { normalScope } from "./knowledge.ts";
+// The scoping clause, shared with threads.ts and runlog.ts rather than written
+// again here: `libraryFor` asks the same question of the threads table that
+// the conversation list asks, and two spellings of "whose rows are these" is
+// one spelling too many.
+import { ownerClause } from "./owner.ts";
 
 // The largest body an artifact may carry, in bytes. Half a megabyte is far
 // more than a page a person reads and far less than a database row anyone
@@ -812,6 +817,78 @@ export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<ArtifactRow[]>(listed);
+}
+
+/** One card in the library: an artifact, where it lives, and enough of it to
+ *  recognise. `excerpt` is the head of the current version's text — the first
+ *  page, in the sense a person means — and empty for anything binary, where
+ *  the bytes are not something to read. */
+export type ArtifactCard = {
+  id: string,
+  threadId: string,
+  threadTitle: string,
+  slot: int,
+  path: string,
+  title: string,
+  kind: string,
+  currentVersion: int,
+  updatedAt: string,
+  excerpt: string,
+};
+
+/* How much of a document the card shows. Enough to tell two briefs apart,
+ * which is what a person is doing when they scan a wall of cards, and not so
+ * much that the list carries a corpus: 400 characters is a paragraph. */
+const EXCERPT = 400;
+
+/** Every artifact this caller owns, newest first.
+ *
+ *  Scoped by a subquery on the threads table rather than by fetching the
+ *  caller's threads and passing a list — the list is unbounded, and a query
+ *  that grows a placeholder per conversation stops working for the people who
+ *  have the most of them. Capped, because a library is browsed and searched
+ *  rather than read to the end; the cap is stated in the answer so a caller
+ *  can say "and more" rather than implying it has everything. */
+export function libraryFor(db: Db, tags: string[], cap: int): ArtifactCard[] {
+  let none: ArtifactCard[] = [];
+  let where = "thread_id IN (SELECT id FROM threads";
+  let args: string[] = [];
+  let scope = ownerClause(db, tags, 1);
+  if (scope != "") {
+    where = where + " WHERE " + scope;
+    let t: int = 0;
+    while (t < tags.length) { args.push(tags[t]); t = t + 1; }
+  }
+  where = where + ")";
+
+  let keys: DbOrder[] = [desc("updated_at")];
+  let listed = listOrdered(db, artifactsMapping(), where, args, keys);
+  if (listed == "" || listed == "[]") { return none; }
+  let rows = JSON.parse<ArtifactRow[]>(listed);
+
+  let out: ArtifactCard[] = [];
+  let i: int = 0;
+  while (i < rows.length && out.length < cap) {
+    let row = rows[i];
+    // The body only for text, and only the head of it. A binary artifact has
+    // no first page worth quoting, and reading one to throw it away would be
+    // the most expensive part of this route.
+    let excerpt = "";
+    if (!binaryKind(row.kind)) {
+      let held = getVersion(db, row.id, row.currentVersion);
+      let body = held.body;
+      excerpt = body.length > EXCERPT ? body.slice(0, EXCERPT) : body;
+    }
+    let card: ArtifactCard = {
+      id: row.id, threadId: row.threadId, threadTitle: "",
+      slot: row.slot, path: row.path, title: row.title, kind: row.kind,
+      currentVersion: row.currentVersion, updatedAt: row.updatedAt,
+      excerpt: excerpt,
+    };
+    out.push(card);
+    i = i + 1;
+  }
+  return out;
 }
 
 // One round's mark on an artifact: which slot and version a turn produced,

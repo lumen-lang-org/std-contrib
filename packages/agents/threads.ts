@@ -503,6 +503,8 @@ function turnOf(row: ThreadTurnRow): Turn {
     return assistantTurn(row.text, calls);
   }
   if (row.role == "tool") { return toolTurn(row.callId, row.toolName, row.text); }
+  // CHUNK_ROLE included: to the MODEL a retrieved passage is a user turn and
+  // always was. The role only changes who else can tell them apart.
   return userTurn(row.text);
 }
 
@@ -535,6 +537,50 @@ function callsJson(calls: ToolCall[]): string {
 // A NUL byte in a tool result is one live trigger: jsonUnescape resolves the
 // escape a provider wrote into the byte itself, and PostgreSQL refuses that in
 // a text parameter. A race losing on migration 54's unique index is another.
+// The opening of what asContext writes. Kept here beside the check that uses
+// it so the two cannot drift apart silently — and they did drift once anyway,
+// when the sentence was rewritten in knowledge.ts and this copy kept the old
+// words; the knowledge suite pins the two together now.
+const CONTEXT_PREFIX = "Passages retrieved from the knowledge base";
+
+// The role a retrieved-passage turn is STORED under.
+//
+// The comment on threadMessageRows wished for this and settled for a prefix
+// match: "matching on text is a seam — a marker on the turn would be better".
+// The seam duly failed. Web retrieval writes its own opening sentence, the
+// prefix check did not know it, and every passage the web index returned was
+// rendered in the transcript as though the person had typed it — a wall of
+// crawled prose above their own question.
+//
+// So the marker exists now. It is the ROW's role and not a new column: `Turn`
+// is the provider's shape and the wire has no field for this, but the row is
+// ours. `turnOf` maps it back to a user turn on the way to the model — which
+// is what a retrieved passage has always been to a model — and every reader
+// that shows a conversation to a PERSON filters on the role instead of
+// guessing from the words.
+//
+// The prefix check stays beside it, for rows written before this existed.
+// They are ordinary user turns in the table and nothing will rewrite them.
+export const CHUNK_ROLE = "chunk";
+
+// The other opening: webrag.ts::asWebContext. Named here beside the knowledge
+// one for the reason that one is — the two files that must agree are far
+// apart, and the last time a sentence was rewritten in one of them this check
+// silently stopped matching.
+const WEB_CONTEXT_PREFIX = "Passages retrieved from the public web index";
+
+/** Whether a user turn is retrieved context rather than something typed.
+ *
+ *  Asked ONCE, when the row is written, and the answer is stored as the row's
+ *  role. That is the difference from what this used to be: the prefix test ran
+ *  on every read, so a retrieval whose wording this file had not been told
+ *  about was a wall of crawled prose in somebody's transcript. Classify at the
+ *  boundary, store the verdict, and every reader after it asks the row. */
+function isRetrievedContext(role: string, text: string): bool {
+  if (role != "user") { return false; }
+  return text.startsWith(CONTEXT_PREFIX) || text.startsWith(WEB_CONTEXT_PREFIX);
+}
+
 export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int): string {
   if (turns.length == 0) { return ""; }
 
@@ -548,7 +594,11 @@ export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int):
       id: threadId + "-" + `${seq}`,
       threadId: threadId,
       seq: seq,
-      role: turns[i].role,
+      // Stored as CHUNK_ROLE when it is retrieved context. `turnOf` maps it
+      // straight back to a user turn for the model, so the wire is unchanged
+      // and only the readers that show a conversation to a PERSON can now
+      // tell the two apart.
+      role: isRetrievedContext(turns[i].role, turns[i].text) ? CHUNK_ROLE : turns[i].role,
       text: turns[i].text,
       calls: callsJson(turns[i].calls),
       callId: turns[i].callId,
@@ -719,11 +769,7 @@ export function threadBudget(): int {
   return THREAD_BUDGET_CHARS;
 }
 
-// The opening of what asContext writes. Kept here beside the check that uses
-// it so the two cannot drift apart silently — and they did drift once anyway,
-// when the sentence was rewritten in knowledge.ts and this copy kept the old
-// words; the knowledge suite pins the two together now.
-const CONTEXT_PREFIX = "Passages retrieved from the knowledge base";
+
 
 // --- which model answers ------------------------------------------------------------
 
@@ -2062,7 +2108,11 @@ export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {
     // them. Matching on text is a seam — a marker on the turn would be better —
     // but Turn is the provider's shape and a field the wire does not carry has
     // to be justified by more than this.
-    if (rows[i].role == "user" && !rows[i].text.startsWith(CONTEXT_PREFIX)) { out.push(rows[i]); }
+    // Role first, prefix second: the role is the marker for everything
+    // written since CHUNK_ROLE existed, and the prefix still catches the
+    // knowledge-base rows already in the table.
+    if (rows[i].role == CHUNK_ROLE) { /* retrieved context, never the person's words */ }
+    else if (rows[i].role == "user" && !rows[i].text.startsWith(CONTEXT_PREFIX)) { out.push(rows[i]); }
     else if (rows[i].role == "assistant" && rows[i].text != "" && jsonList(rows[i].calls).length == 0) { out.push(rows[i]); }
     i = i + 1;
   }

@@ -29,11 +29,12 @@
 
 import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
-import { connectDatabase } from "../plume/plume.ts";
+import { connectDatabase, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
+import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
 
 // How many tasks one pass will fire before leaving the rest to the next tick.
@@ -74,6 +75,38 @@ function main(): void {
     fired = fired + 1;
   }
   if (fired > 0) { console.log("scheduler: fired " + `${fired}`); }
+
+  // The other thing a minute is good for. A crawled body is readable in the
+  // sense that the words are there; a model turns it into an article once, and
+  // this is where that call belongs — not on the read path, where the first
+  // person to open a story waited fifty-three seconds for a page that already
+  // had text on it.
+  reflow(db, master);
+}
+
+// Up to REFLOW_PER_PASS stories, made readable. Per story try, so one that
+// fails costs one story; and no failure is recorded on the row, because there
+// is nothing to record — `readable` answers "" and the story keeps showing the
+// body it already had.
+const REFLOW_PER_PASS: int = 3;
+
+function reflow(db: Db, master: string): void {
+  let waiting = unreadableStories(db, REFLOW_PER_PASS);
+  let i: int = 0;
+  let done: int = 0;
+  while (i < waiting.length) {
+    try {
+      let better = readable(db, waiting[i].body, discoverModelId(), master);
+      if (better != "") {
+        persist(db, discoverStoriesMapping(), JSON.stringify(withReadableBody(waiting[i], better)));
+        done = done + 1;
+      }
+    } catch (e) {
+      console.error("scheduler: reflow " + waiting[i].id + ": " + e.message);
+    }
+    i = i + 1;
+  }
+  if (done > 0) { console.log("scheduler: made " + `${done}` + " stories readable"); }
 }
 
 // One task: open a conversation, ask it, record what happened.

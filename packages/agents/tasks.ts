@@ -23,7 +23,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, asc, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { next as nextFiring, problem as cronProblem, knownZone } from "../cron/cron.ts";
+import { next as nextFiring, problem as cronProblem, civil, knownZone } from "../cron/cron.ts";
 
 // A task, as stored.
 //
@@ -261,6 +261,11 @@ export function compile(said: string): Compiled {
   return bad("\"" + dow + "\" is not a day, \"weekday\", \"weekend\" or \"day\"");
 }
 
+/** Whether these words describe a single instant rather than a recurrence. */
+export function isOnce(said: string): bool {
+  return said.toLowerCase().trim().startsWith("on ");
+}
+
 // ---------------------------------------------------------------------------
 // When it fires
 // ---------------------------------------------------------------------------
@@ -295,6 +300,64 @@ export function nextFire(row: TaskRow, afterMs: number): Scheduled {
   if (!fire.ok) { return noFire(fire.error); }
   let out: Scheduled = { ok: true, at: `${fire.at}`, error: "" };
   return out;
+}
+
+/** "on 2026-08-06 at 09:00" as an instant in `zone`, or why it is not one.
+ *
+ *  The other half of the grammar. `compile` answers recurrences and a one-off
+ *  is not one — "tomorrow at nine" is a single firing and then the task is
+ *  finished — so this is where a date lands. It exists because a person
+ *  describing work to be done later means a date about as often as they mean a
+ *  weekday, and the alternative was every caller computing epoch milliseconds
+ *  and sending them, which is how a task ends up scheduled in 1970.
+ *
+ *  The date is resolved through the same cron machinery as everything else
+ *  rather than by arithmetic here: a day-of-month plus a month is an
+ *  expression, and its first firing in the zone is the instant — daylight
+ *  saving, leap years and "there is no 31st of April" all decided by the
+ *  library that already knows them.
+ *
+ *  A year in the past is the trap that makes the check at the end necessary: a
+ *  cron expression carries no year, so "2019-08-06" would answer this coming
+ *  August. The answer is compared back against what was asked and refused when
+ *  they differ. */
+export function onceInstant(said: string, zone: string, nowMs: number): Scheduled {
+  let text = said.toLowerCase().trim();
+  let words = text.split(" ");
+  let clean: string[] = [];
+  let w: int = 0;
+  while (w < words.length) {
+    if (words[w] != "") { clean.push(words[w]); }
+    w = w + 1;
+  }
+  if (clean.length != 4 || clean[0] != "on" || clean[2] != "at") {
+    return noFire("say \"on 2026-08-06 at 09:00\" — a date, then a time");
+  }
+  let date = clean[1];
+  if (date.length != 10 || date.charAt(4) != "-" || date.charAt(7) != "-") {
+    return noFire("\"" + date + "\" is not a date — write it as YYYY-MM-DD");
+  }
+  let year = parseInt(date.slice(0, 4), 10) ?? 0;
+  let month = parseInt(date.slice(5, 7), 10) ?? 0;
+  let day = parseInt(date.slice(8, 10), 10) ?? 0;
+  if (year < 2000 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return noFire("\"" + date + "\" is not a date this understands");
+  }
+  let when = clockMinutes(clean[3]);
+  if (when < 0) { return noFire("\"" + clean[3] + "\" is not a time — write it as HH:MM, e.g. 09:00"); }
+
+  let expr = "0 " + `${when % 60}` + " " + `${when / 60}` + " " + `${day}` + " " + `${month}` + " *";
+  let fire = nextFiring(zone == "" ? "UTC" : zone, expr, nowMs as i64);
+  if (!fire.ok) { return noFire("there is no " + date + " at " + clean[3] + " to run at"); }
+  // The year, checked by reading the answer back rather than by trusting the
+  // expression that produced it.
+  let reads = civil(zone == "" ? "UTC" : zone, fire.at);
+  if (!reads.startsWith(date)) {
+    return noFire(date + " is in the past — the soonest " + `${day}` + "/" + `${month}`
+      + " ahead is " + reads.slice(0, 10));
+  }
+  let at: Scheduled = { ok: true, at: `${fire.at}`, error: "" };
+  return at;
 }
 
 /** Everything wrong with a task somebody just described, or "".

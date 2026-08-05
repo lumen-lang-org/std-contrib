@@ -125,6 +125,27 @@ export function jsonText(document: string, key: string): string {
   return jsonUnescape(raw.slice(1, raw.length - 1));
 }
 
+// A flag out of an operator's body, whether it arrives as a JSON boolean or as
+// a quoted string.
+//
+// jsonText answers "" for anything that is not a string, which is the rule
+// directly above and a deliberate one. A caller reading a flag with it
+// therefore reads every JSON boolean as "" — and `{"enabled":true}` is what
+// JSON.stringify produces for a boolean field, so a route parsing a flag that
+// way can never see one turned on.
+//
+// It cost a real bug: the captcha checkbox in the console could not be
+// enabled. The console sent true, the engine read "", stored false, returned
+// 200, and the form came back unticked with nothing wrong anywhere to find.
+//
+// jsonRaw is the fix — it hands back the token as it was written, so `true`
+// and `"true"` both arrive intact and are compared as text.
+export function jsonFlag(document: string, key: string, fallback: bool): bool {
+  let raw = jsonRaw(document, key);
+  if (raw == "") { return fallback; }
+  return raw == "true" || raw == "\"true\"";
+}
+
 export type JsonText = {
   found: bool,
   text: string,
