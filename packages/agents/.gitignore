@@ -19,3 +19,13 @@ zz*
 .lumen-*
 api
 api.backup-*
+
+# The other binaries this package compiles, and the copies kept beside them
+# while a deployment is being replaced. `api` was already named; these were
+# not, which is how a 57 MB `api.prev` came to be sitting in `git status`
+# looking like source. A binary that reaches a commit is in the history for
+# good — the note at the top of this file is about exactly that.
+scheduler
+indexer
+api.prev*
+api.pre-*
