@@ -1,0 +1,23 @@
+# The clock. Every minute, which is well under the fifteen-minute floor a task
+# can be scheduled at, so no task waits meaningfully longer than it asked to.
+#
+#   systemctl --user daemon-reload      (or system-wide, matching the engine)
+#   systemctl enable --now joule-scheduler.timer
+#   systemctl list-timers joule-scheduler.timer
+#
+# Persistent=true is the half that is easy to leave out and expensive to miss:
+# without it, a machine that was off over a task's firing time never runs it and
+# never says so. With it, the pass that was missed runs once on boot — once,
+# not once per missed minute, because the claim advances next_at rather than
+# replaying the schedule.
+[Unit]
+Description=Fire Joule scheduled tasks every minute
+
+[Timer]
+OnCalendar=*:0/1
+AccuracySec=5s
+Persistent=true
+Unit=joule-scheduler.service
+
+[Install]
+WantedBy=timers.target

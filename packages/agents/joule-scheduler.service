@@ -1,0 +1,36 @@
+# One pass of the task scheduler: claim what is due, run it, record it, exit.
+#
+# Type=oneshot, and that is the design rather than a simplification. A Lumen
+# binary does not free, so anything that runs forever grows until something
+# stops it — which is why joule-engine.service carries MemoryMax and
+# Restart=always, and why this does not need either. A process that exits every
+# minute cannot leak, cannot wedge, and cannot take the engine down with it when
+# a provider hangs.
+#
+# It is also why there is no loop in scheduler.ts. systemd will not start a
+# second instance while this one is still running, so a pass that overruns skips
+# the next tick instead of piling up; the claim in tasks.ts makes that safe
+# rather than merely tolerable, and the skipped work is simply still due.
+#
+# Firing is capped at PER_PASS tasks per run. A pass that ran forty agent turns
+# would hold the unit active for an hour, and every tick in that hour would be
+# dropped silently.
+[Unit]
+Description=Joule scheduled tasks (one pass)
+After=network-online.target joule-engine.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projects/std-contrib/packages/agents
+EnvironmentFile=/home/ubuntu/projects/std-contrib/packages/agents/.env
+Environment=AGENTS_PG_HOST=172.22.0.2
+Environment=AGENTS_PG_DATABASE=agents
+Environment=AGENTS_PG_USER=agents
+ExecStart=/home/ubuntu/projects/std-contrib/packages/agents/scheduler
+# Long enough for PER_PASS agent turns, short enough that a wedged pass does not
+# hold the timer off for the rest of the day.
+TimeoutStartSec=1800
+StandardOutput=append:/home/ubuntu/projects/std-contrib/packages/agents/.lumen-scheduler.log
+StandardError=append:/home/ubuntu/projects/std-contrib/packages/agents/.lumen-scheduler.log
