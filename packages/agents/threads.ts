@@ -88,6 +88,15 @@ export type ThreadRow = {
   // people. Off for everything: a conversation is private until its owner
   // says otherwise, and this is that saying-so.
   replayable: bool,
+  // The project this conversation is filed under, or "" for none — every
+  // thread written before projects existed, and every one opened outside a
+  // project. Never NULL, for the reason `owner` is not. The column arrives at
+  // 102.1, which rides projectsPlan (projects.ts) rather than the plan below:
+  // the project table is the reason the column exists, and this plan's
+  // numbers are history that may not grow past what other files have since
+  // claimed. Deleting a project sets this back to "" (`releaseThreads`), so
+  // it never points at a row that is gone.
+  projectId: string,
   createdAt: string,
 };
 
@@ -134,6 +143,9 @@ export function threadsMapping(): DbRepository {
     // And the same again, at 88.
     field("title", "title", "text"),
     field("replayable", "replayable", "bool"),
+    // At 102.1, and that ALTER lives in projectsPlan (projects.ts), beside
+    // the table the column points at.
+    field("projectId", "project_id", "text"),
     field("createdAt", "created_at", "text"),
   ];
   return repository("threads", "id", "id", fs);
@@ -297,7 +309,11 @@ export function openThread(db: Db, open: ThreadOpen): string {
   // belongs to whatever files that message — `runInThreadWith` — in exactly one
   // place, rather than to an argument every caller of this would have to make
   // up.
-  let row: ThreadRow = { id: id, agentId: open.agentId, owner: open.owner, modelChoiceId: "", routeKey: "", title: "", replayable: false, createdAt: open.now };
+  // No project either, for the same reason as the choice: `POST /threads`
+  // stamps the field through `assignProject` after checking the project is
+  // the opener's own, so `ThreadOpen` stays three fields and the write has
+  // one home.
+  let row: ThreadRow = { id: id, agentId: open.agentId, owner: open.owner, modelChoiceId: "", routeKey: "", title: "", replayable: false, projectId: "", createdAt: open.now };
   let written = persist(db, threadsMapping(), JSON.stringify(row));
   if (!written.ok) { return ""; }
   return id;
@@ -316,14 +332,18 @@ export type ThreadListing = {
   title: string,
   // Offered as a starting point to other people.
   replayable: bool,
+  // The project it is filed under, "" for none — what the sidebar groups on.
+  projectId: string,
 };
 
 // Which page of whose threads. An empty `tags` is the unscoped read — the
-// community edition, every thread there is; see owner.ts.
+// community edition, every thread there is; see owner.ts. `project` narrows
+// to one project's conversations, "" for the whole sidebar.
 export type ThreadPage = {
   tags: string[],
   limit: int,
   offset: int,
+  project: string,
 };
 
 // How long a thread may sit empty before the sweep may take it, read from
@@ -387,7 +407,31 @@ export function sweepEmptyThreads(db: Db, before: string): void {
 export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
   let out: ThreadListing[] = [];
   let newest: DbOrder[] = [desc("created_at")];
-  let mine = pageOrdered(db, threadsMapping(), ownerClause(db, page.tags, 1), page.tags, newest, page.limit, page.offset);
+  // The project filter joins the owner clause in SQL, for the reason the
+  // owner filter is there (owner.ts): a post-filter pages over rows it throws
+  // away. Filtering does not replace scoping — a stranger who guesses a
+  // project id still meets the owner clause and gets an empty page.
+  // A project's hidden workspace thread never lists. It exists to HOLD the
+  // project's files (projects.ts, PROJECT_FILES_KEY), it is opened by the
+  // engine rather than by a person, and a sidebar that showed it would offer
+  // a conversation nobody had — one per project, forever. A literal rather
+  // than a placeholder so the owner clause's numbering stands untouched.
+  let hidden = "route_key <> 'project-files'";
+  let clause = ownerClause(db, page.tags, 1);
+  clause = clause == "" ? hidden : hidden + " AND " + clause;
+  let args = page.tags;
+  if (page.project != "") {
+    // The workspace thread carries no project_id — it is pointed AT by the
+    // project row, never filed under it — so this branch cannot surface it;
+    // the exclusion rides along anyway, so the rule has one spelling.
+    let scoped = ownerClause(db, page.tags, 2);
+    clause = "project_id = " + placeholderAt(db, 1) + (scoped == "" ? "" : " AND " + scoped) + " AND " + hidden;
+    let both: string[] = [page.project];
+    let t: int = 0;
+    while (t < page.tags.length) { both.push(page.tags[t]); t = t + 1; }
+    args = both;
+  }
+  let mine = pageOrdered(db, threadsMapping(), clause, args, newest, page.limit, page.offset);
   if (mine == "" || mine == "[]") { return out; }
   let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(mine);
   let i: int = 0;
@@ -414,7 +458,7 @@ export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
       if (held.length > 0) { title = held[0].path; }
     }
     if (title.length > 80) { title = title.slice(0, 77) + "..."; }
-    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title, replayable: rows[i].replayable };
+    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title, replayable: rows[i].replayable, projectId: rows[i].projectId };
     out.push(listing);
     i = i + 1;
   }
@@ -912,8 +956,11 @@ export function listReplayable(db: Db, limit: int): ThreadListing[] {
       }
     }
     if (title.length > 80) { title = title.slice(0, 77) + "..."; }
+    // No project in the gallery, whatever the row holds: this list crosses
+    // owners, and a project is its owner's private grouping — naming one here
+    // would leak an id a stranger could try on `?project=`.
     let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId,
-      createdAt: rows[i].createdAt, title: title, replayable: true };
+      createdAt: rows[i].createdAt, title: title, replayable: true, projectId: "" };
     out.push(listing);
     i = i + 1;
   }

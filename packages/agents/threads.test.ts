@@ -5,6 +5,7 @@
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
+import { projectsPlan } from "./projects.ts";
 import { artifactPlan, putArtifact, listArtifacts, TURN_SEQ_NONE } from "./artifacts.ts";
 import { stepPlan } from "./steps.ts";
 import { RunRow, runsMapping, runLogPlan } from "./runlog.ts";
@@ -105,7 +106,17 @@ function freshThreads(): void {
   execute(database, "DROP TABLE IF EXISTS thread_chunks");
   execute(database, "DROP TABLE IF EXISTS thread_turns");
   execute(database, "DROP TABLE IF EXISTS threads");
-  migrate(database, threadPlan(database));
+  // Dropped because 103 ALTERs it: left standing, the second run of this
+  // fixture meets a duplicate files_thread_id and the plan stops there.
+  execute(database, "DROP TABLE IF EXISTS projects");
+  // projectsPlan rides along wherever threads are made: the live mapping
+  // carries project_id, and its ALTER lives in that plan — without it every
+  // INSERT into threads is a column short.
+  let plan = threadPlan(database);
+  let grouped = projectsPlan(database);
+  let g: int = 0;
+  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
+  migrate(database, plan);
 }
 
 function turnCount(threadId: string): int {
@@ -183,6 +194,8 @@ function freshSweep(): void {
   // numbered above it silently never runs and the failure surfaces as a table
   // missing a column nobody edited.
   execute(database, "DROP TABLE IF EXISTS thread_thoughts");
+  // 103 ALTERs projects — freshThreads says why it must not survive a wipe.
+  execute(database, "DROP TABLE IF EXISTS projects");
   let plan = threadPlan(database);
   let files = workspacePlan(database);
   let w: int = 0;
@@ -196,6 +209,10 @@ function freshSweep(): void {
   let ran = runLogPlan(database);
   let r: int = 0;
   while (r < ran.length) { plan.push(ran[r]); r = r + 1; }
+  // The threads column again — freshThreads says why this rides along.
+  let grouped = projectsPlan(database);
+  let g: int = 0;
+  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
   migrate(database, plan);
 }
 
@@ -306,6 +323,23 @@ function seededMenu(): void {
   execute(database, "DROP TABLE IF EXISTS thread_summaries");
   execute(database, "DROP TABLE IF EXISTS plugins");
   execute(database, "DROP TABLE IF EXISTS plugin_items");
+  // The rest of what schemaPlan ALTERs, the api.test.ts fresh() list. These
+  // were missing and the second run of this fixture met migration 90.9 adding
+  // `kind` to an auth_providers that already had it — the plan stopped there,
+  // SILENTLY, and every migration numbered above 90.9 never ran. Nothing here
+  // read a column that high until threads gained project_id at 102.1, at
+  // which point every test through this fixture failed on an INSERT one
+  // column short, eleven tests away from the drop that had not kept up.
+  execute(database, "DROP TABLE IF EXISTS auth_providers");
+  execute(database, "DROP TABLE IF EXISTS agent_skills");
+  execute(database, "DROP TABLE IF EXISTS skill_files");
+  execute(database, "DROP TABLE IF EXISTS skills");
+  execute(database, "DROP TABLE IF EXISTS discover_stories");
+  execute(database, "DROP TABLE IF EXISTS discover_feeds");
+  execute(database, "DROP TABLE IF EXISTS card_plugins");
+  execute(database, "DROP TABLE IF EXISTS card_cases");
+  execute(database, "DROP TABLE IF EXISTS tool_cards");
+  execute(database, "DROP TABLE IF EXISTS agent_web_rag");
   execute(database, "DROP INDEX IF EXISTS chunks_by_thread");
   execute(database, "DROP INDEX IF EXISTS turns_by_thread");
   execute(database, "DROP TABLE IF EXISTS thread_chunks");
@@ -313,6 +347,8 @@ function seededMenu(): void {
   execute(database, "DROP TABLE IF EXISTS threads");
   execute(database, "DROP TABLE IF EXISTS thread_steps");
   execute(database, "DROP TABLE IF EXISTS thread_thoughts");
+  // 103 ALTERs projects — freshThreads says why it must not survive a wipe.
+  execute(database, "DROP TABLE IF EXISTS projects");
 
   let plan = schemaPlan(database);
   let conversations = threadPlan(database);
@@ -323,6 +359,10 @@ function seededMenu(): void {
   let live = stepPlan(database);
   let s: int = 0;
   while (s < live.length) { plan.push(live[s]); s = s + 1; }
+  // The threads column again — freshThreads says why this rides along.
+  let grouped = projectsPlan(database);
+  let g: int = 0;
+  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
   migrate(database, plan);
 
   let own: ModelRow = { id: "m-own", label: "The agent's own", apiName: "own-1", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
@@ -750,7 +790,7 @@ test("the sidebar prefers the name, and keeps every fallback it had", () => {
   expect(nameThread(database, named, "Lyon stock levels") == "");
   putArtifact(database, { threadId: uploaded, path: "/plan.md", title: "Plan", content: "a plan", note: "", origin: "uploaded", mustCreate: true, turnSeq: TURN_SEQ_NONE, now: "1000000000001" });
 
-  let rows: ThreadListing[] = listThreads(database, { tags: [], limit: 50, offset: 0 });
+  let rows: ThreadListing[] = listThreads(database, { tags: [], limit: 50, offset: 0, project: "" });
   expect(rows.length == 3);
   let i: int = 0;
   while (i < rows.length) {

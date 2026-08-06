@@ -96,10 +96,12 @@ export function urlEncode(text: string): string {
       out = out + ch;
     } else {
       let code = text.charCodeAt(i);
-      // Above the ASCII range a character stands for more than one byte, and
-      // this encodes the code unit rather than UTF-8. Nothing this file sends
-      // is outside ASCII — client names, scopes, URLs and opaque tokens — and
-      // encoding it wrongly beats encoding it not at all.
+      // Correct for non-ASCII too, and not by accident of this loop: a Lumen
+      // string is UTF-8 bytes, `length` counts them and `charCodeAt` answers
+      // one, so encoding byte-by-byte IS UTF-8 percent-encoding — "تونس"
+      // comes out %D8%AA%D9%88%D9%86%D8%B3. An earlier comment here claimed
+      // the opposite (thinking in JS code units) and sent someone off to
+      // write a second encoder that double-encoded; measure before replacing.
       out = out + "%" + HEX.charAt((code / 16) % 16) + HEX.charAt(code % 16);
     }
     i = i + 1;
