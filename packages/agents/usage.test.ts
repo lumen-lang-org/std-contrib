@@ -12,6 +12,7 @@ import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/p
 import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
 import { TURN_SEQ_NONE, artifactPlan, putArtifact } from "./artifacts.ts";
 import { threadPlan, openThread } from "./threads.ts";
+import { projectsPlan } from "./projects.ts";
 import { runLogPlan, recordRun } from "./runlog.ts";
 import { AgentRun, AgentStep } from "./run.ts";
 import { Turn } from "./provider.ts";
@@ -34,6 +35,9 @@ function fresh(): void {
   execute(database, "DROP TABLE IF EXISTS threads");
   execute(database, "DROP TABLE IF EXISTS run_steps");
   execute(database, "DROP TABLE IF EXISTS runs");
+  // 103 ALTERs projects: left standing, the second run of this fixture meets
+  // a duplicate files_thread_id and the plan stops there.
+  execute(database, "DROP TABLE IF EXISTS projects");
   // Three plans, not sorted between them — `migrate` orders a plan itself, the
   // same way api.ts hands it eleven of these end to end.
   let plan = threadPlan(database);
@@ -43,6 +47,11 @@ function fresh(): void {
   let runs = runLogPlan(database);
   let n: int = 0;
   while (n < runs.length) { plan.push(runs[n]); n = n + 1; }
+  // The threads mapping carries project_id, whose ALTER rides projectsPlan —
+  // without it every openThread below is a column short.
+  let grouped = projectsPlan(database);
+  let g: int = 0;
+  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
   migrate(database, plan);
 }
 

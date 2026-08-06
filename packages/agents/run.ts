@@ -27,7 +27,9 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
+import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
+import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
@@ -428,6 +430,14 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         specs.push(sched[td]);
         td = td + 1;
       }
+      // Workflows ride the same guard: both are standing instructions with a
+      // provider's bill attached, and both need an owner who can be told.
+      let flows = workflowTools();
+      let wf: int = 0;
+      while (wf < flows.length) {
+        specs.push(flows[wf]);
+        wf = wf + 1;
+      }
     }
   }
 
@@ -652,6 +662,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     system = system + "\n\n" + FILE_FENCE;
     let briefing = artifactBriefing(db, threadId);
     if (briefing != "") { system = system + "\n\n" + briefing; }
+    // The project's standing instructions, when this conversation is filed
+    // under one. Read through the thread each round, so editing a project
+    // reaches every conversation in it on the next turn. Additive by
+    // construction — projects.ts records why the wording must never be
+    // "use only this".
+    let project = projectBriefing(db, threadId);
+    if (project != "") { system = system + "\n\n" + project; }
   }
 
   // How to hand back a passage somebody will want to copy.
@@ -909,6 +926,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, agentId: agentId, modelChoiceId: "",
         name: calls[i].name, args: calls[i].args, nowMs: Date.now() as number,
       });
+      // Workflows, same convention again: ten fixed names, each refused for
+      // this caller rather than answered when nobody owns the conversation.
+      let flowed = callWorkflowTool(db, {
+        owner: where.owner, agentId: agentId,
+        name: calls[i].name, args: calls[i].args, nowMs: Date.now() as number,
+      });
       // The web index, same convention: asked about every call, answers only
       // search_web, which belongs to no connector.
       let websearched = callWebSearchTool(calls[i].name, calls[i].args);
@@ -964,6 +987,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = scheduled.ok;
         resultText = scheduled.text;
         from = "tasks";
+        calledTools.push(calls[i].name);
+      } else if (flowed.handled) {
+        resultOk = flowed.ok;
+        resultText = flowed.text;
+        from = "workflows";
         calledTools.push(calls[i].name);
       } else if (websearched != "") {
         // BEFORE skills, and the ordering is the whole fix. callSkillTool

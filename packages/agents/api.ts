@@ -46,7 +46,7 @@ import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw, jsonFlag } from ".
 import { toolListing } from "./mcp.ts";
 import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, toolsOff, setToolOn } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
-import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
+import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, rememberRouteKey, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson, runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
 import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
@@ -62,9 +62,12 @@ import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./i
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { AgentWebRagRow, agentWebRagMapping, webRagFor, webRagPlan } from "./webrag.ts";
 import { ToolCardRow, allToolCards, toolCardsMapping, toolCardsPlan } from "./toolcards.ts";
-import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, feedById, refreshFeed, storiesFor, storyById } from "./discover.ts";
+import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, ensureGeoFeed, feedById, geoCode, refreshFeed, storiesFor, storyById } from "./discover.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping, cardPluginsPlan } from "./plugincards.ts";
 import { TaskRow, MAX_PER_OWNER, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, tasksPlan, withNextAt } from "./tasks.ts";
+import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, workflowRunsOf, timingOf, withWorkflowNextAt, workflowsMapping, workflowsOf, workflowsPlan } from "./workflow-store.ts";
+import { PROJECT_FILES_KEY, ProjectRow, assignProject, emptyProject, projectsMapping, projectsOf, projectsPlan, releaseThreads, rememberFilesThread } from "./projects.ts";
+import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, documentFilesPlan, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
@@ -2928,7 +2931,10 @@ class ThreadApi {
     // rows is, the moment threads have owners, one person's sidebar deleting
     // somebody else's conversations. Where an operator asks for one it runs on
     // a thread of its own; see `sweepLoop`.
-    let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset });
+    // `?project=` narrows the page to one project's conversations. The filter
+    // rides the SQL beside the owner clause (threads.ts says why), so a
+    // guessed id from another tenant is an empty page, not a leak.
+    let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset, project: queryParam(req, "project", "") });
     let out = "[";
     let i: int = 0;
     while (i < rows.length) {
@@ -2937,7 +2943,8 @@ class ThreadApi {
         + ",\"agentId\":" + JSON.stringify(rows[i].agentId)
         + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt)
         + ",\"title\":" + JSON.stringify(rows[i].title)
-        + ",\"replayable\":" + (rows[i].replayable ? "true" : "false") + "}";
+        + ",\"replayable\":" + (rows[i].replayable ? "true" : "false")
+        + ",\"projectId\":" + JSON.stringify(rows[i].projectId) + "}";
       i = i + 1;
     }
     return ok(out + "]");
@@ -3045,8 +3052,26 @@ class ThreadApi {
       // "Thinking" is a disagreement a client can see and act on.
       if (rememberChoice(this.db, id, chosen) != "") { kept = ""; }
     }
+    // The project, optional, and the same second-statement shape as the
+    // choice above: `openThread` deliberately takes no extra arguments, so
+    // the stamp is one UPDATE with one home (`assignProject`). Checked here
+    // rather than trusted — a project id names somebody's standing
+    // instructions, so only its owner may file conversations under it — and
+    // an id that fails the check is dropped silently for the reason the
+    // choice UPDATE is not a 400: the thread already exists, and the reply
+    // saying "" is a disagreement the console can see.
+    let filed = jsonText(req.body, "projectId");
+    if (filed != "") {
+      let held = findById(this.db, projectsMapping(), filed);
+      if (held == "" || !holdsOwner(callerTags(req), jsonText(held, "owner"))) {
+        filed = "";
+      } else if (assignProject(this.db, id, filed) != "") {
+        filed = "";
+      }
+    }
     return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(agentId)
-      + ",\"modelChoiceId\":" + JSON.stringify(kept) + "}");
+      + ",\"modelChoiceId\":" + JSON.stringify(kept)
+      + ",\"projectId\":" + JSON.stringify(filed) + "}");
   }
 
   // What the run is doing right now.
@@ -3589,7 +3614,11 @@ class DiscoverApi {
   @get("/")
   read(req: Request): Reply {
     let lang = req.query.get("lang") ?? "";
-    let country = req.query.get("country") ?? "";
+    let country = geoCode(req.query.get("country") ?? "");
+    // The first reader from a place creates its feed; the digest job fills it
+    // on its next pass, from the index filtered to that country. Until then
+    // they read the worldwide feeds like everybody else.
+    if (country != "") { ensureGeoFeed(this.db, country); }
     let feeds = allFeeds(this.db);
 
     let out = "[";
@@ -3597,10 +3626,13 @@ class DiscoverApi {
     let i: int = 0;
     while (i < feeds.length) {
       let feed = feeds[i];
-      // A feed matches when it names the caller's language and place, or
-      // names neither — the worldwide fallback.
+      // A feed matches when it names the caller's language, or no language —
+      // the worldwide fallback. A PLACE is stricter: a feed that names a
+      // country is only for callers who reported that country, so a reader
+      // who said nothing about where they are never gets somebody's local
+      // feed mixed into worldwide news.
       let langOk = feed.lang == "" || lang == "" || feed.lang == lang;
-      let placeOk = feed.country == "" || country == "" || feed.country == country;
+      let placeOk = feed.country == "" || feed.country == country;
       if (feed.enabled && langOk && placeOk) {
         let rows = storiesFor(this.db, feed.id);
         if (rows.length > 0) {
@@ -3703,6 +3735,30 @@ class DiscoverApi {
   @get("/feeds")
   feeds(req: Request): Reply {
     return ok(listOrdered(this.db, discoverFeedsMapping(), "", [], [asc("topic")]));
+  }
+
+  /** The places that have a local feed with stories on it — what a country
+   *  picker can honestly offer. Public like the feed, and only countries
+   *  whose digest has produced something: a menu entry that opens an empty
+   *  page is a broken promise, so a feed still waiting on its first pass is
+   *  not listed. */
+  @get("/places")
+  places(req: Request): Reply {
+    let feeds = allFeeds(this.db);
+    let out = "[";
+    let wrote: int = 0;
+    let i: int = 0;
+    while (i < feeds.length) {
+      let feed = feeds[i];
+      if (feed.enabled && feed.country != ""
+          && storiesFor(this.db, feed.id).length > 0) {
+        if (wrote > 0) { out = out + ","; }
+        out = out + "{\"country\":" + JSON.stringify(feed.country) + "}";
+        wrote = wrote + 1;
+      }
+      i = i + 1;
+    }
+    return ok(out + "]");
   }
 
   /** Add one. A feed is a deliberate "this topic, in this language, for this
@@ -4528,6 +4584,13 @@ class DocumentApi {
     }
     let scope = normalScope(queryParam(req, "scope", "/"));
 
+    // Which of them kept their original bytes, in one query for the folder
+    // rather than one per row — document-files.ts says why. Read before either
+    // loop so a queued document and an indexed one answer the same way: the
+    // file is stored at upload, before the indexer has looked at it, so a row
+    // that is still waiting can already have one to preview.
+    let originals = sourcesWithFiles(this.db, scope);
+
     // Waiting and failed jobs first, then what is actually indexed. A file
     // uploaded a second ago has no chunks and no size yet, and saying so is
     // the point — otherwise it simply is not in the list and looks lost.
@@ -4540,7 +4603,8 @@ class DocumentApi {
         + ",\"scope\":" + JSON.stringify(waiting[w].scope)
         + ",\"chunks\":0,\"bytes\":0"
         + ",\"status\":" + JSON.stringify(waiting[w].status)
-        + ",\"error\":" + JSON.stringify(waiting[w].error) + "}";
+        + ",\"error\":" + JSON.stringify(waiting[w].error)
+        + ",\"hasFile\":" + boolJson(holdsSource(originals, waiting[w].source)) + "}";
       w = w + 1;
     }
 
@@ -4552,7 +4616,10 @@ class DocumentApi {
         + ",\"scope\":" + JSON.stringify(rows[i].scope)
         + ",\"chunks\":" + `${rows[i].chunks}`
         + ",\"bytes\":" + `${rows[i].bytes}`
-        + ",\"status\":\"indexed\",\"error\":\"\"}";
+        + ",\"status\":\"indexed\",\"error\":\"\""
+        // Appended, never in place of anything above: the console reads every
+        // member that was already here.
+        + ",\"hasFile\":" + boolJson(holdsSource(originals, rows[i].source)) + "}";
       i = i + 1;
     }
     return ok(out + "]");
@@ -4605,12 +4672,105 @@ class DocumentApi {
       + ",\"status\":" + JSON.stringify(JOB_QUEUED) + "}");
   }
 
+  // Keep the file itself, not just what was read out of it.
+  //
+  // A second door rather than a field on the upload above, and the two are
+  // independent on purpose: indexing is queued and can fail on a provider,
+  // storing bytes is one row and cannot. Sending them together would mean a
+  // failed embedding lost the original as well, which is the exact loss this
+  // table exists to stop. The console PUTs both and neither waits on the
+  // other.
+  //
+  // Idempotent: the id is derived from (scope, source), so re-uploading the
+  // same document REPLACES its kept copy. A second attempt after a browser
+  // retry leaves one row, not two.
+  //
+  // Before "/:source" — the router matches literals first, and a PUT is not a
+  // DELETE, but the house rule is the ordering and it costs nothing to keep.
+  @put("/file")
+  keepFile(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"source\":\"...\",\"scope\":\"...\",\"filename\":\"...\",\"mime\":\"...\",\"contentBase64\":\"...\"}");
+    }
+    // Member by member, never JSON.parse<T> of a request body: a record type
+    // refuses a key it does not name, so a console that sends one extra field
+    // — or the same field spelled for a later build — would have the whole
+    // upload rejected over something nobody reads.
+    let source = jsonText(req.body, "source").trim();
+    if (source == "") { return badRequest("a document needs a source to be filed under"); }
+    let scope = jsonText(req.body, "scope").trim();
+    if (scope == "") { return badRequest("a document needs a scope: \"/specs/plume\""); }
+    let content = jsonText(req.body, "contentBase64");
+    if (content == "") { return badRequest("there are no bytes to keep"); }
+    if (content.length > FILE_BASE64_MAX) {
+      return badRequest("that file is too large to keep");
+    }
+    // No allowlist of types. This is the owner's own corpus and their own
+    // file; the engine never opens it, and hands it back exactly as it
+    // arrived. What is refused is size, above, and nothing else.
+    let filed = normalScope(scope);
+    let row: DocumentFileRow = {
+      id: documentFileId(filed, source),
+      source: source,
+      scope: filed,
+      // The name to hand back. Falls back to the source, so a caller that
+      // omits it still gets something to put on a download rather than a
+      // browser inventing "download".
+      filename: firstText(jsonText(req.body, "filename"), source),
+      mime: firstText(jsonText(req.body, "mime"), "application/octet-stream"),
+      bytes: content,
+      // Decoded length, computed from the base64 rather than decoded to be
+      // measured: four characters carry three bytes, and the one or two "="
+      // at the end each stand for one byte that is not there.
+      size: decodedSize(content),
+      createdAt: stamp(),
+    };
+    let written = persist(this.db, documentFilesMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok("{\"stored\":true}");
+  }
+
+  // Hand the original back, as JSON with the bytes base64 inside it.
+  //
+  // JSON and not the raw bytes with a content type: the console builds a blob
+  // URL from this to show in a viewer, so it wants the bytes in hand rather
+  // than a navigation, and one shape covers every type without the response
+  // path having to carry binary at all. The cost is the third that base64 adds
+  // to the wire, paid once per preview.
+  @get("/file")
+  file(req: Request): Reply {
+    if (this.db.name != "postgres") {
+      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+    }
+    let source = queryParam(req, "source", "");
+    let scope = queryParam(req, "scope", "/");
+    if (source == "") { return badRequest("name the document: ?source=notes&scope=/specs"); }
+    let kept = findDocumentFile(this.db, scope, source);
+    // A document indexed before this table existed has text and no original,
+    // and so does one uploaded by anything that does not PUT here. Absent, not
+    // broken — the listing's `hasFile` is what a caller checks first.
+    if (kept.id == "") { return notFound("no kept file for " + source); }
+    return ok("{\"filename\":" + JSON.stringify(kept.filename)
+      + ",\"mime\":" + JSON.stringify(kept.mime)
+      + ",\"size\":" + `${kept.size}`
+      + ",\"contentBase64\":" + JSON.stringify(kept.bytes) + "}");
+  }
+
   @del("/:source")
   remove(req: Request): Reply {
     if (this.db.name != "postgres") {
       return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
     }
-    executeWith(this.db, "DELETE FROM documents WHERE source = " + this.db.placeholder, [param(req, "source")]);
+    let source = param(req, "source");
+    executeWith(this.db, "DELETE FROM documents WHERE source = " + this.db.placeholder, [source]);
+    // And the original with it. A file whose text is gone is unreachable —
+    // nothing lists it, nothing can ask for it, and nothing would ever delete
+    // it — so leaving it behind is not caution, it is a leak that grows by the
+    // size of every document anybody removes.
+    forgetDocumentFiles(this.db, source);
     return noContent();
   }
 }
@@ -4921,6 +5081,358 @@ class TaskApi {
     if (document == "") { return emptyTask(); }
     let row: TaskRow = JSON.parse<TaskRow>(document);
     if (!holdsOwner(callerTags(req), row.owner)) { return emptyTask(); }
+    return row;
+  }
+}
+
+// Projects: conversations grouped under one name and one set of standing
+// instructions (projects.ts).
+//
+// The rows only, on TaskApi's posture throughout: lists scoped by owner so a
+// stranger's project is absent rather than forbidden, creation refused to
+// callers nobody can name, and every write through one private `owned` that
+// answers strangers and missing ids identically. The instructions themselves
+// reach the model in run.ts (`projectBriefing`), never through this class.
+@controller("/projects")
+class ProjectApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  // This caller's projects, newest first — scoped for the reason TaskApi's
+  // list is: a project's instructions are what somebody standing-orders every
+  // conversation in it, and a list that leaked would be a list of those.
+  @get("/")
+  list(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(projectsOf(this.db, owningTag(tags)));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    // The task rule, for the task reason: a project is a standing instruction
+    // block that rides every conversation filed under it, and it has to
+    // belong to somebody. Both spellings of "not signed in" refused —
+    // TaskApi.create records how testing only one waved guests through.
+    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
+      return badRequest("signing in is what makes a project yours");
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"name\":\"...\",\"instructions\":\"...\"}");
+    }
+    let name = jsonText(req.body, "name");
+    if (name == "") { return badRequest("a project needs a name"); }
+    let row: ProjectRow = {
+      id: crypto.randomUUID(),
+      owner: owner,
+      name: name,
+      instructions: jsonText(req.body, "instructions"),
+      // No workspace thread yet — `POST /:id/files-thread` opens it on the
+      // first ask, so a project that only groups pays for no thread row.
+      filesThreadId: "",
+      createdAt: stamp(),
+    };
+    let written = persist(this.db, projectsMapping(), JSON.stringify(row));
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, projectsMapping(), row.id));
+  }
+
+  // Rename, or rewrite the instructions. Both fields are read verbatim from
+  // the body: an empty `name` keeps the old one — a project with no name
+  // cannot be told apart in a sidebar — while `instructions` is taken as
+  // sent, because "" is a meaningful value here (a project that only groups)
+  // and a keep-on-empty rule would make the instructions impossible to clear.
+  @put("/:id")
+  update(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("project " + param(req, "id")); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    let name = jsonText(req.body, "name");
+    let edited: ProjectRow = {
+      id: mine.id, owner: mine.owner,
+      name: name == "" ? mine.name : name,
+      instructions: jsonText(req.body, "instructions"),
+      // Never editable from a body: which hidden thread holds the files is
+      // the engine's fact, and a caller who could write it could point a
+      // project at any thread whose artifacts would then brief every round.
+      filesThreadId: mine.filesThreadId,
+      createdAt: mine.createdAt,
+    };
+    let written = persist(this.db, projectsMapping(), JSON.stringify(edited));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, projectsMapping(), mine.id));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("project " + param(req, "id")); }
+    // The threads first, so they fall back to "no project" rather than
+    // pointing at a row that is gone; projects.ts says what a dangling stamp
+    // would cost. The conversations themselves are untouched — deleting the
+    // folder is not deleting the letters.
+    releaseThreads(this.db, mine.id);
+    // The workspace thread, when there is one, stays behind as an orphan —
+    // deliberately, not as an oversight. Nothing in the engine deletes a
+    // thread row (the sweep only takes EMPTY ones, and a workspace with files
+    // is not empty), and building a thread-delete for this one caller would
+    // be a bigger change than the junk it clears. The orphan is invisible:
+    // its route_key is 'project-files', which `listThreads` excludes.
+    let gone = deleteById(this.db, projectsMapping(), mine.id);
+    if (!gone.ok) { return badRequest(gone.error); }
+    return noContent();
+  }
+
+  // The project's files, or rather where they live: the id of the hidden
+  // workspace thread whose artifacts they are. Opens the thread on the first
+  // ask and answers the same id ever after, so the console can PUT files
+  // through the ordinary `/threads/:id/artifacts` door without a second
+  // wire shape for "a project file".
+  //
+  // No ordering worry with the "/:id" routes above: the router matches on
+  // segment count, and nothing else in this class is two segments deep.
+  @post("/:id/files-thread")
+  filesThread(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("project " + param(req, "id")); }
+    if (mine.filesThreadId != "") {
+      // Answered from the row, but only while the thread is really there: an
+      // operator's sweep could have taken a workspace opened and never
+      // uploaded to (it is exactly the "empty thread" the sweep collects),
+      // and answering a dead id would 404 every upload after.
+      if (existsById(this.db, threadsMapping(), mine.filesThreadId)) {
+        return ok("{\"threadId\":" + JSON.stringify(mine.filesThreadId) + "}");
+      }
+    }
+    // The owner is the project's, never the caller's whole tag set — the same
+    // one-owner rule `POST /threads` records. PROJECT_FILES_KEY as the agent
+    // id because `ownedThread` reads an empty agent id as "no such thread";
+    // projects.ts says so where the constant lives. No round ever runs here.
+    let id = openThread(this.db, { agentId: PROJECT_FILES_KEY, owner: mine.owner, now: stamp() });
+    if (id == "") { return badRequest("the files thread could not be opened"); }
+    // The stamp that keeps it out of every sidebar (`listThreads` excludes
+    // this key). Written before the project row points at the thread: a
+    // half-done state must fail invisible, not visible.
+    let stamped = rememberRouteKey(this.db, id, PROJECT_FILES_KEY);
+    if (stamped != "") { return badRequest(stamped); }
+    let noted = rememberFilesThread(this.db, mine.id, id);
+    if (noted != "") { return badRequest(noted); }
+    return ok("{\"threadId\":" + JSON.stringify(id) + "}");
+  }
+
+  // The row this caller may touch, or an empty one — TaskApi's helper, for
+  // TaskApi's reason: every write goes through here rather than checking the
+  // owner per route, and a stranger's project 404s exactly as a missing one.
+  private owned(req: Request): ProjectRow {
+    let document = findById(this.db, projectsMapping(), param(req, "id"));
+    if (document == "") { return emptyProject(); }
+    let row: ProjectRow = JSON.parse<ProjectRow>(document);
+    if (!holdsOwner(callerTags(req), row.owner)) { return emptyProject(); }
+    return row;
+  }
+}
+
+// Workflows: graphs of steps, drawn on the console's canvas or drafted in a
+// conversation (workflow-tools.ts), fired by the scheduler.
+//
+// The same posture as TaskApi throughout: owner-scoped so a stranger's row is
+// absent rather than forbidden, schedules compiled server-side from the words
+// on the START step, and even "run now" a write that moves `next_at` — the
+// scheduler stays the only place a workflow is claimed, walked and recorded.
+@controller("/workflows")
+class WorkflowApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  list(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(workflowsOf(this.db, owningTag(tags)));
+  }
+
+  // Create one from a whole document: name, description, graph. The schedule
+  // is never a field of its own — it is the words on the graph's START step,
+  // compiled here, so the canvas and the conversation cannot disagree about
+  // where a schedule lives.
+  @post("/")
+  create(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    // The task rule, for the task reason: a workflow is a standing instruction
+    // with a provider's bill attached, and it has to belong to somebody.
+    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
+      return badRequest("signing in is what makes a workflow yours to keep");
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"name\":\"...\",\"agentId\":\"a1\",\"graph\":{...}}");
+    }
+    let agentId = jsonText(req.body, "agentId");
+    if (!existsById(this.db, agentsMapping(), agentId)) { return badRequest("no agent " + agentId); }
+    if (enabledWorkflowCount(this.db, owner) >= MAX_WORKFLOWS_PER_OWNER) {
+      return badRequest("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — pause one before adding another");
+    }
+    let graphText = jsonRaw(req.body, "graph");
+    if (graphText == "") { return badRequest("a workflow needs a graph: nodes, edges and a view"); }
+    let parsed = parseGraph(graphText);
+    if (!parsed.ok) { return badRequest(parsed.error); }
+    // The scalars are read from the body with the graph's bytes cut out.
+    // jsonText scans flat and answers the FIRST occurrence of a key anywhere
+    // in the document — and a graph is full of nodes carrying "name", so a
+    // create whose graph preceded its name would call every workflow after
+    // its first node. Four rows named "Start" found this on the PUT below.
+    let bare = req.body;
+    let graphAt = req.body.indexOf(graphText);
+    if (graphAt >= 0) { bare = req.body.slice(0, graphAt) + "\"\"" + req.body.slice(graphAt + graphText.length); }
+    let zone = jsonText(bare, "tz");
+    let timing = timingOf(parsed.graph, zone == "" ? "UTC" : zone, Date.now() as number);
+    if (!timing.ok) { return badRequest(timing.error); }
+
+    let now = stamp();
+    let row: WorkflowRow = {
+      id: crypto.randomUUID(), owner: owner, agentId: agentId,
+      modelChoiceId: "",
+      name: jsonText(bare, "name"),
+      description: jsonText(bare, "description"),
+      graph: graphText,
+      kind: timing.kind, cronExpr: timing.expr, tz: zone,
+      nextAt: timing.kind == "once" ? timing.at : "",
+      runningSince: "", enabled: true, failures: 0, pausedReason: "",
+      lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
+      runCount: 0, createdAt: now, updatedAt: now,
+    };
+    let wrong = refuseWorkflow(row);
+    if (wrong != "") { return badRequest(wrong); }
+    let ready = row;
+    if (row.kind == "every") {
+      let first = nextWorkflowFire(row, Date.now() as number);
+      if (!first.ok) { return badRequest(first.error); }
+      ready = withWorkflowNextAt(row, first.at);
+    }
+    let written = persist(this.db, workflowsMapping(), JSON.stringify(ready));
+    if (!written.ok) { return badRequest(written.error); }
+    return created(findById(this.db, workflowsMapping(), ready.id));
+  }
+
+  @get("/:id")
+  one(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    return ok(JSON.stringify(mine));
+  }
+
+  // The whole document again: the canvas saves what it is showing — graph,
+  // name, description, enabled — and the schedule half is recompiled from the
+  // START step it just drew. An `updatedAt` precondition refuses the stale
+  // save instead of burying the newer one, which is what two tabs on one
+  // workflow would otherwise silently do.
+  @put("/:id")
+  update(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (req.body == "") { return badRequest("a body is required"); }
+    // The same flat-scanner discipline as create: everything scalar is read
+    // from the body with the graph's bytes cut out, because the first "name"
+    // in a body whose graph comes first is a NODE's name — and this route
+    // was quietly renaming every canvas-saved workflow to "Start".
+    let sentGraph = jsonRaw(req.body, "graph");
+    let bare = req.body;
+    if (sentGraph != "") {
+      let graphAt = req.body.indexOf(sentGraph);
+      if (graphAt >= 0) { bare = req.body.slice(0, graphAt) + "\"\"" + req.body.slice(graphAt + sentGraph.length); }
+    }
+    let expected = jsonText(bare, "updatedAt");
+    if (expected != "" && expected != mine.updatedAt) {
+      return badRequest("this workflow changed while you were editing — reload it and redo the change");
+    }
+    let graphText = sentGraph == "" ? mine.graph : sentGraph;
+    let parsed = parseGraph(graphText);
+    if (!parsed.ok) { return badRequest(parsed.error); }
+    let zone = jsonText(bare, "tz");
+    let tz = zone == "" ? mine.tz : zone;
+    let timing = timingOf(parsed.graph, tz == "" ? "UTC" : tz, Date.now() as number);
+    if (!timing.ok) { return badRequest(timing.error); }
+    let name = jsonText(bare, "name");
+    let description = jsonText(bare, "description");
+    let on = jsonFlag(bare, "enabled", mine.enabled);
+
+    let edited: WorkflowRow = {
+      id: mine.id, owner: mine.owner, agentId: mine.agentId,
+      modelChoiceId: mine.modelChoiceId,
+      name: name == "" ? mine.name : name,
+      description: description == "" ? mine.description : description,
+      graph: graphText,
+      kind: timing.kind, cronExpr: timing.expr, tz: tz,
+      // A manual workflow KEEPS its next_at: the only way one gets a firing
+      // is run-now, and the canvas PUTs the document on mount — so a save
+      // that zeroed it was cancelling every "Run soon" within a second of
+      // the button being pressed, and the spec caught it as a run that never
+      // happened.
+      nextAt: timing.kind == "once" ? timing.at
+        : timing.kind == "manual" ? mine.nextAt : "",
+      runningSince: mine.runningSince,
+      enabled: on,
+      failures: on && !mine.enabled ? 0 : mine.failures,
+      pausedReason: on ? "" : mine.pausedReason,
+      lastRunAt: mine.lastRunAt, lastRunId: mine.lastRunId,
+      lastStatus: mine.lastStatus, lastError: mine.lastError,
+      runCount: mine.runCount, createdAt: mine.createdAt, updatedAt: stamp(),
+    };
+    let wrong = refuseWorkflow(edited);
+    if (wrong != "") { return badRequest(wrong); }
+    let stored = edited;
+    if (edited.kind == "every") {
+      let ahead = nextWorkflowFire(edited, Date.now() as number);
+      if (!ahead.ok) { return badRequest(ahead.error); }
+      stored = withWorkflowNextAt(edited, ahead.at);
+    }
+    let written = persist(this.db, workflowsMapping(), JSON.stringify(stored));
+    if (!written.ok) { return badRequest(written.error); }
+    return ok(findById(this.db, workflowsMapping(), stored.id));
+  }
+
+  // Fire it on the next tick — the task door's "run now", word for word.
+  @post("/:id/run-now")
+  runNow(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    let now = stamp();
+    executeWith(this.db,
+      "UPDATE workflows SET next_at = " + this.db.placeholder
+      + ", running_since = '', enabled = true, updated_at = " + placeholderAt(this.db, 2)
+      + " WHERE id = " + placeholderAt(this.db, 3),
+      [now, now, mine.id]);
+    return accepted(findById(this.db, workflowsMapping(), mine.id));
+  }
+
+  // What happened when it ran, newest first — the canvas replays a run's
+  // steps as node statuses straight off these rows.
+  @get("/:id/runs")
+  runs(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    return ok(workflowRunsOf(this.db, mine.id, mine.owner));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    executeWith(this.db, "DELETE FROM workflow_runs WHERE workflow_id = " + this.db.placeholder, [mine.id]);
+    let gone = deleteById(this.db, workflowsMapping(), mine.id);
+    if (!gone.ok) { return badRequest(gone.error); }
+    return noContent();
+  }
+
+  private owned(req: Request): WorkflowRow {
+    let document = findById(this.db, workflowsMapping(), param(req, "id"));
+    if (document == "") { return emptyWorkflow(); }
+    let row: WorkflowRow = JSON.parse<WorkflowRow>(document);
+    if (!holdsOwner(callerTags(req), row.owner)) { return emptyWorkflow(); }
     return row;
   }
 }
@@ -5783,6 +6295,36 @@ function stamp(): string {
   return `${Date.now()}`;
 }
 
+// The first of two spellings that is not blank. For the kept-file door, where
+// a missing filename or mime is a caller that did not bother rather than a
+// caller that means "none" — and storing "" would put an empty name on a
+// download.
+function firstText(said: string, fallback: string): string {
+  let text = said.trim();
+  if (text == "") { return fallback; }
+  return text;
+}
+
+// How many bytes a base64 string stands for, without decoding it.
+//
+// Four characters carry three bytes; each "=" at the end is a byte that is not
+// there. Computed rather than measured because the whole point of keeping the
+// bytes as base64 is never having to hold a decoded copy — decoding eighteen
+// megabytes to learn a number the arithmetic already knows would double the
+// memory of every upload.
+export function decodedSize(base64: string): int {
+  let text = base64.trim();
+  if (text.length == 0) { return 0; }
+  let padding: int = 0;
+  if (text.endsWith("==")) {
+    padding = 2;
+  } else if (text.endsWith("=")) {
+    padding = 1;
+  }
+  let whole = (text.length / 4) * 3;
+  return whole - padding;
+}
+
 // The abandoned-thread sweep, on a thread of its own, and only where an
 // operator asked for one.
 //
@@ -5833,7 +6375,16 @@ function digestLoop(master: string, everyMs: int): int {
       let feeds = allFeeds(db);
       let i: int = 0;
       while (i < feeds.length) {
-        if (feeds[i].enabled) { refreshFeed(db, feeds[i], master); }
+        if (feeds[i].enabled) {
+          // Said out loud, because it was not and that cost an afternoon: a
+          // pass whose every feed failed — model down, credential missing, a
+          // query the index mangled — looked exactly like a pass that had not
+          // run yet, and the only way to tell them apart was to guess.
+          let problem = refreshFeed(db, feeds[i], master);
+          if (problem != "") {
+            console.error("discover: " + feeds[i].id + ": " + problem);
+          }
+        }
         i = i + 1;
       }
       process.sleep(everyMs);
@@ -5992,6 +6543,22 @@ export function migrationProblem(db: Db): string {
   let scheduled = tasksPlan(db);
   let st: int = 0;
   while (st < scheduled.length) { plan.push(scheduled[st]); st = st + 1; }
+  // And the graphs of steps beside them (workflow-store.ts), fired by the
+  // same process.
+  let flows = workflowsPlan(db);
+  let fl: int = 0;
+  while (fl < flows.length) { plan.push(flows[fl]); fl = fl + 1; }
+  // Projects (projects.ts): the table, plus the threads column that points at
+  // it — the ALTER rides that plan because threadPlan's numbers are history.
+  let grouped = projectsPlan(db);
+  let pj: int = 0;
+  while (pj < grouped.length) { plan.push(grouped[pj]); pj = pj + 1; }
+  // The original bytes of an uploaded document (document-files.ts), beside the
+  // text the corpus keeps. Its own plan rather than an addition to
+  // knowledgePlan, whose numbers are history and top out at 18.
+  let originals = documentFilesPlan(db);
+  let df: int = 0;
+  while (df < originals.length) { plan.push(originals[df]); df = df + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) { return ""; }
   // Logged and carried on with, this served an API whose routes SELECT columns
@@ -6127,6 +6694,8 @@ function main(): void {
     new ProviderApi(db, master),
     new RunApi(db),
     new TaskApi(db),
+    new ProjectApi(db),
+    new WorkflowApi(db),
     new ScriptImageApi(db),
     new SkillApi(db),
     new TemplateApi(db),

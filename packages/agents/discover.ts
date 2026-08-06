@@ -6,13 +6,17 @@
 // gap between those two is a model reading a pile of snippets and grouping
 // them, which is what this file arranges.
 //
-// Two properties of the index shape everything here, and both are things it
-// will grow out of rather than facts forever:
+// Two properties of the index shape everything here, one now outgrown:
 //
-//   * NO RECENCY RANKING. `sort=recent` is accepted and ignored, so freshness
-//     cannot be asked for — it is filtered here, before the model sees a
-//     result. When the index learns to rank by time, `FRESH_HOURS` becomes a
-//     parameter on the query and this filter becomes a safety net.
+//   * RECENCY IS THE INDEX'S, since 2026-08-06: `sort=recent` orders by
+//     `published_at` falling back to `fetched_at`, and `since=` filters on
+//     the same effective date — so a 2020 archive page re-crawled this
+//     morning no longer reaches the model, which the fetch-time window here
+//     could never say. `FRESH_HOURS` rides the query as `since=36h` and the
+//     textual filter below survives as the safety net it was always going to
+//     become. Publication dates are best-effort (~10% coverage, mostly URL
+//     paths — `published_coverage` on /analytics says exactly); an undated
+//     page behaves exactly as before.
 //
 //   * THIN SOURCE DIVERSITY. Today a topic's fresh results come from one or
 //     two domains, so most stories will carry a single source. That is
@@ -220,12 +224,67 @@ export function discoverPlan(db: Db): Migration[] {
   ];
 }
 
+/* A place's own feed, made the first time somebody from there opens the page.
+ *
+ * The cross-product argument above still holds: nobody sits down and types
+ * two hundred country feeds, and most of them would digest an empty search
+ * forever. But a country that has a READER is exactly the "worth digesting"
+ * judgement the row is supposed to record — so the /discover route creates
+ * the row lazily, and the digest job fills it on its next pass with the
+ * index's country filter doing the selection.
+ *
+ * Two properties keep a public, unauthenticated GET from turning this into a
+ * junk-row faucet: the code must be two letters of the ISO alphabet (which
+ * also drops Cloudflare's "XX" unknown and "T1" Tor), and the total number of
+ * place feeds is capped. A country the index holds nothing for costs one
+ * hitless search per pass — no model call — and never renders, because the
+ * feed route only draws feeds that have stories. */
+const MAX_GEO_FEEDS: int = 40;
+
+const CC_LETTERS: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/** The caller's country, as the index writes it: two ISO letters, uppercase.
+ *  Anything else — an empty header, Cloudflare's "XX"/"T1" unknowns, a spoofed
+ *  paragraph — answers "", which every caller reads as "no place given". */
+export function geoCode(said: string): string {
+  let s = said.trim().toUpperCase();
+  if (s.length != 2) { return ""; }
+  if (CC_LETTERS.indexOf(s.slice(0, 1)) < 0) { return ""; }
+  if (CC_LETTERS.indexOf(s.slice(1, 2)) < 0) { return ""; }
+  if (s == "XX" || s == "ZZ") { return ""; }
+  return s;
+}
+
 /** Every feed, worldwide ones first — they are the fallback a visitor gets
  *  when nothing matches their own language and place. */
 export function allFeeds(db: Db): DiscoverFeed[] {
   let keys: DbOrder[] = [asc("topic")];
   return JSON.parse<DiscoverFeed[]>(
     listOrdered(db, discoverFeedsMapping(), "", [], keys));
+}
+
+/** The feed for one place, created if this is the first reader from there.
+ *  The topic is "Local news" for the model's benefit — the console shows the
+ *  country's own name instead — and the query leans on the index's country
+ *  filter rather than on words: `freshFor` sends `country=` with it. */
+export function ensureGeoFeed(db: Db, country: string): void {
+  let cc = geoCode(country);
+  if (cc == "") { return; }
+  let id = "geo:" + cc.toLowerCase();
+  if (findById(db, discoverFeedsMapping(), id) != "") { return; }
+  let all = allFeeds(db);
+  let placed: int = 0;
+  let i: int = 0;
+  while (i < all.length) {
+    if (all[i].country != "") { placed = placed + 1; }
+    i = i + 1;
+  }
+  if (placed >= MAX_GEO_FEEDS) { return; }
+  let row: DiscoverFeed = {
+    id: id, topic: "Local news", query: "news", lang: "", country: cc,
+    enabled: true, digestedAt: "",
+  };
+  persist(db, discoverFeedsMapping(), JSON.stringify(row));
 }
 
 /** The stories on one feed, in the order the model ranked them. */
@@ -367,7 +426,12 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   // lang and country are the index's own filters, so a French feed is a
   // French SEARCH rather than a worldwide search read in French — the
   // difference is whether the model ever sees the pages it should not.
-  let url = searchApiBase() + "/search?q=" + urlEncode(query) + "&k=" + `${cap}`;
+  // The window and the order are the index's own since it learned dates:
+  // `since` filters on publication where a page declared one and on fetch
+  // time where it did not, and `sort=recent` puts the newest first before a
+  // byte arrives here. The textual cutoff below stays as the safety net.
+  let url = searchApiBase() + "/search?q=" + urlEncode(query) + "&k=" + `${cap}`
+    + "&sort=recent&since=" + `${FRESH_HOURS}` + "h";
   if (lang != "") { url = url + "&lang=" + urlEncode(lang); }
   if (country != "") { url = url + "&country=" + urlEncode(country); }
   let res = http.request(url, "GET", "", new Map<string, string>());
@@ -667,6 +731,9 @@ function digestPrompt(topic: string, count: int): string {
     + "Never infer a date from the text.\n"
     + "why: one clause under 60 characters on why it is worth attention today. "
     + "Empty string if the honest answer is that it is simply new.\n\n"
+    + "Write headline, summary and why in the language most of the snippets "
+    + "you drew on are written in — a French feed's cards read in French, an "
+    + "Arabic feed's in Arabic. Never translate local news into English.\n\n"
     + "Rules that are not style:\n"
     + "1. Every claim must be in a snippet you were given. If the snippets say "
     + "a company is in talks, you may not write that a deal happened. Where "
@@ -705,8 +772,18 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   let key = credentialFor(db, model.provider, master);
   if (key == "") { return said("no credential for " + model.provider); }
 
+  /* 12000 and not the 1800 this started at. The ceiling has to hold the
+   * WHOLE answer, and three things spend it faster than an English estimate
+   * says: a digest in Arabic or another non-Latin script pays more tokens per
+   * word, the sources arrays echo URLs verbatim and a percent-encoded Arabic
+   * URL alone runs to hundreds of tokens, and a provider that reasons before
+   * answering (Gemini) spends its thinking inside this same budget. At 1800
+   * every feed's JSON was cut before its first closing brace and every pass
+   * failed as "did not answer with JSON"; a measured Tunisian digest needed
+   * 5,000 for the answer alone — truncation reads as malformed output, three
+   * layers from its cause. */
   let config: ModelConfigRow = {
-    id: "", modelId: model.id, temperature: 0.2, maxTokens: 1800, topP: 1.0,
+    id: "", modelId: model.id, temperature: 0.2, maxTokens: 12000, topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
   let asked = complete(model, config, digestPrompt(topic, STORIES), asLines(hits), key);
@@ -853,9 +930,11 @@ export function readable(db: Db, raw: string, modelId: string, master: string): 
 
   // Cooler than the digest and roomier: this is transcription, not writing,
   // and the answer is longer than its instructions. The ceiling is generous
-  // because a body cut off mid-sentence is worse than one nobody reformatted.
+  // because a body cut off mid-sentence is worse than one nobody reformatted —
+  // and it carries the digest's tax too: non-Latin scripts cost more tokens
+  // per word, and a reasoning provider spends its thinking inside this budget.
   let config: ModelConfigRow = {
-    id: "", modelId: model.id, temperature: 0.0, maxTokens: 4000, topP: 1.0,
+    id: "", modelId: model.id, temperature: 0.0, maxTokens: 8000, topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
   let asked = complete(model, config, READABLE_PROMPT, raw, key);

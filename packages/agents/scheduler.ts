@@ -32,6 +32,8 @@ import { postgres } from "../plume/postgres.ts";
 import { connectDatabase, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
+import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan } from "./workflow-store.ts";
+import { WorkflowAsk, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
 import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
@@ -41,6 +43,8 @@ import { recordRun } from "./runlog.ts";
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
 // unit active for an hour, and every tick in that hour is silently dropped.
 const PER_PASS: int = 5;
+// Fewer workflows than tasks per pass: one workflow is several model turns.
+const WORKFLOWS_PER_PASS: int = 2;
 
 function main(): void {
   let master = masterKey();
@@ -76,6 +80,22 @@ function main(): void {
   }
   if (fired > 0) { console.log("scheduler: fired " + `${fired}`); }
 
+  // Workflows, the same way: claim, walk, record, per-workflow try. A graph
+  // whose provider is down must cost that graph and not the pass. Fewer per
+  // pass than tasks, because one workflow is several model turns.
+  let walked: int = 0;
+  while (walked < WORKFLOWS_PER_PASS) {
+    let flow = claimDueWorkflow(db, Date.now() as number);
+    if (flow.id == "") { break; }
+    try { fireWorkflow(db, flow, master); }
+    catch (e) {
+      console.error("scheduler: workflow " + flow.id + " threw: " + e.message);
+      markWorkflowFailed(db, flow, e.message, Date.now() as number);
+    }
+    walked = walked + 1;
+  }
+  if (walked > 0) { console.log("scheduler: walked " + `${walked}` + " workflows"); }
+
   // The other thing a minute is good for. A crawled body is readable in the
   // sense that the words are there; a model turns it into an article once, and
   // this is where that call belongs — not on the read path, where the first
@@ -107,6 +127,22 @@ function reflow(db: Db, master: string): void {
     i = i + 1;
   }
   if (done > 0) { console.log("scheduler: made " + `${done}` + " stories readable"); }
+}
+
+// One workflow: the walk records its own run row and files its conversation
+// (workflow-run.ts); this only decides what the outcome means for the row's
+// schedule and failure count.
+function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {
+  let ask: WorkflowAsk = {
+    owner: flow.owner, input: "", master: master,
+    nowMs: Date.now() as number,
+  };
+  let done = runWorkflow(db, flow, ask);
+  if (!done.ok) {
+    markWorkflowFailed(db, flow, done.error, Date.now() as number);
+    return;
+  }
+  markWorkflowRan(db, flow, done.runId, Date.now() as number);
 }
 
 // One task: open a conversation, ask it, record what happened.

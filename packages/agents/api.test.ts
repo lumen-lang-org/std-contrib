@@ -13,6 +13,7 @@ import { connectDatabase, persist, execute, executeWith, findById, deleteById, c
 import { migrate, migration, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, McpServerRow, AgentRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, enabledChoices, configForChoice } from "./schema.ts";
 import { TraceConfigRow, traceConfigMapping } from "./trace.ts";
+import { DiscoverFeed, allFeeds, ensureGeoFeed, geoCode, discoverFeedsMapping } from "./discover.ts";
 import { AgentRetrievalRow, Retrieved, agentRetrievalMapping, grantScope, agentScopes } from "./knowledge.ts";
 import { storeCredential, credentialFor } from "./credentials.ts";
 import { UNKNOWN_TAG, tagsFromHeader, identityUnreadable, owningTag } from "./owner.ts";
@@ -25,7 +26,8 @@ import { RecordedSpan } from "../tracing/tracing.ts";
 import { putFile, getFile, listFiles } from "./workspace.ts";
 import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
-import { migrationProblem, modelProblem, modelDestinationProblem, serverDestinationProblem, traceDestinationProblem, forgetServer, forgetAgent, skillProblem, skillFileProblem, bearerRefused, healthJson, choicesJson, askedChoice, askedPick, choiceProblem, configInUse, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu, guestTag, guestQuotaJson } from "./api.ts";
+import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
+import { migrationProblem, decodedSize, modelProblem, modelDestinationProblem, serverDestinationProblem, traceDestinationProblem, forgetServer, forgetAgent, skillProblem, skillFileProblem, bearerRefused, healthJson, choicesJson, askedChoice, askedPick, choiceProblem, configInUse, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu, guestTag, guestQuotaJson } from "./api.ts";
 
 let database: Db = sqlite();
 
@@ -47,6 +49,11 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS agent_scopes");
   execute(database, "DROP TABLE IF EXISTS agent_retrieval");
   execute(database, "DROP TABLE IF EXISTS documents");
+  // The originals kept beside that text (104). Not ALTERed, so the plan would
+  // survive a leftover table — but the rows would survive with it, and a
+  // listing's `hasFile` would then be a fact about how often this suite has
+  // been run rather than about what the test just stored.
+  execute(database, "DROP TABLE IF EXISTS document_files");
   execute(database, "DROP TABLE IF EXISTS trace_config");
   // Every table the plan ALTERs, or the second run of this suite fails on the
   // first `ADD COLUMN` that finds its column already there — and a plan that
@@ -99,6 +106,12 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS tool_cards");
   execute(database, "DROP TABLE IF EXISTS agent_web_rag");
   execute(database, "DROP TABLE IF EXISTS scheduled_tasks");
+  execute(database, "DROP TABLE IF EXISTS workflows");
+  execute(database, "DROP TABLE IF EXISTS workflow_runs");
+  // ALTERed at 103 (files_thread_id), so it joins the list above for the
+  // reason auth_providers did: left standing, the second run of this fixture
+  // meets a duplicate column and the plan stops there.
+  execute(database, "DROP TABLE IF EXISTS projects");
   // Not ALTERed, but seeded below: rows surviving a wipe would make the menu's
   // order a fact about how often this suite has been run.
   execute(database, "DROP TABLE IF EXISTS model_choices");
@@ -439,7 +452,7 @@ test("no row can hold the unknown tag", () => {
   let hers = threadFor("u-alice", "lyon");
   expect(ownedThread(database, hers, [UNKNOWN_TAG]) == "");
   expect(threadFor("", "unowned") != "");
-  expect(listThreads(database, { tags: [UNKNOWN_TAG], limit: 50, offset: 0 }).length == 0);
+  expect(listThreads(database, { tags: [UNKNOWN_TAG], limit: 50, offset: 0, project: "" }).length == 0);
 });
 
 test("two tags cannot reach each other's threads, files, artifacts, steps or runs", () => {
@@ -466,10 +479,10 @@ test("two tags cannot reach each other's threads, files, artifacts, steps or run
 
   // The list is filtered in SQL, so a page is a page of one tag's threads and
   // not a page of everyone's with the others removed afterwards.
-  let sidebar = listThreads(database, { tags: ["u-alice"], limit: 50, offset: 0 });
+  let sidebar = listThreads(database, { tags: ["u-alice"], limit: 50, offset: 0, project: "" });
   expect(sidebar.length == 1);
   expect(sidebar[0].id == hers);
-  expect(listThreads(database, { tags: ["u-bob"], limit: 50, offset: 0 }).length == 1);
+  expect(listThreads(database, { tags: ["u-bob"], limit: 50, offset: 0, project: "" }).length == 1);
 
   // Runs hang off the agent, and the agent is shared, so the tag is the only
   // thing between one tenant's transcripts and another's.
@@ -493,7 +506,7 @@ test("the trust gate off means every tag sees everything, exactly as before", ()
   expect(ownedThread(database, hers, unscoped) == "a1");
   expect(ownedThread(database, his, unscoped) == "a1");
   expect(ownedThread(database, nobodys, unscoped) == "a1");
-  expect(listThreads(database, { tags: unscoped, limit: 50, offset: 0 }).length == 3);
+  expect(listThreads(database, { tags: unscoped, limit: 50, offset: 0, project: "" }).length == 3);
   expect(runsOf(database, "a1", unscoped, 50).indexOf("about rotterdam") >= 0);
 });
 
@@ -506,7 +519,7 @@ test("turning the gate on does not hand the pre-gateway history to whoever logs 
   // second reading is one character of SQL away and would give every
   // authenticated user the whole of what the box held before it had users.
   expect(ownedThread(database, nobodys, ["u-alice"]) == "");
-  let sidebar = listThreads(database, { tags: ["u-alice"], limit: 50, offset: 0 });
+  let sidebar = listThreads(database, { tags: ["u-alice"], limit: 50, offset: 0, project: "" });
   expect(sidebar.length == 1);
   expect(sidebar[0].id == hers);
   // Claiming them is a deliberate backfill (scenarios/backfill_owner.py), not
@@ -604,10 +617,89 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"100\"") >= 0);
+  expect(said.indexOf("\"migration\":\"104\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);
+});
+
+// --- the original file, kept beside its text ---------------------------------
+//
+// The routes themselves are PostgreSQL-only (retrieval is), so what is asked
+// here is what the store DECIDES: that the id is a function of the pair, which
+// is the whole of the idempotency claim, and that a deleted document does not
+// leave its bytes behind.
+
+function keptFile(source: string, scope: string, bytes: string): DocumentFileRow {
+  let row: DocumentFileRow = {
+    id: documentFileId(scope, source),
+    source: source, scope: scope,
+    filename: source + ".pdf", mime: "application/pdf",
+    bytes: bytes, size: decodedSize(bytes), createdAt: "1700000000000",
+  };
+  return row;
+}
+
+test("a kept original is found by the pair that names it, however the scope was spelled", () => {
+  expect(fresh() == "");
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "aGVsbG8gcGRm")));
+  // A trailing slash is the same folder, so it must be the same row — the id
+  // normalises, and a caller that spells it either way gets the file back.
+  expect(findDocumentFile(database, "/e2e", "notes").bytes == "aGVsbG8gcGRm");
+  expect(findDocumentFile(database, "/e2e/", "notes").bytes == "aGVsbG8gcGRm");
+  expect(findDocumentFile(database, "e2e", "notes").filename == "notes.pdf");
+  // A different folder is a different document, not the same one seen twice.
+  expect(findDocumentFile(database, "/other", "notes").id == "");
+  expect(findDocumentFile(database, "/e2e", "absent").id == "");
+});
+
+test("re-uploading a document replaces its kept copy rather than adding one", () => {
+  expect(fresh() == "");
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "dHdv")));
+  // One row, holding the second upload. Two rows would mean the first file's
+  // bytes were kept forever with nothing able to name them — a leak that grows
+  // by a file every time somebody's browser retries.
+  expect(countWhere(database, documentFilesMapping(), "source = ?", ["notes"]) == 1);
+  expect(findDocumentFile(database, "/e2e", "notes").bytes == "dHdv");
+});
+
+test("deleting a document takes its original with it, in every folder", () => {
+  expect(fresh() == "");
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/spec", "dHdv")));
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("other", "/e2e", "dGhyZWU=")));
+  // Scope-blind, because the corpus's own DELETE is: it takes every chunk of
+  // the source in every folder, and a file whose text is gone can never be
+  // asked for again.
+  forgetDocumentFiles(database, "notes");
+  expect(findDocumentFile(database, "/e2e", "notes").id == "");
+  expect(findDocumentFile(database, "/spec", "notes").id == "");
+  expect(findDocumentFile(database, "/e2e", "other").bytes == "dGhyZWU=");
+});
+
+test("the folder listing learns which sources have an original in one query", () => {
+  expect(fresh() == "");
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
+  persist(database, documentFilesMapping(), JSON.stringify(keptFile("elsewhere", "/spec", "dHdv")));
+  let mine = sourcesWithFiles(database, "/e2e");
+  expect(mine.length == 1);
+  expect(holdsSource(mine, "notes"));
+  // A document indexed before this table existed, or uploaded by anything that
+  // does not keep bytes, is a `hasFile:false` row and not a missing one.
+  expect(!holdsSource(mine, "unindexed"));
+  // Scoped: another folder's originals are not this folder's.
+  expect(!holdsSource(mine, "elsewhere"));
+});
+
+test("the size of a kept file is arithmetic over its base64, never a decode", () => {
+  // Four characters carry three bytes, and each "=" stands for a byte that is
+  // not there. Computed rather than measured so an eighteen-megabyte upload is
+  // never held twice — once encoded, once decoded to be counted.
+  expect(decodedSize("") == 0);
+  expect(decodedSize("aGVsbG8gcGRm") == 9);      // "hello pdf"
+  expect(decodedSize("aGVsbG8=") == 5);          // "hello", one pad
+  expect(decodedSize("aGVsbG8hIQ==") == 7);      // "hello!!", two pads
 });
 
 // --- which model a conversation runs on ---------------------------------------
@@ -1251,6 +1343,59 @@ test("neither a choice nor a router can be deleted out from under what points at
   recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "hi",
     run: emptyRun("hi"), modelChoiceId: "ch-auto", routeNote: "" });
   expect(choiceInUse(database, "ch-auto") == "");
+});
+
+test("a country code is two ISO letters or nothing at all", () => {
+  expect(geoCode("GB") == "GB");
+  // The header arrives however the proxy cased it.
+  expect(geoCode("tn") == "TN");
+  expect(geoCode(" de ") == "DE");
+  // Cloudflare's unknowns, a Tor exit, and free text are all "no place".
+  expect(geoCode("XX") == "");
+  expect(geoCode("T1") == "");
+  expect(geoCode("") == "");
+  expect(geoCode("GBR") == "");
+  expect(geoCode("<script>") == "");
+});
+
+test("the first reader from a place creates its feed, once", () => {
+  fresh();
+  ensureGeoFeed(database, "gb");
+  ensureGeoFeed(database, "GB");
+  let feeds = allFeeds(database);
+  expect(feeds.length == 1);
+  expect(feeds[0].id == "geo:gb");
+  expect(feeds[0].country == "GB");
+  expect(feeds[0].lang == "");
+  expect(feeds[0].enabled);
+  // Not digested yet: the digest job fills it on its next pass.
+  expect(feeds[0].digestedAt == "");
+  // Junk never becomes a row, however it is spelled.
+  ensureGeoFeed(database, "XX");
+  ensureGeoFeed(database, "??");
+  ensureGeoFeed(database, "England");
+  expect(allFeeds(database).length == 1);
+});
+
+test("place feeds are capped, so a GET cannot mint rows forever", () => {
+  fresh();
+  // Fill to the cap with synthetic place feeds...
+  let i: int = 0;
+  while (i < 40) {
+    let a = i / 26;
+    let b = i - a * 26;
+    let cc = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(a, a + 1)
+      + "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(b, b + 1);
+    let row: DiscoverFeed = {
+      id: "geo:" + cc.toLowerCase(), topic: "Local news", query: "news",
+      lang: "", country: cc, enabled: true, digestedAt: "",
+    };
+    persist(database, discoverFeedsMapping(), JSON.stringify(row));
+    i = i + 1;
+  }
+  // ...and the next reader's country is refused quietly.
+  ensureGeoFeed(database, "QQ");
+  expect(allFeeds(database).length == 40);
 });
 
 test("a thread id alone is not authorisation, and refusal is a 404", () => {

@@ -566,6 +566,18 @@ export function thinkingJson(provider: string, config: ModelConfigRow): string {
     if (provider == "vllm" || provider == "ollama") {
       return ",\"chat_template_kwargs\":{\"enable_thinking\":false}";
     }
+    // Gemini is the exception to "none of them think unless asked": 2.5
+    // reasons BY DEFAULT with a dynamic budget, and the thought is spent
+    // inside max_tokens — the Discover digest watched 5,240 of its 6,000
+    // tokens go to reasoning and the visible answer truncate mid-JSON.
+    // Silence is not "off" there, so the nearest honest thing is said. "low"
+    // rather than "none", measured not cautious: low bounds the reasoning to
+    // ~1k tokens on both Gemini models, while "none" is refused outright by
+    // gemini-2.5-pro, whose thinking cannot be disabled — and a 400 at the
+    // first conversation is a bad way to learn that.
+    if (provider == "vertex") {
+      return ",\"reasoning_effort\":\"low\"";
+    }
     return "";
   }
   if (config.thinking == "") { return ""; }
