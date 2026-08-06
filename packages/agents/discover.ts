@@ -35,7 +35,7 @@ import { credentialFor } from "./credentials.ts";
 import { complete, replyText } from "./provider.ts";
 import { retrieveWeb, searchApiBase } from "./webrag.ts";
 import { urlEncode } from "./mcp-oauth.ts";
-import { jsonRaw, jsonText } from "./scan.ts";
+import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 
 /* How recent a page must be to reach the model.
  *
@@ -438,7 +438,33 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   if (!res.ok || res.status != 200) { return none; }
   let raw = jsonRaw(res.body, "results");
   if (raw == "") { return none; }
-  let hits = JSON.parse<Hit[]>(raw);
+  /* Scanned field by field, NEVER JSON.parse<Hit[]>: the typed parse refuses
+   * a member the type does not name, and the index's answer GROWS members —
+   * the day it learned `published_at`, every digest quietly became "nothing
+   * fresh" while the index was answering forty hits, because the release
+   * build reads a refused parse as an empty list. The scan takes what it
+   * knows and ignores what it does not, which is the only stable contract
+   * with an API that is allowed to improve. (retrieveWeb reads its passages
+   * the same way, for the same reason.) */
+  let rows = jsonList(raw);
+  let hits: Hit[] = [];
+  let r: int = 0;
+  while (r < rows.length) {
+    let one: Hit = {
+      title: jsonText(rows[r], "title"),
+      url: jsonText(rows[r], "url"),
+      snippet: jsonText(rows[r], "snippet"),
+      source: jsonText(rows[r], "source"),
+      fetched_at: jsonText(rows[r], "fetched_at"),
+      lang: jsonText(rows[r], "lang"),
+      country: jsonText(rows[r], "country"),
+      category: jsonText(rows[r], "category"),
+      score: 0,
+      image: jsonText(rows[r], "image"),
+    };
+    if (one.url != "") { hits.push(one); }
+    r = r + 1;
+  }
 
   let cutoff = cutoffText();
   let kept: Hit[] = [];
