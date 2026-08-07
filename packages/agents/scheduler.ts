@@ -32,13 +32,13 @@ import { postgres } from "../plume/postgres.ts";
 import { connectDatabase, findById, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
-import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, workflowsMapping } from "./workflow-store.ts";
+import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, withGraph, workflowsMapping } from "./workflow-store.ts";
 import { WorkflowAsk, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
 import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
-import { TriggerInboxRow, claimMessage, finishMessage, noteThread, plainly, threadForChat } from "./triggers.ts";
+import { TriggerInboxRow, botById, claimMessage, finishMessage, noteThread, plainly, testingDraft, threadForChat } from "./triggers.ts";
 
 // How many tasks one pass will fire before leaving the rest to the next tick.
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
@@ -144,6 +144,15 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     return;
   }
   let flow: WorkflowRow = JSON.parse<WorkflowRow>(doc);
+  // A message walks the PUBLISHED graph — except inside the bot's test
+  // window, when the person editing pointed their own bot at the draft on
+  // purpose, loudly, and for a bounded time. The window is a timestamp
+  // compared here at claim, so it cannot be left on: it just passes.
+  let bot = botById(db, msg.botId);
+  let onDraft = testingDraft(bot, Date.now() as number);
+  let bytes = onDraft ? flow.graph
+    : (flow.publishedGraph ?? "") == "" ? flow.graph : (flow.publishedGraph ?? "");
+  flow = withGraph(flow, bytes);
   let ask: WorkflowAsk = {
     // The message IS the input — the same `{{input}}` a step reads when
     // somebody runs the graph by hand, which is what makes a workflow built
@@ -208,7 +217,15 @@ function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {
     owner: flow.owner, input: "", master: master,
     nowMs: Date.now() as number,
   };
-  let done = runWorkflow(db, flow, ask);
+  // Which graph: the clock is production, so a scheduled firing walks what
+  // was PUBLISHED. "Run soon" arrives through this same claim but only ever
+  // on a manual workflow — run-now is the one write that makes one due — and
+  // a person pressing the button is looking at the draft, so the draft is
+  // what runs. The n8n split, decided by kind rather than by a flag that
+  // could disagree with it.
+  let bytes = flow.kind == "manual" ? flow.graph
+    : (flow.publishedGraph ?? "") == "" ? flow.graph : (flow.publishedGraph ?? "");
+  let done = runWorkflow(db, withGraph(flow, bytes), ask);
   if (!done.ok) {
     markWorkflowFailed(db, flow, done.error, Date.now() as number);
     return;
