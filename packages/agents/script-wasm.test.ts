@@ -208,3 +208,13 @@ test("a diagnostic points at the line the person wrote", () => {
   expect(built.error.startsWith("2:"));
   }
 });
+
+test("the run directory does not outlive the run", () => {
+  if (have()) {
+  let source = "function main(): void { console.log(\"tidy\"); }\nmain();\n";
+  let out = ran(source, "x");
+  expect(out.ok);
+  // A workflow firing every minute leaves one of these a minute behind it.
+  expect(!fs.existsSync(DIR));
+  }
+});
