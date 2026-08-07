@@ -432,8 +432,11 @@ test("a switch's edges must name its own cases", () => {
 test("a workflow begins in exactly one place, and a trigger is one of them", () => {
   // A Telegram trigger stands in for the START step rather than sitting
   // before it: it is where the walk begins and what decides the input.
-  let onMessage = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"), node("z", "END")],
-    [edge("e1", "t", "a", ""), edge("e2", "a", "z", "")]);
+  // With a reply step, because a triggered graph must say something back —
+  // the rule of its own further down this file.
+  let onMessage = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"),
+    withText(node("say", "TELEGRAM_REPLY"), "{{prev}}"), node("z", "END")],
+    [edge("e1", "t", "a", ""), edge("e2", "a", "say", ""), edge("e3", "say", "z", "")]);
   expect(refuse(onMessage) == "");
   expect(startOf(onMessage).id == "t");
 
@@ -445,7 +448,8 @@ test("a workflow begins in exactly one place, and a trigger is one of them", () 
 
   // Nothing wires INTO a trigger, and the refusal says trigger rather than
   // START, because START is not what is on the board.
-  let backwards = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"), node("z", "END")],
+  let backwards = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"),
+    withText(node("say", "TELEGRAM_REPLY"), "{{prev}}"), node("z", "END")],
     [edge("e1", "t", "a", ""), edge("e2", "a", "t", "")]);
   expect(refuse(backwards).indexOf("trigger") >= 0);
 });
@@ -464,4 +468,17 @@ test("a telegram reply is a step in the middle, not a second ending", () => {
   let mute = graphOf([node("t", "TELEGRAM"), node("say", "TELEGRAM_REPLY"), node("z", "END")],
     [edge("e1", "t", "say", ""), edge("e2", "say", "z", "")]);
   expect(refuse(mute).indexOf("message to send") >= 0);
+});
+
+test("a workflow that begins at a message must say something back", () => {
+  // END records the answer; a TELEGRAM_REPLY sends it. A triggered graph
+  // with no reply step is a bot that reads and never answers.
+  let deaf = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "t", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(deaf).indexOf("Telegram reply") >= 0);
+
+  // The same graph run by hand needs no reply step: there is no chat.
+  let byHand = graphOf([node("s", "START"), node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(byHand) == "");
 });

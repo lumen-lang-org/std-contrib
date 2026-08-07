@@ -32,7 +32,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { credentialFor, masterKey } from "./credentials.ts";
-import { TriggerBotRow, TriggerInboxRow, TriggerOutboxRow, botById, claimBot, finishMessage, markOutboundSent, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, saveBot, takeMessage, unsentFor, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
+import { TriggerBotRow, TriggerOutboxRow, botById, claimBot, markOutboundSent, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, saveBot, takeMessage, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
 import { jsonText } from "./scan.ts";
 
 // How long Telegram holds the request open with nothing to say. Long enough
@@ -154,8 +154,11 @@ function pass(db: Db, botId: string, who: string, master: string): void {
 // What the scheduler answered, sent back. Per message try: one chat that has
 // blocked the bot must not hold up the rest of the queue.
 function sendAnswers(db: Db, bot: TriggerBotRow, token: string): void {
-  // What a run said mid-walk goes first: an intermediate reply that arrives
-  // after the final answer reads backwards.
+  // The outbox is the ONLY thing this sends. Every word that reaches a chat
+  // was queued by a TELEGRAM_REPLY step — the graph says where it speaks,
+  // END only records — so there is no second sending path reading the inbox,
+  // and a message in the chat can always be pointed at the step that said
+  // it. Oldest first: the order the run spoke is the order the chat reads.
   let speaking = JSON.parse<TriggerOutboxRow[]>(unsentOutbound(db, bot.id));
   let o: int = 0;
   while (o < speaking.length && o < SEND_PER_PASS) {
@@ -165,23 +168,9 @@ function sendAnswers(db: Db, bot: TriggerBotRow, token: string): void {
       markOutboundSent(db, out.id, Date.now() as number);
     } catch (e) {
       console.error("trigger-poller: outbox " + out.id + ": " + e.message);
-      // Left queued; the next pass tries again — the sendAnswers rule.
+      // Left queued; the next pass tries again.
     }
     o = o + 1;
-  }
-  let waiting = JSON.parse<TriggerInboxRow[]>(unsentFor(db, bot.id));
-  let i: int = 0;
-  while (i < waiting.length && i < SEND_PER_PASS) {
-    let row = waiting[i];
-    try {
-      if (row.answer.trim() != "") { sendMessage(token, row.chatId, row.answer); }
-      finishMessage(db, row, "sent", row.runId, row.answer, "", Date.now() as number);
-    } catch (e) {
-      console.error("trigger-poller: sending " + row.id + ": " + e.message);
-      // Left 'done', so the next pass tries again. A send that failed because
-      // Telegram was briefly down should not lose the answer.
-    }
-    i = i + 1;
   }
 }
 

@@ -535,6 +535,22 @@ export function refuse(graph: WfGraph): string {
   if (starts > 1) { return "a workflow begins in one place, not " + `${starts}` + " — a START step or a Telegram step, not both"; }
   if (ends == 0) { return "a workflow needs an END step — what is the answer?"; }
 
+  // A workflow that begins at a message must SAY something back. The END
+  // step records the walk's answer but sends nothing — sending is what a
+  // TELEGRAM_REPLY step is for, visibly, on the drawing — so a triggered
+  // graph with no reply step is a bot that reads and never answers, and the
+  // person who finds that out is the one on the phone. Refused here, where
+  // the sentence can say what to add, rather than discovered there.
+  if (startOf(graph).type == "TELEGRAM") {
+    let speaks = false;
+    let r: int = 0;
+    while (r < graph.nodes.length) {
+      if (graph.nodes[r].type == "TELEGRAM_REPLY") { speaks = true; }
+      r = r + 1;
+    }
+    if (!speaks) { return "a workflow started by a message needs a Telegram reply step — without one the chat never hears back"; }
+  }
+
   let e: int = 0;
   while (e < graph.edges.length) {
     let edge = graph.edges[e];
