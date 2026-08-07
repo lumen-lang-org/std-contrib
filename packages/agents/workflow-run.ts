@@ -274,7 +274,9 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
   };
 
   let step = (node: WfNode, ctx: WalkCtx): StepResult => {
-    if (node.type == "START") { return withInput(stepOk(ctx.input), ctx.input); }
+    // The entry, whichever kind it is: the walk begins here and hands on
+    // whatever started it — the run's input, or the message that arrived.
+    if (node.type == "START" || node.type == "TELEGRAM") { return withInput(stepOk(ctx.input), ctx.input); }
     if (node.type == "END") { return withInput(stepOk(ctx.prev), ctx.prev); }
     if (node.type == "CONDITION") {
       let tested = node.subject == "" ? ctx.prev : fill(node.subject, ctx);

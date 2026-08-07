@@ -428,3 +428,24 @@ test("a switch's edges must name its own cases", () => {
     [edge("e1", "s", "w", ""), edge("e2", "w", "a", ""), edge("e3", "a", "z", "")]);
   expect(refuse(mute).includes("which case"));
 });
+
+test("a workflow begins in exactly one place, and a trigger is one of them", () => {
+  // A Telegram trigger stands in for the START step rather than sitting
+  // before it: it is where the walk begins and what decides the input.
+  let onMessage = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "t", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(onMessage) == "");
+  expect(startOf(onMessage).id == "t");
+
+  // Both is not "belt and braces", it is two answers to "what makes this
+  // run" — and the walk would have to pick one silently.
+  let two = graphOf([node("s", "START"), node("t", "TELEGRAM"), node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(two).indexOf("one place") >= 0);
+
+  // Nothing wires INTO a trigger, and the refusal says trigger rather than
+  // START, because START is not what is on the board.
+  let backwards = graphOf([node("t", "TELEGRAM"), node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "t", "a", ""), edge("e2", "a", "t", "")]);
+  expect(refuse(backwards).indexOf("trigger") >= 0);
+});
