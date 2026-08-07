@@ -59,7 +59,15 @@ export type WfNode = {
   // anything and reach nothing. The source sits on the node rather than in a
   // table of its own for the reason the graph is one column: a workflow is a
   // document, and half of one is worse than none.
-  source: string,
+  //
+  // OPTIONAL, and that is not a style choice. `JSON.parse<WfGraph>` requires
+  // every field, and every graph stored before this field existed has no
+  // "source" in it — so making it required refused those documents outright
+  // and every workflow written before today stopped running, with "that is
+  // not a workflow graph" as its reason. A field added to a stored document
+  // has to be optional or the old documents have to be rewritten; optional is
+  // the one that cannot half-finish.
+  source?: string,
 };
 
 // An edge. `when` is "" for the ordinary case; a CONDITION's outgoing edges
@@ -101,6 +109,12 @@ export type StepResult = {
   branch: string,
   error: string,
   input: string,
+  // Where the work went, when a step did its work somewhere a person can
+  // read. An AGENT step answers in a conversation — the run's own, or one of
+  // its own when it names a different agent — and without this the trail
+  // records that it happened but not where. Optional: no other kind of step
+  // has one, and a run stored before this field must still parse.
+  threadId?: string,
 };
 
 // One node's visit, as recorded. `status` is "COMPLETED" or "FAILED" — the
@@ -111,6 +125,9 @@ export type WfStep = {
   type: string,
   status: string,
   ms: number,
+  // The conversation this step's work is in, when it has one. See
+  // StepResult.threadId.
+  threadId?: string,
   // What went in and what came out. Both are kept whether the step worked or
   // not: the pair is what somebody reads to find out why it did not.
   input: string,
@@ -271,9 +288,10 @@ function refuseNode(node: WfNode): string {
   if (node.type == "KNOWLEDGE" && node.query.trim() == "") { return label + " needs a query to look up"; }
   if (node.type == "MCP" && (node.serverId == "" || node.tool == "")) { return label + " needs a server and a tool on it"; }
   if (node.type == "SCRIPT") {
-    if (node.source.trim() == "") { return label + " has no script in it yet"; }
-    if (node.source.length > MAX_SOURCE) {
-      return label + " is " + `${node.source.length}` + " characters of script — the most one step may carry is " + `${MAX_SOURCE}`;
+    let body = node.source ?? "";
+    if (body.trim() == "") { return label + " has no script in it yet"; }
+    if (body.length > MAX_SOURCE) {
+      return label + " is " + `${body.length}` + " characters of script — the most one step may carry is " + `${MAX_SOURCE}`;
     }
   }
   if (node.type == "HTTP") {
@@ -764,6 +782,7 @@ export function walk(graph: WfGraph, input: string,
       // did not say. See StepResult.
       input: did.input == "" ? ctx.prev : did.input,
       output: did.output, error: did.error,
+      threadId: did.threadId ?? "",
     };
     steps.push(one);
     watch(steps, emptyNode());

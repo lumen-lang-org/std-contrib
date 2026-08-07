@@ -59,7 +59,15 @@ function stepFailed(why: string): StepResult {
  *  no longer knows it was a template. A record cannot be edited in place, so
  *  this is the whole record again with the one field filled in. */
 function withInput(r: StepResult, said: string): StepResult {
-  let told: StepResult = { ok: r.ok, output: r.output, branch: r.branch, error: r.error, input: said };
+  let told: StepResult = { ok: r.ok, output: r.output, branch: r.branch, error: r.error,
+    input: said, threadId: r.threadId ?? "" };
+  return told;
+}
+
+/** The same answer, saying which conversation it was written in. */
+function inThread(r: StepResult, thread: string): StepResult {
+  let told: StepResult = { ok: r.ok, output: r.output, branch: r.branch, error: r.error,
+    input: r.input, threadId: thread };
   return told;
 }
 
@@ -172,7 +180,7 @@ function scriptGiven(ctx: WalkCtx): ScriptGiven {
  *  its hash for every run after — including runs of other workflows that
  *  happen to hold the same text. */
 function runScriptStep(node: WfNode, ctx: WalkCtx, runId: string): StepResult {
-  let built = ensureBuilt(node.source);
+  let built = ensureBuilt(node.source ?? "");
   if (!built.ok) { return stepFailed(built.error); }
   let dir = "/tmp/joule-script-run/" + runId + "-" + node.id;
   let ran = runScript(built.path, scriptGiven(ctx), dir);
@@ -243,7 +251,7 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     let i: int = 0;
     while (i < sofar.length) { all.push(sofar[i]); i = i + 1; }
     if (at.id != "") {
-      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "" };
+      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "", threadId: "" };
       all.push(underway);
     }
     let progress: WorkflowRunRow = {
@@ -296,10 +304,10 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     if (node.type == "AGENT") {
       let said = fill(node.instruction, ctx);
       // The step's own thread when it names another agent; the run's when not.
-      let inThread = threadId;
+      let thread = threadId;
       if (node.agentId != "" && node.agentId != row.agentId) {
-        inThread = openThread(db, { agentId: node.agentId, owner: ask.owner, now: `${Date.now() as number}` });
-        if (inThread == "") { return withInput(stepFailed("no conversation could be opened for agent " + node.agentId), said); }
+        thread = openThread(db, { agentId: node.agentId, owner: ask.owner, now: `${Date.now() as number}` });
+        if (thread == "") { return withInput(stepFailed("no conversation could be opened for agent " + node.agentId), said); }
       }
       let turn: ThreadAsk = {
         userText: said,
@@ -308,9 +316,13 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
         pick: inheritedPick(),
         think: false,
       };
-      let answered = runInThreadWith(db, inThread, turn);
-      if (!answered.run.ok) { return withInput(stepFailed(answered.run.error), said); }
-      return withInput(stepOk(answered.text), said);
+      let answered = runInThreadWith(db, thread, turn);
+      // Which conversation this step's words are in — the run's, or its own
+      // when it named another agent. The run row carries only the run's, so
+      // without this a step that answered elsewhere left a link to an empty
+      // page.
+      if (!answered.run.ok) { return inThread(withInput(stepFailed(answered.run.error), said), thread); }
+      return inThread(withInput(stepOk(answered.text), said), thread);
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
   };
