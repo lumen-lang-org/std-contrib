@@ -29,6 +29,7 @@ import { tracerFor } from "./trace.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
 import { callTool } from "./mcp.ts";
+import { ensureBuilt, runScript } from "./script-wasm.ts";
 
 // What one web search step may pull in. Smaller than a chat turn's budget:
 // a workflow chains steps, and each one's output is the next one's input.
@@ -149,6 +150,39 @@ function reachOut(db: Db, node: WfNode, owner: string, master: string, args: str
   return stepOk(called.text);
 }
 
+/** What a SCRIPT step is handed, as JSON in the one file it can read.
+ *
+ *  Every earlier answer by node id, so a script can reach what a template
+ *  can — `{{node.h}}` and `given.outputs.h` are the same value by two doors.
+ *  Built here rather than in script-wasm.ts because the shape is the walk's,
+ *  and that module knows nothing about walks. */
+function scriptInput(ctx: WalkCtx): string {
+  let outs = "";
+  let i: int = 0;
+  while (i < ctx.outputs.length) {
+    if (i > 0) { outs = outs + ","; }
+    outs = outs + JSON.stringify(ctx.outputs[i].nodeId) + ":" + JSON.stringify(ctx.outputs[i].output);
+    i = i + 1;
+  }
+  return "{\"input\":" + JSON.stringify(ctx.input)
+    + ",\"prev\":" + JSON.stringify(ctx.prev)
+    + ",\"outputs\":{" + outs + "}}";
+}
+
+/** The SCRIPT step: compile once per source, then run with nothing granted.
+ *
+ *  The compile happens on the first run of a given source and is cached by
+ *  its hash for every run after — including runs of other workflows that
+ *  happen to hold the same text. */
+function runScriptStep(node: WfNode, ctx: WalkCtx, runId: string): StepResult {
+  let built = ensureBuilt(node.source);
+  if (!built.ok) { return stepFailed(built.error); }
+  let dir = "/tmp/joule-script-run/" + runId + "-" + node.id;
+  let ran = runScript(built.path, scriptInput(ctx), dir);
+  if (!ran.ok) { return stepFailed(ran.error); }
+  return stepOk(ran.output);
+}
+
 /** The HTTP step. GET sends no body; everything else sends the filled one. */
 function fetchStep(node: WfNode, ctx: WalkCtx): StepResult {
   let url = fill(node.url, ctx);
@@ -249,6 +283,11 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     if (node.type == "MCP") {
       let args = fill(node.args, ctx);
       return withInput(reachOut(db, node, ask.owner, ask.master, args), node.tool + " " + args);
+    }
+    if (node.type == "SCRIPT") {
+      // The script's own input is the walk so far, so what it was handed is
+      // recorded as that rather than as the source it is made of.
+      return withInput(runScriptStep(node, ctx, runId), scriptInput(ctx));
     }
     if (node.type == "HTTP") {
       let url = fill(node.url, ctx);

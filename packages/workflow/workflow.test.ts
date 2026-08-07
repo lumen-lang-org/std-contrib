@@ -22,7 +22,7 @@ function node(id: string, kind: string): WfNode {
     query: kind == "WEB_SEARCH" || kind == "KNOWLEDGE" ? "what changed" : "",
     test: kind == "CONDITION" ? "contains" : "",
     needle: kind == "CONDITION" ? "urgent" : "",
-    subject: "", schedule: "",
+    subject: "", schedule: "", source: "",
   };
   return n;
 }
@@ -36,7 +36,7 @@ function withText(n: WfNode, said: string): WfNode {
     serverId: n.serverId, tool: n.tool, args: n.args,
     url: n.url, method: n.method, body: n.body,
     query: n.query, test: n.test, needle: n.needle,
-    subject: n.subject, schedule: n.schedule,
+    subject: n.subject, schedule: n.schedule, source: n.source,
   };
   return out;
 }
@@ -145,7 +145,7 @@ test("a step missing what its kind needs is named in the refusal", () => {
     id: "a", type: "AGENT", name: "Morning brief", x: 0.0, y: 0.0,
     instruction: "", agentId: "", serverId: "", tool: "", args: "",
     url: "", method: "", body: "", query: "", test: "", needle: "",
-    subject: "", schedule: empty.schedule,
+    subject: "", schedule: empty.schedule, source: empty.source,
   };
   let bad = refuse(graphOf([node("s", "START"), mute, node("z", "END")], []));
   expect(bad.indexOf("Morning brief") >= 0);

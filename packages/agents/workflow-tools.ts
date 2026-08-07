@@ -346,7 +346,7 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
     body: "",
     query: made == "WEB_SEARCH" || made == "KNOWLEDGE" ? text : "",
     test: "", needle: "", subject: "",
-    schedule: "",
+    schedule: "", source: made == "SCRIPT" ? text : "",
   };
   return built;
 }
@@ -359,7 +359,7 @@ function startEndNode(kind: string, schedule: string, idx: int): WfNode {
     x: 120.0 + (idx as number) * 240.0, y: 200.0,
     instruction: "", agentId: "", serverId: "", tool: "", args: "",
     url: "", method: "", body: "", query: "", test: "", needle: "",
-    subject: base.subject,
+    subject: base.subject, source: base.source,
     schedule: kind == "START" ? schedule : "",
   };
   return built;
@@ -379,7 +379,7 @@ function withText(node: WfNode, text: string, title: string): WfNode {
     method: node.method, body: node.body,
     query: text != "" && (node.type == "WEB_SEARCH" || node.type == "KNOWLEDGE") ? text : node.query,
     test: node.test, needle: node.needle, subject: node.subject,
-    schedule: node.schedule,
+    schedule: node.schedule, source: node.source,
   };
   return changed;
 }
@@ -391,7 +391,7 @@ function withSchedule(node: WfNode, schedule: string): WfNode {
     serverId: node.serverId, tool: node.tool, args: node.args,
     url: node.url, method: node.method, body: node.body,
     query: node.query, test: node.test, needle: node.needle,
-    subject: node.subject, schedule: schedule,
+    subject: node.subject, schedule: schedule, source: node.source,
   };
   return changed;
 }
@@ -684,7 +684,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       serverId: built.serverId, tool: built.tool, args: built.args,
       url: built.url, method: built.method, body: built.body,
       query: built.query, test: built.test, needle: built.needle,
-      subject: built.subject, schedule: built.schedule,
+      subject: built.subject, schedule: built.schedule, source: built.source,
     };
     let nodes: WfNode[] = [];
     let n: int = 0;

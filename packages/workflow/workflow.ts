@@ -19,7 +19,8 @@
 // every read.
 export type WfNode = {
   id: string,
-  // START, END, AGENT, LLM, CONDITION, WEB_SEARCH, KNOWLEDGE, MCP, HTTP.
+  // START, END, AGENT, LLM, CONDITION, WEB_SEARCH, KNOWLEDGE, MCP, HTTP,
+  // SCRIPT.
   type: string,
   // What the canvas shows on the node.
   name: string,
@@ -53,6 +54,12 @@ export type WfNode = {
   // and the zone database live with the store, and a pure package that
   // half-checked them would disagree with the one that decides.
   schedule: string,
+  // SCRIPT: the body, as written. It is compiled to wasm and run with no
+  // capabilities at all — see agents/script-wasm.ts — so this text may say
+  // anything and reach nothing. The source sits on the node rather than in a
+  // table of its own for the reason the graph is one column: a workflow is a
+  // document, and half of one is worse than none.
+  source: string,
 };
 
 // An edge. `when` is "" for the ordinary case; a CONDITION's outgoing edges
@@ -140,8 +147,12 @@ export type WalkCtx = {
 export const MAX_NODES: int = 24;
 export const MAX_NAME: int = 80;
 export const MAX_TEXT: int = 4000;
+// A script is longer than a prompt and shorter than a program. Bounded here
+// because the graph is validated whole on every write, and because a compile
+// is a process this deployment pays for.
+export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT"];
 
 export function knownType(kind: string): bool {
   let i: int = 0;
@@ -158,7 +169,7 @@ export function emptyNode(): WfNode {
     instruction: "", agentId: "",
     serverId: "", tool: "", args: "",
     url: "", method: "", body: "",
-    query: "", test: "", needle: "", subject: "", schedule: "",
+    query: "", test: "", needle: "", subject: "", schedule: "", source: "",
   };
   return none;
 }
@@ -259,6 +270,12 @@ function refuseNode(node: WfNode): string {
   if (node.type == "WEB_SEARCH" && node.query.trim() == "") { return label + " needs a query to search for"; }
   if (node.type == "KNOWLEDGE" && node.query.trim() == "") { return label + " needs a query to look up"; }
   if (node.type == "MCP" && (node.serverId == "" || node.tool == "")) { return label + " needs a server and a tool on it"; }
+  if (node.type == "SCRIPT") {
+    if (node.source.trim() == "") { return label + " has no script in it yet"; }
+    if (node.source.length > MAX_SOURCE) {
+      return label + " is " + `${node.source.length}` + " characters of script — the most one step may carry is " + `${MAX_SOURCE}`;
+    }
+  }
   if (node.type == "HTTP") {
     if (!node.url.startsWith("http://") && !node.url.startsWith("https://")) { return label + " needs a full http(s) url"; }
     let m = node.method;
