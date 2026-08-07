@@ -38,7 +38,7 @@ import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads
 import { tracerFor } from "./trace.ts";
 import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
-import { TriggerInboxRow, claimMessage, finishMessage, plainly } from "./triggers.ts";
+import { TriggerInboxRow, claimMessage, finishMessage, noteThread, plainly, threadForChat } from "./triggers.ts";
 
 // How many tasks one pass will fire before leaving the rest to the next tick.
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
@@ -150,8 +150,17 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     // and tested in the console work unchanged behind a bot.
     owner: msg.owner, input: msg.input, master: master,
     nowMs: Date.now() as number,
+    // And the conversation that chat is already having, so the second
+    // message can say "and tomorrow?" and mean it. A run started by the
+    // clock passes nothing here and gets a fresh conversation, which is
+    // right: nobody is talking to it.
+    threadId: threadForChat(db, msg.botId, msg.chatId),
   };
   let done = runWorkflow(db, flow, ask);
+  // Before the outcome is judged: a walk that opened a conversation and then
+  // failed still opened one, and the next message should continue it rather
+  // than start a third.
+  if (done.threadId != "") { noteThread(db, msg.id, done.threadId); }
   if (!done.ok) {
     finishMessage(db, msg, "failed", done.runId, "", done.error, Date.now() as number);
     return;

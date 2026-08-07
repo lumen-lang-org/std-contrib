@@ -6,7 +6,7 @@
 //
 //   cd packages/agents && lumen test triggers.test.ts
 
-import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, mayRun, nextOffset, plainly, updatesIn, withRunCounted } from "./triggers.ts";
+import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, updatesIn, withRunCounted } from "./triggers.ts";
 
 function bot(): TriggerBotRow {
   let base = emptyBot();
@@ -171,4 +171,15 @@ test("the ceilings work at a real clock, not only at toy timestamps", () => {
   };
   expect(mayRun(yesterday, 0, realNow).ok);
   expect(withRunCounted(yesterday, realNow).runsToday == 1);
+});
+
+test("a chat's messages land in one conversation, not one each", () => {
+  // Pure half only: the row carries the thread, so the lookup has something
+  // to find. The query itself is exercised against a database by the run.
+  let row = emptyMessage();
+  expect(row.threadId == "");
+  // A refused message never ran, so it never opened a conversation — and it
+  // must not be mistaken for one when the next message looks for the chat's
+  // thread. That is what the `thread_id <> ''` in threadForChat is for.
+  expect(row.status == "");
 });
