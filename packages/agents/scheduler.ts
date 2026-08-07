@@ -155,6 +155,8 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     // clock passes nothing here and gets a fresh conversation, which is
     // right: nobody is talking to it.
     threadId: threadForChat(db, msg.botId, msg.chatId),
+    // And where a TELEGRAM_REPLY step speaks to, mid-walk.
+    botId: msg.botId, chatId: msg.chatId,
   };
   let done = runWorkflow(db, flow, ask);
   // Before the outcome is judged: a walk that opened a conversation and then

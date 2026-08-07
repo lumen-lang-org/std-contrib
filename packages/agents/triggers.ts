@@ -178,6 +178,38 @@ export function triggerInboxMapping(): DbRepository {
   return repository("trigger_inbox", "id", "id", fs);
 }
 
+// A message on its way OUT — a REPLY step spoke, or will have, before the
+// run is over. Its own table rather than more columns on the inbox: one
+// inbound message may now produce several outbound ones, and a row that is
+// one thing is a row that stays understandable.
+export type TriggerOutboxRow = {
+  id: string,
+  botId: string,
+  chatId: string,
+  // Which run said it, so the console can show a reply beside its walk.
+  runId: string,
+  text: string,
+  // "queued" then "sent". Nothing retries forever: a send that throws stays
+  // queued and the next poller pass tries again, the sendAnswers rule.
+  status: string,
+  createdAt: string,
+  updatedAt: string,
+};
+
+export function triggerOutboxMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("botId", "bot_id", "text"),
+    field("chatId", "chat_id", "text"),
+    field("runId", "run_id", "text"),
+    field("text", "text", "text"),
+    field("status", "status", "text"),
+    field("createdAt", "created_at", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("trigger_outbox", "id", "id", fs);
+}
+
 export function triggersPlan(db: Db): Migration[] {
   // 106: 105 is the highest recorded. Check
   // `SELECT version FROM plume_schema_history ORDER BY installed_rank DESC`
@@ -194,6 +226,11 @@ export function triggersPlan(db: Db): Migration[] {
     // an applied one is checked on every start.
     migration("106.2", "a chat keeps one conversation",
       "ALTER TABLE trigger_inbox ADD COLUMN thread_id " + db.textType + " NOT NULL DEFAULT ''"),
+    // A new table generates its CREATE from the mapping above; if a column is
+    // ever added, that mapping gets a frozen V1 copy first — 106.1 taught
+    // this file the hard way.
+    migration("106.3", "what a run says before it is done",
+      createTableSql(db, triggerOutboxMapping())),
   ];
 }
 
@@ -515,6 +552,33 @@ export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runI
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
   db.query(sql, [status, runId, answer, problem, `${nowMs}`, row.id]);
+}
+
+/** A REPLY step spoke: queue it for the poller, which is the process that
+ *  holds the token. Stripped of control blocks here, so the poller stays a
+ *  dumb pipe — the same division as the final answer. */
+export function queueOutbound(db: Db, botId: string, chatId: string, runId: string, text: string, nowMs: number): string {
+  let now = `${nowMs}`;
+  let row: TriggerOutboxRow = {
+    id: crypto.randomUUID(), botId: botId, chatId: chatId, runId: runId,
+    text: plainly(text), status: "queued", createdAt: now, updatedAt: now,
+  };
+  persist(db, triggerOutboxMapping(), JSON.stringify(row));
+  return row.id;
+}
+
+/** What is waiting to leave through this bot, oldest first — the order the
+ *  run said them is the order the chat should read them. */
+export function unsentOutbound(db: Db, botId: string): string {
+  let keys: DbOrder[] = [asc("created_at")];
+  return listOrdered(db, triggerOutboxMapping(),
+    "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
+    [botId, "queued"], keys);
+}
+
+export function markOutboundSent(db: Db, id: string, nowMs: number): void {
+  db.query("UPDATE trigger_outbox SET status = 'sent', updated_at = " + db.placeholder
+    + " WHERE id = " + placeholderAt(db, 2), [`${nowMs}`, id]);
 }
 
 /** The conversation this chat is already having, or "".

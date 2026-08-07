@@ -449,3 +449,19 @@ test("a workflow begins in exactly one place, and a trigger is one of them", () 
     [edge("e1", "t", "a", ""), edge("e2", "a", "t", "")]);
   expect(refuse(backwards).indexOf("trigger") >= 0);
 });
+
+test("a telegram reply is a step in the middle, not a second ending", () => {
+  // It sits mid-chain like any step: one way in, one way out, and the walk
+  // continues past it.
+  let g = graphOf([node("t", "TELEGRAM"),
+    withText(node("say", "TELEGRAM_REPLY"), "on it — searching now"),
+    node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "t", "say", ""), edge("e2", "say", "a", ""), edge("e3", "a", "z", "")]);
+  expect(refuse(g) == "");
+
+  // An empty message is refused with the field named: a reply that sends
+  // nothing looks like a broken bot from the phone.
+  let mute = graphOf([node("t", "TELEGRAM"), node("say", "TELEGRAM_REPLY"), node("z", "END")],
+    [edge("e1", "t", "say", ""), edge("e2", "say", "z", "")]);
+  expect(refuse(mute).indexOf("message to send") >= 0);
+});
