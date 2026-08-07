@@ -97,6 +97,19 @@ export type DiscoverRow = {
   // The urls, joined by newline. A list column would be a second table for
   // data that is only ever read whole.
   sources: string,
+  /* What each of those sources called the story, in the same order and joined the same
+   * way — line n here is the headline for line n of `sources`.
+   *
+   * Written at digest time rather than looked up when somebody opens the article, and
+   * the reason is not caching: the console renders on the server, and a title it has to
+   * fetch from the browser cannot be in the first paint. The cards showed bare
+   * hostnames and filled in a moment later. The digest already holds these — every
+   * search hit carries its title, and they were being discarded once the model had read
+   * them.
+   *
+   * Empty for rows digested before this column existed; the console asks the index for
+   * those, which is what it did for all of them until now. */
+  sourceTitles: string,
   fetchedAt: string,
   why: string,
   madeAt: string,
@@ -163,6 +176,7 @@ export function discoverStoriesMapping(): DbRepository {
     field("headline", "headline", "text"),
     field("summary", "summary", "text"),
     field("sources", "sources", "text"),
+    field("sourceTitles", "source_titles", "text"),
     field("fetchedAt", "fetched_at", "text"),
     field("why", "why", "text"),
     field("madeAt", "made_at", "text"),
@@ -221,6 +235,11 @@ export function discoverPlan(db: Db): Migration[] {
     // ordering.
     migration("100", "the body again, made readable",
       "ALTER TABLE discover_stories ADD COLUMN body_md " + db.textType + " NOT NULL DEFAULT ''"),
+    // 105, for the reason spelled out above 100: plume refuses a plan whose next
+    // migration sorts below one already applied, and 104 has run. The number belongs to
+    // the deployment's order, not to this module's series.
+    migration("105", "what each source called the story",
+      "ALTER TABLE discover_stories ADD COLUMN source_titles " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -305,7 +324,7 @@ export function storyById(db: Db, id: string): DiscoverRow {
   let held = findById(db, discoverStoriesMapping(), id);
   if (held == "") {
     let none: DiscoverRow = {
-      id: "", feedId: "", rank: 0, headline: "", summary: "", sources: "",
+      id: "", feedId: "", rank: 0, headline: "", summary: "", sources: "", sourceTitles: "",
       fetchedAt: "", why: "", madeAt: "", body: "", image: "", readMinutes: 0,
       bodyMd: "",
     };
@@ -338,6 +357,9 @@ export type WrittenStory = {
   readMinutes: int,
   // The picture, taken from whichever of the story's own sources has one.
   image: string,
+  // Each source's own headline, by position against story.sources. Found here for the
+  // same reason image is: this is where the hits are.
+  sourceTitles: string,
 };
 
 export type DiscoverTopic = {
@@ -357,6 +379,15 @@ type Hit = {
   snippet: string,
   source: string,
   fetched_at: string,
+  /* When the PAGE said it was published, ISO-8601, or "" when it declared no
+   * date. The index learned this on 2026-08-06 and it is the field this feed
+   * is actually about: fetched_at answers "when did the crawler last see it",
+   * which a re-crawl moves to today for an article written in 2019. */
+  published_at: string,
+  /* When the URL first entered the index, never moved by a re-crawl. The
+   * honest fallback for a page that declares no date: it says "new to us",
+   * which is a claim we can defend, where fetch time says nothing at all. */
+  first_seen: string,
   lang: string,
   country: string,
   category: string,
@@ -370,6 +401,26 @@ type Hit = {
 
 /** Whether a fetch stamp is inside the window. The index writes ISO-8601 in
  *  UTC ("2026-08-05T09:14:00.000Z"), which sorts and parses as text. */
+/* The date this feed judges a story by.
+ *
+ * Publication if the page declared one; else when we first saw it; else the
+ * fetch. The order matters and the last one is a last resort: fetch time is
+ * when the crawler last touched the page, so a back-catalogue walk re-stamps
+ * thousands of old articles with today and every one of them enters a
+ * 36-hour window as breaking news. Both the cutoff below and the ordering
+ * read this rather than fetched_at, or the index's own `sort=recent` and
+ * `since=` are undone the moment their answer arrives here.
+ *
+ * Empty strings, not nulls: jsonText yields "" for an absent member, and the
+ * comparison is textual, so a "" would sort below every real stamp and be
+ * filtered out — which is why each step is checked for length rather than
+ * chained blindly. */
+function effectiveStamp(h: Hit): string {
+  if (h.published_at.length >= 19) { return h.published_at; }
+  if (h.first_seen.length >= 19) { return h.first_seen; }
+  return h.fetched_at;
+}
+
 function recent(stamp: string, cutoff: string): bool {
   if (stamp.length < 19 || cutoff.length < 19) { return false; }
   return stamp.slice(0, 19) >= cutoff.slice(0, 19);
@@ -456,6 +507,8 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
       snippet: jsonText(rows[r], "snippet"),
       source: jsonText(rows[r], "source"),
       fetched_at: jsonText(rows[r], "fetched_at"),
+      published_at: jsonText(rows[r], "published_at"),
+      first_seen: jsonText(rows[r], "first_seen"),
       lang: jsonText(rows[r], "lang"),
       country: jsonText(rows[r], "country"),
       category: jsonText(rows[r], "category"),
@@ -470,7 +523,7 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   let kept: Hit[] = [];
   let i: int = 0;
   while (i < hits.length) {
-    if (recent(hits[i].fetched_at, cutoff)) { kept.push(hits[i]); }
+    if (recent(effectiveStamp(hits[i]), cutoff)) { kept.push(hits[i]); }
     i = i + 1;
   }
 
@@ -482,7 +535,7 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
     let k: int = 0;
     while (k < kept.length) {
       if (!taken(out, kept[k].url)
-          && (best < 0 || kept[k].fetched_at > kept[best].fetched_at)) { best = k; }
+          && (best < 0 || effectiveStamp(kept[k]) > effectiveStamp(kept[best]))) { best = k; }
       k = k + 1;
     }
     if (best < 0) { break; }
@@ -674,6 +727,29 @@ function imageFor(story: DiscoverStory, hits: Hit[]): string {
   return "";
 }
 
+/** Each source's own headline, in the order the sources are listed.
+ *
+ *  The same walk imageFor does: the hits are what the model was given, so the title
+ *  beside a url here is the one that produced the story. A source with no matching hit
+ *  yields an empty line rather than shifting the others — the two lists are read by
+ *  position, so a missing title must still occupy its place. */
+function titlesFor(story: DiscoverStory, hits: Hit[]): string {
+  let out: string = "";
+  let s: int = 0;
+  while (s < story.sources.length) {
+    let found: string = "";
+    let h: int = 0;
+    while (h < hits.length) {
+      if (hits[h].url == story.sources[s]) { found = hits[h].title; h = hits.length; }
+      else { h = h + 1; }
+    }
+    out = out + found.replaceAll("\n", " ");
+    if (s + 1 < story.sources.length) { out = out + "\n"; }
+    s = s + 1;
+  }
+  return out;
+}
+
 /** Reading minutes, at 220 words a minute, never zero for a body that exists.
  *  Words counted as runs of non-space, which is close enough for a figure
  *  whose whole job is to say "short" or "long". */
@@ -850,6 +926,7 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
     let one: WrittenStory = {
       story: parsed[w], body: text, readMinutes: readingMinutes(text),
       image: imageFor(parsed[w], hits),
+      sourceTitles: titlesFor(parsed[w], hits),
     };
     wrote.push(one);
     w = w + 1;
@@ -1055,7 +1132,8 @@ export function discoverModelId(): string { return digestModelId(); }
 export function withReadableBody(row: DiscoverRow, md: string): DiscoverRow {
   let better: DiscoverRow = {
     id: row.id, feedId: row.feedId, rank: row.rank, headline: row.headline,
-    summary: row.summary, sources: row.sources, fetchedAt: row.fetchedAt,
+    summary: row.summary, sources: row.sources, sourceTitles: row.sourceTitles,
+    fetchedAt: row.fetchedAt,
     why: row.why, madeAt: row.madeAt, body: row.body, image: row.image,
     readMinutes: row.readMinutes, bodyMd: md,
   };
@@ -1104,7 +1182,8 @@ export function refreshFeed(db: Db, feed: DiscoverFeed, master: string): string 
       // English one, and each is its own page.
       id: feed.id + ":" + stem(one.headline), feedId: feed.id, rank: i,
       headline: one.headline, summary: one.summary,
-      sources: one.sources.join("\n"), fetchedAt: one.fetchedAt,
+      sources: one.sources.join("\n"), sourceTitles: written.sourceTitles,
+      fetchedAt: one.fetchedAt,
       why: one.why, madeAt: now,
       body: written.body, image: written.image, readMinutes: written.readMinutes,
       // Carried over when this story survived the refresh unchanged, and
