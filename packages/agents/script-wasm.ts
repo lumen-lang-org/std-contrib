@@ -272,8 +272,45 @@ export function ensureBuilt(source: string): ScriptBuild {
       error: "the compiled step could not be put away: " + e.message, fresh: true };
     return stuck;
   }
+  sweepCache();
   let made: ScriptBuild = { ok: true, path: wasm, error: "", fresh: true };
   return made;
+}
+
+// How many built modules to keep. Each is around 50KB of wasm beside the
+// source it came from, and every edit of a step mints another — so left
+// alone this grows for as long as somebody is working, which on a disk that
+// is already 90% full is a slow leak with a date on it rather than a
+// theoretical one.
+export const SCRIPT_CACHE_KEEP: int = 200;
+
+/** Drop the oldest built modules once there are too many.
+ *
+ *  Oldest by the directory's own mtime, which the build sets when it writes
+ *  the source — near enough to "least recently built", and it needs no
+ *  bookkeeping file of our own to go stale. Called after a FRESH build only:
+ *  a cache hit changes nothing, and sweeping on every run would stat the
+ *  whole directory to learn that. */
+function sweepCache(): void {
+  try {
+    let names = fs.readdirSync(scriptCacheDir());
+    if (names.length <= SCRIPT_CACHE_KEEP) { return; }
+    // The oldest one, dropped per sweep. A build happens once per new source,
+    // so one out per one in holds the size steady without a sort.
+    let oldestAt: number = 0.0;
+    let oldest = "";
+    let i: int = 0;
+    while (i < names.length) {
+      let dir = scriptCacheDir() + "/" + names[i];
+      let when = fs.statSync(dir).mtimeMs;
+      if (oldest == "" || when < oldestAt) { oldestAt = when; oldest = dir; }
+      i = i + 1;
+    }
+    if (oldest != "") { fs.rmSync(oldest, true); }
+  } catch (e) {
+    // A cache that cannot be swept is a disk problem, not a run problem: the
+    // step still has its module and the next build will try again.
+  }
 }
 
 /** Run a built module over one input.
@@ -391,6 +428,10 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
       error: "the script answered " + `${said.length}` + " characters — the most a step may pass on is " + `${SCRIPT_OUT_MAX}` };
     return loud;
   }
+  // The call directory held one run's input and has no reader left. Kept, a
+  // workflow that runs every minute leaves a directory a minute behind it
+  // forever.
+  try { fs.rmSync(callDir, true); } catch (e) { }
   let done: WasmRun = { ok: true, output: said.trim(), error: "" };
   return done;
 }
