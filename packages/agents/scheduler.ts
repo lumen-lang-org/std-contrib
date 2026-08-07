@@ -44,6 +44,9 @@ import { TriggerInboxRow, botById, claimMessage, finishMessage, noteThread, plai
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
 // unit active for an hour, and every tick in that hour is silently dropped.
 const PER_PASS: int = 5;
+// How many trigger runners one pass will launch. Each is a whole process
+// walking whole graphs, so this bounds concurrent model spend, not threads.
+const TRIGGER_RUNNERS: int = 3;
 // Fewer workflows than tasks per pass: one workflow is several model turns.
 const WORKFLOWS_PER_PASS: int = 2;
 
@@ -51,6 +54,22 @@ function main(): void {
   let master = masterKey();
   if (master == "") {
     console.error("LUMEN_MASTER_KEY is not set — the scheduler cannot read provider credentials");
+    return;
+  }
+  // Child mode: walk triggered messages until the queue is dry, then exit.
+  // Everything else — tasks, clock workflows, reflow — belongs to the timer's
+  // own pass; a runner exists so that work and this work cannot block each
+  // other.
+  if ((process.env("SCHEDULER_CHILD") ?? "") == "triggers") {
+    let db2 = postgres();
+    let server2: DbConfig = {
+      host: process.env("AGENTS_PG_HOST") ?? "127.0.0.1",
+      database: process.env("AGENTS_PG_DATABASE") ?? "agents",
+      user: process.env("AGENTS_PG_USER") ?? "agents",
+      password: process.env("AGENTS_PG_PASSWORD") ?? "",
+    };
+    connectDatabase(db2, server2);
+    drainTriggers(db2, master);
     return;
   }
 
@@ -104,23 +123,51 @@ function main(): void {
   // had text on it.
   reflow(db, master);
 
-  // And what arrived while nobody was asking. A trigger's poller wrote rows
-  // and stopped; this is where they become runs — deliberately here and
-  // nowhere else, so that a workflow started by a Telegram message goes
-  // through the same claim, the same walk and the same run record as one
-  // started by a clock.
-  drainTriggers(db, master);
+  // And what arrived while nobody was asking — but not HERE. A triggered
+  // walk is minutes of model time, and this pass ran them inline until one
+  // proved both failure modes in an afternoon: a slow walk held the pass
+  // (and systemd's no-second-instance rule held every tick behind it), and a
+  // crashing walk took the pass down with every unclaimed message behind it.
+  // So the pass now only counts the queue and launches runners — each one
+  // this same binary in child mode, claiming through the same SKIP LOCKED
+  // door, walking until the queue is dry, and exiting. A process that exits
+  // also cannot leak, which is this file's founding rule; a child holds the
+  // transcripts of the walks it ran and gives them back to the OS minutes
+  // later instead of never.
+  let waiting = queuedMessages(db);
+  if (waiting > 0) {
+    let runners = waiting < TRIGGER_RUNNERS ? waiting : TRIGGER_RUNNERS;
+    let r: int = 0;
+    while (r < runners) {
+      // nohup + & through a shell, because what this needs is a DETACHED
+      // child — one that outlives this pass — and spawnSync here returns as
+      // soon as the shell has backgrounded it.
+      child_process.spawnSync("bash", ["-c",
+        "SCHEDULER_CHILD=triggers nohup " + ownBinary() + " >> .lumen-scheduler-runner.log 2>&1 & disown"]);
+      r = r + 1;
+    }
+    console.log("scheduler: launched " + `${runners}` + " runner(s) for " + `${waiting}` + " queued message(s)");
+  }
 }
 
-// How many inbound messages one pass answers. Same reasoning as the workflow
-// bound above: one message is a whole graph, several model turns deep, and a
-// pass that answers twenty holds the unit active while every tick behind it
-// is dropped.
-const TRIGGERS_PER_PASS: int = 3;
+// Where this binary lives, for launching itself. The unit's WorkingDirectory
+// is this package, so the relative default holds for systemd and for a shell
+// started here; anything else names it.
+function ownBinary(): string {
+  return process.env("AGENTS_SCHEDULER_BIN") ?? "./scheduler";
+}
+
+function queuedMessages(db: Db): int {
+  if (!db.query("SELECT count(*) FROM trigger_inbox WHERE status = 'queued'", [])) { return 0; }
+  if (db.rows() == 0) { return 0; }
+  return parseInt(db.value(0, 0), 10) ?? 0;
+}
 
 function drainTriggers(db: Db, master: string): void {
   let answered: int = 0;
-  while (answered < TRIGGERS_PER_PASS) {
+  // Until dry, not a fixed few: this runs in a child whose whole job is the
+  // queue, and the concurrency bound is how many children the pass launches.
+  while (answered < 50) {
     let msg = claimMessage(db, Date.now() as number);
     if (msg.id == "") { break; }
     try { answer(db, msg, master); }
