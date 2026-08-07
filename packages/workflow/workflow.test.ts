@@ -48,7 +48,7 @@ function chain(): WfGraph {
 // A step that answers its node id, with the prev carried in brackets — so a
 // walk's answer spells out the order it took.
 function echo(n: WfNode, ctx: WalkCtx): StepResult {
-  let r: StepResult = { ok: true, output: n.id + "(" + ctx.prev + ")", branch: "", error: "" };
+  let r: StepResult = { ok: true, output: n.id + "(" + ctx.prev + ")", branch: "", error: "", input: ctx.prev };
   return r;
 }
 
@@ -156,7 +156,7 @@ test("the walk visits in order and carries each answer forward", () => {
 test("a failing middle step ends the walk with its reason and its trail", () => {
   let sour = (n: WfNode, ctx: WalkCtx): StepResult => {
     if (n.type == "AGENT") {
-      let r: StepResult = { ok: false, output: "", branch: "", error: "the provider timed out" };
+      let r: StepResult = { ok: false, output: "", branch: "", error: "the provider timed out", input: ctx.prev };
       return r;
     }
     return echo(n, ctx);
@@ -177,7 +177,7 @@ test("a condition's branch decides which edge the walk follows", () => {
      edge("e4", "a", "z", ""), edge("e5", "b", "z", "")]);
   let no = (n: WfNode, ctx: WalkCtx): StepResult => {
     if (n.type == "CONDITION") {
-      let r: StepResult = { ok: true, output: ctx.prev, branch: "no", error: "" };
+      let r: StepResult = { ok: true, output: ctx.prev, branch: "no", error: "", input: ctx.prev };
       return r;
     }
     return echo(n, ctx);
@@ -197,7 +197,7 @@ test("a branch nothing was drawn for ends the walk with what it has", () => {
     [edge("e1", "s", "c", ""), edge("e2", "c", "a", "yes"), edge("e4", "a", "z", "")]);
   let no = (n: WfNode, ctx: WalkCtx): StepResult => {
     if (n.type == "CONDITION") {
-      let r: StepResult = { ok: true, output: ctx.prev, branch: "no", error: "" };
+      let r: StepResult = { ok: true, output: ctx.prev, branch: "no", error: "", input: ctx.prev };
       return r;
     }
     return echo(n, ctx);
@@ -238,4 +238,39 @@ test("the watcher hears the step underway, then the trail without it", () => {
   expect(heard[1] == "1-done");
   expect(heard[2] == "1-at:a");
   expect(heard[5] == "3-done");
+});
+
+test("a step's trail says what it was GIVEN, not only what it answered", () => {
+  ticks = 0;
+  let done = walk(chain(), "go", echo, tick, deaf);
+  expect(done.ok);
+  expect(done.steps.length == 3);
+  // START is handed the run's input; every step after it the one before.
+  expect(done.steps[0].input == "go");
+  expect(done.steps[1].input == "s(go)");
+  expect(done.steps[2].input == "a(s(go))");
+});
+
+test("a step that says nothing about its input gets the chain's, not silence", () => {
+  // The reason StepResult carries `input` at all: a step whose template
+  // reaches for {{node.somethingElse}} was NOT handed the previous output,
+  // and a panel deriving it from the chain would show a person text the step
+  // never saw. Here the caller reports the truth and the walk keeps it; the
+  // quiet step below falls back to the chain, which is what {{prev}} means.
+  let quiet = (n: WfNode, ctx: WalkCtx): StepResult => {
+    if (n.id == "a") {
+      let told: StepResult = { ok: true, output: "answered", branch: "", error: "",
+                               input: "the FIRST step's output, not the previous one" };
+      return told;
+    }
+    let plain: StepResult = { ok: true, output: n.id + "!", branch: "", error: "", input: "" };
+    return plain;
+  };
+  ticks = 0;
+  let done = walk(chain(), "go", quiet, tick, deaf);
+  expect(done.ok);
+  expect(done.steps[1].input == "the FIRST step's output, not the previous one");
+  // The quiet ones still say something: what the chain handed them.
+  expect(done.steps[0].input == "go");
+  expect(done.steps[2].input == "answered");
 });
