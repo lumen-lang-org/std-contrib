@@ -98,6 +98,11 @@ export type TriggerInboxRow = {
   input: string,
   // "queued", "running", "done", "failed", "refused".
   status: string,
+  // The conversation this chat is having. One per chat rather than one per
+  // message: a bot that forgets what was said a minute ago is a search box
+  // with extra steps. Carried on the row so the next message can find it
+  // without a table of its own.
+  threadId: string,
   runId: string,
   answer: string,
   error: string,
@@ -127,7 +132,14 @@ export function triggerBotsMapping(): DbRepository {
   return repository("trigger_bots", "id", "id", fs);
 }
 
-export function triggerInboxMapping(): DbRepository {
+// Frozen at what 106.1 created, for the reason threads.ts states about its
+// own V1: a migration's text is checksummed, 106.1 generates its CREATE from
+// a mapping, and adding a column to the live mapping below rewrites 106.1 —
+// so every database that already ran it refuses the whole plan while a fresh
+// one migrates happily and nothing in CI notices. This engine spent a restart
+// loop proving it. A new column is an ALTER at a new version, never an edit
+// to the mapping a shipped migration reads.
+function triggerInboxMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("owner", "owner", "text"),
@@ -146,6 +158,26 @@ export function triggerInboxMapping(): DbRepository {
   return repository("trigger_inbox", "id", "id", fs);
 }
 
+export function triggerInboxMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("owner", "owner", "text"),
+    field("botId", "bot_id", "text"),
+    field("workflowId", "workflow_id", "text"),
+    field("updateId", "update_id", "text"),
+    field("chatId", "chat_id", "text"),
+    field("input", "input", "text"),
+    field("status", "status", "text"),
+    field("threadId", "thread_id", "text"),
+    field("runId", "run_id", "text"),
+    field("answer", "answer", "text"),
+    field("error", "error", "text"),
+    field("createdAt", "created_at", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("trigger_inbox", "id", "id", fs);
+}
+
 export function triggersPlan(db: Db): Migration[] {
   // 106: 105 is the highest recorded. Check
   // `SELECT version FROM plume_schema_history ORDER BY installed_rank DESC`
@@ -155,7 +187,13 @@ export function triggersPlan(db: Db): Migration[] {
     migration("106", "triggers: workflows started by something arriving",
       createTableSql(db, triggerBotsMapping())),
     migration("106.1", "and what arrived",
-      createTableSql(db, triggerInboxMapping())),
+      createTableSql(db, triggerInboxMappingV1())),
+    // The column, for a table that already exists on a deployment: 106.1
+    // creates it with the column, this adds it where 106.1 already ran.
+    // Migrations are history and are never edited in place — the checksum of
+    // an applied one is checked on every start.
+    migration("106.2", "a chat keeps one conversation",
+      "ALTER TABLE trigger_inbox ADD COLUMN thread_id " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -405,7 +443,7 @@ export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, now
   let row: TriggerInboxRow = {
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
     workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
-    input: said.text, status: "queued", runId: "", answer: "", error: "",
+    input: said.text, status: "queued", threadId: "", runId: "", answer: "", error: "",
     createdAt: now, updatedAt: now,
   };
   persist(db, triggerInboxMapping(), JSON.stringify(row));
@@ -422,7 +460,7 @@ export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, w
   let row: TriggerInboxRow = {
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
     workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
-    input: said.text, status: "refused", runId: "", answer: why, error: why,
+    input: said.text, status: "refused", threadId: "", runId: "", answer: why, error: why,
     createdAt: now, updatedAt: now,
   };
   persist(db, triggerInboxMapping(), JSON.stringify(row));
@@ -451,7 +489,7 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
   let got: TriggerInboxRow = {
     id: db.value(0, 0), owner: db.value(0, 1), botId: db.value(0, 2),
     workflowId: db.value(0, 3), updateId: db.value(0, 4), chatId: db.value(0, 5),
-    input: db.value(0, 6), status: "running", runId: db.value(0, 7),
+    input: db.value(0, 6), status: "running", threadId: "", runId: db.value(0, 7),
     answer: "", error: "", createdAt: db.value(0, 8), updatedAt: now,
   };
   return got;
@@ -460,7 +498,7 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
 export function emptyMessage(): TriggerInboxRow {
   let none: TriggerInboxRow = {
     id: "", owner: "", botId: "", workflowId: "", updateId: "", chatId: "",
-    input: "", status: "", runId: "", answer: "", error: "",
+    input: "", status: "", threadId: "", runId: "", answer: "", error: "",
     createdAt: "", updatedAt: "",
   };
   return none;
@@ -477,6 +515,29 @@ export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runI
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
   db.query(sql, [status, runId, answer, problem, `${nowMs}`, row.id]);
+}
+
+/** The conversation this chat is already having, or "".
+ *
+ *  Looked up per message rather than kept on the bot, because a bot answers
+ *  many chats and they are different conversations — the chat id is the
+ *  identity, not the bot. */
+export function threadForChat(db: Db, botId: string, chatId: string): string {
+  let sql = "SELECT thread_id FROM trigger_inbox"
+    + " WHERE bot_id = " + db.placeholder
+    + " AND chat_id = " + placeholderAt(db, 2)
+    + " AND thread_id <> ''"
+    + " ORDER BY created_at DESC LIMIT 1";
+  if (!db.query(sql, [botId, chatId])) { return ""; }
+  if (db.rows() == 0) { return ""; }
+  return db.value(0, 0);
+}
+
+/** Which conversation a message ended up in. Written when the run opens or
+ *  continues one, so the next message from the same chat finds it. */
+export function noteThread(db: Db, rowId: string, threadId: string): void {
+  db.query("UPDATE trigger_inbox SET thread_id = " + db.placeholder
+    + " WHERE id = " + placeholderAt(db, 2), [threadId, rowId]);
 }
 
 // ---------------------------------------------------------------------------

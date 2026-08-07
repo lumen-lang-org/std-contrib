@@ -17,14 +17,14 @@
 // otherwise would file one agent's words under another's name.
 
 import { Db } from "../plume/driver.ts";
-import { findById, persist } from "../plume/plume.ts";
+import { existsById, findById, persist } from "../plume/plume.ts";
 import { StepResult, WalkCtx, WfNode, WfStep, Walked, emptyNode, fill, switchBranch, walk } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { accessTokenFor } from "./connect.ts";
 import { complete, replyText } from "./provider.ts";
-import { ThreadAsk, inheritedPick, openThread, runInThreadWith } from "./threads.ts";
+import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadsMapping } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
@@ -79,6 +79,12 @@ export type WorkflowAsk = {
   input: string,
   master: string,
   nowMs: number,
+  // A conversation to continue rather than a fresh one. Empty for a run
+  // started by hand or by the clock — those are one-shot and a new
+  // conversation each time is right. A trigger passes the one it keeps for
+  // the chat that wrote in, which is what makes "and what about tomorrow?"
+  // mean anything.
+  threadId?: string,
 };
 
 export type WorkflowDone = {
@@ -232,7 +238,12 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
   }
   let agent: AgentRow = JSON.parse<AgentRow>(agentDoc);
 
-  let threadId = openThread(db, { agentId: row.agentId, owner: ask.owner, now: `${ask.nowMs}` });
+  let carried = ask.threadId ?? "";
+  // Continued, or opened. `existsById` rather than trust: a thread deleted
+  // from the console must not make every later message from that chat fail.
+  let threadId = carried != "" && existsById(db, threadsMapping(), carried)
+    ? carried
+    : openThread(db, { agentId: row.agentId, owner: ask.owner, now: `${ask.nowMs}` });
   if (threadId == "") {
     let refused: WorkflowDone = { ok: false, runId: "", threadId: "", answer: "", error: "the conversation could not be opened" };
     return refused;

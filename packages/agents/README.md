@@ -140,7 +140,7 @@ Three byte caps, all of them defaulting to the number they were when they were
 constants — set none of these and nothing changes:
 
 ```sh
-AGENTS_ARTIFACT_BYTES_MAX=524288     # one artifact body
+AGENTS_ARTIFACT_BYTES_MAX=524288     # one artifact body (joule.sh runs 29360128 — see TELEGRAM-FILES.md)
 AGENTS_THREAD_BYTES_MAX=104857600    # one thread's artifacts, every version
 AGENTS_UPLOAD_BYTES_MAX=1048576      # one workspace file
 ```

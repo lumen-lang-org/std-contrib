@@ -103,17 +103,32 @@ only process that touches conversations.
 | limit | value | why |
 |---|---|---|
 | what Telegram will hand a bot | 20MB | theirs, not ours |
-| `AGENTS_ARTIFACT_BYTES_MAX` | 512KB | already deployed |
-| what this accepts | the artifact ceiling | one number, already tuned |
+| `AGENTS_ARTIFACT_BYTES_MAX` on joule.sh | 28MB | raised for this, see below |
+| what this accepts | whatever Telegram will send | one ceiling, and it is not ours |
 
-A file over the ceiling is **refused with a sentence in the chat** — the same
-shape as the run ceilings. "That file is 4MB; I can read up to 512KB" is a
-working bot with a limit. Silence is a broken one, which is what today's
-behaviour looks like from the phone.
+The artifact ceiling was 512KB — chosen as "far more than a page a person
+reads and far less than a database row anyone should hold in memory", which is
+the right instinct for text and the wrong one for a PDF somebody sends a bot.
+It is 28MB on this deployment now, and the number is not arbitrary: the cap
+measures the **stored** body, base64 is 4/3 of the bytes, and 20MB — all
+Telegram will ever hand a bot — encodes to 26.7MB. So the only refusal left
+above that is Telegram's own, and the bot never has to explain a limit that
+is really ours.
 
-Base64 is 4/3 of the bytes, and the check must be on the **encoded** length,
-because that is what is stored. Checking the raw length passes a file that
-then fails to write.
+Measured rather than assumed: a 6MB PDF stores through gateway, console proxy
+and engine; a 22MB one stores; 30.8MB of base64 is refused with "an artifact
+is at most 29360128 bytes; this one is 30834048"; the engine sat at 70MB of
+its 2G while doing it.
+
+`AGENTS_THREAD_BYTES_MAX` went with it, 100MB to 500MB — versions are
+append-only and every version counts, so a 100MB conversation held three
+files of this size and then refused the fourth for a reason nobody could see
+from a chat.
+
+The code's own defaults are unchanged (`caps.ts`, 512KB and 100MB). A box
+with less memory than this one should not inherit a ceiling chosen for a
+deployment that has 2G to spend, and these are environment variables exactly
+so that is a unit-file edit rather than a fork.
 
 ## What this deliberately does not do
 
