@@ -36,6 +36,7 @@ import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, asc, createTableSql, desc, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
+import { stampMs } from "./tasks.ts";
 
 // What one bot may cost. Deliberately small: these are the numbers somebody
 // raises on purpose after watching a real chat, not the numbers that let a
@@ -243,8 +244,14 @@ export function mayRun(bot: TriggerBotRow, recentMinute: int, nowMs: number): Tr
     let off: TriggerVerdict = { ok: false, reason: "this bot is switched off" };
     return off;
   }
-  let dayStarted = parseInt(bot.dayStartedAt, 10) ?? 0;
-  let fresh = (nowMs as int) - dayStarted > 86400000;
+  // stampMs and plain f64 arithmetic, NOT parseInt and `as int`. tasks.ts
+  // wrote this trap down and this file fell into it anyway: parseInt answers
+  // an i32 and an epoch in milliseconds needs 41 bits, so `nowMs as int` is
+  // out of bounds for every real clock — the poller crash-looped on its first
+  // pass while every test passed, because the tests used timestamps like
+  // 1000. A double carries an integer exactly to 2^53.
+  let dayStarted = stampMs(bot.dayStartedAt);
+  let fresh = nowMs - dayStarted > 86400000.0;
   let today = fresh ? 0 : bot.runsToday;
   if (today >= TRIGGER_RUNS_PER_DAY) {
     let spent: TriggerVerdict = { ok: false,
@@ -263,8 +270,8 @@ export function mayRun(bot: TriggerBotRow, recentMinute: int, nowMs: number): Tr
 /** The same row with its day counter moved on, rolling over when the day has
  *  turned. Records are immutable, so "add one" is "build it again". */
 export function withRunCounted(bot: TriggerBotRow, nowMs: number): TriggerBotRow {
-  let dayStarted = parseInt(bot.dayStartedAt, 10) ?? 0;
-  let fresh = (nowMs as int) - dayStarted > 86400000;
+  let dayStarted = stampMs(bot.dayStartedAt);
+  let fresh = nowMs - dayStarted > 86400000.0;
   let counted: TriggerBotRow = {
     id: bot.id, owner: bot.owner, kind: bot.kind, name: bot.name,
     workflowId: bot.workflowId, credentialRef: bot.credentialRef,

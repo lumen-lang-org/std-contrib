@@ -139,3 +139,36 @@ test("an answer is sent as prose, not as the machinery around it", () => {
   // nothing at all.
   expect(plainly("[TEXT]{\"body\":\"x\"}[/TEXT]").length > 0);
 });
+
+test("the ceilings work at a real clock, not only at toy timestamps", () => {
+  // The bug this test exists for: every other test here used stamps like
+  // "1000", where `parseInt` and `as int` both behave. At a real epoch an i32
+  // is 41 bits short, `nowMs as int` is out of bounds, and the poller
+  // crash-looped on its first pass against a live bot.
+  let realNow = 1786124262180.0;
+  let today = `${realNow - 3600000.0}`;
+  let live: TriggerBotRow = {
+    id: "b1", owner: "o1", kind: "telegram", name: "Support",
+    workflowId: "w1", credentialRef: "telegram:b1", offset: "0",
+    leaseBy: "", leaseUntil: "", enabled: true,
+    runsToday: 3, dayStartedAt: today, lastAt: "", lastError: "",
+    createdAt: "", updatedAt: "",
+  };
+  expect(mayRun(live, 0, realNow).ok);
+
+  // The day still rolls over, and the count still climbs, at that clock.
+  let counted = withRunCounted(live, realNow);
+  expect(counted.runsToday == 4);
+  expect(counted.dayStartedAt == today);
+
+  let yesterday: TriggerBotRow = {
+    id: live.id, owner: live.owner, kind: live.kind, name: live.name,
+    workflowId: live.workflowId, credentialRef: live.credentialRef,
+    offset: live.offset, leaseBy: live.leaseBy, leaseUntil: live.leaseUntil,
+    enabled: true, runsToday: TRIGGER_RUNS_PER_DAY,
+    dayStartedAt: `${realNow - 90000000.0}`,
+    lastAt: "", lastError: "", createdAt: "", updatedAt: "",
+  };
+  expect(mayRun(yesterday, 0, realNow).ok);
+  expect(withRunCounted(yesterday, realNow).runsToday == 1);
+});
