@@ -37,18 +37,29 @@ const WEB_MAX_CHARS: int = 6000;
 const KNOW_TOP_K: int = 6;
 
 function stepOk(output: string): StepResult {
-  let r: StepResult = { ok: true, output: output, branch: "", error: "" };
+  let r: StepResult = { ok: true, output: output, branch: "", error: "", input: "" };
   return r;
 }
 
 function stepBranch(output: string, branch: string): StepResult {
-  let r: StepResult = { ok: true, output: output, branch: branch, error: "" };
+  let r: StepResult = { ok: true, output: output, branch: branch, error: "", input: "" };
   return r;
 }
 
 function stepFailed(why: string): StepResult {
-  let r: StepResult = { ok: false, output: "", branch: "", error: why };
+  let r: StepResult = { ok: false, output: "", branch: "", error: why, input: "" };
   return r;
+}
+
+/** The same answer, saying what the step was actually given.
+ *
+ *  Set out here rather than inside each adapter because the filling happens
+ *  in `step` below — the adapter is handed text that is already resolved and
+ *  no longer knows it was a template. A record cannot be edited in place, so
+ *  this is the whole record again with the one field filled in. */
+function withInput(r: StepResult, said: string): StepResult {
+  let told: StepResult = { ok: r.ok, output: r.output, branch: r.branch, error: r.error, input: said };
+  return told;
 }
 
 // What a run needs beyond the row: whose it is, what goes into {{input}},
@@ -201,7 +212,7 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     let i: int = 0;
     while (i < sofar.length) { all.push(sofar[i]); i = i + 1; }
     if (at.id != "") {
-      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, output: "", error: "" };
+      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "" };
       all.push(underway);
     }
     let progress: WorkflowRunRow = {
@@ -214,36 +225,54 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
   };
 
   let step = (node: WfNode, ctx: WalkCtx): StepResult => {
-    if (node.type == "START") { return stepOk(ctx.input); }
-    if (node.type == "END") { return stepOk(ctx.prev); }
-    if (node.type == "CONDITION") { return decide(node, ctx); }
-    if (node.type == "LLM") { return askModel(db, agent, ask.master, fill(node.instruction, ctx)); }
-    if (node.type == "WEB_SEARCH") {
-      let found = retrieveWeb(fill(node.query, ctx), WEB_TOP_K, WEB_MAX_CHARS);
-      if (!found.ok) { return stepFailed(found.error); }
-      if (found.found.length == 0) { return stepOk("The web index has nothing for: " + found.query); }
-      return stepOk(asWebContext(found.found));
+    if (node.type == "START") { return withInput(stepOk(ctx.input), ctx.input); }
+    if (node.type == "END") { return withInput(stepOk(ctx.prev), ctx.prev); }
+    if (node.type == "CONDITION") {
+      let tested = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
+      return withInput(decide(node, ctx), tested);
     }
-    if (node.type == "KNOWLEDGE") { return lookUp(db, agent, ask.master, fill(node.query, ctx)); }
-    if (node.type == "MCP") { return reachOut(db, node, ask.owner, ask.master, fill(node.args, ctx)); }
-    if (node.type == "HTTP") { return fetchStep(node, ctx); }
+    if (node.type == "LLM") {
+      let said = fill(node.instruction, ctx);
+      return withInput(askModel(db, agent, ask.master, said), said);
+    }
+    if (node.type == "WEB_SEARCH") {
+      let asked = fill(node.query, ctx);
+      let found = retrieveWeb(asked, WEB_TOP_K, WEB_MAX_CHARS);
+      if (!found.ok) { return withInput(stepFailed(found.error), asked); }
+      if (found.found.length == 0) { return withInput(stepOk("The web index has nothing for: " + found.query), asked); }
+      return withInput(stepOk(asWebContext(found.found)), asked);
+    }
+    if (node.type == "KNOWLEDGE") {
+      let asked = fill(node.query, ctx);
+      return withInput(lookUp(db, agent, ask.master, asked), asked);
+    }
+    if (node.type == "MCP") {
+      let args = fill(node.args, ctx);
+      return withInput(reachOut(db, node, ask.owner, ask.master, args), node.tool + " " + args);
+    }
+    if (node.type == "HTTP") {
+      let url = fill(node.url, ctx);
+      let body = node.method == "GET" ? "" : fill(node.body, ctx);
+      return withInput(fetchStep(node, ctx), node.method + " " + url + (body == "" ? "" : "\n" + body));
+    }
     if (node.type == "AGENT") {
+      let said = fill(node.instruction, ctx);
       // The step's own thread when it names another agent; the run's when not.
       let inThread = threadId;
       if (node.agentId != "" && node.agentId != row.agentId) {
         inThread = openThread(db, { agentId: node.agentId, owner: ask.owner, now: `${Date.now() as number}` });
-        if (inThread == "") { return stepFailed("no conversation could be opened for agent " + node.agentId); }
+        if (inThread == "") { return withInput(stepFailed("no conversation could be opened for agent " + node.agentId), said); }
       }
       let turn: ThreadAsk = {
-        userText: fill(node.instruction, ctx),
+        userText: said,
         master: ask.master,
         tracer: tracerFor(db, ask.master),
         pick: inheritedPick(),
         think: false,
       };
       let answered = runInThreadWith(db, inThread, turn);
-      if (!answered.run.ok) { return stepFailed(answered.run.error); }
-      return stepOk(answered.text);
+      if (!answered.run.ok) { return withInput(stepFailed(answered.run.error), said); }
+      return withInput(stepOk(answered.text), said);
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
   };
