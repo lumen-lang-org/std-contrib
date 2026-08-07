@@ -149,3 +149,62 @@ test("a script sees the one directory it is given and nothing beside it", () => 
   expect(!out.ok);
   }
 });
+
+test("a guest's own diagnostic is what is reported, minus the cache path", () => {
+  if (have()) {
+  // The message is on stderr under a blank line, which the first version of
+  // firstLine answered with "" — so every guest failure read as "stopped
+  // without saying why" while the reason sat one line further down.
+  let source = "function main(): void {\n"
+    + "  let s = fs.readFileSync(\"no-such-file\");\n"
+    + "  console.log(s);\n"
+    + "}\n"
+    + "main();\n";
+  let out = ran(source, "x");
+  expect(!out.ok);
+  expect(out.error.includes("cannot read 'no-such-file'"));
+  expect(!out.error.includes("/tmp/"));
+  expect(!out.error.includes("stopped without saying why"));
+  }
+});
+
+test("a network attempt ends at once — there is no socket to wait on", () => {
+  if (have()) {
+  let source = "function main(): void {\n"
+    + "  let h = new Map<string, string>();\n"
+    + "  let r = http.request(\"https://example.com\", \"GET\", \"\", h);\n"
+    + "  console.log(`${r.status}`);\n"
+    + "}\n"
+    + "main();\n";
+  // Built first, then timed: a step's duration includes its compile the
+  // first time, and that is what a twenty-five second "network attempt" in
+  // an early measurement actually was — a fresh build, not a runaway.
+  let built = ensureBuilt(source);
+  expect(built.ok);
+  let began = Date.now() as number;
+  let out = ran(source, "x");
+  let took = (Date.now() as number) - began;
+  expect(took < 5000.0);
+  // It answers -1: the module has no socket call in it, so the request
+  // cannot leave. `timeout` in front of the runtime is the belt for a host
+  // call that DOES block, which the epoch budget cannot interrupt.
+  expect(out.ok);
+  expect(out.output.includes("-1"));
+  }
+});
+
+test("a diagnostic points at the line the person wrote", () => {
+  if (have()) {
+  // The prelude sits above their text, so the compiler counts from ITS top:
+  // an error on line 2 of a script was reported at line 15, and the reader
+  // counted down through code they never wrote.
+  let source = "function main(): void {\n"
+    + "  let x: int = \"not an int\";\n"
+    + "  console.log(x);\n"
+    + "}\n"
+    + "main();\n";
+  let built = ensureBuilt(source);
+  expect(!built.ok);
+  expect(built.error.startsWith("2:"));
+  }
+});
