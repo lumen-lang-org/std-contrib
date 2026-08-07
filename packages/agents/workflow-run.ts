@@ -26,6 +26,7 @@ import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
+import { queueOutbound } from "./triggers.ts";
 import { RunContext, runAgentAt } from "./run.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
@@ -86,6 +87,11 @@ export type WorkflowAsk = {
   // the chat that wrote in, which is what makes "and what about tomorrow?"
   // mean anything.
   threadId?: string,
+  // Where a TELEGRAM_REPLY step speaks to, when a message started this run.
+  // Empty for the clock and the Run button — the step then has nowhere to
+  // send and says so on its row instead of failing the walk.
+  botId?: string,
+  chatId?: string,
 };
 
 export type WorkflowDone = {
@@ -328,6 +334,26 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
       let url = fill(node.url, ctx);
       let body = node.method == "GET" ? "" : fill(node.body, ctx);
       return withInput(fetchStep(node, ctx), node.method + " " + url + (body == "" ? "" : "\n" + body));
+    }
+    if (node.type == "TELEGRAM_REPLY") {
+      let saying = fill(node.instruction, ctx);
+      let bot = ask.botId ?? "";
+      let chat = ask.chatId ?? "";
+      if (bot == "" || chat == "") {
+        // The clock or the Run button started this walk: there is no chat to
+        // speak to. A pass-through rather than a failure, so one graph can
+        // serve both doors — the reply simply has no audience today, and the
+        // step row says exactly that.
+        return withInput(stepOk(ctx.prev), "(no chat to reply to) " + saying);
+      }
+      // Queued now, mid-walk, not gathered at the end: the whole point of an
+      // intermediate reply is that "searching…" arrives while the search is
+      // still running. The poller drains the queue on its next pass.
+      queueOutbound(db, bot, chat, runId, saying, Date.now() as number);
+      // {{prev}} passes through untouched — the CONDITION rule, for the same
+      // reason: a step that talks to the person must not break the chain the
+      // next step reads. What was said is on the row as its input.
+      return withInput(stepOk(ctx.prev), saying);
     }
     if (node.type == "AGENT") {
       let said = fill(node.instruction, ctx);

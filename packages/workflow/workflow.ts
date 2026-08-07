@@ -187,7 +187,7 @@ export const MAX_TEXT: int = 4000;
 // is a process this deployment pays for.
 export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY"];
 
 /** Whether this is where a walk begins.
  *
@@ -365,6 +365,12 @@ function refuseNode(node: WfNode): string {
   let label = node.name == "" ? node.id : node.name;
   if (node.type == "AGENT" && node.instruction.trim() == "") { return label + " needs an instruction — what should the agent do?"; }
   if (node.type == "LLM" && node.instruction.trim() == "") { return label + " needs an instruction — what should the model be asked?"; }
+  // TELEGRAM_REPLY: what to say. Telegram-specific on purpose, the way the
+  // trigger is: "reply" with no channel behind it would be a promise this
+  // engine cannot keep for a run the clock started. The one step whose whole
+  // job is a sentence, so an empty one is a step that sends nothing and
+  // looks like a broken bot.
+  if (node.type == "TELEGRAM_REPLY" && node.instruction.trim() == "") { return label + " needs the message to send — {{prev}} sends the previous step's answer"; }
   if (node.type == "WEB_SEARCH" && node.query.trim() == "") { return label + " needs a query to search for"; }
   if (node.type == "KNOWLEDGE" && node.query.trim() == "") { return label + " needs a query to look up"; }
   if (node.type == "MCP" && (node.serverId == "" || node.tool == "")) { return label + " needs a server and a tool on it"; }

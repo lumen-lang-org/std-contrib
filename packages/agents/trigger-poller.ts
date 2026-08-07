@@ -32,7 +32,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { credentialFor, masterKey } from "./credentials.ts";
-import { TriggerBotRow, TriggerInboxRow, botById, claimBot, finishMessage, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, saveBot, takeMessage, unsentFor, updatesIn, withRunCounted } from "./triggers.ts";
+import { TriggerBotRow, TriggerInboxRow, TriggerOutboxRow, botById, claimBot, finishMessage, markOutboundSent, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, saveBot, takeMessage, unsentFor, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
 import { jsonText } from "./scan.ts";
 
 // How long Telegram holds the request open with nothing to say. Long enough
@@ -154,6 +154,21 @@ function pass(db: Db, botId: string, who: string, master: string): void {
 // What the scheduler answered, sent back. Per message try: one chat that has
 // blocked the bot must not hold up the rest of the queue.
 function sendAnswers(db: Db, bot: TriggerBotRow, token: string): void {
+  // What a run said mid-walk goes first: an intermediate reply that arrives
+  // after the final answer reads backwards.
+  let speaking = JSON.parse<TriggerOutboxRow[]>(unsentOutbound(db, bot.id));
+  let o: int = 0;
+  while (o < speaking.length && o < SEND_PER_PASS) {
+    let out = speaking[o];
+    try {
+      if (out.text.trim() != "") { sendMessage(token, out.chatId, out.text); }
+      markOutboundSent(db, out.id, Date.now() as number);
+    } catch (e) {
+      console.error("trigger-poller: outbox " + out.id + ": " + e.message);
+      // Left queued; the next pass tries again — the sendAnswers rule.
+    }
+    o = o + 1;
+  }
   let waiting = JSON.parse<TriggerInboxRow[]>(unsentFor(db, bot.id));
   let i: int = 0;
   while (i < waiting.length && i < SEND_PER_PASS) {
