@@ -54,3 +54,17 @@ mig
 # Stray compiler output from a bare `lumen compile` in the repo root.
 /unk
 /unk2
+
+# Built engine binaries and their rollbacks: 50MB+ each, produced by
+# `lumen compile`, never a source of truth.
+packages/agents/api
+packages/agents/api.*
+packages/agents/scheduler
+packages/agents/scheduler.*
+!packages/agents/api.ts
+!packages/agents/api.test.ts
+!packages/agents/scheduler.ts
+# Compiled SCRIPT steps, keyed by the hash of their source and rebuilt on
+# demand — a cache, not code.
+packages/agents/script-cache/
+*.wasm
