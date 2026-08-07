@@ -20,7 +20,7 @@ import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
 import { StepResult, WalkCtx, WfNode, WfStep, Walked, emptyNode, fill, switchBranch, walk } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
-import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
+import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
@@ -128,12 +128,18 @@ function route(node: WfNode, ctx: WalkCtx): StepResult {
 
 /** The LLM step: one model call, no tools, on the workflow's agent's model. */
 function askModel(db: Db, agent: AgentRow, master: string, prompt: string): StepResult {
-  let configDoc = findById(db, modelConfigsMapping(db), agent.modelConfigId);
-  if (configDoc == "") { return stepFailed("agent " + agent.agentName + " has no model config"); }
-  let config: ModelConfigRow = JSON.parse<ModelConfigRow>(configDoc);
-  let modelDoc = findById(db, modelsMapping(), config.modelId);
-  if (modelDoc == "") { return stepFailed("no model " + config.modelId); }
-  let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
+  // configAndModel, not a typed parse of the mapping's document: the mapping
+  // carries a `model` RELATION, so findById answers a document with a field
+  // ModelConfigRow does not declare, and JSON.parse refuses unknown fields by
+  // design (spec 252). This parsed the relation-bearing doc directly and
+  // every LLM step died of it — as an uncaught throw, which killed the whole
+  // scheduler pass and stranded the run at 'running' until the lease let
+  // somebody else claim it. One step's defect must never again be every
+  // message's outage; the runner split below is the other half of that.
+  let held = configAndModel(db, agent.modelConfigId);
+  if (held.problem != "") { return stepFailed(agent.agentName + ": " + held.problem); }
+  let config = held.config;
+  let model = held.model;
   if (!model.enabled) { return stepFailed(model.label + " is disabled"); }
   let key = credentialFor(db, model.provider, master);
   if (key == "") { return stepFailed("no usable credential for " + model.provider); }
