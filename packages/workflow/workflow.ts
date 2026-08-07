@@ -81,11 +81,19 @@ export type WfGraph = {
 // What one step answered. `branch` is "" except from a CONDITION, where it
 // names the edge to follow. `output` from a CONDITION is the text it tested,
 // passed through, so a condition never breaks the chain of {{prev}}.
+//
+// `input` is what the step actually received AFTER its template was filled,
+// and it is the caller's to report because only the caller knows what it
+// filled. Left empty, the walk records the previous node's output instead —
+// which is what {{prev}} means and is a lie the moment a step reaches for
+// {{node.someOtherStep}}. A panel that shows a person "what this step was
+// given" has to be given the truth or say nothing.
 export type StepResult = {
   ok: bool,
   output: string,
   branch: string,
   error: string,
+  input: string,
 };
 
 // One node's visit, as recorded. `status` is "COMPLETED" or "FAILED" — the
@@ -96,6 +104,9 @@ export type WfStep = {
   type: string,
   status: string,
   ms: number,
+  // What went in and what came out. Both are kept whether the step worked or
+  // not: the pair is what somebody reads to find out why it did not.
+  input: string,
   output: string,
   error: string,
 };
@@ -430,7 +441,11 @@ export function walk(graph: WfGraph, input: string,
     let one: WfStep = {
       nodeId: at.id, type: at.type,
       status: did.ok ? "COMPLETED" : "FAILED",
-      ms: took, output: did.output, error: did.error,
+      ms: took,
+      // The step's own account of what it was given, or the chain's if it
+      // did not say. See StepResult.
+      input: did.input == "" ? ctx.prev : did.input,
+      output: did.output, error: did.error,
     };
     steps.push(one);
     watch(steps, emptyNode());
