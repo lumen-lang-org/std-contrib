@@ -1,0 +1,38 @@
+# One bot's poller. `systemctl enable --now joule-trigger@<bot-id>`, where the
+# instance name is the id the /triggers door minted.
+#
+# A template unit, one instance per bot, for a reason that is not tidiness:
+# `getUpdates` holds a request open for 25 seconds, so bots sharing a process
+# take turns waiting — ten of them and a message can sit unanswered for four
+# minutes. joule-extract@1..4 has the same shape for the same kind of reason.
+#
+# This is the opposite of joule-scheduler.service, which is Type=oneshot so it
+# cannot leak. A poller cannot exit between polls without throwing away what a
+# long poll is for, so it runs forever and carries the engine's medicine
+# instead: MemoryMax, and a restart when it hits it. It holds a socket and a
+# cursor, not transcripts — the run happens in the scheduler — so the ceiling
+# is small on purpose. If one of these is ever seen restarting on memory,
+# something is being accumulated in the loop that should not be.
+[Unit]
+Description=Joule trigger poller for bot %i
+After=network-online.target joule-engine.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/projects/std-contrib/packages/agents
+EnvironmentFile=/home/ubuntu/projects/std-contrib/packages/agents/.env
+Environment=AGENTS_PG_HOST=172.22.0.2
+Environment=AGENTS_PG_DATABASE=agents
+Environment=AGENTS_PG_USER=agents
+Environment=TRIGGER_BOT=%i
+ExecStart=/home/ubuntu/projects/std-contrib/packages/agents/trigger-poller
+Restart=always
+RestartSec=5
+MemoryMax=512M
+StandardOutput=append:/home/ubuntu/projects/std-contrib/packages/agents/.lumen-trigger-%i.log
+StandardError=append:/home/ubuntu/projects/std-contrib/packages/agents/.lumen-trigger-%i.log
+
+[Install]
+WantedBy=multi-user.target

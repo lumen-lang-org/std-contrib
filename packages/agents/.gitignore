@@ -27,5 +27,7 @@ api.backup-*
 # good — the note at the top of this file is about exactly that.
 scheduler
 indexer
+# One poller per bot, built the same way and just as unwelcome in a diff.
+trigger-poller
 api.prev*
 api.pre-*

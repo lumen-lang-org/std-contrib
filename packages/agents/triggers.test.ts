@@ -6,7 +6,7 @@
 //
 //   cd packages/agents && lumen test triggers.test.ts
 
-import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, mayRun, nextOffset, updatesIn, withRunCounted } from "./triggers.ts";
+import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, mayRun, nextOffset, plainly, updatesIn, withRunCounted } from "./triggers.ts";
 
 function bot(): TriggerBotRow {
   let base = emptyBot();
@@ -122,4 +122,20 @@ test("the day's count rolls over rather than standing forever", () => {
   let same = withRunCounted(bot(), 2000.0);
   expect(same.runsToday == 1);
   expect(same.dayStartedAt == "1000");
+});
+
+test("an answer is sent as prose, not as the machinery around it", () => {
+  let raw = "Tunis is on CET all year.\n\n[FOLLOWUPS]{\"items\":[\"What time is it?\"]}[/FOLLOWUPS]";
+  expect(plainly(raw) == "Tunis is on CET all year.");
+
+  // A block the model never closed: everything from the opening tag is
+  // machinery, and half of it on screen is worse than none.
+  expect(plainly("Here you go.\n[FOLLOWUPS]{\"items\":[").trim() == "Here you go.");
+
+  // An ordinary bracket is not a block, and a markdown link keeps working.
+  expect(plainly("See [the docs](https://example.com) for more.") == "See [the docs](https://example.com) for more.");
+
+  // Nothing but a block: the message is sent as it came rather than as
+  // nothing at all.
+  expect(plainly("[TEXT]{\"body\":\"x\"}[/TEXT]").length > 0);
 });

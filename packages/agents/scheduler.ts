@@ -29,15 +29,16 @@
 
 import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
-import { connectDatabase, persist } from "../plume/plume.ts";
+import { connectDatabase, findById, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
-import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan } from "./workflow-store.ts";
+import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, workflowsMapping } from "./workflow-store.ts";
 import { WorkflowAsk, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
 import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
+import { TriggerInboxRow, claimMessage, finishMessage, plainly } from "./triggers.ts";
 
 // How many tasks one pass will fire before leaving the rest to the next tick.
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
@@ -102,6 +103,65 @@ function main(): void {
   // person to open a story waited fifty-three seconds for a page that already
   // had text on it.
   reflow(db, master);
+
+  // And what arrived while nobody was asking. A trigger's poller wrote rows
+  // and stopped; this is where they become runs — deliberately here and
+  // nowhere else, so that a workflow started by a Telegram message goes
+  // through the same claim, the same walk and the same run record as one
+  // started by a clock.
+  drainTriggers(db, master);
+}
+
+// How many inbound messages one pass answers. Same reasoning as the workflow
+// bound above: one message is a whole graph, several model turns deep, and a
+// pass that answers twenty holds the unit active while every tick behind it
+// is dropped.
+const TRIGGERS_PER_PASS: int = 3;
+
+function drainTriggers(db: Db, master: string): void {
+  let answered: int = 0;
+  while (answered < TRIGGERS_PER_PASS) {
+    let msg = claimMessage(db, Date.now() as number);
+    if (msg.id == "") { break; }
+    try { answer(db, msg, master); }
+    catch (e) {
+      console.error("scheduler: trigger message " + msg.id + " threw: " + e.message);
+      finishMessage(db, msg, "failed", "", "", e.message, Date.now() as number);
+    }
+    answered = answered + 1;
+  }
+  if (answered > 0) { console.log("scheduler: answered " + `${answered}` + " triggered messages"); }
+}
+
+// One inbound message: run its bot's workflow with the message as the input,
+// and leave the answer on the row. Sending it back is the poller's job, not
+// this one's — the poller is the process that holds the token, and a token
+// read in two places is a token to rotate in two places.
+function answer(db: Db, msg: TriggerInboxRow, master: string): void {
+  let doc = findById(db, workflowsMapping(), msg.workflowId);
+  if (doc == "") {
+    finishMessage(db, msg, "failed", "", "", "no workflow " + msg.workflowId, Date.now() as number);
+    return;
+  }
+  let flow: WorkflowRow = JSON.parse<WorkflowRow>(doc);
+  let ask: WorkflowAsk = {
+    // The message IS the input — the same `{{input}}` a step reads when
+    // somebody runs the graph by hand, which is what makes a workflow built
+    // and tested in the console work unchanged behind a bot.
+    owner: msg.owner, input: msg.input, master: master,
+    nowMs: Date.now() as number,
+  };
+  let done = runWorkflow(db, flow, ask);
+  if (!done.ok) {
+    finishMessage(db, msg, "failed", done.runId, "", done.error, Date.now() as number);
+    return;
+  }
+  // Stripped of its control blocks before it is stored to be sent. The run
+  // record keeps the answer as the agent wrote it; what goes to a chat is the
+  // prose, because [FOLLOWUPS]{…} on a phone is a bug report.
+  //
+  // 'done' rather than 'sent': there is an answer, and it has not left yet.
+  finishMessage(db, msg, "done", done.runId, plainly(done.answer), "", Date.now() as number);
 }
 
 // Up to REFLOW_PER_PASS stories, made readable. Per story try, so one that

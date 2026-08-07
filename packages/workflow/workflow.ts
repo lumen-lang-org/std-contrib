@@ -77,6 +77,15 @@ export type WfNode = {
   // record with one field per idea, and the canvas's own node configuration
   // travels as scalars. Optional, for the reason `source` is.
   cases?: string,
+  // TELEGRAM: which bot row this step is connected to (triggers.ts). The
+  // token is NOT here and never will be — a graph is saved on every drag and
+  // read back by anyone who may see the workflow, and a credential belongs in
+  // the one table that encrypts it.
+  //
+  // Optional, for the reason `source` is; and as of the compiler's spec 481
+  // that mark finally means what it says — absent parses to null instead of
+  // refusing the document.
+  botId?: string,
 };
 
 // An edge. `when` is "" for the ordinary case; a CONDITION's outgoing edges
@@ -178,7 +187,25 @@ export const MAX_TEXT: int = 4000;
 // is a process this deployment pays for.
 export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM"];
+
+/** Whether this is where a walk begins.
+ *
+ *  A workflow has exactly one, and it is either START — run by hand or by the
+ *  clock — or TELEGRAM, run by a message arriving. They are the same idea
+ *  wearing different clothes: the entry decides what {{input}} is, and
+ *  everything after it cannot tell which one it was.
+ *
+ *  Modelling the trigger as an entry rather than as a step BEFORE the entry is
+ *  what keeps this small. A node that fed the START step would need a rule for
+ *  what happens when the clock fires a graph whose trigger did not, and there
+ *  is no such rule anybody would guess. */
+export function isEntry(kind: string): bool {
+  // `kind`, not `type`: the compiler refuses a parameter named `type` with
+  // "name shadows primitive" and says to report it. Reported, and the name
+  // reads better here anyway — WfNode.type is the field, its values are kinds.
+  return kind == "START" || kind == "TELEGRAM";
+}
 
 // What an unmatched value takes. Not a case somebody writes: it is the way
 // out that exists whether or not they thought about it.
@@ -249,11 +276,12 @@ export function emptyGraph(): WfGraph {
   return none;
 }
 
-/** The graph's single START, or an empty node. */
+/** The graph's single entry — its START, or its TELEGRAM node — or an empty
+ *  node. Named for the START it used to only ever be. */
 export function startOf(graph: WfGraph): WfNode {
   let i: int = 0;
   while (i < graph.nodes.length) {
-    if (graph.nodes[i].type == "START") { return graph.nodes[i]; }
+    if (isEntry(graph.nodes[i].type)) { return graph.nodes[i]; }
     i = i + 1;
   }
   return emptyNode();
@@ -326,7 +354,8 @@ function refuseNode(node: WfNode): string {
   if (node.id == "") { return "a node has no id"; }
   if (!knownType(node.type)) {
     return "\"" + node.type + "\" is not a step this can run — the kinds are "
-      + "AGENT, LLM, CONDITION, WEB_SEARCH, KNOWLEDGE, MCP, HTTP, and one START and END";
+      + "AGENT, LLM, CONDITION, WEB_SEARCH, KNOWLEDGE, MCP, HTTP, SCRIPT, SWITCH, "
+      + "and one END beside one START or TELEGRAM";
   }
   if (node.name.length > MAX_NAME) { return "\"" + node.name.slice(0, 20) + "...\" is too long a name"; }
   if (node.instruction.length > MAX_TEXT || node.body.length > MAX_TEXT
@@ -487,7 +516,7 @@ export function refuse(graph: WfGraph): string {
   while (i < graph.nodes.length) {
     let bad = refuseNode(graph.nodes[i]);
     if (bad != "") { return bad; }
-    if (graph.nodes[i].type == "START") { starts = starts + 1; }
+    if (isEntry(graph.nodes[i].type)) { starts = starts + 1; }
     if (graph.nodes[i].type == "END") { ends = ends + 1; }
     let j = i + 1;
     while (j < graph.nodes.length) {
@@ -497,7 +526,7 @@ export function refuse(graph: WfGraph): string {
     i = i + 1;
   }
   if (starts == 0) { return "a workflow needs a START step — where does it begin?"; }
-  if (starts > 1) { return "a workflow has one START, not " + `${starts}`; }
+  if (starts > 1) { return "a workflow begins in one place, not " + `${starts}` + " — a START step or a Telegram step, not both"; }
   if (ends == 0) { return "a workflow needs an END step — what is the answer?"; }
 
   let e: int = 0;
@@ -508,7 +537,13 @@ export function refuse(graph: WfGraph): string {
     if (from.id == "") { return "an edge leaves a step that does not exist: " + edge.from; }
     if (to.id == "") { return "an edge arrives at a step that does not exist: " + edge.to; }
     if (edge.from == edge.to) { return (from.name == "" ? from.id : from.name) + " connects to itself"; }
-    if (to.type == "START") { return "nothing connects INTO the START step"; }
+    if (isEntry(to.type)) {
+      // Named for what it is. A graph that begins at START keeps the sentence
+      // it always had; one that begins at a trigger gets the word somebody
+      // drew on the board.
+      return to.type == "START" ? "nothing connects INTO the START step"
+        : "nothing connects INTO a trigger — it is where the workflow begins";
+    }
     if (from.type == "END") { return "nothing connects OUT of an END step"; }
     if (edge.when != "" && from.type != "CONDITION" && from.type != "SWITCH") {
       return "only a CONDITION or a SWITCH branches — the edge out of "

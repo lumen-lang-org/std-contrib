@@ -33,7 +33,7 @@
 //   cd packages/agents && lumen test triggers.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, desc, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, asc, createTableSql, desc, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 
@@ -334,4 +334,204 @@ export function unsentFor(db: Db, botId: string): string {
   return listOrdered(db, triggerInboxMapping(),
     "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
     [botId, "done"], keys);
+}
+
+// ---------------------------------------------------------------------------
+// Claims
+// ---------------------------------------------------------------------------
+
+/** One bot, or an empty row. */
+export function botById(db: Db, id: string): TriggerBotRow {
+  let doc = findById(db, triggerBotsMapping(), id);
+  if (doc == "") { return emptyBot(); }
+  return JSON.parse<TriggerBotRow>(doc);
+}
+
+/** Take the right to poll this bot, or answer false.
+ *
+ *  One poller per bot, enforced here rather than by hoping systemd only ever
+ *  started one: a second process holding the same token would have both
+ *  reading the same updates, and getUpdates hands each update to whoever asks
+ *  first — so the two would split a conversation between them at random.
+ *
+ *  The claim expires. A poller that is killed does not get to make its bot
+ *  unpollable forever, which is what a boolean "claimed" column would do. */
+export function claimBot(db: Db, botId: string, who: string, nowMs: number): bool {
+  let until = `${(nowMs as i64) + (TRIGGER_LEASE_MS as i64)}`;
+  let now = `${nowMs}`;
+  let sql = "UPDATE trigger_bots SET lease_by = " + db.placeholder
+    + ", lease_until = " + placeholderAt(db, 2)
+    + " WHERE id = " + placeholderAt(db, 3) + " AND enabled = true"
+    // Mine already, or nobody's, or expired. Renewing is the same statement
+    // as taking, which is why a poller can call this every pass.
+    + " AND (lease_by = " + placeholderAt(db, 4)
+    + " OR lease_until = '' OR lease_until < " + placeholderAt(db, 5) + ")"
+    // RETURNING rather than an affected-row count: the claims in this package
+    // all read their result as rows, and it is the only one plume exposes.
+    + " RETURNING id";
+  if (!db.query(sql, [who, until, botId, who, now])) { return false; }
+  return db.rows() > 0;
+}
+
+/** Where the cursor is now, and what the bot last had to say for itself. */
+export function noteBotPass(db: Db, botId: string, offset: string, problem: string, nowMs: number): void {
+  let sql = "UPDATE trigger_bots SET cursor_offset = " + db.placeholder
+    + ", last_at = " + placeholderAt(db, 2)
+    + ", last_error = " + placeholderAt(db, 3)
+    + ", updated_at = " + placeholderAt(db, 4)
+    + " WHERE id = " + placeholderAt(db, 5);
+  let now = `${nowMs}`;
+  db.query(sql, [offset, now, problem, now, botId]);
+}
+
+/** The day counter, written back. Separate from the cursor because the cursor
+ *  moves on every pass and this only moves when something ran. */
+export function saveBot(db: Db, bot: TriggerBotRow): void {
+  persist(db, triggerBotsMapping(), JSON.stringify(bot));
+}
+
+/** Take a message in. Answers the row's id, or "" if this update was already
+ *  here — the dedupe half of at-least-once delivery. */
+export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, nowMs: number): string {
+  if (alreadyHave(db, bot.id, said.updateId)) { return ""; }
+  let now = `${nowMs}`;
+  let row: TriggerInboxRow = {
+    id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
+    workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
+    input: said.text, status: "queued", runId: "", answer: "", error: "",
+    createdAt: now, updatedAt: now,
+  };
+  persist(db, triggerInboxMapping(), JSON.stringify(row));
+  return row.id;
+}
+
+/** A message that was refused rather than queued — over a ceiling, or a bot
+ *  switched off between the poll and the check. It is recorded, not dropped:
+ *  a person who was told "not now" and can see why is in a different position
+ *  from one whose message vanished. */
+export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, why: string, nowMs: number): string {
+  if (alreadyHave(db, bot.id, said.updateId)) { return ""; }
+  let now = `${nowMs}`;
+  let row: TriggerInboxRow = {
+    id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
+    workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
+    input: said.text, status: "refused", runId: "", answer: why, error: why,
+    createdAt: now, updatedAt: now,
+  };
+  persist(db, triggerInboxMapping(), JSON.stringify(row));
+  return row.id;
+}
+
+/** The next queued message, claimed. Any bot's: the scheduler drains one
+ *  queue, the same way it claims one due task.
+ *
+ *  SKIP LOCKED for the reason every other claim in this package uses it — two
+ *  passes overlapping must be a second worker taking the next row, not two
+ *  workflows firing for one message. */
+export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
+  let now = `${nowMs}`;
+  let stale = `${(nowMs as i64) - (TRIGGER_LEASE_MS as i64)}`;
+  let sql = "UPDATE trigger_inbox SET status = 'running', updated_at = " + db.placeholder
+    + " WHERE id = (SELECT id FROM trigger_inbox"
+    + " WHERE status = 'queued'"
+    // A row left 'running' by a scheduler that died comes back after a lease,
+    // rather than sitting claimed forever.
+    + " OR (status = 'running' AND updated_at < " + placeholderAt(db, 2) + ")"
+    + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
+    + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at";
+  if (!db.query(sql, [now, stale])) { return emptyMessage(); }
+  if (db.rows() == 0) { return emptyMessage(); }
+  let got: TriggerInboxRow = {
+    id: db.value(0, 0), owner: db.value(0, 1), botId: db.value(0, 2),
+    workflowId: db.value(0, 3), updateId: db.value(0, 4), chatId: db.value(0, 5),
+    input: db.value(0, 6), status: "running", runId: db.value(0, 7),
+    answer: "", error: "", createdAt: db.value(0, 8), updatedAt: now,
+  };
+  return got;
+}
+
+export function emptyMessage(): TriggerInboxRow {
+  let none: TriggerInboxRow = {
+    id: "", owner: "", botId: "", workflowId: "", updateId: "", chatId: "",
+    input: "", status: "", runId: "", answer: "", error: "",
+    createdAt: "", updatedAt: "",
+  };
+  return none;
+}
+
+/** What a walk left behind. `done` means there is an answer waiting to be
+ *  sent; the poller sends it, because the poller is the process that holds
+ *  the token. */
+export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runId: string, answer: string, problem: string, nowMs: number): void {
+  let sql = "UPDATE trigger_inbox SET status = " + db.placeholder
+    + ", run_id = " + placeholderAt(db, 2)
+    + ", answer = " + placeholderAt(db, 3)
+    + ", error = " + placeholderAt(db, 4)
+    + ", updated_at = " + placeholderAt(db, 5)
+    + " WHERE id = " + placeholderAt(db, 6);
+  db.query(sql, [status, runId, answer, problem, `${nowMs}`, row.id]);
+}
+
+// ---------------------------------------------------------------------------
+// What a person should actually read
+// ---------------------------------------------------------------------------
+
+/** An agent's answer with its control blocks taken out.
+ *
+ *  A reply can carry blocks the console parses and never shows —
+ *  `[FOLLOWUPS]{…}[/FOLLOWUPS]` is the common one, `[TEXT]{…}[/TEXT]` is a
+ *  card. Every surface that shows an answer has to remove them, and until
+ *  today the console was the only surface. A Telegram user was sent the JSON.
+ *
+ *  The rule is the shape rather than a list of names: `[NAME]…[/NAME]` where
+ *  NAME is upper-case. A list would be missing whichever block is added next,
+ *  and the failure would again be somebody reading machinery in a chat.
+ *
+ *  If stripping empties the message the original is sent instead. An ugly
+ *  reply is a worse answer than a clean one; no reply at all is not an answer. */
+export function plainly(answer: string): string {
+  let out = "";
+  let rest = answer;
+  while (true) {
+    let open = rest.indexOf("[");
+    if (open < 0) { out = out + rest; break; }
+    let shut = rest.indexOf("]", open);
+    if (shut < 0) { out = out + rest; break; }
+    let name = rest.slice(open + 1, shut);
+    if (!isBlockName(name)) {
+      // An ordinary bracket — a markdown link, a footnote marker. Kept, and
+      // the scan moves past it rather than treating the rest as a block.
+      out = out + rest.slice(0, shut + 1);
+      rest = rest.slice(shut + 1);
+      continue;
+    }
+    let closer = "[/" + name + "]";
+    let ends = rest.indexOf(closer, shut);
+    if (ends < 0) {
+      // An opening tag with no closing one: the model was cut off mid-block.
+      // Everything from here is machinery, and showing half of it is worse
+      // than showing none.
+      out = out + rest.slice(0, open);
+      break;
+    }
+    out = out + rest.slice(0, open);
+    rest = rest.slice(ends + closer.length);
+  }
+  let clean = out.trim();
+  return clean == "" ? answer.trim() : clean;
+}
+
+/** Whether these are the letters of a control block's name: upper case, and
+ *  at least one of them. */
+function isBlockName(name: string): bool {
+  if (name.length == 0 || name.length > 24) { return false; }
+  let i: int = 0;
+  while (i < name.length) {
+    let c = name.charCodeAt(i);
+    let upper = c >= 65 && c <= 90;
+    let mark = c == 95;
+    if (!upper && !mark) { return false; }
+    i = i + 1;
+  }
+  return true;
 }
