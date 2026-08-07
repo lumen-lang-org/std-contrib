@@ -18,7 +18,7 @@
 
 import { Db } from "../plume/driver.ts";
 import { findById, persist } from "../plume/plume.ts";
-import { StepResult, WalkCtx, WfNode, WfStep, Walked, emptyNode, fill, walk } from "../workflow/workflow.ts";
+import { StepResult, WalkCtx, WfNode, WfStep, Walked, emptyNode, fill, switchBranch, walk } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
@@ -101,6 +101,16 @@ function decide(node: WfNode, ctx: WalkCtx): StepResult {
   // The tested text passes through, so a condition never breaks {{prev}} —
   // a branch is a turn in the road, not a step that produced something.
   return stepBranch(ctx.prev, verdict ? "yes" : "no");
+}
+
+/** The SWITCH step: many ways out, chosen by matching a value.
+ *
+ *  Decided here for the same reason the condition is — it touches nothing but
+ *  the text it is given — and the tested text passes through untouched, so a
+ *  switch never breaks the chain of {{prev}}. */
+function route(node: WfNode, ctx: WalkCtx): StepResult {
+  let subject = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
+  return stepBranch(ctx.prev, switchBranch(node, subject));
 }
 
 /** The LLM step: one model call, no tools, on the workflow's agent's model. */
@@ -269,6 +279,10 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     if (node.type == "CONDITION") {
       let tested = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
       return withInput(decide(node, ctx), tested);
+    }
+    if (node.type == "SWITCH") {
+      let tested = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
+      return withInput(route(node, ctx), tested);
     }
     if (node.type == "LLM") {
       let said = fill(node.instruction, ctx);

@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, dig, emptyGraph, emptyNode, fill, refuse, startOf, walk } from "./workflow.ts";
+import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, emptyNode, fill, refuse, startOf, switchBranch, walk } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -375,4 +375,56 @@ test("a reference to a step that is not there, or not before this one, is refuse
      node("z", "END")],
     [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
   expect(refuse(quoting) == "");
+});
+
+test("a switch sends a value down the case it matches, or else", () => {
+  let sw = node("w", "SWITCH");
+  let cases: WfNode = {
+    id: sw.id, type: sw.type, name: sw.name, x: sw.x, y: sw.y,
+    instruction: sw.instruction, agentId: sw.agentId,
+    serverId: sw.serverId, tool: sw.tool, args: sw.args,
+    url: sw.url, method: sw.method, body: sw.body,
+    query: sw.query, test: sw.test, needle: sw.needle,
+    subject: sw.subject, schedule: sw.schedule, source: sw.source,
+    cases: "urgent\nroutine\n",
+  };
+  expect(casesOf(cases).length == 2);
+  expect(switchBranch(cases, "urgent") == "urgent");
+  // Case and surrounding space do not decide a route.
+  expect(switchBranch(cases, "  ROUTINE ") == "routine");
+  // Anything else has one way out, and it exists whether or not somebody
+  // thought about it.
+  expect(switchBranch(cases, "something else entirely") == "else");
+  // Not "contains": a value that merely holds a case is not that case.
+  expect(switchBranch(cases, "not urgent at all") == "else");
+});
+
+test("a switch's edges must name its own cases", () => {
+  let sw = node("w", "SWITCH");
+  let withCases: WfNode = {
+    id: sw.id, type: sw.type, name: "Triage", x: sw.x, y: sw.y,
+    instruction: "", agentId: "", serverId: "", tool: "", args: "",
+    url: "", method: "", body: "", query: "", test: "", needle: "",
+    subject: "", schedule: "", source: "", cases: "urgent\nroutine",
+  };
+  let good = graphOf(
+    [node("s", "START"), withCases, node("a", "AGENT"), node("b", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "w", ""), edge("e2", "w", "a", "urgent"),
+     edge("e3", "w", "b", "routine"), edge("e4", "w", "z", "else"),
+     edge("e5", "a", "z", ""), edge("e6", "b", "z", "")]);
+  expect(refuse(good) == "");
+
+  // An edge for a case nobody declared can never run, and the drawing gives
+  // no hint of it.
+  let ghost = graphOf(
+    [node("s", "START"), withCases, node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "w", ""), edge("e2", "w", "a", "later"), edge("e3", "a", "z", "")]);
+  expect(refuse(ghost).includes("no case"));
+
+  // And an edge out of a switch that says nothing is a way out nobody can
+  // predict.
+  let mute = graphOf(
+    [node("s", "START"), withCases, node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "w", ""), edge("e2", "w", "a", ""), edge("e3", "a", "z", "")]);
+  expect(refuse(mute).includes("which case"));
 });
