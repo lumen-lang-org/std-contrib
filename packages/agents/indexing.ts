@@ -148,6 +148,23 @@ export function pendingJobs(db: Db, scope: string): IndexJobRow[] {
 // claimed. Returned to the queue rather than left forever — the alternative is
 // a document nobody indexes and nobody is told about.
 export function requeueStalled(db: Db, before: string): void {
+  // An empty `before` means EVERY claimed row, not "claimed before the empty
+  // string". `updated_at` holds milliseconds as text and every one of them
+  // sorts above "", so the comparison was false for all of them and this
+  // function did nothing at all — a worker that died mid-job left its row
+  // saying "indexing" for good, which is precisely what the one caller calls
+  // it to prevent.
+  //
+  // Requeuing everything is right for the caller that passes "": the indexer
+  // is one systemd unit and systemd will not start a second while one runs,
+  // so a row still claimed when a worker starts belongs to a worker that is
+  // gone. A deployment running two would pass a real cutoff instead.
+  if (before == "") {
+    executeWith(db, "UPDATE index_jobs SET status = " + db.placeholder
+      + " WHERE status = " + placeholderAt(db, 2),
+      [JOB_QUEUED, JOB_INDEXING]);
+    return;
+  }
   executeWith(db, "UPDATE index_jobs SET status = " + db.placeholder
     + " WHERE status = " + placeholderAt(db, 2)
     + " AND updated_at < " + placeholderAt(db, 3),
