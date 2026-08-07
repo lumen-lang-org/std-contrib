@@ -6,7 +6,7 @@
 //
 //   cd packages/agents && lumen test triggers.test.ts
 
-import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, updatesIn, withRunCounted } from "./triggers.ts";
+import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, testingDraft, updatesIn, withRunCounted } from "./triggers.ts";
 
 function bot(): TriggerBotRow {
   let base = emptyBot();
@@ -182,4 +182,26 @@ test("a chat's messages land in one conversation, not one each", () => {
   // must not be mistaken for one when the next message looks for the chat's
   // thread. That is what the `thread_id <> ''` in threadForChat is for.
   expect(row.status == "");
+});
+
+test("the test window is a timestamp, so it cannot be forgotten on", () => {
+  let realNow = 1786124262180.0;
+  let b = bot();
+  // No window: published. Inside one: draft. After it: published again,
+  // enforced by comparison rather than by anything remembering to turn it
+  // off — the property the whole feature hangs on.
+  expect(!testingDraft(b, realNow));
+  let open: TriggerBotRow = {
+    id: b.id, owner: b.owner, kind: b.kind, name: b.name,
+    workflowId: b.workflowId, credentialRef: b.credentialRef,
+    offset: b.offset, leaseBy: b.leaseBy, leaseUntil: b.leaseUntil,
+    enabled: b.enabled, runsToday: b.runsToday, dayStartedAt: b.dayStartedAt,
+    lastAt: b.lastAt, lastError: b.lastError,
+    draftUntil: `${realNow + 300000.0}`,
+    createdAt: b.createdAt, updatedAt: b.updatedAt,
+  };
+  expect(testingDraft(open, realNow));
+  expect(!testingDraft(open, realNow + 300001.0));
+  // And counting a run keeps the window: the copy carries it.
+  expect(testingDraft(withRunCounted(open, realNow), realNow));
 });

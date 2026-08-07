@@ -5333,7 +5333,12 @@ class WorkflowApi {
       nextAt: timing.kind == "once" ? timing.at : "",
       runningSince: "", enabled: true, failures: 0, pausedReason: "",
       lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
-      runCount: 0, createdAt: now, updatedAt: now,
+      runCount: 0,
+      // Born published: the graph was just validated whole, and a workflow
+      // that runs nothing until a second button is pressed is a surprise.
+      // The first DIVERGENCE is the first unpublished edit.
+      publishedGraph: graphText, publishedAt: now,
+      createdAt: now, updatedAt: now,
     };
     let wrong = refuseWorkflow(row);
     if (wrong != "") { return badRequest(wrong); }
@@ -5410,7 +5415,10 @@ class WorkflowApi {
       pausedReason: on ? "" : mine.pausedReason,
       lastRunAt: mine.lastRunAt, lastRunId: mine.lastRunId,
       lastStatus: mine.lastStatus, lastError: mine.lastError,
-      runCount: mine.runCount, createdAt: mine.createdAt, updatedAt: stamp(),
+      runCount: mine.runCount,
+      // The autosave never touches what production runs. Only /publish does.
+      publishedGraph: mine.publishedGraph ?? "", publishedAt: mine.publishedAt ?? "",
+      createdAt: mine.createdAt, updatedAt: stamp(),
     };
     let wrong = refuseWorkflow(edited);
     if (wrong != "") { return badRequest(wrong); }
@@ -5454,6 +5462,30 @@ class WorkflowApi {
       return ok("{\"ok\":false,\"error\":" + JSON.stringify(built.error) + "}");
     }
     return ok("{\"ok\":true,\"error\":\"\",\"fresh\":" + (built.fresh ? "true" : "false") + "}");
+  }
+
+  // The draft becomes what production runs — the one write site for
+  // published_graph, which is what makes "publish" a word rather than a
+  // hope. Messages and the clock walk this; the canvas keeps autosaving the
+  // draft without touching it.
+  @post("/:id/publish")
+  publish(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    // Re-validated at the door even though every save validates: publish is
+    // the moment the graph starts serving people, and a cheap second check
+    // beats trusting that nothing ever wrote the column another way.
+    let parsed = parseGraph(mine.graph);
+    if (!parsed.ok) { return badRequest(parsed.error); }
+    let wrong = refuseWorkflow(mine);
+    if (wrong != "") { return badRequest(wrong); }
+    let now = stamp();
+    executeWith(this.db,
+      "UPDATE workflows SET published_graph = graph, published_at = " + this.db.placeholder
+      + ", updated_at = " + placeholderAt(this.db, 2)
+      + " WHERE id = " + placeholderAt(this.db, 3),
+      [now, now, mine.id]);
+    return ok(findById(this.db, workflowsMapping(), mine.id));
   }
 
   // Fire it on the next tick — the task door's "run now", word for word.
@@ -5554,7 +5586,7 @@ class TriggerApi {
       // polling it looks broken; a bot switched off looks off.
       enabled: false,
       runsToday: 0, dayStartedAt: now, lastAt: "", lastError: "",
-      createdAt: now, updatedAt: now,
+      draftUntil: "", createdAt: now, updatedAt: now,
     };
     let written = persist(this.db, triggerBotsMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
@@ -5590,11 +5622,34 @@ class TriggerApi {
       enabled: jsonFlag(req.body, "enabled", mine.enabled),
       runsToday: mine.runsToday, dayStartedAt: mine.dayStartedAt,
       lastAt: mine.lastAt, lastError: mine.lastError,
-      createdAt: mine.createdAt, updatedAt: stamp(),
+      draftUntil: mine.draftUntil ?? "", createdAt: mine.createdAt, updatedAt: stamp(),
     };
     let written = persist(this.db, triggerBotsMapping(), JSON.stringify(edited));
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, triggerBotsMapping(), edited.id));
+  }
+
+  // Point this bot at the DRAFT for a bounded window — the n8n test button,
+  // with n8n's honesty about it: the stream cannot be split, so testing IS
+  // prod traffic for the duration, made loud and short instead of hidden.
+  // {"minutes": 5} starts one (capped at 30), {"minutes": 0} ends it now.
+  // The revert needs no daemon: the window is a timestamp the scheduler
+  // compares on every claim, so forgetting it is impossible — it just ends.
+  @post("/:id/test")
+  test(req: Request): Reply {
+    let mine = this.owned(req);
+    if (mine.id == "") { return notFound("bot " + param(req, "id")); }
+    // jsonRaw, not jsonText — a JSON number, the ok/update_id lesson.
+    let minutes = parseInt(jsonRaw(req.body, "minutes").trim(), 10) ?? 5;
+    if (minutes < 0) { minutes = 0; }
+    if (minutes > 30) { minutes = 30; }
+    let until = minutes == 0 ? "" : `${(Date.now() as i64) + (minutes as i64) * 60000}`;
+    executeWith(this.db,
+      "UPDATE trigger_bots SET draft_until = " + this.db.placeholder
+      + ", updated_at = " + placeholderAt(this.db, 2)
+      + " WHERE id = " + placeholderAt(this.db, 3),
+      [until, stamp(), mine.id]);
+    return ok(findById(this.db, triggerBotsMapping(), mine.id));
   }
 
   // What is waiting to be answered. The console shows this beside the bot,

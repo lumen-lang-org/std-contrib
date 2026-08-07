@@ -77,6 +77,11 @@ export type TriggerBotRow = {
   dayStartedAt: string,
   lastAt: string,
   lastError: string,
+  // The n8n-shaped test window: until this instant, messages to this bot
+  // walk the workflow's DRAFT instead of its published graph. Bounded and
+  // self-expiring — enforced by comparison at claim time, so a test mode
+  // nobody remembers cannot become a quiet prod outage; it just ends.
+  draftUntil?: string,
   createdAt: string,
   updatedAt: string,
 };
@@ -110,6 +115,29 @@ export type TriggerInboxRow = {
   updatedAt: string,
 };
 
+// Frozen at what 106 created — the same rule as the inbox's V1 below.
+function triggerBotsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("owner", "owner", "text"),
+    field("kind", "kind", "text"),
+    field("name", "name", "text"),
+    field("workflowId", "workflow_id", "text"),
+    field("credentialRef", "credential_ref", "text"),
+    field("offset", "cursor_offset", "text"),
+    field("leaseBy", "lease_by", "text"),
+    field("leaseUntil", "lease_until", "text"),
+    field("enabled", "enabled", "bool"),
+    field("runsToday", "runs_today", "int"),
+    field("dayStartedAt", "day_started_at", "text"),
+    field("lastAt", "last_at", "text"),
+    field("lastError", "last_error", "text"),
+    field("createdAt", "created_at", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("trigger_bots", "id", "id", fs);
+}
+
 export function triggerBotsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -126,6 +154,12 @@ export function triggerBotsMapping(): DbRepository {
     field("dayStartedAt", "day_started_at", "text"),
     field("lastAt", "last_at", "text"),
     field("lastError", "last_error", "text"),
+    // Added after 106 shipped — the ALTER at 107.3. An optional field's
+    // absence from this list is INVISIBLE to every check (the row type marks
+    // it optional, so parse and persist both shrug), which is how it shipped
+    // missing the first time: the test window read as permanently closed and
+    // nothing anywhere errored.
+    field("draftUntil", "draft_until", "text"),
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
@@ -217,7 +251,7 @@ export function triggersPlan(db: Db): Migration[] {
   // already applied refuses the whole plan.
   return [
     migration("106", "triggers: workflows started by something arriving",
-      createTableSql(db, triggerBotsMapping())),
+      createTableSql(db, triggerBotsMappingV1())),
     migration("106.1", "and what arrived",
       createTableSql(db, triggerInboxMappingV1())),
     // The column, for a table that already exists on a deployment: 106.1
@@ -231,6 +265,10 @@ export function triggersPlan(db: Db): Migration[] {
     // this file the hard way.
     migration("106.3", "what a run says before it is done",
       createTableSql(db, triggerOutboxMapping())),
+    // 107.3: 107–107.2 live with the workflows plan; shared numbering, one
+    // history.
+    migration("107.3", "a bounded window where a bot tests the draft",
+      "ALTER TABLE trigger_bots ADD COLUMN draft_until " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -355,6 +393,9 @@ export function withRunCounted(bot: TriggerBotRow, nowMs: number): TriggerBotRow
     runsToday: fresh ? 1 : bot.runsToday + 1,
     dayStartedAt: fresh ? `${nowMs}` : bot.dayStartedAt,
     lastAt: `${nowMs}`, lastError: bot.lastError,
+    // Carried: this copy is what saveBot persists, and dropping it here
+    // would end every test window at the first counted message.
+    draftUntil: bot.draftUntil ?? "",
     createdAt: bot.createdAt, updatedAt: `${nowMs}`,
   };
   return counted;
@@ -369,7 +410,7 @@ export function emptyBot(): TriggerBotRow {
     id: "", owner: "", kind: "", name: "", workflowId: "", credentialRef: "",
     offset: "0", leaseBy: "", leaseUntil: "", enabled: false,
     runsToday: 0, dayStartedAt: "", lastAt: "", lastError: "",
-    createdAt: "", updatedAt: "",
+    draftUntil: "", createdAt: "", updatedAt: "",
   };
   return none;
 }
@@ -574,6 +615,13 @@ export function unsentOutbound(db: Db, botId: string): string {
   return listOrdered(db, triggerOutboxMapping(),
     "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
     [botId, "queued"], keys);
+}
+
+/** Whether this bot is inside its test window — its messages walk the
+ *  draft. Pure, so the rule is testable at a real clock. */
+export function testingDraft(bot: TriggerBotRow, nowMs: number): bool {
+  let until = stampMs(bot.draftUntil ?? "");
+  return until > nowMs;
 }
 
 export function markOutboundSent(db: Db, id: string, nowMs: number): void {

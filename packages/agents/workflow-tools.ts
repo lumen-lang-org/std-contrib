@@ -427,7 +427,11 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     failures: row.failures, pausedReason: row.pausedReason,
     lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,
     lastStatus: row.lastStatus, lastError: row.lastError,
-    runCount: row.runCount, createdAt: row.createdAt, updatedAt: `${nowMs}`,
+    runCount: row.runCount,
+    // Carried — a copy that dropped the published half would blank what
+    // production runs on the next conversational edit.
+    publishedGraph: row.publishedGraph ?? "", publishedAt: row.publishedAt ?? "",
+    createdAt: row.createdAt, updatedAt: `${nowMs}`,
   };
   let wrong = refuseWorkflow(edited);
   if (wrong != "") {
@@ -541,7 +545,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       graph: "", kind: "manual", cronExpr: "", tz: zone, nextAt: "",
       runningSince: "", enabled: true, failures: 0, pausedReason: "",
       lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
-      runCount: 0, createdAt: now, updatedAt: now,
+      runCount: 0, publishedGraph: "", publishedAt: "", createdAt: now, updatedAt: now,
     };
     let stored = storeGraph(db, row, graph, zone, call.nowMs);
     if (!stored.ok) { return no(stored.error); }
@@ -594,7 +598,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       pausedReason: on ? "" : row.pausedReason,
       lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,
       lastStatus: row.lastStatus, lastError: row.lastError,
-      runCount: row.runCount, createdAt: row.createdAt, updatedAt: `${call.nowMs}`,
+      runCount: row.runCount,
+      publishedGraph: row.publishedGraph ?? "", publishedAt: row.publishedAt ?? "",
+      createdAt: row.createdAt, updatedAt: `${call.nowMs}`,
     };
     let wrong = refuseWorkflow(edited);
     if (wrong != "") { return no(wrong); }

@@ -63,6 +63,13 @@ export type WorkflowRow = {
   lastStatus: string,
   lastError: string,
   runCount: int,
+  // What production runs: the graph as it stood at the last Publish. The
+  // n8n split — `graph` is the draft the canvas autosaves, and nothing a
+  // person is mid-way through editing reaches a chat or the clock. Optional
+  // marks (absent-able since compiler spec 481) so rows written before 107
+  // still parse.
+  publishedGraph?: string,
+  publishedAt?: string,
   createdAt: string,
   updatedAt: string,
 };
@@ -86,6 +93,39 @@ export type WorkflowRunRow = {
   endedAt: string,
 };
 
+// Frozen at what 101 created — the threads.ts/triggers.ts rule: a
+// migration's text is checksummed and 101 generates its CREATE from a
+// mapping, so a column added to the LIVE mapping below rewrites an applied
+// migration and every deployed database refuses the whole plan. New columns
+// are ALTERs at new versions.
+function workflowsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("owner", "owner", "text"),
+    field("agentId", "agent_id", "text"),
+    field("modelChoiceId", "model_choice_id", "text"),
+    field("name", "name", "text"),
+    field("description", "description", "text"),
+    field("graph", "graph", "text"),
+    field("kind", "kind", "text"),
+    field("cronExpr", "cron_expr", "text"),
+    field("tz", "tz", "text"),
+    field("nextAt", "next_at", "text"),
+    field("runningSince", "running_since", "text"),
+    field("enabled", "enabled", "bool"),
+    field("failures", "failures", "int"),
+    field("pausedReason", "paused_reason", "text"),
+    field("lastRunAt", "last_run_at", "text"),
+    field("lastRunId", "last_run_id", "text"),
+    field("lastStatus", "last_status", "text"),
+    field("lastError", "last_error", "text"),
+    field("runCount", "run_count", "int"),
+    field("createdAt", "created_at", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("workflows", "id", "id", fs);
+}
+
 export function workflowsMapping(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -108,6 +148,9 @@ export function workflowsMapping(): DbRepository {
     field("lastStatus", "last_status", "text"),
     field("lastError", "last_error", "text"),
     field("runCount", "run_count", "int"),
+    // Added after 101 shipped, so they arrive as ALTERs at 107.
+    field("publishedGraph", "published_graph", "text"),
+    field("publishedAt", "published_at", "text"),
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
@@ -138,9 +181,20 @@ export function workflowsPlan(db: Db): Migration[] {
   // before choosing a number, not after.
   return [
     migration("101", "workflows: steps somebody drew",
-      createTableSql(db, workflowsMapping())),
+      createTableSql(db, workflowsMappingV1())),
     migration("101.1", "and what happened when they ran",
       createTableSql(db, workflowRunsMapping())),
+    // 107: not 101.2 — plume orders by version and 106.x is already applied,
+    // so a late 101.x would sort below history and refuse the plan.
+    migration("107", "what production runs: the graph as last published",
+      "ALTER TABLE workflows ADD COLUMN published_graph " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("107.1", "and when it was published",
+      "ALTER TABLE workflows ADD COLUMN published_at " + db.textType + " NOT NULL DEFAULT ''"),
+    // Every existing workflow keeps working exactly as it did: what it runs
+    // today becomes its published version, and the first divergence is the
+    // first unpublished edit after this ships.
+    migration("107.2", "what already runs is what is published",
+      "UPDATE workflows SET published_graph = graph, published_at = updated_at"),
   ];
 }
 
@@ -247,7 +301,7 @@ export function emptyWorkflow(): WorkflowRow {
     graph: "", kind: "", cronExpr: "", tz: "", nextAt: "", runningSince: "",
     enabled: false, failures: 0, pausedReason: "",
     lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
-    runCount: 0, createdAt: "", updatedAt: "",
+    runCount: 0, publishedGraph: "", publishedAt: "", createdAt: "", updatedAt: "",
   };
   return none;
 }
@@ -306,9 +360,34 @@ export function withWorkflowNextAt(row: WorkflowRow, at: string): WorkflowRow {
     failures: row.failures, pausedReason: row.pausedReason,
     lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,
     lastStatus: row.lastStatus, lastError: row.lastError,
-    runCount: row.runCount, createdAt: row.createdAt, updatedAt: row.updatedAt,
+    runCount: row.runCount,
+    // Carried, not defaulted: this copy is what persist writes back, and a
+    // copy that forgot the published half would blank production on the
+    // next autosave — the exact quiet failure the optional mark invites.
+    publishedGraph: row.publishedGraph ?? "", publishedAt: row.publishedAt ?? "",
+    createdAt: row.createdAt, updatedAt: row.updatedAt,
   };
   return moved;
+}
+
+/** The same row about to be walked with different graph bytes — how the
+ *  scheduler hands the walk the PUBLISHED graph (or a test window's draft)
+ *  while everything else about the row stays itself. */
+export function withGraph(row: WorkflowRow, bytes: string): WorkflowRow {
+  let swapped: WorkflowRow = {
+    id: row.id, owner: row.owner, agentId: row.agentId,
+    modelChoiceId: row.modelChoiceId, name: row.name,
+    description: row.description, graph: bytes, kind: row.kind,
+    cronExpr: row.cronExpr, tz: row.tz, nextAt: row.nextAt,
+    runningSince: row.runningSince, enabled: row.enabled,
+    failures: row.failures, pausedReason: row.pausedReason,
+    lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,
+    lastStatus: row.lastStatus, lastError: row.lastError,
+    runCount: row.runCount,
+    publishedGraph: row.publishedGraph ?? "", publishedAt: row.publishedAt ?? "",
+    createdAt: row.createdAt, updatedAt: row.updatedAt,
+  };
+  return swapped;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +412,7 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
     + " AND (running_since = '' OR running_since < " + placeholderAt(db, 3) + ")"
     + " ORDER BY next_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
     + " RETURNING id, owner, agent_id, model_choice_id, name, description,"
-    + " graph, kind, cron_expr, tz, next_at, failures, run_count";
+    + " graph, kind, cron_expr, tz, next_at, failures, run_count, published_graph";
   if (!db.query(sql, [now, now, stale])) { return none; }
   if (db.rows() == 0) { return none; }
   let got: WorkflowRow = {
@@ -354,6 +433,7 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
     pausedReason: "",
     lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
     runCount: parseInt(db.value(0, 12), 10) ?? 0,
+    publishedGraph: db.value(0, 13), publishedAt: "",
     createdAt: "", updatedAt: "",
   };
   return got;
