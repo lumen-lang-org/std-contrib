@@ -275,6 +275,94 @@ function refuseNode(node: WfNode): string {
   return "";
 }
 
+/** Every `{{...}}` in a piece of text, in order. */
+function tokensIn(text: string): string[] {
+  let found: string[] = [];
+  let i: int = 0;
+  while (i < text.length) {
+    let open = text.indexOf("{{", i);
+    if (open < 0) { return found; }
+    let close = text.indexOf("}}", open);
+    if (close < 0) { return found; }
+    found.push(text.slice(open + 2, close).trim());
+    i = close + 2;
+  }
+  return found;
+}
+
+/** Whether the edges lead from `from` to `to`. Breadth-first over an
+ *  append-only list, the shape hasCycle uses and for the same reason. */
+function reaches(graph: WfGraph, from: string, to: string): bool {
+  let seen: string[] = [];
+  seen.push(from);
+  let at: int = 0;
+  while (at < seen.length) {
+    let here = seen[at];
+    let e: int = 0;
+    while (e < graph.edges.length) {
+      if (graph.edges[e].from == here) {
+        let next = graph.edges[e].to;
+        if (next == to) { return true; }
+        if (!peeledAlready(seen, next)) { seen.push(next); }
+      }
+      e = e + 1;
+    }
+    at = at + 1;
+  }
+  return false;
+}
+
+/** Everything wrong with the `{{node.X}}` references in one node, or "".
+ *
+ *  Only `node.` is checked, and that is a deliberate line. An unrecognised
+ *  token is left standing by `fill` on purpose — somebody asking a model to
+ *  write a template needs to be able to type braces — but `{{node.something}}`
+ *  states an intention that either resolves or does not, and until now a
+ *  wrong one travelled all the way into a provider's prompt as literal text.
+ *  The reader saw {{node.serach}} in the output and had no idea why.
+ *
+ *  Upstream, not merely present: a step cannot use what a step after it has
+ *  not produced yet. The walk would leave that token standing at fire time,
+ *  which is the same silence one write earlier. */
+function refuseRefs(graph: WfGraph, node: WfNode): string {
+  let fields: string[] = [node.instruction, node.query, node.url, node.body, node.args, node.subject];
+  let label = node.name == "" ? node.id : node.name;
+  let f: int = 0;
+  while (f < fields.length) {
+    let tokens = tokensIn(fields[f]);
+    let t: int = 0;
+    while (t < tokens.length) {
+      let token = tokens[t];
+      if (token.startsWith("node.")) {
+        let rest = token.slice(5);
+        // The named step is the longest id that the token begins with; the
+        // remainder, if any, is a path into what it answered and is nobody's
+        // business until the run.
+        let named = "";
+        let n: int = 0;
+        while (n < graph.nodes.length) {
+          let id = graph.nodes[n].id;
+          if ((rest == id || rest.startsWith(id + ".")) && id.length > named.length) { named = id; }
+          n = n + 1;
+        }
+        if (rest != "" && named == "") {
+          return label + " uses {{" + token + "}}, and there is no step called \"" + rest + "\"";
+        }
+        if (named != "" && named == node.id) {
+          return label + " uses its own answer, which does not exist yet when it runs";
+        }
+        if (named != "" && !reaches(graph, named, node.id)) {
+          return label + " uses {{" + token + "}}, but that step does not run before it — "
+            + "connect them, or use a step that does";
+        }
+      }
+      t = t + 1;
+    }
+    f = f + 1;
+  }
+  return "";
+}
+
 /** Everything wrong with a graph somebody just described, or "".
  *
  *  Run where it can still be fixed — on every write — rather than at fire
@@ -335,14 +423,214 @@ export function refuse(graph: WfGraph): string {
     e = e + 1;
   }
   if (hasCycle(graph)) { return "the steps loop back on themselves — a workflow runs forward and ends"; }
+  // References last: they are checked against the edges, so the edges have to
+  // have been found sound first — and a cyclic graph would make "does it run
+  // before me" a question with no answer.
+  let r: int = 0;
+  while (r < graph.nodes.length) {
+    let wrong = refuseRefs(graph, graph.nodes[r]);
+    if (wrong != "") { return wrong; }
+    r = r + 1;
+  }
   return "";
 }
 
-/** `{{input}}`, `{{prev}}` and `{{node.<id>}}`, filled from the walk so far.
+// ---------------------------------------------------------------------------
+// Reaching into a step's answer
+// ---------------------------------------------------------------------------
+//
+// An HTTP step answers a whole JSON document and a person wants one field of
+// it. Without a path the only way to use `status` is to hand a model the
+// entire body and ask it to read the field out — a model call to do what a
+// substring does, and one that can get it wrong.
+//
+// This is a level-by-level walk, deliberately unlike agents/scan.ts, which
+// answers the FIRST match of a key at ANY depth. That is the right shape for
+// reading a provider's reply, whose nesting is the provider's business, and
+// the wrong shape for a path: `{{node.h.error}}` must mean the error at the
+// top of that answer, not an `error` buried three levels down inside some
+// unrelated member. A path that is wrong should miss.
+//
+// It lives here rather than being imported because this package depends on
+// nothing — that is what lets its tests run without a database, a provider or
+// a clock — and a reader is seventy lines.
+
+export type Dug = {
+  ok: bool,
+  text: string,
+};
+
+function jsBlank(ch: string): bool {
+  return ch == " " || ch == "\n" || ch == "\t" || ch == "\r";
+}
+
+/** The text of the value that starts at `from`, quotes and braces included. */
+function valueAt(doc: string, from: int): string {
+  let i = from;
+  while (i < doc.length && jsBlank(doc.charAt(i))) { i = i + 1; }
+  if (i >= doc.length) { return ""; }
+  let start = i;
+  let first = doc.charAt(i);
+  if (first == "\"") {
+    i = i + 1;
+    while (i < doc.length) {
+      let ch = doc.charAt(i);
+      if (ch == "\\") { i = i + 2; continue; }
+      if (ch == "\"") { return doc.slice(start, i + 1); }
+      i = i + 1;
+    }
+    return "";
+  }
+  if (first == "{" || first == "[") {
+    let depth: int = 0;
+    let inString = false;
+    while (i < doc.length) {
+      let ch = doc.charAt(i);
+      if (inString) {
+        if (ch == "\\") { i = i + 2; continue; }
+        if (ch == "\"") { inString = false; }
+        i = i + 1;
+        continue;
+      }
+      if (ch == "\"") { inString = true; i = i + 1; continue; }
+      if (ch == "{" || ch == "[") { depth = depth + 1; }
+      if (ch == "}" || ch == "]") {
+        depth = depth - 1;
+        if (depth == 0) { return doc.slice(start, i + 1); }
+      }
+      i = i + 1;
+    }
+    return "";
+  }
+  while (i < doc.length) {
+    let ch = doc.charAt(i);
+    if (ch == "," || ch == "}" || ch == "]" || jsBlank(ch)) { return doc.slice(start, i); }
+    i = i + 1;
+  }
+  return doc.slice(start, doc.length);
+}
+
+/** The value of `key` at the TOP level of the object `doc`, or ok:false. */
+function memberOf(doc: string, key: string): Dug {
+  let missing: Dug = { ok: false, text: "" };
+  let i: int = 0;
+  while (i < doc.length && jsBlank(doc.charAt(i))) { i = i + 1; }
+  if (i >= doc.length || doc.charAt(i) != "{") { return missing; }
+  i = i + 1;
+  while (i < doc.length) {
+    while (i < doc.length && (jsBlank(doc.charAt(i)) || doc.charAt(i) == ",")) { i = i + 1; }
+    if (i >= doc.length || doc.charAt(i) == "}") { return missing; }
+    if (doc.charAt(i) != "\"") { return missing; }
+    let name = "";
+    let j = i + 1;
+    while (j < doc.length) {
+      let ch = doc.charAt(j);
+      if (ch == "\\") { name = name + doc.slice(j + 1, j + 2); j = j + 2; continue; }
+      if (ch == "\"") { break; }
+      name = name + ch;
+      j = j + 1;
+    }
+    if (j >= doc.length) { return missing; }
+    let after = j + 1;
+    while (after < doc.length && jsBlank(doc.charAt(after))) { after = after + 1; }
+    if (after >= doc.length || doc.charAt(after) != ":") { return missing; }
+    let held = valueAt(doc, after + 1);
+    if (name == key) {
+      let got: Dug = { ok: true, text: held };
+      return got;
+    }
+    // Past this member's value, on to the next.
+    let value = valueAt(doc, after + 1);
+    let at = doc.indexOf(value, after + 1);
+    i = at < 0 ? doc.length : at + value.length;
+  }
+  return missing;
+}
+
+/** The nth element of the array `doc`, or ok:false. */
+function elementOf(doc: string, n: int): Dug {
+  let missing: Dug = { ok: false, text: "" };
+  let i: int = 0;
+  while (i < doc.length && jsBlank(doc.charAt(i))) { i = i + 1; }
+  if (i >= doc.length || doc.charAt(i) != "[") { return missing; }
+  i = i + 1;
+  let seen: int = 0;
+  while (i < doc.length) {
+    while (i < doc.length && (jsBlank(doc.charAt(i)) || doc.charAt(i) == ",")) { i = i + 1; }
+    if (i >= doc.length || doc.charAt(i) == "]") { return missing; }
+    let value = valueAt(doc, i);
+    if (value == "") { return missing; }
+    if (seen == n) {
+      let got: Dug = { ok: true, text: value };
+      return got;
+    }
+    seen = seen + 1;
+    i = i + value.length;
+  }
+  return missing;
+}
+
+/** A quoted string as its characters; anything else as it stands. */
+function plain(value: string): string {
+  if (value.length < 2 || value.charAt(0) != "\"") { return value; }
+  let out = "";
+  let i: int = 1;
+  while (i < value.length - 1) {
+    let ch = value.charAt(i);
+    if (ch == "\\" && i + 1 < value.length - 1) {
+      let next = value.charAt(i + 1);
+      if (next == "n") { out = out + "\n"; }
+      else if (next == "t") { out = out + "\t"; }
+      else if (next == "r") { out = out + "\r"; }
+      else { out = out + next; }
+      i = i + 2;
+      continue;
+    }
+    out = out + ch;
+    i = i + 1;
+  }
+  return out;
+}
+
+/** The value at a dotted path inside JSON text.
+ *
+ *  `body.items.0.name` — a segment that is all digits indexes an array, any
+ *  other segment names a member. A miss at any level is a miss, never a
+ *  guess: the caller leaves the token standing so the person can see their
+ *  path was wrong rather than reading an empty space. */
+export function dig(document: string, path: string): Dug {
+  let missing: Dug = { ok: false, text: "" };
+  if (path == "") { return missing; }
+  let here = document;
+  let rest = path;
+  while (rest != "") {
+    let dot = rest.indexOf(".");
+    let part = dot < 0 ? rest : rest.slice(0, dot);
+    rest = dot < 0 ? "" : rest.slice(dot + 1);
+    if (part == "") { return missing; }
+    let digits = true;
+    let d: int = 0;
+    while (d < part.length) {
+      let ch = part.charAt(d);
+      if (ch < "0" || ch > "9") { digits = false; }
+      d = d + 1;
+    }
+    let step = digits ? elementOf(here, parseInt(part, 10) ?? 0) : memberOf(here, part);
+    if (!step.ok) { return missing; }
+    here = step.text;
+  }
+  let found: Dug = { ok: true, text: plain(here) };
+  return found;
+}
+
+/** `{{input}}`, `{{prev}}` and `{{node.<id>}}`, filled from the walk so far —
+ *  and any of the last two followed by a path into the JSON it answered,
+ *  `{{node.fetch.body.status}}`.
  *
  *  An unknown token is left standing rather than silently emptied: a template
  *  that names a node wrongly should look wrong in the output it produced, not
- *  vanish into text that reads as though nothing was meant to be there. */
+ *  vanish into text that reads as though nothing was meant to be there. The
+ *  same rule covers a path that misses. */
 export function fill(text: string, ctx: WalkCtx): string {
   let out = "";
   let i: int = 0;
@@ -363,14 +651,27 @@ export function fill(text: string, ctx: WalkCtx): string {
       out = out + ctx.input;
     } else if (token == "prev") {
       out = out + ctx.prev;
+    } else if (token.startsWith("prev.")) {
+      let inside = dig(ctx.prev, token.slice(5));
+      out = out + (inside.ok ? inside.text : text.slice(open, close + 2));
     } else if (token.startsWith("node.")) {
-      let id = token.slice(5);
+      let rest = token.slice(5);
       let found = false;
       let o: int = 0;
       while (o < ctx.outputs.length) {
-        if (ctx.outputs[o].nodeId == id) {
+        let id = ctx.outputs[o].nodeId;
+        if (!found && rest == id) {
           out = out + ctx.outputs[o].output;
           found = true;
+        } else if (!found && rest.startsWith(id + ".")) {
+          // The id ends where the path begins. Tested against the ids in
+          // hand rather than split on the first dot, because an id is
+          // whatever the drawing called it and may well hold one.
+          let inside = dig(ctx.outputs[o].output, rest.slice(id.length + 1));
+          if (inside.ok) {
+            out = out + inside.text;
+            found = true;
+          }
         }
         o = o + 1;
       }

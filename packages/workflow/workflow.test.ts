@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, emptyGraph, emptyNode, fill, refuse, startOf, walk } from "./workflow.ts";
+import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, dig, emptyGraph, emptyNode, fill, refuse, startOf, walk } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -25,6 +25,20 @@ function node(id: string, kind: string): WfNode {
     subject: "", schedule: "",
   };
   return n;
+}
+
+// The same node with a different instruction — records are immutable, so it
+// is the whole thing again.
+function withText(n: WfNode, said: string): WfNode {
+  let out: WfNode = {
+    id: n.id, type: n.type, name: n.name, x: n.x, y: n.y,
+    instruction: said, agentId: n.agentId,
+    serverId: n.serverId, tool: n.tool, args: n.args,
+    url: n.url, method: n.method, body: n.body,
+    query: n.query, test: n.test, needle: n.needle,
+    subject: n.subject, schedule: n.schedule,
+  };
+  return out;
 }
 
 function edge(id: string, from: string, to: string, when: string): WfEdge {
@@ -273,4 +287,92 @@ test("a step that says nothing about its input gets the chain's, not silence", (
   // The quiet ones still say something: what the chain handed them.
   expect(done.steps[0].input == "go");
   expect(done.steps[2].input == "answered");
+});
+
+test("a path reaches into a step's answer, and a wrong one misses", () => {
+  let body = "{\"version\":\"0.2.0\",\"docker\":true,\"counts\":{\"docs\":12},"
+    + "\"items\":[{\"name\":\"first\"},{\"name\":\"second\"}]}";
+  expect(dig(body, "version").text == "0.2.0");
+  expect(dig(body, "docker").text == "true");
+  expect(dig(body, "counts.docs").text == "12");
+  expect(dig(body, "items.1.name").text == "second");
+  expect(dig(body, "counts").text == "{\"docs\":12}");
+  // A miss at any level is a miss.
+  expect(!dig(body, "nope").ok);
+  expect(!dig(body, "counts.nope").ok);
+  expect(!dig(body, "items.9.name").ok);
+  expect(!dig(body, "version.deeper").ok);
+  // And a key that exists further down is NOT found at the top: a path is
+  // exact, unlike agents/scan.ts, which searches every depth.
+  expect(!dig(body, "docs").ok);
+});
+
+test("templates reach into what a step answered", () => {
+  let outs: WfOut[] = [];
+  let one: WfOut = { nodeId: "h", output: "{\"status\":\"ok\",\"body\":{\"n\":7}}" };
+  outs.push(one);
+  let ctx: WalkCtx = { input: "go", prev: one.output, outputs: outs };
+  expect(fill("it said {{node.h.status}}", ctx) == "it said ok");
+  expect(fill("deep {{node.h.body.n}}", ctx) == "deep 7");
+  expect(fill("prev too {{prev.status}}", ctx) == "prev too ok");
+  // The whole answer still works, and a path nobody has stays visible so the
+  // person can see what they wrote rather than a gap where it was.
+  expect(fill("{{node.h}}", ctx) == one.output);
+  expect(fill("{{node.h.missing}}", ctx) == "{{node.h.missing}}");
+  expect(fill("{{prev.missing}}", ctx) == "{{prev.missing}}");
+});
+
+test("a reference to a step that is not there, or not before this one, is refused", () => {
+  // s -> c, and the condition's two arms — a and b — cannot see each other
+  // however sound each is on its own. Branching through a CONDITION because
+  // two plain edges out of one step is already refused: which one runs?
+  let g = graphOf(
+    [node("s", "START"), node("c", "CONDITION"), node("a", "AGENT"),
+     node("b", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "c", ""), edge("e2", "c", "a", "yes"), edge("e3", "c", "b", "no"),
+     edge("e4", "a", "z", ""), edge("e5", "b", "z", "")]);
+  expect(refuse(g) == "");
+
+  // Upstream is fine, and so is a path into it.
+  let uses = graphOf(
+    [node("s", "START"), withText(node("a", "AGENT"), "read {{node.s}}"),
+     node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(uses) == "");
+  let path = graphOf(
+    [node("s", "START"), withText(node("a", "AGENT"), "read {{node.s.body.n}}"),
+     node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(path) == "");
+
+  // A step nobody has.
+  let ghost = graphOf(
+    [node("s", "START"), withText(node("a", "AGENT"), "read {{node.serach}}"),
+     node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(ghost).includes("serach"));
+
+  // A step that exists but does not run first — the other arm of the branch.
+  let sideways = graphOf(
+    [node("s", "START"), node("c", "CONDITION"),
+     withText(node("a", "AGENT"), "read {{node.b}}"),
+     node("b", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "c", ""), edge("e2", "c", "a", "yes"), edge("e3", "c", "b", "no"),
+     edge("e4", "a", "z", ""), edge("e5", "b", "z", "")]);
+  expect(refuse(sideways).includes("does not run before it"));
+
+  // And a step reaching for itself.
+  let selfish = graphOf(
+    [node("s", "START"), withText(node("a", "AGENT"), "read {{node.a}}"),
+     node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(selfish).includes("its own answer"));
+
+  // A token that is not a node reference is still left alone: somebody asking
+  // a model to write a template has to be able to type braces.
+  let quoting = graphOf(
+    [node("s", "START"), withText(node("a", "AGENT"), "write {{placeholder}} for me"),
+     node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
+  expect(refuse(quoting) == "");
 });
