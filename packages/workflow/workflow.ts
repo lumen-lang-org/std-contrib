@@ -68,6 +68,15 @@ export type WfNode = {
   // has to be optional or the old documents have to be rewritten; optional is
   // the one that cannot half-finish.
   source?: string,
+  // SWITCH: the values it routes on, one per line. An edge out of a switch
+  // carries one of these as its `when`, or "else" for everything that
+  // matched nothing — so a switch is a condition with more than two ways out
+  // and the same shape underneath.
+  //
+  // A newline-separated string rather than a list, because WfNode is a flat
+  // record with one field per idea, and the canvas's own node configuration
+  // travels as scalars. Optional, for the reason `source` is.
+  cases?: string,
 };
 
 // An edge. `when` is "" for the ordinary case; a CONDITION's outgoing edges
@@ -169,7 +178,50 @@ export const MAX_TEXT: int = 4000;
 // is a process this deployment pays for.
 export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH"];
+
+// What an unmatched value takes. Not a case somebody writes: it is the way
+// out that exists whether or not they thought about it.
+export const SWITCH_ELSE: string = "else";
+// A switch with fifty ways out is a table, and a drawing is the wrong place
+// for a table.
+export const MAX_CASES: int = 12;
+
+/** The values a switch routes on, in order, blanks dropped. */
+export function casesOf(node: WfNode): string[] {
+  let out: string[] = [];
+  let said = node.cases ?? "";
+  let i: int = 0;
+  let one = "";
+  while (i < said.length) {
+    let ch = said.charAt(i);
+    if (ch == "\n" || ch == "\r") {
+      if (one.trim() != "") { out.push(one.trim()); }
+      one = "";
+    } else {
+      one = one + ch;
+    }
+    i = i + 1;
+  }
+  if (one.trim() != "") { out.push(one.trim()); }
+  return out;
+}
+
+/** Which way a switch sends a value: the first case it matches, or "else".
+ *
+ *  Matching is exact, ignoring case and surrounding space. Not "contains":
+ *  a switch whose cases are "yes" and "yes, urgently" would send both to the
+ *  first, and the reader would have to know the order to predict it. */
+export function switchBranch(node: WfNode, value: string): string {
+  let want = value.trim().toLowerCase();
+  let all = casesOf(node);
+  let i: int = 0;
+  while (i < all.length) {
+    if (all[i].toLowerCase() == want) { return all[i]; }
+    i = i + 1;
+  }
+  return SWITCH_ELSE;
+}
 
 export function knownType(kind: string): bool {
   let i: int = 0;
@@ -287,6 +339,27 @@ function refuseNode(node: WfNode): string {
   if (node.type == "WEB_SEARCH" && node.query.trim() == "") { return label + " needs a query to search for"; }
   if (node.type == "KNOWLEDGE" && node.query.trim() == "") { return label + " needs a query to look up"; }
   if (node.type == "MCP" && (node.serverId == "" || node.tool == "")) { return label + " needs a server and a tool on it"; }
+  if (node.type == "SWITCH") {
+    let all = casesOf(node);
+    if (all.length == 0) { return label + " has no cases — what is it choosing between?"; }
+    if (all.length > MAX_CASES) {
+      return label + " has " + `${all.length}` + " cases — the most a switch may have is " + `${MAX_CASES}`;
+    }
+    let i: int = 0;
+    while (i < all.length) {
+      if (all[i].toLowerCase() == SWITCH_ELSE) {
+        return label + " lists \"else\" as a case, and else is the way out for everything that matched nothing";
+      }
+      let j = i + 1;
+      while (j < all.length) {
+        if (all[j].toLowerCase() == all[i].toLowerCase()) {
+          return label + " lists \"" + all[i] + "\" twice — which edge would run?";
+        }
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+  }
   if (node.type == "SCRIPT") {
     let body = node.source ?? "";
     if (body.trim() == "") { return label + " has no script in it yet"; }
@@ -437,15 +510,37 @@ export function refuse(graph: WfGraph): string {
     if (edge.from == edge.to) { return (from.name == "" ? from.id : from.name) + " connects to itself"; }
     if (to.type == "START") { return "nothing connects INTO the START step"; }
     if (from.type == "END") { return "nothing connects OUT of an END step"; }
-    if (edge.when != "" && edge.when != "yes" && edge.when != "no") {
-      return "\"" + edge.when + "\" is not a branch — a condition's edges are \"yes\" and \"no\"";
-    }
-    if (edge.when != "" && from.type != "CONDITION") {
-      return "only a CONDITION step branches — the edge out of "
+    if (edge.when != "" && from.type != "CONDITION" && from.type != "SWITCH") {
+      return "only a CONDITION or a SWITCH branches — the edge out of "
         + (from.name == "" ? from.id : from.name) + " cannot carry \"" + edge.when + "\"";
     }
-    if (edge.when == "" && from.type == "CONDITION") {
-      return "each edge out of a condition says which way — \"yes\" or \"no\"";
+    if (from.type == "CONDITION") {
+      if (edge.when == "") { return "each edge out of a condition says which way — \"yes\" or \"no\""; }
+      if (edge.when != "yes" && edge.when != "no") {
+        return "\"" + edge.when + "\" is not a branch — a condition's edges are \"yes\" and \"no\"";
+      }
+    }
+    if (from.type == "SWITCH") {
+      if (edge.when == "") {
+        return "each edge out of " + (from.name == "" ? from.id : from.name)
+          + " says which case it is for, or \"else\"";
+      }
+      if (edge.when != SWITCH_ELSE) {
+        // An edge for a case nobody declared is an edge that can never run,
+        // and the drawing gives no hint of it — so it is refused at the write
+        // rather than discovered as a branch that never fires.
+        let known = false;
+        let all = casesOf(from);
+        let c: int = 0;
+        while (c < all.length) {
+          if (all[c] == edge.when) { known = true; }
+          c = c + 1;
+        }
+        if (!known) {
+          return (from.name == "" ? from.id : from.name) + " has no case \"" + edge.when
+            + "\" — its cases are the lines in its own list";
+        }
+      }
     }
     let d = e + 1;
     while (d < graph.edges.length) {
