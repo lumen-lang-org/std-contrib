@@ -23,9 +23,10 @@ import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { accessTokenFor } from "./connect.ts";
-import { complete, replyText } from "./provider.ts";
-import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadsMapping } from "./threads.ts";
+import { Turn, complete, replyText } from "./provider.ts";
+import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
+import { RunContext, runAgentAt } from "./run.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
 import { callTool } from "./mcp.ts";
@@ -330,11 +331,47 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     }
     if (node.type == "AGENT") {
       let said = fill(node.instruction, ctx);
-      // The step's own thread when it names another agent; the run's when not.
-      let thread = threadId;
       if (node.agentId != "" && node.agentId != row.agentId) {
-        thread = openThread(db, { agentId: node.agentId, owner: ask.owner, now: `${Date.now() as number}` });
-        if (thread == "") { return withInput(stepFailed("no conversation could be opened for agent " + node.agentId), said); }
+        // A step that names another agent runs it the way delegation does
+        // (run.ts, the `child.id` branch): a FRESH conversation — replaying
+        // the run's transcript into a specialist would ask it to answer
+        // questions it was never part of — but the RUN's thread as its
+        // workspace, because it is doing the run's work on the run's
+        // material.
+        //
+        // This used to open a thread per step per run and answer through it,
+        // which had two costs the fresh-thread comment above does not buy:
+        // every file the step wrote landed in a conversation nothing else
+        // could see (an artifact's identity is threadId:path), and a bot's
+        // chat minted a throwaway thread per message that no sweeper takes.
+        // The delegation pattern is the same isolation without either.
+        let alone: Turn[] = [];
+        let noChunks: string[] = [];
+        let noPath: string[] = [];
+        // The thread's turn count is the round every artifact write is
+        // stamped with — the same number runInThreadWith passes for its own
+        // writes — so files this step makes sit under the round that is
+        // walking, not under TURN_SEQ_NONE where the panel's by-turn view
+        // cannot place them.
+        let atSeq = threadTurns(db, threadId).length;
+        let below: RunContext = {
+          depth: 0, path: noPath, tracer: tracerFor(db, ask.master),
+          parentSpan: "", prior: alone, threadId: threadId,
+          excludeChunks: noChunks,
+          // The step's agent runs its operator's own model, never the
+          // walk's — the delegation rule, for the delegation reason.
+          modelConfigId: "",
+          baseSeq: atSeq,
+          owner: ask.owner,
+          think: false,
+        };
+        let asked = runAgentAt(db, node.agentId, said, ask.master, below);
+        // The run's thread, because that is where this step's files went and
+        // the only page a person can follow the link to. The words shown on
+        // the step row are its own input and output, so nothing is lost by
+        // the transcript not being a sidebar conversation of its own.
+        if (!asked.ok) { return inThread(withInput(stepFailed(asked.error), said), threadId); }
+        return inThread(withInput(stepOk(asked.text), said), threadId);
       }
       let turn: ThreadAsk = {
         userText: said,
@@ -343,13 +380,9 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
         pick: inheritedPick(),
         think: false,
       };
-      let answered = runInThreadWith(db, thread, turn);
-      // Which conversation this step's words are in — the run's, or its own
-      // when it named another agent. The run row carries only the run's, so
-      // without this a step that answered elsewhere left a link to an empty
-      // page.
-      if (!answered.run.ok) { return inThread(withInput(stepFailed(answered.run.error), said), thread); }
-      return inThread(withInput(stepOk(answered.text), said), thread);
+      let answered = runInThreadWith(db, threadId, turn);
+      if (!answered.run.ok) { return inThread(withInput(stepFailed(answered.run.error), said), threadId); }
+      return inThread(withInput(stepOk(answered.text), said), threadId);
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
   };
