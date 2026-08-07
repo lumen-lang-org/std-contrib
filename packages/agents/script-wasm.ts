@@ -48,6 +48,11 @@ export function scriptCacheDir(): string {
 // `while (true)` costs exactly this and not a hung scheduler — measured at
 // 2.07s for a 2s budget against a spinning loop.
 export const SCRIPT_TIMEOUT_S: int = 5;
+// And the wall clock, which is what actually bounds a script: the epoch
+// budget above is spent on wasm instructions and cannot see a blocking host
+// call. Larger than the epoch, so an ordinary overrun is still reported as
+// the runtime's own interruption rather than as a kill.
+export const SCRIPT_WALL_S: int = 8;
 export const SCRIPT_OUT_MAX: int = 262144;
 
 export type ScriptBuild = {
@@ -125,12 +130,64 @@ export function scriptWasmPath(hash: string): string {
   return scriptDir(hash) + "/step.wasm";
 }
 
+/** The first line with anything on it.
+ *
+ *  Not simply the first line: a Lumen program's uncaught error is preceded by
+ *  a blank one, so taking line zero answered "" and every guest failure was
+ *  reported as "stopped without saying why" — the message was there the whole
+ *  time, one line further down. */
 function firstLine(text: string): string {
-  let end: int = 0;
-  while (end < text.length && text.charCodeAt(end) != 10 && text.charCodeAt(end) != 13) {
-    end = end + 1;
+  let i: int = 0;
+  while (i < text.length) {
+    let line = "";
+    let j = i;
+    while (j < text.length && text.charCodeAt(j) != 10 && text.charCodeAt(j) != 13) {
+      line = line + text.charAt(j);
+      j = j + 1;
+    }
+    if (line.trim() != "") { return line.trim(); }
+    i = j + 1;
   }
-  return text.slice(0, end).trim();
+  return "";
+}
+
+/** How many lines the prelude adds above what somebody wrote. */
+function preludeLines(): int {
+  let n: int = 0;
+  let i: int = 0;
+  while (i < PRELUDE.length) {
+    if (PRELUDE.charCodeAt(i) == 10) { n = n + 1; }
+    i = i + 1;
+  }
+  return n;
+}
+
+/** A diagnostic's line number, moved back onto the line the person typed.
+ *
+ *  The compiler and the guest both count from the top of the file they were
+ *  given, and that file begins with the prelude — so an error on the second
+ *  line of a script was reported at line 15, and the reader counted down
+ *  fifteen lines of code they never wrote. The subtraction happens here
+ *  rather than by making the prelude a single line, because the prelude is
+ *  the documentation of what a script may reach and should stay readable. */
+function atUserLine(said: string): string {
+  let colon = said.indexOf(":");
+  if (colon <= 0) { return said; }
+  let head = said.slice(0, colon);
+  let line = parseInt(head, 10) ?? 0;
+  if (line <= preludeLines()) { return said; }
+  return `${line - preludeLines()}` + said.slice(colon);
+}
+
+/** A path prefix on a diagnostic, cut back to the file name.
+ *
+ *  Both the compiler and the guest report `<path>.ts:3:7: ...`, and the path
+ *  is a cache directory named after a hash that nobody has heard of. What is
+ *  worth showing starts at the line number. */
+function withoutPath(line: string): string {
+  let at = line.indexOf(".ts:");
+  if (at < 0) { return line.trim(); }
+  return atUserLine(line.slice(at + 4).trim());
 }
 
 /** The compiler's refusal, as a sentence somebody can act on.
@@ -146,8 +203,11 @@ export function compilerSaid(stderr: string, stdout: string): string {
     let j = i;
     while (j < text.length && text.charCodeAt(j) != 10) { line = line + text.charAt(j); j = j + 1; }
     if (line.includes("error:")) {
-      let at = line.indexOf("step.ts:");
-      let said = at < 0 ? line.trim() : line.slice(at + 8).trim();
+      // The source is named for its hash, so there is no fixed prefix to cut
+      // at — the first version looked for "step.ts:" and, once the file was
+      // renamed, showed the reader an absolute cache path instead of a line
+      // and column.
+      let said = withoutPath(line);
       return said.length > 300 ? said.slice(0, 297) + "..." : said;
     }
     i = j + 1;
@@ -291,17 +351,36 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
   // PermissionDenied, which cost an afternoon to learn.
   args.push("--dir=" + callDir + "::/");
   args.push(wasmPath);
-  let res = child_process.spawnSync(wasmtimeBin(), args);
+  let timed: string[] = [];
+  timed.push("-k");
+  timed.push("2");
+  timed.push(`${SCRIPT_WALL_S}`);
+  timed.push(wasmtimeBin());
+  let a: int = 0;
+  while (a < args.length) { timed.push(args[a]); a = a + 1; }
+  let res = child_process.spawnSync("timeout", timed);
   if (res.status != 0) {
+    // The epoch budget is spent on WASM INSTRUCTIONS, so a script sitting in
+    // a blocking host call is not interrupted by it — a network attempt ran
+    // for twenty-five seconds against a five second budget, because the time
+    // went inside poll_oneoff and not in the module. `timeout` bounds the
+    // wall clock the epoch cannot see; 124 is what it reports.
+    if (res.status == 124 || res.status == 137) {
+      let late: WasmRun = { ok: false, output: "",
+        error: "the script ran longer than " + `${SCRIPT_WALL_S}` + " seconds and was stopped" };
+      return late;
+    }
     let why = firstLine(res.stderr);
     if (why == "") { why = firstLine(res.stdout); }
-    if (why == "") { why = "the script stopped without saying why"; }
-    // The runtime's own words for the two failures a person will actually
-    // hit, said the way the rest of this engine says things.
     if (res.stderr.includes("epoch deadline") || res.stderr.includes("interrupt")) {
       why = "the script ran longer than " + `${SCRIPT_TIMEOUT_S}` + " seconds and was stopped";
-    } else if (res.stderr.includes("PermissionDenied")) {
-      why = "the script tried to reach something it is not given: " + why;
+    } else if (why == "") {
+      why = "the script stopped without saying why";
+    } else {
+      // The guest's own diagnostic, minus the cache path in front of it. It
+      // already names what it could not reach, so nothing is prepended: two
+      // sentences glued together read as one confused one.
+      why = withoutPath(why);
     }
     let failed: WasmRun = { ok: false, output: "", error: why };
     return failed;
