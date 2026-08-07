@@ -517,13 +517,11 @@ export function refuse(graph: WfGraph): string {
     return "that is " + `${graph.nodes.length}` + " steps — the most a workflow may have is " + `${MAX_NODES}`;
   }
   let starts: int = 0;
-  let ends: int = 0;
   let i: int = 0;
   while (i < graph.nodes.length) {
     let bad = refuseNode(graph.nodes[i]);
     if (bad != "") { return bad; }
     if (isEntry(graph.nodes[i].type)) { starts = starts + 1; }
-    if (graph.nodes[i].type == "END") { ends = ends + 1; }
     let j = i + 1;
     while (j < graph.nodes.length) {
       if (graph.nodes[j].id == graph.nodes[i].id) { return "two steps share the id " + graph.nodes[i].id; }
@@ -533,7 +531,13 @@ export function refuse(graph: WfGraph): string {
   }
   if (starts == 0) { return "a workflow needs a START step — where does it begin?"; }
   if (starts > 1) { return "a workflow begins in one place, not " + `${starts}` + " — a START step or a Telegram step, not both"; }
-  if (ends == 0) { return "a workflow needs an END step — what is the answer?"; }
+  // No END requirement. A walk ends at any step with nothing wired after it,
+  // and what that step answered IS the workflow's answer — the walk has said
+  // so all along ("the walk is over and what it has is the answer"). END was
+  // ceremony on top: a node that did nothing, sent nothing since the reply
+  // step took over speaking, and existed to satisfy this line. Stored graphs
+  // that carry one keep working — it walks as a no-op — it is simply no
+  // longer demanded, drawn by default, or the thing the answer hides behind.
 
   // A workflow that begins at a message must SAY something back. The END
   // step records the walk's answer but sends nothing — sending is what a

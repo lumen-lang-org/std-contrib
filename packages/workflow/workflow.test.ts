@@ -91,7 +91,9 @@ test("what is refused, and with a sentence rather than a code", () => {
   expect(refuse(emptyGraph()) != "");                                    // nothing to run
   expect(refuse(graphOf([node("a", "AGENT"), node("z", "END")], [])) != "");   // no START
   expect(refuse(graphOf([node("s", "START"), node("s2", "START"), node("z", "END")], [])) != "");  // two STARTs
-  expect(refuse(graphOf([node("s", "START"), node("a", "AGENT")], [])) != "");  // no END
+  // No END is not refused any more: a walk ends where the edges stop, and
+  // the last step's output is the answer.
+  expect(refuse(graphOf([node("s", "START"), node("a", "AGENT")], [edge("e1", "s", "a", "")])) == "");
   expect(refuse(graphOf([node("s", "START"), node("x", "KAFKA"), node("z", "END")], [])).indexOf("KAFKA") >= 0);
   expect(refuse(graphOf([node("s", "START"), node("s", "AGENT"), node("z", "END")], [])).indexOf("share") >= 0);
 
