@@ -65,6 +65,7 @@ import { ToolCardRow, allToolCards, toolCardsMapping, toolCardsPlan } from "./to
 import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, ensureGeoFeed, feedById, geoCode, refreshFeed, storiesFor, storyById } from "./discover.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping, cardPluginsPlan } from "./plugincards.ts";
 import { TaskRow, MAX_PER_OWNER, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, tasksPlan, withNextAt } from "./tasks.ts";
+import { ensureBuilt } from "./script-wasm.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, workflowRunsOf, timingOf, withWorkflowNextAt, workflowsMapping, workflowsOf, workflowsPlan } from "./workflow-store.ts";
 import { PROJECT_FILES_KEY, ProjectRow, assignProject, emptyProject, projectsMapping, projectsOf, projectsPlan, releaseThreads, rememberFilesThread } from "./projects.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, documentFilesPlan, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
@@ -3633,12 +3634,35 @@ class DiscoverApi {
       // feed mixed into worldwide news.
       let langOk = feed.lang == "" || lang == "" || feed.lang == lang;
       let placeOk = feed.country == "" || feed.country == country;
-      if (feed.enabled && langOk && placeOk) {
+      // `?all=1` drops both filters and the has-stories rule.
+      //
+      // The filters above are right for a READER: a feed naming a country belongs to
+      // callers from there, and an empty feed is not a page. They are exactly wrong for
+      // whoever runs the thing, because the feeds that need attention are the empty ones
+      // and the ones for places the operator is not sitting in. The admin panel read
+      // this route and concluded there were three feeds and no countries, while six
+      // existed.
+      //
+      // A flag on the existing route rather than a route of its own: adding a method to
+      // this controller makes the built binary panic in plume's migrate at startup,
+      // reproducibly and before any request is served, which is a code-generation
+      // problem in the compiler this deployment builds with and not something to work
+      // around by guessing. Nothing here is sensitive — a feed is a topic, a place and
+      // a query — so the flag costs no secrecy.
+      let all = req.query.get("all") == "1";
+      if (feed.enabled && (all || (langOk && placeOk))) {
         let rows = storiesFor(this.db, feed.id);
-        if (rows.length > 0) {
+        if (all || rows.length > 0) {
           if (wrote > 0) { out = out + ","; }
           out = out + "{\"id\":" + JSON.stringify(feed.id)
             + ",\"topic\":" + JSON.stringify(feed.topic)
+            // The query and the enabled flag: what this feed ASKS the index for, which
+            // is the one setting that decides whether it can find anything. A reader has
+            // no use for it; an operator has nothing without it — the admin panel drew
+            // an empty column and could not compute how many stories were available,
+            // because that check re-sends the feed's own query.
+            + ",\"query\":" + JSON.stringify(feed.query)
+            + ",\"enabled\":" + (feed.enabled ? "true" : "false")
             + ",\"lang\":" + JSON.stringify(feed.lang)
             + ",\"country\":" + JSON.stringify(feed.country)
             + ",\"digestedAt\":" + JSON.stringify(feed.digestedAt)
@@ -3659,6 +3683,11 @@ class DiscoverApi {
               + ",\"headline\":" + JSON.stringify(rows[r].headline)
               + ",\"summary\":" + JSON.stringify(rows[r].summary)
               + ",\"sources\":" + JSON.stringify(rows[r].sources)
+              // Beside `sources` and read by position against it: what each of those
+              // outlets called the story. Small — a few headlines — and it travels here
+              // rather than being fetched per card so the console can render it on the
+              // server, which a browser lookup after mount cannot do.
+              + ",\"sourceTitles\":" + JSON.stringify(rows[r].sourceTitles)
               + ",\"fetchedAt\":" + JSON.stringify(rows[r].fetchedAt)
               + ",\"why\":" + JSON.stringify(rows[r].why)
               + ",\"madeAt\":" + JSON.stringify(rows[r].madeAt)
@@ -5393,6 +5422,37 @@ class WorkflowApi {
     let written = persist(this.db, workflowsMapping(), JSON.stringify(stored));
     if (!written.ok) { return badRequest(written.error); }
     return ok(findById(this.db, workflowsMapping(), stored.id));
+  }
+
+  // Compile a step's script and say whether it is sound, without running
+  // anything.
+  //
+  // The console calls this a moment after the editor goes quiet, so a person
+  // learns their script does not compile while they are looking at it —
+  // rather than by running the workflow and reading the failure off the step.
+  // It is the SAME call the run makes (`ensureBuilt`, keyed by the hash of
+  // the source), so this is not a second compiler path and the check is not
+  // wasted work: the module it builds is the one the run will use, which is
+  // also why the first run stops being the slow one.
+  //
+  // Signed in only. Compiling is the one thing here that spends real time on
+  // this machine, and an anonymous caller with a loop could spend all of it.
+  @post("/script-check")
+  scriptCheck(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" || guestTag(tags) != "") {
+      return badRequest("signing in is what makes a script yours to compile");
+    }
+    if (req.body == "") { return badRequest("a body is required: {\"source\":\"...\"}"); }
+    let source = jsonText(req.body, "source");
+    if (source.trim() == "") {
+      return ok("{\"ok\":false,\"error\":\"there is no script to compile\"}");
+    }
+    let built = ensureBuilt(source);
+    if (!built.ok) {
+      return ok("{\"ok\":false,\"error\":" + JSON.stringify(built.error) + "}");
+    }
+    return ok("{\"ok\":true,\"error\":\"\",\"fresh\":" + (built.fresh ? "true" : "false") + "}");
   }
 
   // Fire it on the next tick — the task door's "run now", word for word.
