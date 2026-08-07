@@ -70,10 +70,51 @@ export type WasmRun = {
   error: string,
 };
 
+/* What every script gets above its own text.
+ *
+ * The expression language reads {{prev}}, {{input}} and {{node.<id>}}; a
+ * script reads prev(), input() and node("<id>"). Same vocabulary, so moving a
+ * step from a field to a script is a rewrite of the logic and not of the
+ * nouns.
+ *
+ * They are FILES, not a JSON document to parse. The runner grants exactly one
+ * directory, so that directory can be the API: one file per value, read
+ * whole. No parser in the prelude, no escaping to get wrong, and a script
+ * that wants a step's answer as bytes gets it as bytes. `given()` is the
+ * whole envelope for anything that wants to iterate.
+ *
+ * The user's own `main()` is still the entry point. Wrapping their body in a
+ * function of ours would mean their line numbers no longer match the compiler
+ * errors they are shown, and those errors are the only debugger they have. */
+const PRELUDE: string =
+  "// --- given by the workflow ------------------------------------------\n"
+  + "// These are the step's inputs. Everything else is up to you; there is\n"
+  + "// no network, no environment, and no file outside this directory.\n"
+  + "function given(name: string): string {\n"
+  + "  try { return fs.readFileSync(name); } catch (e) { return \"\"; }\n"
+  + "}\n"
+  + "/** The previous step's answer. */\n"
+  + "function prev(): string { return given(\"prev\"); }\n"
+  + "/** What the run was started with. */\n"
+  + "function input(): string { return given(\"input\"); }\n"
+  + "/** Any earlier step's answer, by the id the drawing gives it. */\n"
+  + "function node(id: string): string { return given(\"node-\" + id); }\n"
+  + "// --------------------------------------------------------------------\n";
+
+/** The source as it is actually compiled: the prelude, then what was
+ *  written. */
+export function fullSource(source: string): string {
+  return PRELUDE + source;
+}
+
 /** The name a source compiles to. The hash is the identity: the same text is
- *  the same module, so editing a step and putting it back costs nothing. */
+ *  the same module, so editing a step and putting it back costs nothing.
+ *
+ *  Over the WHOLE source, prelude included — change what a script is handed
+ *  and every module must be built again, which a hash of the body alone
+ *  would not notice. */
 export function scriptHash(source: string): string {
-  return crypto.sha256(source);
+  return crypto.sha256(fullSource(source));
 }
 
 function scriptDir(hash: string): string {
@@ -141,7 +182,7 @@ export function ensureBuilt(source: string): ScriptBuild {
     }
     if (!fs.existsSync(scriptCacheDir())) { fs.mkdirSync(scriptCacheDir()); }
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir); }
-    fs.writeFileSync(dir + "/" + hash + ".ts", source);
+    fs.writeFileSync(dir + "/" + hash + ".ts", fullSource(source));
   } catch (e) {
     let broke: ScriptBuild = { ok: false, path: "",
       error: "the script could not be written down to compile: " + e.message, fresh: false };
@@ -180,7 +221,34 @@ export function ensureBuilt(source: string): ScriptBuild {
  *  Everything the module can reach is in this argument vector: one directory,
  *  holding one file, which this function wrote. No --env, no network flag
  *  (there is none to give), and a timeout the runtime enforces itself. */
-export function runScript(wasmPath: string, inputJson: string, callDir: string): WasmRun {
+export type ScriptGiven = {
+  input: string,
+  prev: string,
+  // Every earlier answer, as id and text. Written one file per entry.
+  outputs: ScriptOut[],
+};
+
+export type ScriptOut = {
+  id: string,
+  output: string,
+};
+
+/** An id that may become a filename. The ids a drawing makes are already
+ *  tame, but a name is a path the moment it is joined to one, and a step
+ *  called "../../etc" must not be able to say where its file goes. */
+function tameId(id: string): bool {
+  if (id == "" || id.length > 64) { return false; }
+  let i: int = 0;
+  while (i < id.length) {
+    let c = id.charAt(i);
+    let ok = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "-" || c == "_";
+    if (!ok) { return false; }
+    i = i + 1;
+  }
+  return true;
+}
+
+export function runScript(wasmPath: string, given: ScriptGiven, callDir: string): WasmRun {
   try {
     // Both levels: mkdirSync makes one directory, not a path, and a missing
     // PARENT here failed silently — no throw to catch — leaving wasmtime to
@@ -192,14 +260,23 @@ export function runScript(wasmPath: string, inputJson: string, callDir: string):
       if (!fs.existsSync(parent)) { fs.mkdirSync(parent); }
     }
     if (!fs.existsSync(callDir)) { fs.mkdirSync(callDir); }
-    fs.writeFileSync(callDir + "/input.json", inputJson);
+    // One file per value: the granted directory IS the API the prelude reads.
+    fs.writeFileSync(callDir + "/input", given.input);
+    fs.writeFileSync(callDir + "/prev", given.prev);
+    let o: int = 0;
+    while (o < given.outputs.length) {
+      if (tameId(given.outputs[o].id)) {
+        fs.writeFileSync(callDir + "/node-" + given.outputs[o].id, given.outputs[o].output);
+      }
+      o = o + 1;
+    }
   } catch (e) {
     let broke: WasmRun = { ok: false, output: "",
       error: "the step's input could not be handed over: " + e.message };
     return broke;
   }
   // Checked, not assumed, for the same reason.
-  if (!fs.existsSync(callDir + "/input.json")) {
+  if (!fs.existsSync(callDir + "/prev")) {
     let gone: WasmRun = { ok: false, output: "",
       error: "the step's input could not be written to " + callDir };
     return gone;

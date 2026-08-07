@@ -8,7 +8,7 @@
 //
 //   cd packages/agents && lumen test script-wasm.test.ts
 
-import { WasmRun, compilerSaid, ensureBuilt, runScript, scriptHash, scriptWasmPath, wasmtimeBin } from "./script-wasm.ts";
+import { ScriptGiven, ScriptOut, WasmRun, compilerSaid, ensureBuilt, fullSource, runScript, scriptHash, scriptWasmPath, wasmtimeBin } from "./script-wasm.ts";
 
 const DIR = "/tmp/joule-script-test";
 
@@ -17,13 +17,17 @@ function have(): bool {
   return wt.status == 0;
 }
 
-function ran(source: string, input: string): WasmRun {
+function ran(source: string, prev: string): WasmRun {
   let built = ensureBuilt(source);
   if (!built.ok) {
     let refused: WasmRun = { ok: false, output: "", error: built.error };
     return refused;
   }
-  return runScript(built.path, input, DIR);
+  let outs: ScriptOut[] = [];
+  let one: ScriptOut = { id: "earlier", output: "what the first step said" };
+  outs.push(one);
+  let given: ScriptGiven = { input: "started with", prev: prev, outputs: outs };
+  return runScript(built.path, given, DIR);
 }
 
 test("the same source is the same module, and a different one is not", () => {
@@ -48,13 +52,12 @@ test("a script computes, and its answer comes back", () => {
   // whole of it rather than an early return.
   if (have()) {
   let source = "function main(): void {\n"
-    + "  let given = fs.readFileSync(\"input.json\");\n"
-    + "  console.log(\"got \" + `${given.length}` + \" bytes\");\n"
+    + "  console.log(\"got \" + `${prev().length}` + \" bytes\");\n"
     + "}\n"
     + "main();\n";
-  let out = ran(source, "{\"prev\":\"hello\"}");
+  let out = ran(source, "hello there");
   expect(out.ok);
-  expect(out.output.startsWith("got 16 bytes"));
+  expect(out.output.startsWith("got 11 bytes"));
   }
 });
 
@@ -87,6 +90,39 @@ test("a script cannot reach the network — the instruction is not in the module
   // what must never happen is a 200.
   expect(!out.ok || !out.output.includes("200"));
   }
+});
+
+test("a script reads the walk with the same words the templates use", () => {
+  if (have()) {
+  // {{prev}}, {{input}} and {{node.<id>}} in a field; prev(), input() and
+  // node("<id>") here. The prelude is what makes the two agree.
+  let source = "function main(): void {\n"
+    + "  console.log(prev() + \"|\" + input() + \"|\" + node(\"earlier\"));\n"
+    + "}\n"
+    + "main();\n";
+  let out = ran(source, "the last answer");
+  expect(out.ok);
+  expect(out.output == "the last answer|started with|what the first step said");
+  }
+});
+
+test("a step that is not there reads as nothing, not as a failure", () => {
+  if (have()) {
+  let source = "function main(): void {\n"
+    + "  console.log(\"[\" + node(\"nobody\") + \"]\");\n"
+    + "}\n"
+    + "main();\n";
+  let out = ran(source, "x");
+  expect(out.ok);
+  expect(out.output == "[]");
+  }
+});
+
+test("the prelude is part of what is hashed", () => {
+  // Change what a script is handed and every module must be built again — a
+  // hash of the body alone would not notice.
+  expect(fullSource("main();").includes("function prev()"));
+  expect(fullSource("main();").endsWith("main();"));
 });
 
 test("a script that will not stop is stopped", () => {

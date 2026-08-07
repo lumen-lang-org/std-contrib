@@ -29,7 +29,7 @@ import { tracerFor } from "./trace.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
 import { callTool } from "./mcp.ts";
-import { ensureBuilt, runScript } from "./script-wasm.ts";
+import { ScriptGiven, ScriptOut, ensureBuilt, runScript } from "./script-wasm.ts";
 
 // What one web search step may pull in. Smaller than a chat turn's budget:
 // a workflow chains steps, and each one's output is the next one's input.
@@ -150,23 +150,20 @@ function reachOut(db: Db, node: WfNode, owner: string, master: string, args: str
   return stepOk(called.text);
 }
 
-/** What a SCRIPT step is handed, as JSON in the one file it can read.
- *
- *  Every earlier answer by node id, so a script can reach what a template
- *  can — `{{node.h}}` and `given.outputs.h` are the same value by two doors.
- *  Built here rather than in script-wasm.ts because the shape is the walk's,
- *  and that module knows nothing about walks. */
-function scriptInput(ctx: WalkCtx): string {
-  let outs = "";
+/** What a SCRIPT step is handed: the run's input, the previous answer, and
+ *  every earlier answer by node id. The runner writes one file per value —
+ *  the granted directory is the API the prelude reads, so nothing here has
+ *  to escape anything into a document. */
+function scriptGiven(ctx: WalkCtx): ScriptGiven {
+  let outs: ScriptOut[] = [];
   let i: int = 0;
   while (i < ctx.outputs.length) {
-    if (i > 0) { outs = outs + ","; }
-    outs = outs + JSON.stringify(ctx.outputs[i].nodeId) + ":" + JSON.stringify(ctx.outputs[i].output);
+    let one: ScriptOut = { id: ctx.outputs[i].nodeId, output: ctx.outputs[i].output };
+    outs.push(one);
     i = i + 1;
   }
-  return "{\"input\":" + JSON.stringify(ctx.input)
-    + ",\"prev\":" + JSON.stringify(ctx.prev)
-    + ",\"outputs\":{" + outs + "}}";
+  let given: ScriptGiven = { input: ctx.input, prev: ctx.prev, outputs: outs };
+  return given;
 }
 
 /** The SCRIPT step: compile once per source, then run with nothing granted.
@@ -178,7 +175,7 @@ function runScriptStep(node: WfNode, ctx: WalkCtx, runId: string): StepResult {
   let built = ensureBuilt(node.source);
   if (!built.ok) { return stepFailed(built.error); }
   let dir = "/tmp/joule-script-run/" + runId + "-" + node.id;
-  let ran = runScript(built.path, scriptInput(ctx), dir);
+  let ran = runScript(built.path, scriptGiven(ctx), dir);
   if (!ran.ok) { return stepFailed(ran.error); }
   return stepOk(ran.output);
 }
@@ -287,7 +284,9 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     if (node.type == "SCRIPT") {
       // The script's own input is the walk so far, so what it was handed is
       // recorded as that rather than as the source it is made of.
-      return withInput(runScriptStep(node, ctx, runId), scriptInput(ctx));
+      // What it was handed, said the way the panel shows every other step:
+      // the chain's previous answer is the honest summary of the envelope.
+      return withInput(runScriptStep(node, ctx, runId), ctx.prev);
     }
     if (node.type == "HTTP") {
       let url = fill(node.url, ctx);
