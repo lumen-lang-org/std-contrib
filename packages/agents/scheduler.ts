@@ -167,11 +167,11 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     finishMessage(db, msg, "failed", done.runId, "", done.error, Date.now() as number);
     return;
   }
-  // Stripped of its control blocks before it is stored to be sent. The run
-  // record keeps the answer as the agent wrote it; what goes to a chat is the
-  // prose, because [FOLLOWUPS]{…} on a phone is a bug report.
-  //
-  // 'done' rather than 'sent': there is an answer, and it has not left yet.
+  // 'done' is the END of this row's life now, not "waiting to be sent".
+  // Everything that reaches the chat went through a TELEGRAM_REPLY step and
+  // the outbox — the graph SAYS where it speaks, and END only records. The
+  // answer is kept on the row for the console's queue view, and the poller
+  // no longer reads this table to send.
   finishMessage(db, msg, "done", done.runId, plainly(done.answer), "", Date.now() as number);
 }
 
