@@ -29,6 +29,7 @@ import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, fi
 import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
+import { agentTools, callAgentTool } from "./agent-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
@@ -446,6 +447,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       while (bt < bots.length) {
         specs.push(bots[bt]);
         bt = bt + 1;
+      }
+      // And the agents everything answers through — Settings, sayable.
+      let selves = agentTools();
+      let ag: int = 0;
+      while (ag < selves.length) {
+        specs.push(selves[ag]);
+        ag = ag + 1;
       }
     }
   }
@@ -946,6 +954,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, name: calls[i].name, args: calls[i].args,
         nowMs: Date.now() as number,
       });
+      // Agents, same convention: four fixed names.
+      let selfed = callAgentTool(db, {
+        owner: where.owner, name: calls[i].name, args: calls[i].args,
+        nowMs: Date.now() as number,
+      });
       // The web index, same convention: asked about every call, answers only
       // search_web, which belongs to no connector.
       let websearched = callWebSearchTool(calls[i].name, calls[i].args);
@@ -1011,6 +1024,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = botted.ok;
         resultText = botted.text;
         from = "triggers";
+        calledTools.push(calls[i].name);
+      } else if (selfed.handled) {
+        resultOk = selfed.ok;
+        resultText = selfed.text;
+        from = "agents";
         calledTools.push(calls[i].name);
       } else if (websearched != "") {
         // BEFORE skills, and the ordering is the whole fix. callSkillTool
