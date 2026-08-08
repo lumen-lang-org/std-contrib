@@ -38,18 +38,24 @@ import { migrate, appliedHighWater } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, enabledChoices, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, AuthProviderRow, authProvidersMapping, PluginRow, PluginItemRow, pluginsMapping, pluginItemsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel, readSetting, writeSetting } from "./schema.ts";
 import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
 import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
-import { chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText, userTurn } from "./provider.ts";
+import { ToolSpec, chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText, userTurn } from "./provider.ts";
 import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "./runlog.ts";
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw, jsonFlag } from "./scan.ts";
 import { toolListing } from "./mcp.ts";
+import { taskTools, callTaskTool } from "./task-tools.ts";
+import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
+import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
+import { agentTools, callAgentTool } from "./agent-tools.ts";
+import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
+import { projectTools, callProjectTool } from "./project-tools.ts";
 import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, toolsOff, setToolOn } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, rememberRouteKey, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
 import { ownerUsage, usageJson, runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
-import { workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
+import { FileToolResult, workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
 import { ArtifactRow, ArtifactCard, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, libraryFor, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
@@ -5688,6 +5694,125 @@ class TriggerApi {
   }
 }
 
+/* Joule, exported as an MCP server.
+ *
+ * POST /mcp-server speaks the protocol's JSON-RPC over plain HTTP:
+ * initialize, tools/list, tools/call. What it serves is EXACTLY the
+ * sentence surface — the same specs the chat mounts, dispatched through the
+ * same callXTool functions with the same owner gate — so an external agent
+ * connecting here can do precisely what a person's sentence can do, no
+ * more. That equivalence is the security argument: nothing is exported that
+ * a signed-in chat could not already say, and the deliberate exclusions
+ * (credentials, operator keys) are excluded here by construction because no
+ * tool for them exists.
+ *
+ * Identity rides the same two headers as every other door: the bearer that
+ * admits the caller to the engine, and X-USER for whose rows these are. An
+ * MCP client is configured with both, the way any API client is.
+ *
+ * Tool families that need a conversation (workspace files, artifacts) are
+ * not served — an MCP caller has no thread. What remains is everything that
+ * acts on the deployment's own nouns: tasks, workflows, bots, agents,
+ * projects, skills, the corpus.
+ */
+@controller("/mcp-server")
+class McpServerApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @post("/")
+  rpc(req: Request): Reply {
+    let id = jsonRaw(req.body, "id");
+    if (id == "") { id = "null"; }
+    let method = jsonText(req.body, "method");
+
+    if (method == "initialize") {
+      return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{"
+        + "\"protocolVersion\":\"2024-11-05\","
+        + "\"capabilities\":{\"tools\":{}},"
+        + "\"serverInfo\":{\"name\":\"joule\",\"version\":\"1\"}}}");
+    }
+    if (method == "notifications/initialized" || method == "ping") {
+      return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{}}");
+    }
+
+    if (method == "tools/list") {
+      let specs = mcpExportedTools();
+      let out = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"tools\":[";
+      let i: int = 0;
+      while (i < specs.length) {
+        if (i > 0) { out = out + ","; }
+        out = out + "{\"name\":" + JSON.stringify(specs[i].name)
+          + ",\"description\":" + JSON.stringify(specs[i].description)
+          + ",\"inputSchema\":" + specs[i].schema + "}";
+        i = i + 1;
+      }
+      return ok(out + "]}}");
+    }
+
+    if (method == "tools/call") {
+      let params = jsonRaw(req.body, "params");
+      let name = jsonText(params, "name");
+      let args = jsonRaw(params, "arguments");
+      if (args == "") { args = "{}"; }
+      let owner = owningTag(callerTags(req));
+      let answered = mcpDispatch(this.db, owner, name, args);
+      if (!answered.handled) {
+        return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id
+          + ",\"error\":{\"code\":-32601,\"message\":" + JSON.stringify("no tool named " + name) + "}}");
+      }
+      // The protocol's own failure shape: a result with isError, so the
+      // calling agent reads the sentence instead of a transport fault.
+      return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{"
+        + "\"content\":[{\"type\":\"text\",\"text\":" + JSON.stringify(answered.text) + "}],"
+        + "\"isError\":" + (answered.ok ? "false" : "true") + "}}");
+    }
+
+    return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id
+      + ",\"error\":{\"code\":-32601,\"message\":\"unknown method\"}}");
+  }
+}
+
+/** Every family a caller with no conversation can use. */
+function mcpExportedTools(): ToolSpec[] {
+  let out: ToolSpec[] = [];
+  let families: ToolSpec[][] = [
+    taskTools(), workflowTools(), triggerTools(), agentTools(),
+    knowledgeTools(), projectTools(),
+  ];
+  let f: int = 0;
+  while (f < families.length) {
+    let one = families[f];
+    let i: int = 0;
+    while (i < one.length) { out.push(one[i]); i = i + 1; }
+    f = f + 1;
+  }
+  return out;
+}
+
+/** One call, tried against each family — the run loop's dispatch, minus the
+ *  thread-bound families an MCP caller cannot hold. */
+function mcpDispatch(db: Db, owner: string, name: string, args: string): FileToolResult {
+  let nowMs = Date.now() as number;
+  let scheduled = callTaskTool(db, { owner: owner, agentId: "", modelChoiceId: "", name: name, args: args, nowMs: nowMs });
+  if (scheduled.handled) { return scheduled; }
+  let flowed = callWorkflowTool(db, { owner: owner, agentId: "", name: name, args: args, nowMs: nowMs });
+  if (flowed.handled) { return flowed; }
+  let botted = callTriggerTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
+  if (botted.handled) { return botted; }
+  let selfed = callAgentTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
+  if (selfed.handled) { return selfed; }
+  let known = callKnowledgeTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
+  if (known.handled) { return known; }
+  // Projects, threadless: list and create work anywhere; move_to_project
+  // refuses with its own sentence, since an MCP caller holds no conversation.
+  let grouped = callProjectTool(db, { owner: owner, threadId: "", name: name, args: args, nowMs: nowMs });
+  if (grouped.handled) { return grouped; }
+  let none: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
+  return none;
+}
+
 // Whether this process is worth sending a request to, and which build it is.
 //
 // The one route that answers without a bearer token (`bearerRefused` below)
@@ -6954,6 +7079,7 @@ function main(): void {
     new ProjectApi(db),
     new WorkflowApi(db),
     new TriggerApi(db, master),
+    new McpServerApi(db),
     new ScriptImageApi(db),
     new SkillApi(db),
     new TemplateApi(db),
