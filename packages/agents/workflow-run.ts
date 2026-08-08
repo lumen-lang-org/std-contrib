@@ -26,7 +26,7 @@ import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
-import { queueOutbound, queueOutboundWith } from "./triggers.ts";
+import { queueOutbound, queueOutboundFile, queueOutboundWith } from "./triggers.ts";
 import { RunContext, runAgentAt } from "./run.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
@@ -383,7 +383,18 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       // Queued now, mid-walk, not gathered at the end: the whole point of an
       // intermediate reply is that "searching…" arrives while the search is
       // still running. The poller drains the queue on its next pass.
-      queueOutbound(db, bot, chat, runId, saying, Date.now() as number);
+      //
+      // A reply whose BODY names an artifact path sends that document, with
+      // the text as its caption — the outbound half of TELEGRAM-FILES.md.
+      // The path is templated like everything ({{node.x}} can name a file a
+      // script step wrote), and it resolves on the RUN'S OWN THREAD, which
+      // is where every step's files land.
+      let sendPath = fill(node.body, ctx).trim();
+      if (sendPath != "") {
+        queueOutboundFile(db, bot, chat, runId, saying, threadId, sendPath, Date.now() as number);
+      } else {
+        queueOutbound(db, bot, chat, runId, saying, Date.now() as number);
+      }
       // {{prev}} passes through untouched — the CONDITION rule, for the same
       // reason: a step that talks to the person must not break the chain the
       // next step reads. What was said is on the row as its input.

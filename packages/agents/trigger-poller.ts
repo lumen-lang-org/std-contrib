@@ -34,6 +34,7 @@ import { connectDatabase } from "../plume/plume.ts";
 import { credentialFor, masterKey } from "./credentials.ts";
 import { TriggerBotRow, TriggerOutboxRow, botById, claimBot, markOutboundSent, mayRun, nextOffset, noteBotPass, parkFile, recentRuns, refuseMessage, replyKeyboard, saveBot, takeMessage, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
+import { binaryKind, getArtifact, getVersion } from "./artifacts.ts";
 
 // How long Telegram holds the request open with nothing to say. Long enough
 // that an idle bot costs about two requests a minute; short enough that the
@@ -187,7 +188,11 @@ function sendAnswers(db: Db, bot: TriggerBotRow, token: string): void {
   while (o < speaking.length && o < SEND_PER_PASS) {
     let out = speaking[o];
     try {
-      if (out.text.trim() != "") { sendMessage(token, out.chatId, out.text, replyKeyboard(out.options ?? "")); }
+      if ((out.filePath ?? "") != "") {
+        sendDocument(db, token, out);
+      } else if (out.text.trim() != "") {
+        sendMessage(token, out.chatId, out.text, replyKeyboard(out.options ?? ""));
+      }
       markOutboundSent(db, out.id, Date.now() as number);
     } catch (e) {
       console.error("trigger-poller: outbox " + out.id + ": " + e.message);
@@ -221,6 +226,37 @@ function getUpdates(token: string, offset: string): string {
   // the caller: it records the pass and asks again.
   if (!res.ok) { return ""; }
   return res.body;
+}
+
+/** A document from the store to the phone: resolved at send time, decoded
+ *  when the store holds base64 (the binaryKind boundary), and posted as the
+ *  multipart upload Telegram's sendDocument wants. A Lumen string carries
+ *  arbitrary bytes, which is the whole reason this can be built by hand. */
+function sendDocument(db: Db, token: string, out: TriggerOutboxRow): void {
+  let art = getArtifact(db, out.fileThread ?? "", out.filePath ?? "");
+  if (art.id == "") {
+    sendMessage(token, out.chatId, "The file " + (out.filePath ?? "") + " is not there any more.", "");
+    return;
+  }
+  let held = getVersion(db, art.id, art.currentVersion);
+  let bytes = binaryKind(art.kind) ? crypto.base64Decode(held.body) : held.body;
+  let parts = (out.filePath ?? "/file").split("/");
+  let name = parts.length == 0 ? "file" : parts[parts.length - 1];
+  if (name == "") { name = "file"; }
+  let B = "JouleBoundary7d29c1";
+  let body = "--" + B + "\r\n"
+    + "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + out.chatId + "\r\n"
+    + (out.text.trim() == "" ? "" : "--" + B + "\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n" + out.text + "\r\n")
+    + "--" + B + "\r\n"
+    + "Content-Disposition: form-data; name=\"document\"; filename=\"" + name + "\"\r\n"
+    + "Content-Type: application/octet-stream\r\n\r\n"
+    + bytes + "\r\n--" + B + "--\r\n";
+  let headers = new Map<string, string>();
+  headers.set("content-type", "multipart/form-data; boundary=" + B);
+  let res = http.request(api(token, "sendDocument"), "POST", body, headers);
+  if (!res.ok || res.status >= 400) {
+    throw new Error("telegram refused the document: " + `${res.status}` + " " + res.body.slice(0, 120));
+  }
 }
 
 function sendMessage(token: string, chatId: string, text: string, markup: string): void {

@@ -239,6 +239,12 @@ export type TriggerOutboxRow = {
   status: string,
   // Options to offer as tap buttons, one per line; "" is a plain message.
   options?: string,
+  // An artifact to send as a document: the conversation it lives on and its
+  // path there. The POLLER resolves it at send time — bytes do not belong in
+  // this table, and an artifact edited between queue and send should go out
+  // as it stands, not as it stood.
+  fileThread?: string,
+  filePath?: string,
   createdAt: string,
   updatedAt: string,
 };
@@ -270,6 +276,8 @@ export function triggerOutboxMapping(): DbRepository {
     // options; non-empty means the poller sends them as a one-time reply
     // keyboard, and the tap comes back as an ordinary message.
     field("options", "options", "text"),
+    field("fileThread", "file_thread", "text"),
+    field("filePath", "file_path", "text"),
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
@@ -358,6 +366,10 @@ export function triggersPlan(db: Db): Migration[] {
       "ALTER TABLE trigger_inbox ADD COLUMN file_body " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.8", "who spoke, in a group",
       "ALTER TABLE trigger_inbox ADD COLUMN speaker " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("107.9", "a reply can send a document: where it lives",
+      "ALTER TABLE trigger_outbox ADD COLUMN file_thread " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("108", "and its path there",
+      "ALTER TABLE trigger_outbox ADD COLUMN file_path " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -745,6 +757,20 @@ export function queueOutboundWith(db: Db, botId: string, chatId: string, runId: 
   let row: TriggerOutboxRow = {
     id: crypto.randomUUID(), botId: botId, chatId: chatId, runId: runId,
     text: plainly(text), status: "queued", options: options.trim(),
+    fileThread: "", filePath: "",
+    createdAt: now, updatedAt: now,
+  };
+  persist(db, triggerOutboxMapping(), JSON.stringify(row));
+  return row.id;
+}
+
+/** A document on its way out: the reply's text becomes the caption. */
+export function queueOutboundFile(db: Db, botId: string, chatId: string, runId: string, caption: string, fileThread: string, filePath: string, nowMs: number): string {
+  let now = `${nowMs}`;
+  let row: TriggerOutboxRow = {
+    id: crypto.randomUUID(), botId: botId, chatId: chatId, runId: runId,
+    text: plainly(caption), status: "queued", options: "",
+    fileThread: fileThread, filePath: filePath,
     createdAt: now, updatedAt: now,
   };
   persist(db, triggerOutboxMapping(), JSON.stringify(row));
