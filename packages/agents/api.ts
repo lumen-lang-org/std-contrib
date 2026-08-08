@@ -2611,28 +2611,9 @@ class ServerApi {
     return noContent();
   }
 
-  // What this server offers, for the canvas: a Connector step's panel lists
-  // these by name and description so a person picks a tool rather than
-  // typing one. Per-caller, because the token is — the same Linear answers
-  // a different tool list to somebody who never signed in (namely: a
-  // problem, which the panel shows in place of a picker).
-  @get("/:id/tools")
-  tools(req: Request): Reply {
-    let document = findById(this.db, mcpServersMapping(), param(req, "id"));
-    if (document == "") { return notFound("server " + param(req, "id")); }
-    let server: McpServerRow = JSON.parse<McpServerRow>(document);
-    let token = accessTokenFor(this.db, server, owningTag(callerTags(req)), this.master);
-    let listing = toolListing(server, token);
-    let out = "{\"problem\":" + JSON.stringify(listing.problem) + ",\"tools\":[";
-    let i: int = 0;
-    while (i < listing.tools.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + "{\"name\":" + JSON.stringify(listing.tools[i].name)
-        + ",\"description\":" + JSON.stringify(listing.tools[i].description) + "}";
-      i = i + 1;
-    }
-    return ok(out + "]}");
-  }
+  // (The tools listing lives at 2401 — another hand had already built
+  // GET /:id/tools when this controller grew a second copy, and the router
+  // refuses a route that can never match rather than letting it shadow.)
 
   // Whether each connector is connected, for whoever is asking.
   //

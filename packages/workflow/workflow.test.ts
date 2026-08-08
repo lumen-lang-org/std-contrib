@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, emptyNode, fill, refuse, startOf, switchBranch, walk } from "./workflow.ts";
+import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, emptyNode, fill, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -483,4 +483,49 @@ test("a workflow that begins at a message must say something back", () => {
   let byHand = graphOf([node("s", "START"), node("a", "AGENT"), node("z", "END")],
     [edge("e1", "s", "a", ""), edge("e2", "a", "z", "")]);
   expect(refuse(byHand) == "");
+});
+
+// A step function that suspends at an ASK and echoes everywhere else — the
+// runner's adapter in miniature.
+function askOrEcho(n: WfNode, ctx: WalkCtx): StepResult {
+  if (n.type == "TELEGRAM_ASK") {
+    let paused: StepResult = { ok: true, output: "asked", branch: "", error: "", input: ctx.prev, suspend: true };
+    return paused;
+  }
+  return echo(n, ctx);
+}
+
+test("an ask stops the walk successfully, and the reply resumes past it", () => {
+  ticks = 0;
+  let g = graphOf([node("t", "TELEGRAM"),
+    withText(node("q", "TELEGRAM_ASK"), "create it? yes/no"),
+    node("d", "AGENT"),
+    withText(node("say", "TELEGRAM_REPLY"), "{{prev}}")],
+    [edge("e1", "t", "q", ""), edge("e2", "q", "d", ""), edge("e3", "d", "say", "")]);
+  expect(refuse(g) == "");
+
+  // The first half: walks to the question and stops there, OK.
+  let paused = walk(g, "make me an issue", askOrEcho, tick, deaf);
+  expect(paused.ok);
+  expect((paused.waitingAt ?? "") == "q");
+  expect(paused.steps.length == 2);
+
+  // The second half: the person said yes, and the step after the question
+  // reads the REPLY as {{prev}} — not the question, not the old chain.
+  let outs: WfOut[] = [];
+  let t0: WfOut = { nodeId: "t", output: "t(make me an issue)" };
+  outs.push(t0);
+  let resumed = walkFrom(g, "make me an issue", "q", "yes", outs, askOrEcho, tick, deaf);
+  expect(resumed.ok);
+  expect((resumed.waitingAt ?? "") == "");
+  expect(resumed.steps[0].nodeId == "d");
+  expect(resumed.steps[0].input == "yes");
+  expect(resumed.answer == "say(d(yes))");
+});
+
+test("an ask needs a telegram trigger in front of it", () => {
+  let stray = graphOf([node("s", "START"),
+    withText(node("q", "TELEGRAM_ASK"), "sure?"), node("z", "END")],
+    [edge("e1", "s", "q", ""), edge("e2", "q", "z", "")]);
+  expect(refuse(stray).indexOf("Telegram trigger") >= 0);
 });

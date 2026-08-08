@@ -33,12 +33,12 @@ import { connectDatabase, findById, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
 import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, withGraph, workflowsMapping } from "./workflow-store.ts";
-import { WorkflowAsk, runWorkflow } from "./workflow-run.ts";
+import { ResumeAsk, WorkflowAsk, resumeWorkflow, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
 import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
-import { TriggerInboxRow, botById, claimMessage, finishMessage, noteThread, plainly, testingDraft, threadForChat } from "./triggers.ts";
+import { TRIGGER_ASK_TTL_MS, TriggerInboxRow, TriggerPendingRow, botById, claimMessage, finishMessage, forgetAsk, noteThread, pendingFor, plainly, rememberAsk, testingDraft, threadForChat } from "./triggers.ts";
 
 // How many tasks one pass will fire before leaving the rest to the next tick.
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
@@ -166,6 +166,21 @@ function queuedMessages(db: Db): int {
   return parseInt(db.value(0, 0), 10) ?? 0;
 }
 
+/** A walk stopped mid-question: keep what the resume needs, keyed to the
+ *  chat, with an expiry — the one rule that makes "yes" safe. */
+function rememberOpenQuestion(db: Db, msg: TriggerInboxRow, flow: WorkflowRow, done: WorkflowDone): void {
+  let now = Date.now() as number;
+  let row: TriggerPendingRow = {
+    id: crypto.randomUUID(), botId: msg.botId, chatId: msg.chatId,
+    workflowId: flow.id, runId: done.runId, nodeId: done.waitingAt ?? "",
+    graph: flow.graph, input: msg.input, outputs: done.outputsSoFar ?? "[]",
+    threadId: done.threadId,
+    expiresAt: `${now + (TRIGGER_ASK_TTL_MS as number)}`,
+    createdAt: `${now}`,
+  };
+  rememberAsk(db, row);
+}
+
 function drainTriggers(db: Db, master: string): void {
   let answered: int = 0;
   // Until dry, not a fixed few: this runs in a child whose whole job is the
@@ -194,6 +209,47 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     return;
   }
   let flow: WorkflowRow = JSON.parse<WorkflowRow>(doc);
+
+  // An open question outranks a fresh start: if this chat was asked
+  // something and answered within the question's lifetime, this message IS
+  // the answer, and the suspended walk continues from the asking node with
+  // it as {{prev}}. Expired questions fall through — "yes" must never fire
+  // an action proposed yesterday.
+  let open = pendingFor(db, msg.botId, msg.chatId, Date.now() as number);
+  if (open.id != "") {
+    forgetAsk(db, open.id);
+    let stepsSoFar = "[]";
+    let runDoc = findById(db, workflowRunsMapping(), open.runId);
+    // jsonText, not jsonRaw: `steps` is a STRING column holding JSON, so the
+    // raw scanner answers it still wearing its quotes and the typed parse
+    // refuses. The ok/update_id lesson from the other direction.
+    if (runDoc != "") { stepsSoFar = jsonText(runDoc, "steps"); }
+    let held: ResumeAsk = {
+      runId: open.runId, threadId: open.threadId, graph: open.graph,
+      nodeId: open.nodeId, input: open.input, outputs: open.outputs,
+      stepsSoFar: stepsSoFar == "" ? "[]" : stepsSoFar,
+      startedAt: jsonText(runDoc, "startedAt"),
+      reply: msg.input, master: master, nowMs: Date.now() as number,
+      botId: msg.botId, chatId: msg.chatId,
+    };
+    let resumed = resumeWorkflow(db, flow, held);
+    if (resumed.threadId != "") { noteThread(db, msg.id, resumed.threadId); }
+    if ((resumed.waitingAt ?? "") != "") {
+      // A second question in the same walk: the NEXT resume must keep
+      // walking the bytes this one walked, not whatever the draft has
+      // become since the first suspension.
+      rememberOpenQuestion(db, msg, withGraph(flow, open.graph), resumed);
+      finishMessage(db, msg, "done", resumed.runId, "", "", Date.now() as number);
+      return;
+    }
+    if (!resumed.ok) {
+      finishMessage(db, msg, "failed", resumed.runId, "", resumed.error, Date.now() as number);
+      return;
+    }
+    finishMessage(db, msg, "done", resumed.runId, plainly(resumed.answer), "", Date.now() as number);
+    return;
+  }
+
   // A message walks the PUBLISHED graph — except inside the bot's test
   // window, when the person editing pointed their own bot at the draft on
   // purpose, loudly, and for a bounded time. The window is a timestamp
@@ -222,6 +278,13 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
   // failed still opened one, and the next message should continue it rather
   // than start a third.
   if (done.threadId != "") { noteThread(db, msg.id, done.threadId); }
+  if ((done.waitingAt ?? "") != "") {
+    // Stopped to ask. The question already left through the outbox; what
+    // remains is remembering enough to continue when the answer comes.
+    rememberOpenQuestion(db, msg, flow, done);
+    finishMessage(db, msg, "done", done.runId, "", "", Date.now() as number);
+    return;
+  }
   if (!done.ok) {
     finishMessage(db, msg, "failed", done.runId, "", done.error, Date.now() as number);
     return;

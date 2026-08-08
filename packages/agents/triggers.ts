@@ -244,6 +244,53 @@ export function triggerOutboxMapping(): DbRepository {
   return repository("trigger_outbox", "id", "id", fs);
 }
 
+// A question a workflow asked, waiting for its chat to answer. One per
+// (bot, chat): a new question replaces the old, because two open questions
+// in one chat means the next message answers an ambiguous one.
+export type TriggerPendingRow = {
+  id: string,
+  botId: string,
+  chatId: string,
+  workflowId: string,
+  // The suspended run, whose trail the resume appends to.
+  runId: string,
+  // The asking node, and the GRAPH BYTES that were being walked — a resume
+  // walks what was suspended, not whatever the graph has become since.
+  nodeId: string,
+  graph: string,
+  // The run's original {{input}} and the outputs of the first half, so
+  // {{node.x}} keeps resolving across the gap.
+  input: string,
+  outputs: string,
+  threadId: string,
+  // Past this instant the question is stale: the next message starts fresh
+  // rather than answering something asked yesterday.
+  expiresAt: string,
+  createdAt: string,
+};
+
+export function triggerPendingMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("botId", "bot_id", "text"),
+    field("chatId", "chat_id", "text"),
+    field("workflowId", "workflow_id", "text"),
+    field("runId", "run_id", "text"),
+    field("nodeId", "node_id", "text"),
+    field("graph", "graph", "text"),
+    field("input", "input", "text"),
+    field("outputs", "outputs", "text"),
+    field("threadId", "thread_id", "text"),
+    field("expiresAt", "expires_at", "text"),
+    field("createdAt", "created_at", "text"),
+  ];
+  return repository("trigger_pending", "id", "id", fs);
+}
+
+// How long a question stays answerable. Half an hour: long enough to read a
+// phone, short enough that "yes" cannot fire an action proposed yesterday.
+export const TRIGGER_ASK_TTL_MS: int = 1800000;
+
 export function triggersPlan(db: Db): Migration[] {
   // 106: 105 is the highest recorded. Check
   // `SELECT version FROM plume_schema_history ORDER BY installed_rank DESC`
@@ -269,6 +316,8 @@ export function triggersPlan(db: Db): Migration[] {
     // history.
     migration("107.3", "a bounded window where a bot tests the draft",
       "ALTER TABLE trigger_bots ADD COLUMN draft_until " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("107.4", "a question waiting for its chat to answer",
+      createTableSql(db, triggerPendingMapping())),
   ];
 }
 
@@ -627,6 +676,42 @@ export function testingDraft(bot: TriggerBotRow, nowMs: number): bool {
 export function markOutboundSent(db: Db, id: string, nowMs: number): void {
   db.query("UPDATE trigger_outbox SET status = 'sent', updated_at = " + db.placeholder
     + " WHERE id = " + placeholderAt(db, 2), [`${nowMs}`, id]);
+}
+
+/** The open question for this chat, or an empty row. Expired rows answer
+ *  empty AND are deleted here, so staleness is one rule in one place. */
+export function pendingFor(db: Db, botId: string, chatId: string, nowMs: number): TriggerPendingRow {
+  let rows = JSON.parse<TriggerPendingRow[]>(listWhere(db, triggerPendingMapping(),
+    "bot_id = " + db.placeholder + " AND chat_id = " + placeholderAt(db, 2),
+    [botId, chatId]));
+  if (rows.length == 0) { return emptyPending(); }
+  let held = rows[0];
+  if (stampMs(held.expiresAt) <= nowMs) {
+    db.query("DELETE FROM trigger_pending WHERE id = " + db.placeholder, [held.id]);
+    return emptyPending();
+  }
+  return held;
+}
+
+/** A question asked: remember what a resume needs. Replaces any open
+ *  question for the chat — two at once would make the next message an answer
+ *  to an ambiguous one. */
+export function rememberAsk(db: Db, row: TriggerPendingRow): void {
+  db.query("DELETE FROM trigger_pending WHERE bot_id = " + db.placeholder
+    + " AND chat_id = " + placeholderAt(db, 2), [row.botId, row.chatId]);
+  persist(db, triggerPendingMapping(), JSON.stringify(row));
+}
+
+export function forgetAsk(db: Db, id: string): void {
+  db.query("DELETE FROM trigger_pending WHERE id = " + db.placeholder, [id]);
+}
+
+export function emptyPending(): TriggerPendingRow {
+  let none: TriggerPendingRow = {
+    id: "", botId: "", chatId: "", workflowId: "", runId: "", nodeId: "",
+    graph: "", input: "", outputs: "", threadId: "", expiresAt: "", createdAt: "",
+  };
+  return none;
 }
 
 /** The conversation this chat is already having, or "".
