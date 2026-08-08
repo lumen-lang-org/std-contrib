@@ -58,8 +58,8 @@ function call(owner: string, name: string, args: string): Said {
   return out;
 }
 
-test("four names answer, and show carries the whole prompt", () => {
-  expect(agentTools().length == 4);
+test("five names answer, and show carries the whole prompt", () => {
+  expect(agentTools().length == 5);
   expect(!call("o1", "schedule_task", "{}").handled);
   let shown = call("o1", "show_agent", "{\"agent\":\"helper\"}");
   expect(shown.ok);
@@ -94,7 +94,27 @@ test("a changed prompt is a new version, and the old one is said to remain", () 
 test("nothing sent, nothing changed — and it says what could be", () => {
   let idle = call("o1", "change_agent", "{\"agent\":\"helper\"}");
   expect(!idle.ok);
-  expect(idle.text.includes("description, prompt, model_config or enabled"));
+  expect(idle.text.includes("add_skill or prompt_version"));
   let guest = call("guest:x", "list_agents", "{}");
   expect(!guest.ok);
+});
+
+test("rollback repoints, delete refuses the default and takes the rest", () => {
+  // v1 was "You help."; write v2, then roll back to v1.
+  let v2 = call("o1", "change_agent", "{\"agent\":\"helper\",\"prompt\":\"You help, tersely.\"}");
+  expect(v2.ok);
+  let back = call("o1", "change_agent", "{\"agent\":\"helper\",\"prompt_version\":1}");
+  expect(back.ok);
+  expect(back.text.includes("rolled to v1"));
+  let shown = call("o1", "show_agent", "{\"agent\":\"helper\"}");
+  expect(shown.text.includes("You help."));
+  expect(!shown.text.includes("tersely"));
+
+  // The default cannot be deleted; a bystander can.
+  let refused = call("o1", "delete_agent", "{\"agent\":\"helper\"}");
+  expect(!refused.ok);
+  expect(refused.text.includes("default"));
+  let bye = call("o1", "delete_agent", "{\"agent\":\"french-tutor\"}");
+  expect(bye.ok);
+  expect(call("o1", "show_agent", "{\"agent\":\"french-tutor\"}").ok == false);
 });

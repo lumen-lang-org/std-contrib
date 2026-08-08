@@ -19,7 +19,7 @@
 //   cd packages/agents && lumen test agent-tools.test.ts
 
 import { Db } from "../plume/driver.ts";
-import { DbOrder, asc, desc, existsById, findById, listOrdered, pageOrdered, persist } from "../plume/plume.ts";
+import { DbOrder, asc, desc, executeWith, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
@@ -79,7 +79,17 @@ export function agentTools(): ToolSpec[] {
     + "\"description\":{\"type\":\"string\",\"description\":\"A new one-liner.\"},"
     + "\"prompt\":{\"type\":\"string\",\"description\":\"The WHOLE new system prompt, not a diff. Saved as a new version.\"},"
     + "\"model_config\":{\"type\":\"string\",\"description\":\"A model config id or label to run on.\"},"
-    + "\"enabled\":{\"type\":\"boolean\",\"description\":\"false switches it off everywhere it is named.\"}},"
+    + "\"enabled\":{\"type\":\"boolean\",\"description\":\"false switches it off everywhere it is named.\"},"
+    + "\"default\":{\"type\":\"boolean\",\"description\":\"true makes it the agent new conversations open against — the old default steps down.\"},"
+    + "\"add_skill\":{\"type\":\"string\",\"description\":\"A skill name from list_skills to attach, so this agent can use_skill it.\"},"
+    + "\"prompt_version\":{\"type\":\"number\",\"description\":\"Roll the prompt back (or forward) to this version of its history. show_agent names the current one.\"}},"
+    + "\"required\":[\"agent\"]}"));
+
+  out.push(toolSpec("delete_agent",
+    "Remove an agent. Refused for the default agent; workflow steps that name a deleted agent "
+    + "fail with its name when they next run — say so if any might.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"agent\":{\"type\":\"string\",\"description\":\"" + which + "\"}},"
     + "\"required\":[\"agent\"]}"));
 
   return out;
@@ -188,6 +198,27 @@ function writePromptVersion(db: Db, promptName: string, body: string, nowMs: num
   return row.id;
 }
 
+function findSkill(db: Db, said: string): string {
+  let sql = "SELECT id FROM skills WHERE LOWER(skill_name) = " + db.placeholder;
+  if (!db.query(sql, [said.toLowerCase()])) { return ""; }
+  if (db.rows() != 1) { return ""; }
+  return db.value(0, 0);
+}
+
+function promptAtVersion(db: Db, promptName: string, version: int): string {
+  let sql = "SELECT id FROM prompts WHERE prompt_name = " + db.placeholder
+    + " AND version = " + placeholderAt(db, 2);
+  if (!db.query(sql, [promptName, `${version}`])) { return ""; }
+  if (db.rows() != 1) { return ""; }
+  return db.value(0, 0);
+}
+
+function boolLit(db: Db, v: bool): string {
+  // The dialect split boolColumn exists for, at the literal.
+  if (db.name == "postgres") { return v ? "TRUE" : "FALSE"; }
+  return v ? "1" : "0";
+}
+
 function describeAgent(db: Db, agent: AgentRow, withPrompt: bool): string {
   let config = configSaid(db, agent.modelConfigId);
   let line = agent.agentName + " [" + agent.id + "]"
@@ -205,7 +236,8 @@ function describeAgent(db: Db, agent: AgentRow, withPrompt: bool): string {
 
 export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   if (call.name != "list_agents" && call.name != "show_agent"
-    && call.name != "create_agent" && call.name != "change_agent") {
+    && call.name != "create_agent" && call.name != "change_agent"
+    && call.name != "delete_agent") {
     return not();
   }
   // The workflows gate: what a signed-in person may do in Settings they may
@@ -263,13 +295,26 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     return yes(describeAgent(db, agent, true));
   }
 
+  if (call.name == "delete_agent") {
+    if (agent.isDefault) {
+      return no("\"" + agent.agentName + "\" is the default agent — make another the default first (change_agent with default: true).");
+    }
+    executeWith(db, "DELETE FROM agent_skills WHERE agent_id = " + db.placeholder, [agent.id]);
+    executeWith(db, "DELETE FROM agents WHERE id = " + db.placeholder, [agent.id]);
+    return yes("Deleted \"" + agent.agentName + "\". Any workflow step or bot that still names it will fail with its name — worth checking if one might.");
+  }
+
   // change_agent.
   let description = jsonText(call.args, "description").trim();
   let promptText = jsonText(call.args, "prompt");
   let configWord = jsonText(call.args, "model_config").trim();
   let enabledRaw = jsonRaw(call.args, "enabled").trim();
-  if (description == "" && promptText.trim() == "" && configWord == "" && enabledRaw == "") {
-    return no("say what changes: description, prompt, model_config or enabled.");
+  let wantDefault = jsonRaw(call.args, "default").trim() == "true";
+  let addSkill = jsonText(call.args, "add_skill").trim();
+  let promptVersionRaw = jsonRaw(call.args, "prompt_version").trim();
+  if (description == "" && promptText.trim() == "" && configWord == "" && enabledRaw == ""
+    && !wantDefault && addSkill == "" && promptVersionRaw == "") {
+    return no("say what changes: description, prompt, model_config, enabled, default, add_skill or prompt_version.");
   }
   let configId = agent.modelConfigId;
   let note = "";
@@ -279,7 +324,29 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     configId = config.id;
     note = " Now on " + config.label + ".";
   }
+  if (addSkill != "") {
+    let sk = findSkill(db, addSkill);
+    if (sk == "") { return no("no skill called \"" + addSkill + "\" — list_skills shows them."); }
+    executeWith(db, "DELETE FROM agent_skills WHERE agent_id = " + db.placeholder
+      + " AND skill_id = " + placeholderAt(db, 2), [agent.id, sk]);
+    executeWith(db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
+      + db.placeholder + ", " + placeholderAt(db, 2) + ")", [agent.id, sk]);
+    note = note + " Skill \"" + addSkill + "\" attached.";
+  }
+  if (wantDefault && !agent.isDefault) {
+    executeWith(db, "UPDATE agents SET is_default = " + boolLit(db, false)
+      + " WHERE is_default = " + boolLit(db, true), []);
+    note = note + " It is the default now.";
+  }
   let promptId = agent.promptId;
+  if (promptVersionRaw != "") {
+    let wantV = parseInt(promptVersionRaw, 10) ?? 0;
+    let old = promptOf(db, agent.promptId);
+    let found = promptAtVersion(db, old.promptName, wantV);
+    if (found == "") { return no("\"" + old.promptName + "\" has no version " + `${wantV}` + " — show_agent names the current one."); }
+    promptId = found;
+    note = note + " Prompt rolled to v" + `${wantV}` + ".";
+  }
   if (promptText.trim() != "") {
     let old = promptOf(db, agent.promptId);
     promptId = writePromptVersion(db, old.promptName == "" ? agent.agentName : old.promptName,
@@ -292,7 +359,7 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     description: description == "" ? agent.description : description,
     modelConfigId: configId, promptId: promptId,
     enabled: enabledRaw == "" ? agent.enabled : enabledRaw == "true",
-    isDefault: agent.isDefault, scriptImageId: agent.scriptImageId,
+    isDefault: wantDefault ? true : agent.isDefault, scriptImageId: agent.scriptImageId,
     updatedAt: `${call.nowMs}`,
   };
   persist(db, agentsMapping(), JSON.stringify(edited));
