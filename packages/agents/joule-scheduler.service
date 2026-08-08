@@ -22,6 +22,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# The pass launches detached runner processes (scheduler.ts, child mode) and
+# then exits. The default KillMode reaps the whole cgroup at that exit — which
+# killed every runner mid-walk, silently, setsid and nohup notwithstanding:
+# a cgroup is not a process group. KillMode=process stops only the pass.
+KillMode=process
 User=ubuntu
 WorkingDirectory=/home/ubuntu/projects/std-contrib/packages/agents
 EnvironmentFile=/home/ubuntu/projects/std-contrib/packages/agents/.env
