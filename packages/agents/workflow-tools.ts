@@ -34,7 +34,7 @@ import { FileToolResult } from "./workspace.ts";
 import { jsonFlag, jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { maySchedule } from "./task-tools.ts";
 import { civil, knownZone } from "./../cron/cron.ts";
-import { WfEdge, WfGraph, WfNode, WfView, emptyNode, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
+import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
 import { stampMs } from "./tasks.ts";
 
@@ -46,8 +46,10 @@ const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\
   + "\\\"http\\\" (fetch a url), \\\"script\\\" (compiled Lumen, run sandboxed), "
   + "\\\"reply\\\" (say text to the Telegram chat mid-walk and keep going), "
   + "\\\"ask\\\" (ask the Telegram chat and STOP until they answer; give options and they become tap buttons), "
-  + "\\\"connector\\\" (call one tool on a connected server such as linear)";
-const KINDS_SENTENCE = "the kinds are agent, model, web_search, knowledge, http, script, reply, ask and connector";
+  + "\\\"connector\\\" (call one tool on a connected server such as linear), "
+  + "\\\"switch\\\" (route on the previous step's answer — give cases, one per line; every branch first "
+  + "points at the next step, and connect_steps re-points each case)";
+const KINDS_SENTENCE = "the kinds are agent, model, web_search, knowledge, http, script, reply, ask, connector and switch";
 
 export type WorkflowToolCall = {
   owner: string,
@@ -114,6 +116,7 @@ export function workflowTools(): ToolSpec[] {
     + "\"text\":{\"type\":\"string\",\"description\":\"What the step does: the instruction for agent or model, the query for web_search or knowledge, the url for http (GET).\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas, such as \\\"Search the news\\\".\"},"
     + "\"options\":{\"type\":\"string\",\"description\":\"ask only: the choices offered as tap buttons, one per line.\"},"
+    + "\"cases\":{\"type\":\"string\",\"description\":\"switch only: the values it routes on, one per line.\"},"
     + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id, from the Connectors page — such as linear.\"},"
     + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
     + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"}},"
@@ -121,6 +124,17 @@ export function workflowTools(): ToolSpec[] {
     + "\"schedule\":{\"type\":\"string\",\"description\":\"" + schedule + "\"},"
     + "\"timezone\":{\"type\":\"string\",\"description\":\"" + zone + "\"}},"
     + "\"required\":[\"name\",\"steps\"]}"));
+
+  out.push(toolSpec("connect_steps",
+    "Point an edge: make one step lead to another. For a switch or condition, say which branch — "
+    + "the case's own text (or \\\"else\\\", or \\\"yes\\\"/\\\"no\\\") — and that branch is re-pointed; "
+    + "other branches stay. Without a branch, the step's plain way out is re-pointed.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"workflow\":{\"type\":\"string\",\"description\":\"" + which + "\"},"
+    + "\"from\":{\"type\":\"string\",\"description\":\"" + step + "\"},"
+    + "\"to\":{\"type\":\"string\",\"description\":\"" + step + "\"},"
+    + "\"branch\":{\"type\":\"string\",\"description\":\"For a switch: which case. For a condition: yes or no. Leave out otherwise.\"}},"
+    + "\"required\":[\"workflow\",\"from\",\"to\"]}"));
 
   out.push(toolSpec("publish_workflow",
     "Make the workflow's current draft what production runs. Edits made here land in the DRAFT: "
@@ -140,6 +154,7 @@ export function workflowTools(): ToolSpec[] {
     + "\"text\":{\"type\":\"string\",\"description\":\"What the step does. {{prev}} is the previous step's output.\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas.\"},"
     + "\"options\":{\"type\":\"string\",\"description\":\"ask only: the choices offered as tap buttons, one per line.\"},"
+    + "\"cases\":{\"type\":\"string\",\"description\":\"switch only: the values it routes on, one per line.\"},"
     + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id — such as linear.\"},"
     + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
     + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"},"
@@ -349,6 +364,8 @@ function describe(row: WorkflowRow, parsedSteps: bool): string {
 export type SaidExtras = {
   // ask: the options offered as tap buttons, one per line.
   options: string,
+  // switch: the values it routes on, one per line.
+  cases: string,
   // connector: which server and which of its tools, and the JSON arguments.
   server: string,
   tool: string,
@@ -356,7 +373,7 @@ export type SaidExtras = {
 };
 
 export function noExtras(): SaidExtras {
-  let none: SaidExtras = { options: "", server: "", tool: "", argsJson: "" };
+  let none: SaidExtras = { options: "", cases: "", server: "", tool: "", argsJson: "" };
   return none;
 }
 
@@ -372,6 +389,7 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
   if (kind == "reply") { made = "TELEGRAM_REPLY"; }
   if (kind == "ask") { made = "TELEGRAM_ASK"; }
   if (kind == "connector" || kind == "mcp") { made = "MCP"; }
+  if (kind == "switch") { made = "SWITCH"; }
   if (made == "") { return base; }
   let built: WfNode = {
     id: id, type: made, name: title,
@@ -387,7 +405,7 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
     query: made == "WEB_SEARCH" || made == "KNOWLEDGE" ? text : "",
     test: "", needle: "", subject: "",
     schedule: "", source: made == "SCRIPT" ? text : "",
-    cases: made == "TELEGRAM_ASK" ? extra.options : "",
+    cases: made == "TELEGRAM_ASK" ? extra.options : made == "SWITCH" ? extra.cases : "",
   };
   return built;
 }
@@ -396,6 +414,7 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
 export function extrasOf(said: string): SaidExtras {
   let held: SaidExtras = {
     options: jsonText(said, "options").trim(),
+    cases: jsonText(said, "cases").trim(),
     server: jsonText(said, "server").trim(),
     tool: jsonText(said, "tool").trim(),
     argsJson: jsonRaw(said, "arguments").trim(),
@@ -449,8 +468,30 @@ function withSchedule(node: WfNode, schedule: string): WfNode {
 }
 
 function edgeOf(from: string, to: string): WfEdge {
-  let e: WfEdge = { id: "e-" + from + "-" + to, from: from, to: to, when: "" };
+  let e: WfEdge = { id: "e" + crypto.randomUUID().slice(0, 8), from: from, to: to, when: "" };
   return e;
+}
+
+/** The edges out of a NEW node toward the old next step. A plain node is one
+ *  edge; a switch is one per case plus else, all pointing the same way until
+ *  connect_steps re-points them — valid and runnable from the first save,
+ *  which beats a switch that saves broken until somebody draws. */
+function branchEdges(node: WfNode, from: string, to: string): WfEdge[] {
+  let out: WfEdge[] = [];
+  if (node.type != "SWITCH") {
+    out.push(edgeOf(from, to));
+    return out;
+  }
+  let all = casesOf(node);
+  let i: int = 0;
+  while (i < all.length) {
+    let e: WfEdge = { id: "e" + crypto.randomUUID().slice(0, 8), from: from, to: to, when: all[i] };
+    out.push(e);
+    i = i + 1;
+  }
+  let elseWay: WfEdge = { id: "e" + crypto.randomUUID().slice(0, 8), from: from, to: to, when: "else" };
+  out.push(elseWay);
+  return out;
 }
 
 /** The row, rebuilt around a new graph and re-timed from its START — the one
@@ -530,7 +571,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     && call.name != "change_step" && call.name != "remove_step"
     && call.name != "schedule_workflow" && call.name != "change_workflow"
     && call.name != "run_workflow" && call.name != "delete_workflow"
-    && call.name != "publish_workflow") {
+    && call.name != "publish_workflow" && call.name != "connect_steps") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -604,8 +645,16 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
         return no("\"" + kind + "\" is not a step kind — " + KINDS_SENTENCE + ".");
       }
       nodes.push(built);
-      edges.push(edgeOf(prevId, id));
+      let prevNode = emptyNode();
+      let pn: int = 0;
+      while (pn < nodes.length) { if (nodes[pn].id == prevId) { prevNode = nodes[pn]; } pn = pn + 1; }
+      let ways = branchEdges(prevNode, prevId, id);
+      let w: int = 0;
+      while (w < ways.length) { edges.push(ways[w]); w = w + 1; }
       prevId = id;
+      // A switch mid-chain: its branches are wired when the NEXT step's edge
+      // is drawn, so the walk stays connected; nothing to do here beyond
+      // remembering that edgeOf(prev=switch) below must fan out.
       i = i + 1;
     }
     nodes.push(startEndNode("END", "", saidSteps.length + 1));
@@ -735,7 +784,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   if (call.name == "add_step") {
     let kind = jsonText(call.args, "kind").trim().toLowerCase();
     let text = jsonText(call.args, "text").trim();
-    if (text == "") { return no("say what the step does: {\"kind\":\"agent\",\"text\":\"...\"}"); }
+    // A switch says nothing — its cases are its meaning; a connector's is
+    // its server and tool. Everything else needs its text.
+    if (text == "" && kind != "switch" && kind != "connector" && kind != "mcp") { return no("say what the step does: {\"kind\":\"agent\",\"text\":\"...\"}"); }
     let saidAfter = jsonText(call.args, "after").trim();
     // Where the splice happens: after the named step, or on the edge into END.
     let fromId = "";
@@ -780,6 +831,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       url: built.url, method: built.method, body: built.body,
       query: built.query, test: built.test, needle: built.needle,
       subject: built.subject, schedule: built.schedule, source: built.source ?? "",
+      // The optional fields ride too — this copy dropped `cases` once and a
+      // said switch arrived caseless, refused by the graph's own rule.
+      cases: built.cases ?? "",
     };
     let nodes: WfNode[] = [];
     let n: int = 0;
@@ -791,7 +845,11 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       let edge = graph.edges[e3];
       if (edge.from == fromId && edge.when == "" && edge.to == oldTo) {
         edges.push(edgeOf(fromId, id));
-        if (oldTo != "") { edges.push(edgeOf(id, oldTo)); }
+        if (oldTo != "") {
+          let fan = branchEdges(placed, id, oldTo);
+          let b: int = 0;
+          while (b < fan.length) { edges.push(fan[b]); b = b + 1; }
+        }
       } else {
         edges.push(edge);
       }
@@ -804,8 +862,39 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     return yes("Added.\n\n" + describe(stored.row, true));
   }
 
-  let node = stepOf(graph, jsonText(call.args, "step").trim());
+  // connect_steps names its anchor "from"; the editing verbs say "step".
+  let anchorSaid = call.name == "connect_steps" ? jsonText(call.args, "from").trim() : jsonText(call.args, "step").trim();
+  let node = stepOf(graph, anchorSaid);
   if (node.id == "") { return no("no step by that id or name — show_workflow lists them."); }
+
+  if (call.name == "connect_steps") {
+    let toSaid = jsonText(call.args, "to").trim();
+    let target = stepOf(graph, toSaid);
+    if (target.id == "") { return no("no step called \"" + toSaid + "\" — show_workflow lists them."); }
+    let branch = jsonText(call.args, "branch").trim();
+    let edges2: WfEdge[] = [];
+    let moved = false;
+    let ec: int = 0;
+    while (ec < graph.edges.length) {
+      let edge = graph.edges[ec];
+      if (edge.from == node.id && edge.when == branch) {
+        let re: WfEdge = { id: edge.id, from: edge.from, to: target.id, when: edge.when };
+        edges2.push(re);
+        moved = true;
+      } else {
+        edges2.push(edge);
+      }
+      ec = ec + 1;
+    }
+    if (!moved) {
+      let fresh2: WfEdge = { id: "e" + crypto.randomUUID().slice(0, 8), from: node.id, to: target.id, when: branch };
+      edges2.push(fresh2);
+    }
+    let rewired: WfGraph = { nodes: graph.nodes, edges: edges2, view: graph.view };
+    let stored = storeGraph(db, row, rewired, row.tz, call.nowMs);
+    if (!stored.ok) { return no(stored.error); }
+    return yes("Connected.\n\n" + describe(stored.row, true));
+  }
 
   if (call.name == "change_step") {
     let text = jsonText(call.args, "text").trim();

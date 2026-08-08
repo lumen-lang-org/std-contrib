@@ -84,9 +84,9 @@ const DRAFT = "{\"name\":\"Morning brief\",\"steps\":["
   + "{\"kind\":\"agent\",\"text\":\"Summarise {{prev}} in five lines\",\"title\":\"Summarise\"}"
   + "],\"schedule\":\"every weekday at 08:00\",\"timezone\":\"Europe/Paris\"}";
 
-test("the eleven names are offered, and nothing else answers to them", () => {
+test("the twelve names are offered, and nothing else answers to them", () => {
   let specs = workflowTools();
-  expect(specs.length == 11);
+  expect(specs.length == 12);
   expect(specs[0].name == "list_workflows");
   // By name, not index: an inserted verb shifted every position once and a
   // test that counts positions re-breaks on every addition.
@@ -350,4 +350,51 @@ test("a chat can draft the telegram shapes, and publish what it drafted", () => 
   expect(out.text.includes("Published"));
   let after = flowsFor("o9");
   expect((after[0].publishedGraph ?? "") == after[0].graph);
+});
+
+test("a said switch lands valid, and connect_steps re-points one branch", () => {
+  let made = call("o9", "add_step",
+    "{\"workflow\":\"Triage over chat\",\"kind\":\"switch\",\"text\":\"\",\"title\":\"Route\",\"cases\":\"Log it\\nSkip\",\"after\":\"s3\"}");
+  expect(made.ok);
+  let rows = flowsFor("o9");
+  let g = parseGraph(rows[0].graph).graph;
+  // Every branch exists from the first save: cases and else all point at
+  // whatever followed the anchor, so the graph never passes through a state
+  // the engine would refuse.
+  let fanned: int = 0;
+  let sid = "";
+  let i: int = 0;
+  while (i < g.nodes.length) { if (g.nodes[i].type == "SWITCH") { sid = g.nodes[i].id; } i = i + 1; }
+  i = 0;
+  while (i < g.edges.length) { if (g.edges[i].from == sid) { fanned = fanned + 1; } i = i + 1; }
+  expect(fanned == 3);
+
+  // Every branch starts at the old next, so re-pointing a CASE to the same
+  // place proves nothing — the meaningful move is a plain edge: route the
+  // connector straight to the switch, skipping the ask.
+  let wired = call("o9", "connect_steps",
+    "{\"workflow\":\"Triage over chat\",\"from\":\"Issues\",\"to\":\"Route\"}");
+  expect(wired.ok);
+  let g2 = parseGraph(flowsFor("o9")[0].graph).graph;
+  i = 0;
+  let issuesTo = "";
+  let askIn = 0;
+  let askId = "";
+  let j: int = 0;
+  while (j < g2.nodes.length) { if (g2.nodes[j].type == "TELEGRAM_ASK") { askId = g2.nodes[j].id; } j = j + 1; }
+  while (i < g2.edges.length) {
+    if (g2.edges[i].to == askId) { askIn = askIn + 1; }
+    if (g2.edges[i].when == "") {
+      let f = g2.edges[i].from;
+      let isIssues = false;
+      let k: int = 0;
+      while (k < g2.nodes.length) { if (g2.nodes[k].id == f && g2.nodes[k].type == "MCP") { isIssues = true; } k = k + 1; }
+      if (isIssues) { issuesTo = g2.edges[i].to; }
+    }
+    i = i + 1;
+  }
+  expect(issuesTo == sid);
+  // The ask is now unwired — reachable by nobody, refused by nothing: a
+  // dangling step is the canvas's to reconnect, not a reason to lose a save.
+  expect(askIn == 0);
 });
