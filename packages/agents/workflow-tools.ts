@@ -43,7 +43,11 @@ import { stampMs } from "./tasks.ts";
 // said); this list is what draft_workflow and add_step accept.
 const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\\\" (one model call, no tools), "
   + "\\\"web_search\\\" (the deployment's web index), \\\"knowledge\\\" (the agent's documents), "
-  + "\\\"http\\\" (fetch a url)";
+  + "\\\"http\\\" (fetch a url), \\\"script\\\" (compiled Lumen, run sandboxed), "
+  + "\\\"reply\\\" (say text to the Telegram chat mid-walk and keep going), "
+  + "\\\"ask\\\" (ask the Telegram chat and STOP until they answer; give options and they become tap buttons), "
+  + "\\\"connector\\\" (call one tool on a connected server such as linear)";
+const KINDS_SENTENCE = "the kinds are agent, model, web_search, knowledge, http, script, reply, ask and connector";
 
 export type WorkflowToolCall = {
   owner: string,
@@ -108,11 +112,23 @@ export function workflowTools(): ToolSpec[] {
     + "\"steps\":{\"type\":\"array\",\"description\":\"The steps, in the order they run.\",\"items\":{\"type\":\"object\",\"properties\":{"
     + "\"kind\":{\"type\":\"string\",\"description\":\"One of " + SAID_KINDS + ".\"},"
     + "\"text\":{\"type\":\"string\",\"description\":\"What the step does: the instruction for agent or model, the query for web_search or knowledge, the url for http (GET).\"},"
-    + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas, such as \\\"Search the news\\\".\"}},"
+    + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas, such as \\\"Search the news\\\".\"},"
+    + "\"options\":{\"type\":\"string\",\"description\":\"ask only: the choices offered as tap buttons, one per line.\"},"
+    + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id, from the Connectors page — such as linear.\"},"
+    + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
+    + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"}},"
     + "\"required\":[\"kind\",\"text\"]}},"
     + "\"schedule\":{\"type\":\"string\",\"description\":\"" + schedule + "\"},"
     + "\"timezone\":{\"type\":\"string\",\"description\":\"" + zone + "\"}},"
     + "\"required\":[\"name\",\"steps\"]}"));
+
+  out.push(toolSpec("publish_workflow",
+    "Make the workflow's current draft what production runs. Edits made here land in the DRAFT: "
+    + "runs a person starts by hand use it at once, but messages and the clock keep running the "
+    + "version last published — so after changing a workflow a bot serves, publish it, and say so.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"workflow\":{\"type\":\"string\",\"description\":\"" + which + "\"}},"
+    + "\"required\":[\"workflow\"]}"));
 
   out.push(toolSpec("add_step",
     "Add one step to a workflow's chain. It is spliced in after the step named — or just before the "
@@ -123,6 +139,10 @@ export function workflowTools(): ToolSpec[] {
     + "\"kind\":{\"type\":\"string\",\"description\":\"One of " + SAID_KINDS + ".\"},"
     + "\"text\":{\"type\":\"string\",\"description\":\"What the step does. {{prev}} is the previous step's output.\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas.\"},"
+    + "\"options\":{\"type\":\"string\",\"description\":\"ask only: the choices offered as tap buttons, one per line.\"},"
+    + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id — such as linear.\"},"
+    + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
+    + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"},"
     + "\"after\":{\"type\":\"string\",\"description\":\"" + step + " Leave out to add before the end.\"}},"
     + "\"required\":[\"workflow\",\"kind\",\"text\"]}"));
 
@@ -326,7 +346,21 @@ function describe(row: WorkflowRow, parsedSteps: bool): string {
 
 /** One said step as a node. `idx` places it; ids are short and stable so a
  *  model can quote them back. */
-function saidNode(kind: string, text: string, title: string, id: string, idx: int): WfNode {
+export type SaidExtras = {
+  // ask: the options offered as tap buttons, one per line.
+  options: string,
+  // connector: which server and which of its tools, and the JSON arguments.
+  server: string,
+  tool: string,
+  argsJson: string,
+};
+
+export function noExtras(): SaidExtras {
+  let none: SaidExtras = { options: "", server: "", tool: "", argsJson: "" };
+  return none;
+}
+
+function saidNode(kind: string, text: string, title: string, id: string, idx: int, extra: SaidExtras): WfNode {
   let base = emptyNode();
   let made = "";
   if (kind == "agent") { made = "AGENT"; }
@@ -334,21 +368,39 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
   if (kind == "web_search" || kind == "web") { made = "WEB_SEARCH"; }
   if (kind == "knowledge" || kind == "documents") { made = "KNOWLEDGE"; }
   if (kind == "http" || kind == "fetch") { made = "HTTP"; }
+  if (kind == "script") { made = "SCRIPT"; }
+  if (kind == "reply") { made = "TELEGRAM_REPLY"; }
+  if (kind == "ask") { made = "TELEGRAM_ASK"; }
+  if (kind == "connector" || kind == "mcp") { made = "MCP"; }
   if (made == "") { return base; }
   let built: WfNode = {
     id: id, type: made, name: title,
     x: 120.0 + (idx as number) * 240.0, y: 200.0,
-    instruction: made == "AGENT" || made == "LLM" ? text : "",
+    instruction: made == "AGENT" || made == "LLM" || made == "TELEGRAM_REPLY" || made == "TELEGRAM_ASK" ? text : "",
     agentId: "",
-    serverId: "", tool: "", args: "",
+    serverId: made == "MCP" ? extra.server : "",
+    tool: made == "MCP" ? extra.tool : "",
+    args: made == "MCP" ? extra.argsJson : "",
     url: made == "HTTP" ? text : "",
     method: made == "HTTP" ? "GET" : "",
     body: "",
     query: made == "WEB_SEARCH" || made == "KNOWLEDGE" ? text : "",
     test: "", needle: "", subject: "",
     schedule: "", source: made == "SCRIPT" ? text : "",
+    cases: made == "TELEGRAM_ASK" ? extra.options : "",
   };
   return built;
+}
+
+/** The extra fields a said step may carry, read once at either door. */
+export function extrasOf(said: string): SaidExtras {
+  let held: SaidExtras = {
+    options: jsonText(said, "options").trim(),
+    server: jsonText(said, "server").trim(),
+    tool: jsonText(said, "tool").trim(),
+    argsJson: jsonRaw(said, "arguments").trim(),
+  };
+  return held;
 }
 
 function startEndNode(kind: string, schedule: string, idx: int): WfNode {
@@ -477,7 +529,8 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     && call.name != "draft_workflow" && call.name != "add_step"
     && call.name != "change_step" && call.name != "remove_step"
     && call.name != "schedule_workflow" && call.name != "change_workflow"
-    && call.name != "run_workflow" && call.name != "delete_workflow") {
+    && call.name != "run_workflow" && call.name != "delete_workflow"
+    && call.name != "publish_workflow") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -512,7 +565,33 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let nodes: WfNode[] = [];
     let edges: WfEdge[] = [];
     let said = jsonText(call.args, "schedule").trim();
-    nodes.push(startEndNode("START", said == "manual" || said == "never" ? "" : said, 0));
+    // A chain with a reply or an ask in it is a BOT flow: it begins at a
+    // Telegram trigger, because an ask waits for a chat and a clock has
+    // none. A schedule alongside that is two answers to "what starts this",
+    // refused rather than silently half-honoured.
+    let chatty = false;
+    let look: int = 0;
+    while (look < saidSteps.length) {
+      let k = jsonText(saidSteps[look], "kind").trim().toLowerCase();
+      if (k == "reply" || k == "ask") { chatty = true; }
+      look = look + 1;
+    }
+    if (chatty && said != "" && said != "manual" && said != "never") {
+      return no("a workflow that talks to a Telegram chat starts when a message arrives — it cannot also run on a schedule. Drop the schedule, or drop the reply/ask steps.");
+    }
+    if (chatty) {
+      let entry = startEndNode("START", "", 0);
+      let asTrigger: WfNode = {
+        id: entry.id, type: "TELEGRAM", name: "On a message",
+        x: entry.x, y: entry.y,
+        instruction: "", agentId: "", serverId: "", tool: "", args: "",
+        url: "", method: "", body: "", query: "", test: "", needle: "",
+        subject: "", schedule: "", source: "",
+      };
+      nodes.push(asTrigger);
+    } else {
+      nodes.push(startEndNode("START", said == "manual" || said == "never" ? "" : said, 0));
+    }
     let i: int = 0;
     let prevId = "start";
     while (i < saidSteps.length) {
@@ -520,9 +599,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       let text = jsonText(saidSteps[i], "text").trim();
       let title = jsonText(saidSteps[i], "title").trim();
       let id = "s" + `${i + 1}`;
-      let built = saidNode(kind, text, title, id, i + 1);
+      let built = saidNode(kind, text, title, id, i + 1, extrasOf(saidSteps[i]));
       if (built.id == "") {
-        return no("\"" + kind + "\" is not a step kind — the kinds are agent, model, web_search, knowledge and http.");
+        return no("\"" + kind + "\" is not a step kind — " + KINDS_SENTENCE + ".");
       }
       nodes.push(built);
       edges.push(edgeOf(prevId, id));
@@ -562,6 +641,16 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
 
   if (call.name == "show_workflow") {
     return yes(describe(row, true));
+  }
+
+  if (call.name == "publish_workflow") {
+    let sql = "UPDATE workflows SET published_graph = graph, published_at = " + db.placeholder
+      + ", updated_at = " + placeholderAt(db, 2)
+      + " WHERE id = " + placeholderAt(db, 3);
+    let now = `${call.nowMs}`;
+    db.query(sql, [now, now, row.id]);
+    let fresh: WorkflowRow = JSON.parse<WorkflowRow>(findById(db, workflowsMapping(), row.id));
+    return yes("Published — messages and the clock now run what you see. " + describe(fresh, false));
   }
 
   if (call.name == "run_workflow") {
@@ -678,9 +767,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     if (branchy) { return no("that step branches — open the workflow on the Workflows page and add the step where it belongs."); }
     let id = "s" + crypto.randomUUID().slice(0, 8);
     let anchorNode = stepOf(graph, fromId);
-    let built = saidNode(kind, text, jsonText(call.args, "title").trim(), id, 0);
+    let built = saidNode(kind, text, jsonText(call.args, "title").trim(), id, 0, extrasOf(call.args));
     if (built.id == "") {
-      return no("\"" + kind + "\" is not a step kind — the kinds are agent, model, web_search, knowledge and http.");
+      return no("\"" + kind + "\" is not a step kind — " + KINDS_SENTENCE + ".");
     }
     // Placed just past its anchor; the canvas's tidy is a click away.
     let placed: WfNode = {

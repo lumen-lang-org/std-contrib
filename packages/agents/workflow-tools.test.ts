@@ -84,14 +84,24 @@ const DRAFT = "{\"name\":\"Morning brief\",\"steps\":["
   + "{\"kind\":\"agent\",\"text\":\"Summarise {{prev}} in five lines\",\"title\":\"Summarise\"}"
   + "],\"schedule\":\"every weekday at 08:00\",\"timezone\":\"Europe/Paris\"}";
 
-test("the ten names are offered, and nothing else answers to them", () => {
+test("the eleven names are offered, and nothing else answers to them", () => {
   let specs = workflowTools();
-  expect(specs.length == 10);
+  expect(specs.length == 11);
   expect(specs[0].name == "list_workflows");
-  expect(specs[2].name == "draft_workflow");
+  // By name, not index: an inserted verb shifted every position once and a
+  // test that counts positions re-breaks on every addition.
+  let drafting = "";
+  let scheduling = "";
+  let i0: int = 0;
+  while (i0 < specs.length) {
+    if (specs[i0].name == "draft_workflow") { drafting = specs[i0].schema; }
+    if (specs[i0].name == "schedule_workflow") { scheduling = specs[i0].schema; }
+    i0 = i0 + 1;
+  }
   // The grammar and the step kinds are IN the descriptions.
-  expect(specs[2].schema.indexOf("web_search") >= 0);
-  expect(specs[6].schema.indexOf("every weekday at 08:00") >= 0);
+  expect(drafting.indexOf("web_search") >= 0);
+  expect(drafting.indexOf("tap buttons") >= 0);
+  expect(scheduling.indexOf("every weekday at 08:00") >= 0);
 
   seeded();
   expect(!call("o1", "write_artifact", "{}").handled);
@@ -301,4 +311,43 @@ test("the eleventh workflow is refused before it is a row", () => {
   expect(!eleventh.ok);
   expect(eleventh.text.indexOf("10") >= 0);
   expect(flowsFor("o1").length == 10);
+});
+
+test("a chat can draft the telegram shapes, and publish what it drafted", () => {
+  // A reply, an ask with tap-button options, and a connector step — the
+  // week's vocabulary, buildable from a sentence.
+  let made = call("o9", "draft_workflow",
+    "{\"name\":\"Triage over chat\",\"steps\":["
+    + "{\"kind\":\"reply\",\"text\":\"On it…\",\"title\":\"Ack\"},"
+    + "{\"kind\":\"connector\",\"text\":\"\",\"title\":\"Issues\",\"server\":\"linear\",\"tool\":\"list_issues\",\"arguments\":{}},"
+    + "{\"kind\":\"ask\",\"text\":\"What next?\",\"title\":\"Choose\",\"options\":\"Log it\\nSkip\"}"
+    + "]}");
+  expect(made.ok);
+  let rows = flowsFor("o9");
+  let g = parseGraph(rows[0].graph).graph;
+  let kinds = "";
+  let i: int = 0;
+  while (i < g.nodes.length) { kinds = kinds + g.nodes[i].type + " "; i = i + 1; }
+  expect(kinds.includes("TELEGRAM_REPLY"));
+  expect(kinds.includes("MCP"));
+  expect(kinds.includes("TELEGRAM_ASK"));
+  let q = startOf(g);
+  i = 0;
+  let options = "";
+  let server = "";
+  while (i < g.nodes.length) {
+    if (g.nodes[i].type == "TELEGRAM_ASK") { options = g.nodes[i].cases ?? ""; }
+    if (g.nodes[i].type == "MCP") { server = g.nodes[i].serverId; }
+    i = i + 1;
+  }
+  expect(options == "Log it\nSkip");
+  expect(server == "linear");
+
+  // Publish pins it: the draft column and the published column agree after,
+  // and the reply says so in words a person can repeat.
+  let out = call("o9", "publish_workflow", "{\"workflow\":\"Triage over chat\"}");
+  expect(out.ok);
+  expect(out.text.includes("Published"));
+  let after = flowsFor("o9");
+  expect((after[0].publishedGraph ?? "") == after[0].graph);
 });
