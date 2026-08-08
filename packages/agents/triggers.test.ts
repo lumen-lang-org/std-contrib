@@ -239,3 +239,17 @@ test("a document rides in with its caption, and a bare file still speaks", () =>
   let photo = "{\"ok\":true,\"result\":[{\"update_id\":32,\"message\":{\"chat\":{\"id\":9},\"photo\":[]}}]}";
   expect(updatesIn(photo).length == 0);
 });
+
+test("a group names its speakers; a private chat stays bare", () => {
+  let group = "{\"ok\":true,\"result\":[{\"update_id\":40,\"message\":{"
+    + "\"from\":{\"id\":77,\"first_name\":\"Sara\"},"
+    + "\"chat\":{\"id\":-100200,\"type\":\"group\"},\"text\":\"ship it friday\"}}]}";
+  let seen = updatesIn(group);
+  expect(seen.length == 1);
+  expect(seen[0].speaker == "Sara");
+
+  let dm = "{\"ok\":true,\"result\":[{\"update_id\":41,\"message\":{"
+    + "\"from\":{\"id\":77,\"first_name\":\"Sara\"},"
+    + "\"chat\":{\"id\":77,\"type\":\"private\"},\"text\":\"ship it friday\"}}]}";
+  expect(updatesIn(dm)[0].speaker == "");
+});

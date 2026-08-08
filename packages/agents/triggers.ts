@@ -114,6 +114,8 @@ export type TriggerInboxRow = {
   // the split TELEGRAM-FILES.md argues for. "" when the message was words.
   fileName?: string,
   fileBody?: string,
+  // Who spoke, in a group. "" in private chats.
+  speaker?: string,
   runId: string,
   answer: string,
   error: string,
@@ -211,6 +213,7 @@ export function triggerInboxMapping(): DbRepository {
     field("threadId", "thread_id", "text"),
     field("fileName", "file_name", "text"),
     field("fileBody", "file_body", "text"),
+    field("speaker", "speaker", "text"),
     field("runId", "run_id", "text"),
     field("answer", "answer", "text"),
     field("error", "error", "text"),
@@ -353,6 +356,8 @@ export function triggersPlan(db: Db): Migration[] {
       "ALTER TABLE trigger_inbox ADD COLUMN file_name " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.7", "and its bytes",
       "ALTER TABLE trigger_inbox ADD COLUMN file_body " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("107.8", "who spoke, in a group",
+      "ALTER TABLE trigger_inbox ADD COLUMN speaker " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -376,6 +381,12 @@ export type TriggerUpdate = {
   fileId: string,
   fileName: string,
   fileSize: number,
+  // Who spoke, for GROUP chats only — "" in a private chat, where the chat
+  // IS the person. A room's transcript without names reads as one voice
+  // saying contradictory things; the fresh run's input gets "Name: " in
+  // front, while an ask's RESUME stays raw, because "Sara: Log it" must
+  // not break the switch matching "Log it".
+  speaker: string,
 };
 
 /** The plain messages in a getUpdates body, in order.
@@ -411,11 +422,18 @@ export function updatesIn(body: string): TriggerUpdate[] {
       // instruction; a FILE with no caption is still a message — sending one
       // is a person asking a question about it.
       if (doc != "" && text.trim() == "") { text = jsonText(message, "caption"); }
+      let kind = chat == "" ? "" : jsonText(chat, "type");
+      let who = "";
+      if (kind != "" && kind != "private") {
+        let from = jsonRaw(message, "from");
+        who = from == "" ? "" : jsonText(from, "first_name");
+        if (who == "") { who = from == "" ? "" : jsonText(from, "username"); }
+      }
       if (chatId != "" && (text.trim() != "" || fileId != "")) {
         let said: TriggerUpdate = { updateId: id, chatId: chatId,
           text: text.length > TRIGGER_INPUT_MAX ? text.slice(0, TRIGGER_INPUT_MAX) : text,
           fileId: fileId, fileName: fileName == "" && fileId != "" ? "document" : fileName,
-          fileSize: fileSize };
+          fileSize: fileSize, speaker: who };
         out.push(said);
       }
     }
@@ -622,7 +640,7 @@ export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, now
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
     workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
     input: said.text, status: "queued", threadId: "",
-    fileName: "", fileBody: "",
+    fileName: "", fileBody: "", speaker: said.speaker,
     runId: "", answer: "", error: "",
     createdAt: now, updatedAt: now,
   };
@@ -641,7 +659,7 @@ export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, w
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
     workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
     input: said.text, status: "refused", threadId: "",
-    fileName: "", fileBody: "",
+    fileName: "", fileBody: "", speaker: said.speaker,
     runId: "", answer: why, error: why,
     createdAt: now, updatedAt: now,
   };
@@ -665,7 +683,7 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
     // rather than sitting claimed forever.
     + " OR (status = 'running' AND updated_at < " + placeholderAt(db, 2) + ")"
     + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
-    + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at, file_name, file_body, thread_id";
+    + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at, file_name, file_body, thread_id, speaker";
   if (!db.query(sql, [now, stale])) { return emptyMessage(); }
   if (db.rows() == 0) { return emptyMessage(); }
   let got: TriggerInboxRow = {
@@ -673,6 +691,7 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
     workflowId: db.value(0, 3), updateId: db.value(0, 4), chatId: db.value(0, 5),
     input: db.value(0, 6), status: "running", threadId: db.value(0, 11),
     fileName: db.value(0, 9), fileBody: db.value(0, 10),
+    speaker: db.value(0, 12),
     runId: db.value(0, 7),
     answer: "", error: "", createdAt: db.value(0, 8), updatedAt: now,
   };
@@ -682,7 +701,7 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
 export function emptyMessage(): TriggerInboxRow {
   let none: TriggerInboxRow = {
     id: "", owner: "", botId: "", workflowId: "", updateId: "", chatId: "",
-    input: "", status: "", threadId: "", fileName: "", fileBody: "",
+    input: "", status: "", threadId: "", fileName: "", fileBody: "", speaker: "",
     runId: "", answer: "", error: "",
     createdAt: "", updatedAt: "",
   };

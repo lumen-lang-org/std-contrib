@@ -293,7 +293,13 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     // The message IS the input — the same `{{input}}` a step reads when
     // somebody runs the graph by hand, which is what makes a workflow built
     // and tested in the console work unchanged behind a bot.
-    owner: msg.owner, input: msg.input, master: master,
+    // In a group, the speaker's name rides in front — a room's transcript
+    // without names reads as one voice contradicting itself. Fresh runs
+    // only: the ask-resume above uses msg.input RAW, because "Sara: Log it"
+    // must not break a switch matching "Log it".
+    owner: msg.owner,
+    input: (msg.speaker ?? "") == "" ? msg.input : (msg.speaker ?? "") + ": " + msg.input,
+    master: master,
     nowMs: Date.now() as number,
     // And the conversation that chat is already having, so the second
     // message can say "and tomorrow?" and mean it. A run started by the
