@@ -5785,7 +5785,12 @@ function mcpExportedTools(): ToolSpec[] {
   while (f < families.length) {
     let one = families[f];
     let i: int = 0;
-    while (i < one.length) { out.push(one[i]); i = i + 1; }
+    while (i < one.length) {
+      // The banner is the deployment's voice above every visitor's page,
+      // not one owner's noun — console chat only, never a foreign agent.
+      if (one[i].name != "set_banner") { out.push(one[i]); }
+      i = i + 1;
+    }
     f = f + 1;
   }
   return out;
@@ -5803,6 +5808,12 @@ function mcpDispatch(db: Db, owner: string, name: string, args: string): FileToo
   if (botted.handled) { return botted; }
   let selfed = callAgentTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
   if (selfed.handled) { return selfed; }
+  if (name == "set_banner") {
+    // Unlisted above, and barred here too — an unlisted name is a hint, a
+    // refusal is a wall.
+    let barred: FileToolResult = { handled: true, ok: false, text: "the site banner is set from the console's own chat, not over MCP.", line: 0, changed: "" };
+    return barred;
+  }
   let known = callKnowledgeTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
   if (known.handled) { return known; }
   // Projects, threadless: list and create work anywhere; move_to_project
