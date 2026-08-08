@@ -139,11 +139,14 @@ function main(): void {
     let runners = waiting < TRIGGER_RUNNERS ? waiting : TRIGGER_RUNNERS;
     let r: int = 0;
     while (r < runners) {
-      // nohup + & through a shell, because what this needs is a DETACHED
-      // child — one that outlives this pass — and spawnSync here returns as
-      // soon as the shell has backgrounded it.
+      // setsid, not nohup: the runtime reaps the process GROUP when this
+      // pass exits, and nohup only shields a child from SIGHUP — twenty-five
+      // launches produced a created-then-empty log and not one surviving
+      // runner. setsid gives the child its own session, out of the group the
+      // reaper kills. Through a shell, because what this needs is a DETACHED
+      // child, and spawnSync returns as soon as the shell has backgrounded it.
       child_process.spawnSync("bash", ["-c",
-        "SCHEDULER_CHILD=triggers nohup " + ownBinary() + " >> .lumen-scheduler-runner.log 2>&1 & disown"]);
+        "SCHEDULER_CHILD=triggers setsid " + ownBinary() + " >> .lumen-scheduler-runner.log 2>&1 < /dev/null &"]);
       r = r + 1;
     }
     console.log("scheduler: launched " + `${runners}` + " runner(s) for " + `${waiting}` + " queued message(s)");
