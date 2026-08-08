@@ -127,6 +127,9 @@ export type StepResult = {
   branch: string,
   error: string,
   input: string,
+  // A step that asked a person something and cannot continue until they
+  // answer. The walk stops HERE, successfully.
+  suspend?: bool,
   // Where the work went, when a step did its work somewhere a person can
   // read. An AGENT step answers in a conversation — the run's own, or one of
   // its own when it names a different agent — and without this the trail
@@ -161,6 +164,11 @@ export type Walked = {
   answer: string,
   error: string,
   steps: WfStep[],
+  // A walk that stopped to ASK: the id of the step waiting for a person, ""
+  // for a walk that finished. The walk is over as a walk — the runner stores
+  // what a resume needs and the next message from that chat continues from
+  // this node's edge, with the reply as {{prev}}.
+  waitingAt?: string,
 };
 
 // What the walk carries between nodes. `outputs` is every finished node's
@@ -187,7 +195,7 @@ export const MAX_TEXT: int = 4000;
 // is a process this deployment pays for.
 export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY", "TELEGRAM_ASK"];
 
 /** Whether this is where a walk begins.
  *
@@ -371,6 +379,7 @@ function refuseNode(node: WfNode): string {
   // job is a sentence, so an empty one is a step that sends nothing and
   // looks like a broken bot.
   if (node.type == "TELEGRAM_REPLY" && node.instruction.trim() == "") { return label + " needs the message to send — {{prev}} sends the previous step's answer"; }
+  if (node.type == "TELEGRAM_ASK" && node.instruction.trim() == "") { return label + " needs the question to ask — the person's reply becomes {{prev}}"; }
   if (node.type == "WEB_SEARCH" && node.query.trim() == "") { return label + " needs a query to search for"; }
   if (node.type == "KNOWLEDGE" && node.query.trim() == "") { return label + " needs a query to look up"; }
   if (node.type == "MCP" && (node.serverId == "" || node.tool == "")) { return label + " needs a server and a tool on it"; }
@@ -549,10 +558,21 @@ export function refuse(graph: WfGraph): string {
     let speaks = false;
     let r: int = 0;
     while (r < graph.nodes.length) {
-      if (graph.nodes[r].type == "TELEGRAM_REPLY") { speaks = true; }
+      if (graph.nodes[r].type == "TELEGRAM_REPLY" || graph.nodes[r].type == "TELEGRAM_ASK") { speaks = true; }
       r = r + 1;
     }
     if (!speaks) { return "a workflow started by a message needs a Telegram reply step — without one the chat never hears back"; }
+  }
+  // An ASK without a chat is a question into the void: the walk would stop
+  // and nothing could ever answer. It belongs behind a Telegram trigger.
+  if (startOf(graph).type != "TELEGRAM") {
+    let q: int = 0;
+    while (q < graph.nodes.length) {
+      if (graph.nodes[q].type == "TELEGRAM_ASK") {
+        return "an Ask step waits for a chat's reply, so the workflow must begin at a Telegram trigger";
+      }
+      q = q + 1;
+    }
   }
 
   let e: int = 0;
@@ -919,10 +939,55 @@ export function walk(graph: WfGraph, input: string,
   let steps: WfStep[] = [];
   let start = startOf(graph);
   if (start.id == "") { return failedWalk("this workflow has no START step", steps); }
-
   let outs: WfOut[] = [];
   let ctx: WalkCtx = { input: input, prev: input, outputs: outs };
-  let at = start;
+  return walkOn(graph, input, start, ctx, steps, step, clock, watch);
+}
+
+/** The walk, resumed past an ASK step: the person answered, and their reply
+ *  is what the asking node is now considered to have said — {{prev}} and
+ *  {{node.<ask>}} both resolve to it downstream. `priorOuts` is the first
+ *  half's outputs, so references to steps before the question keep working
+ *  across the gap. The steps answered are the RESUMED half only; the runner
+ *  appends them to the trail it stored at suspension. */
+export function walkFrom(graph: WfGraph, input: string, askId: string, reply: string,
+                         priorOuts: WfOut[],
+                         step: (node: WfNode, ctx: WalkCtx) => StepResult,
+                         clock: () => number,
+                         watch: (steps: WfStep[], at: WfNode) => void): Walked {
+  let steps: WfStep[] = [];
+  let outs: WfOut[] = [];
+  let i: int = 0;
+  while (i < priorOuts.length) {
+    if (priorOuts[i].nodeId != askId) { outs.push(priorOuts[i]); }
+    i = i + 1;
+  }
+  let said: WfOut = { nodeId: askId, output: reply };
+  outs.push(said);
+  let to = nextId(graph, askId, "");
+  if (to == "") {
+    // The question was the last step drawn. The reply is the answer, and
+    // there is nothing left to walk.
+    let done: Walked = { ok: true, answer: reply, error: "", steps: steps };
+    return done;
+  }
+  let at = nodeAt(graph, to);
+  if (at.id == "") { return failedWalk("the step after the question is gone — the workflow changed while waiting", steps); }
+  let ctx: WalkCtx = { input: input, prev: reply, outputs: outs };
+  return walkOn(graph, input, at, ctx, steps, step, clock, watch);
+}
+
+function walkOn(graph: WfGraph, input: string, first: WfNode, ctx0: WalkCtx, steps: WfStep[],
+                step: (node: WfNode, ctx: WalkCtx) => StepResult,
+                clock: () => number,
+                watch: (steps: WfStep[], at: WfNode) => void): Walked {
+  // A list of our own: WalkCtx is a record and records are immutable, so the
+  // walk grows this and rebuilds the record around it each step.
+  let outs: WfOut[] = [];
+  let seed: int = 0;
+  while (seed < ctx0.outputs.length) { outs.push(ctx0.outputs[seed]); seed = seed + 1; }
+  let ctx: WalkCtx = { input: ctx0.input, prev: ctx0.prev, outputs: outs };
+  let at = first;
   let visited: int = 0;
   while (visited <= MAX_NODES) {
     visited = visited + 1;
@@ -948,6 +1013,12 @@ export function walk(graph: WfGraph, input: string,
     let out: WfOut = { nodeId: at.id, output: did.output };
     outs.push(out);
     ctx = { input: input, prev: did.output, outputs: outs };
+    if (did.suspend ?? false) {
+      // Stopped to ask a person. Successful as far as it went; the runner
+      // stores the context and the next message resumes past this node.
+      let paused: Walked = { ok: true, answer: did.output, error: "", steps: steps, waitingAt: at.id };
+      return paused;
+    }
     if (at.type == "END") {
       let done: Walked = { ok: true, answer: did.output, error: "", steps: steps };
       return done;

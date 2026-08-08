@@ -18,7 +18,7 @@
 
 import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
-import { StepResult, WalkCtx, WfNode, WfStep, Walked, emptyNode, fill, switchBranch, walk } from "../workflow/workflow.ts";
+import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, emptyNode, fill, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
@@ -100,6 +100,11 @@ export type WorkflowDone = {
   threadId: string,
   answer: string,
   error: string,
+  // A walk stopped at an ASK: the asking node and the outputs so far
+  // (JSON), handed out because WHERE to keep them is the trigger's
+  // business, not the walk's.
+  waitingAt?: string,
+  outputsSoFar?: string,
 };
 
 /** The CONDITION step: a string test, decided here because it touches
@@ -297,7 +302,14 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     persist(db, workflowRunsMapping(), JSON.stringify(progress));
   };
 
-  let step = (node: WfNode, ctx: WalkCtx): StepResult => {
+  let step = stepFnFor(db, row, agent, ask, runId, threadId);
+  let clock = (): number => Date.now() as number;
+  let walked = walk(parsed.graph, ask.input, step, clock, paint);
+  return closeWalk(db, row, ask.owner, runId, threadId, ask.input, `${ask.nowMs}`, walked, walked.steps);
+}
+
+function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, runId: string, threadId: string): (node: WfNode, ctx: WalkCtx) => StepResult {
+  return (node: WfNode, ctx: WalkCtx): StepResult => {
     // The entry, whichever kind it is: the walk begins here and hands on
     // whatever started it — the run's input, or the message that arrived.
     if (node.type == "START" || node.type == "TELEGRAM") { return withInput(stepOk(ctx.input), ctx.input); }
@@ -340,6 +352,19 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
       let url = fill(node.url, ctx);
       let body = node.method == "GET" ? "" : fill(node.body, ctx);
       return withInput(fetchStep(node, ctx), node.method + " " + url + (body == "" ? "" : "\n" + body));
+    }
+    if (node.type == "TELEGRAM_ASK") {
+      let asking = fill(node.instruction, ctx);
+      let bot = ask.botId ?? "";
+      let chat = ask.chatId ?? "";
+      if (bot == "" || chat == "") {
+        // The save-time rule keeps asks behind telegram triggers, so this is
+        // the run-by-hand case, and the honest sentence is this one.
+        return withInput(stepFailed("nobody can answer - this run was not started by a chat"), asking);
+      }
+      queueOutbound(db, bot, chat, runId, asking, Date.now() as number);
+      let paused: StepResult = { ok: true, output: asking, branch: "", error: "", input: asking, suspend: true };
+      return paused;
     }
     if (node.type == "TELEGRAM_REPLY") {
       let saying = fill(node.instruction, ctx);
@@ -418,22 +443,111 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
   };
+}
 
+/** What a resume carries: the pending row's memory, plus this message. */
+export type ResumeAsk = {
+  runId: string,
+  threadId: string,
+  graph: string,
+  nodeId: string,
+  input: string,
+  outputs: string,
+  stepsSoFar: string,
+  startedAt: string,
+  reply: string,
+  master: string,
+  nowMs: number,
+  botId: string,
+  chatId: string,
+};
+
+/** The second half of an asked run: the person answered, and the walk
+ *  continues from the question's edge with the reply as {{prev}}. It walks
+ *  the GRAPH BYTES that were suspended — not whatever the workflow has
+ *  become since — and appends to the suspended run's own row, so the canvas
+ *  replays one run, whole. */
+export function resumeWorkflow(db: Db, row: WorkflowRow, held: ResumeAsk): WorkflowDone {
+  let parsed = parseGraph(held.graph);
+  if (!parsed.ok) {
+    let refused: WorkflowDone = { ok: false, runId: held.runId, threadId: held.threadId, answer: "", error: parsed.error };
+    return refused;
+  }
+  let agentDoc = findById(db, agentsMapping(), row.agentId);
+  if (agentDoc == "") {
+    let refused: WorkflowDone = { ok: false, runId: held.runId, threadId: held.threadId, answer: "", error: "no agent " + row.agentId + " to run as" };
+    return refused;
+  }
+  let agent: AgentRow = JSON.parse<AgentRow>(agentDoc);
+  let runId = held.runId;
+  let threadId = held.threadId;
+  let ask: WorkflowAsk = {
+    owner: row.owner, input: held.input, master: held.master,
+    nowMs: held.nowMs, threadId: threadId, botId: held.botId, chatId: held.chatId,
+  };
+  let firstHalf: WfStep[] = JSON.parse<WfStep[]>(held.stepsSoFar);
+  let paint = (steps: WfStep[], at: WfNode): void => {
+    let all: WfStep[] = [];
+    let f: int = 0;
+    while (f < firstHalf.length) { all.push(firstHalf[f]); f = f + 1; }
+    let g: int = 0;
+    while (g < steps.length) { all.push(steps[g]); g = g + 1; }
+    if (at.id != "") {
+      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "", threadId: "" };
+      all.push(underway);
+    }
+    let live: WorkflowRunRow = {
+      id: runId, workflowId: row.id, owner: row.owner,
+      status: "running", input: held.input, answer: "", error: "",
+      threadId: threadId, steps: JSON.stringify(all),
+      startedAt: held.startedAt, endedAt: "",
+    };
+    persist(db, workflowRunsMapping(), JSON.stringify(live));
+  };
+  let step = stepFnFor(db, row, agent, ask, runId, threadId);
   let clock = (): number => Date.now() as number;
-  let walked = walk(parsed.graph, ask.input, step, clock, paint);
+  let priorOuts: WfOut[] = JSON.parse<WfOut[]>(held.outputs);
+  let walked = walkFrom(parsed.graph, held.input, held.nodeId, held.reply, priorOuts, step, clock, paint);
 
+  let all: WfStep[] = [];
+  let f: int = 0;
+  while (f < firstHalf.length) { all.push(firstHalf[f]); f = f + 1; }
+  let g: int = 0;
+  while (g < walked.steps.length) { all.push(walked.steps[g]); g = g + 1; }
+  return closeWalk(db, row, row.owner, runId, threadId, held.input, held.startedAt, walked, all);
+}
+
+/** The end of either half of a walk: the run row written with the right
+ *  status — 'waiting' for a run stopped mid-question, which the resume
+ *  reopens and finishes — and the outputs bundled for the pending row when
+ *  there is one. `all` is the WHOLE trail (a resume prepends the first
+ *  half), because the canvas replays one run, not two halves. */
+function closeWalk(db: Db, row: WorkflowRow, owner: string, runId: string, threadId: string,
+                   input: string, startedAt: string, walked: Walked, all: WfStep[]): WorkflowDone {
+  let waiting = walked.waitingAt ?? "";
   let closed: WorkflowRunRow = {
-    id: runId, workflowId: row.id, owner: ask.owner,
-    status: walked.ok ? "ok" : "failed",
-    input: ask.input, answer: walked.answer, error: walked.error,
-    threadId: threadId, steps: JSON.stringify(walked.steps),
-    startedAt: `${ask.nowMs}`, endedAt: `${Date.now() as number}`,
+    id: runId, workflowId: row.id, owner: owner,
+    status: waiting != "" ? "waiting" : walked.ok ? "ok" : "failed",
+    input: input, answer: walked.answer, error: walked.error,
+    threadId: threadId, steps: JSON.stringify(all),
+    startedAt: startedAt, endedAt: waiting != "" ? "" : `${Date.now() as number}`,
   };
   persist(db, workflowRunsMapping(), JSON.stringify(closed));
-
+  let outsSoFar = "[]";
+  if (waiting != "") {
+    let outs: WfOut[] = [];
+    let w: int = 0;
+    while (w < all.length) {
+      let one: WfOut = { nodeId: all[w].nodeId, output: all[w].output };
+      outs.push(one);
+      w = w + 1;
+    }
+    outsSoFar = JSON.stringify(outs);
+  }
   let done: WorkflowDone = {
     ok: walked.ok, runId: runId, threadId: threadId,
     answer: walked.answer, error: walked.error,
+    waitingAt: waiting, outputsSoFar: outsSoFar,
   };
   return done;
 }
