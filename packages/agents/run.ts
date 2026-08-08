@@ -30,6 +30,7 @@ import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
+import { projectTools, callProjectTool } from "./project-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
@@ -454,6 +455,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       while (ag < selves.length) {
         specs.push(selves[ag]);
         ag = ag + 1;
+      }
+      let groups = projectTools();
+      let pj: int = 0;
+      while (pj < groups.length) {
+        specs.push(groups[pj]);
+        pj = pj + 1;
       }
     }
   }
@@ -959,6 +966,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, name: calls[i].name, args: calls[i].args,
         nowMs: Date.now() as number,
       });
+      // Projects: three names, and the conversation the words were said in.
+      let grouped = callProjectTool(db, {
+        owner: where.owner, threadId: threadId,
+        name: calls[i].name, args: calls[i].args, nowMs: Date.now() as number,
+      });
       // The web index, same convention: asked about every call, answers only
       // search_web, which belongs to no connector.
       let websearched = callWebSearchTool(calls[i].name, calls[i].args);
@@ -1029,6 +1041,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = selfed.ok;
         resultText = selfed.text;
         from = "agents";
+        calledTools.push(calls[i].name);
+      } else if (grouped.handled) {
+        resultOk = grouped.ok;
+        resultText = grouped.text;
+        from = "projects";
         calledTools.push(calls[i].name);
       } else if (websearched != "") {
         // BEFORE skills, and the ordering is the whole fix. callSkillTool
