@@ -17,8 +17,9 @@ import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
 import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelRow } from "./schema.ts";
-import { normalScope } from "./knowledge.ts";
+import { listSources, normalScope } from "./knowledge.ts";
 import { enqueue, JOB_QUEUED } from "./indexing.ts";
+import { forgetDocumentFiles } from "./document-files.ts";
 import { maySchedule } from "./task-tools.ts";
 
 function not(): FileToolResult {
@@ -48,6 +49,20 @@ export function knowledgeTools(): ToolSpec[] {
     + "\"scope\":{\"type\":\"string\",\"description\":\"The folder, such as /hackathon or /specs/plume. Agents only see folders they are scoped to.\"},"
     + "\"body\":{\"type\":\"string\",\"description\":\"The document's text, whole.\"}},"
     + "\"required\":[\"source\",\"scope\",\"body\"]}"));
+
+  out.push(toolSpec("list_documents",
+    "What the corpus holds in one folder: each source with its chunk count and size. Call "
+    + "before forgetting, and to answer \\\"what do I have about…\\\" questions about the corpus itself.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"scope\":{\"type\":\"string\",\"description\":\"The folder, such as /hackathon. Defaults to /.\"}},"
+    + "\"required\":[]}"));
+
+  out.push(toolSpec("forget_document",
+    "Remove one source from the corpus — its chunks and its kept original file. Gone from every "
+    + "agent's retrieval at once, no undo. Name it exactly, from list_documents.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"source\":{\"type\":\"string\",\"description\":\"The source name, from list_documents.\"}},"
+    + "\"required\":[\"source\"]}"));
 
   out.push(toolSpec("list_skills",
     "The skills on this deployment: named instruction sets any agent can load with use_skill. "
@@ -121,7 +136,8 @@ function plainName(name: string): bool {
 }
 
 export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResult {
-  if (call.name != "add_document" && call.name != "list_skills"
+  if (call.name != "add_document" && call.name != "list_documents"
+    && call.name != "forget_document" && call.name != "list_skills"
     && call.name != "create_skill" && call.name != "change_skill") {
     return not();
   }
@@ -141,6 +157,29 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (id == "") { return no("the indexing queue refused the job."); }
     return yes("Queued \"" + source + "\" under " + scope + " — searchable in about a minute. "
       + "Agents scoped to " + scope + " will retrieve and cite it.");
+  }
+
+  if (call.name == "list_documents") {
+    let scope = normalScope(jsonText(call.args, "scope").trim());
+    let rows = listSources(db, scope);
+    if (rows.length == 0) { return yes("Nothing in " + scope + " yet — add_document files the first."); }
+    let out = `${rows.length}` + " source(s) in " + scope + ":\n";
+    let i: int = 0;
+    while (i < rows.length) {
+      out = out + "\n" + rows[i].source + " — " + `${rows[i].chunks}` + " chunk(s), " + `${rows[i].bytes}` + " bytes";
+      i = i + 1;
+    }
+    return yes(out);
+  }
+
+  if (call.name == "forget_document") {
+    let source = jsonText(call.args, "source").trim();
+    if (source == "") { return no("say which source: {\"source\":\"...\"} — list_documents shows them."); }
+    executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder, [source]);
+    // And the kept original, the door's own rule: a file whose text is gone
+    // is unreachable, and leaving it is a leak that grows per deletion.
+    forgetDocumentFiles(db, source);
+    return yes("Forgotten: \"" + source + "\" — out of every agent's retrieval now.");
   }
 
   if (call.name == "list_skills") {

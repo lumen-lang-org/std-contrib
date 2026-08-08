@@ -108,6 +108,12 @@ export type TriggerInboxRow = {
   // with extra steps. Carried on the row so the next message can find it
   // without a table of its own.
   threadId: string,
+  // A document that rode the message, parked: its name, and its bytes as
+  // base64. The POLLER downloads (Telegram's file_path expires within the
+  // hour) and the SCHEDULER files it as an artifact once a thread exists —
+  // the split TELEGRAM-FILES.md argues for. "" when the message was words.
+  fileName?: string,
+  fileBody?: string,
   runId: string,
   answer: string,
   error: string,
@@ -203,6 +209,8 @@ export function triggerInboxMapping(): DbRepository {
     field("input", "input", "text"),
     field("status", "status", "text"),
     field("threadId", "thread_id", "text"),
+    field("fileName", "file_name", "text"),
+    field("fileBody", "file_body", "text"),
     field("runId", "run_id", "text"),
     field("answer", "answer", "text"),
     field("error", "error", "text"),
@@ -341,6 +349,10 @@ export function triggersPlan(db: Db): Migration[] {
       createTableSql(db, triggerPendingMapping())),
     migration("107.5", "a question can offer its answers as buttons",
       "ALTER TABLE trigger_outbox ADD COLUMN options " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("107.6", "a message can carry a document, parked for the walk",
+      "ALTER TABLE trigger_inbox ADD COLUMN file_name " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("107.7", "and its bytes",
+      "ALTER TABLE trigger_inbox ADD COLUMN file_body " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -356,6 +368,14 @@ export type TriggerUpdate = {
   updateId: string,
   chatId: string,
   text: string,
+  // A document, when one rode the message: Telegram's file_id (the ticket
+  // for getFile), its name, and its declared size. "" / 0 for a plain
+  // message. Photos, voice and albums stay stepped over — each is its own
+  // design (vision, transcription, grouping), and TELEGRAM-FILES.md says
+  // why this slice is documents alone.
+  fileId: string,
+  fileName: string,
+  fileSize: number,
 };
 
 /** The plain messages in a getUpdates body, in order.
@@ -383,11 +403,19 @@ export function updatesIn(body: string): TriggerUpdate[] {
       let chat = jsonRaw(message, "chat");
       let chatId = chat == "" ? "" : jsonRaw(chat, "id").trim();
       let text = jsonText(message, "text");
-      // No text is no instruction. A photo with no caption starting a
-      // workflow would run it on the empty string.
-      if (chatId != "" && text.trim() != "") {
+      let doc = jsonRaw(message, "document");
+      let fileId = doc == "" ? "" : jsonText(doc, "file_id");
+      let fileName = doc == "" ? "" : jsonText(doc, "file_name");
+      let fileSize = doc == "" ? 0.0 : (parseFloat(jsonRaw(doc, "file_size").trim()) ?? 0.0);
+      // The caption is a document's text. No text and no file is no
+      // instruction; a FILE with no caption is still a message — sending one
+      // is a person asking a question about it.
+      if (doc != "" && text.trim() == "") { text = jsonText(message, "caption"); }
+      if (chatId != "" && (text.trim() != "" || fileId != "")) {
         let said: TriggerUpdate = { updateId: id, chatId: chatId,
-          text: text.length > TRIGGER_INPUT_MAX ? text.slice(0, TRIGGER_INPUT_MAX) : text };
+          text: text.length > TRIGGER_INPUT_MAX ? text.slice(0, TRIGGER_INPUT_MAX) : text,
+          fileId: fileId, fileName: fileName == "" && fileId != "" ? "document" : fileName,
+          fileSize: fileSize };
         out.push(said);
       }
     }
@@ -593,7 +621,9 @@ export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, now
   let row: TriggerInboxRow = {
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
     workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
-    input: said.text, status: "queued", threadId: "", runId: "", answer: "", error: "",
+    input: said.text, status: "queued", threadId: "",
+    fileName: "", fileBody: "",
+    runId: "", answer: "", error: "",
     createdAt: now, updatedAt: now,
   };
   persist(db, triggerInboxMapping(), JSON.stringify(row));
@@ -610,7 +640,9 @@ export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, w
   let row: TriggerInboxRow = {
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
     workflowId: bot.workflowId, updateId: said.updateId, chatId: said.chatId,
-    input: said.text, status: "refused", threadId: "", runId: "", answer: why, error: why,
+    input: said.text, status: "refused", threadId: "",
+    fileName: "", fileBody: "",
+    runId: "", answer: why, error: why,
     createdAt: now, updatedAt: now,
   };
   persist(db, triggerInboxMapping(), JSON.stringify(row));
@@ -633,13 +665,15 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
     // rather than sitting claimed forever.
     + " OR (status = 'running' AND updated_at < " + placeholderAt(db, 2) + ")"
     + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
-    + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at";
+    + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at, file_name, file_body, thread_id";
   if (!db.query(sql, [now, stale])) { return emptyMessage(); }
   if (db.rows() == 0) { return emptyMessage(); }
   let got: TriggerInboxRow = {
     id: db.value(0, 0), owner: db.value(0, 1), botId: db.value(0, 2),
     workflowId: db.value(0, 3), updateId: db.value(0, 4), chatId: db.value(0, 5),
-    input: db.value(0, 6), status: "running", threadId: "", runId: db.value(0, 7),
+    input: db.value(0, 6), status: "running", threadId: db.value(0, 11),
+    fileName: db.value(0, 9), fileBody: db.value(0, 10),
+    runId: db.value(0, 7),
     answer: "", error: "", createdAt: db.value(0, 8), updatedAt: now,
   };
   return got;
@@ -648,7 +682,8 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
 export function emptyMessage(): TriggerInboxRow {
   let none: TriggerInboxRow = {
     id: "", owner: "", botId: "", workflowId: "", updateId: "", chatId: "",
-    input: "", status: "", threadId: "", runId: "", answer: "", error: "",
+    input: "", status: "", threadId: "", fileName: "", fileBody: "",
+    runId: "", answer: "", error: "",
     createdAt: "", updatedAt: "",
   };
   return none;
@@ -665,6 +700,15 @@ export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runI
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
   db.query(sql, [status, runId, answer, problem, `${nowMs}`, row.id]);
+}
+
+/** The downloaded document, parked on its inbox row. Separate from
+ *  takeMessage so the dedupe/ceiling path stays one shape and the download
+ *  happens only for a row that was actually taken. */
+export function parkFile(db: Db, rowId: string, fileName: string, fileBody: string): void {
+  db.query("UPDATE trigger_inbox SET file_name = " + db.placeholder
+    + ", file_body = " + placeholderAt(db, 2)
+    + " WHERE id = " + placeholderAt(db, 3), [fileName, fileBody, rowId]);
 }
 
 /** A REPLY step spoke: queue it for the poller, which is the process that
