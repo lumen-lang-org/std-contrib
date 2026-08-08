@@ -32,8 +32,8 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { credentialFor, masterKey } from "./credentials.ts";
-import { TriggerBotRow, TriggerOutboxRow, botById, claimBot, markOutboundSent, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, replyKeyboard, saveBot, takeMessage, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
-import { jsonText } from "./scan.ts";
+import { TriggerBotRow, TriggerOutboxRow, botById, claimBot, markOutboundSent, mayRun, nextOffset, noteBotPass, parkFile, recentRuns, refuseMessage, replyKeyboard, saveBot, takeMessage, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
+import { jsonRaw, jsonText } from "./scan.ts";
 
 // How long Telegram holds the request open with nothing to say. Long enough
 // that an idle bot costs about two requests a minute; short enough that the
@@ -45,6 +45,12 @@ const BACKOFF_MS: int = 5000;
 // At most this many answers sent per pass, so a backlog cannot hold the poll
 // closed for minutes.
 const SEND_PER_PASS: int = 10;
+// Base64 is 4/3 of the bytes and the artifact cap measures the STORED body;
+// 20MB (all Telegram hands a bot) encodes to ~26.7MB, inside the deployed
+// 28MB artifact ceiling — so Telegram's own limit is the only one a person
+// ever meets. The raw-bytes gate here exists for the parked column.
+const FILE_MAX_BYTES: number = 20000000.0;
+
 
 function main(): void {
   let botId = process.env("TRIGGER_BOT") ?? "";
@@ -133,8 +139,25 @@ function pass(db: Db, botId: string, who: string, master: string): void {
     let now = Date.now() as number;
     let verdict = mayRun(counted, recentRuns(db, counted.id, now), now);
     if (verdict.ok) {
-      if (takeMessage(db, counted, said[i], now) != "") {
+      let rowId = takeMessage(db, counted, said[i], now);
+      if (rowId != "") {
         counted = withRunCounted(counted, now);
+        if (said[i].fileId != "") {
+          // Download NOW, not from a queue: Telegram's file_path expires
+          // within the hour, and the artifact ceiling is the size gate —
+          // refused loudly rather than parked doomed.
+          if (said[i].fileSize > FILE_MAX_BYTES) {
+            try { sendMessage(token, said[i].chatId, "That file is " + `${said[i].fileSize}` + " bytes — I can read up to " + `${FILE_MAX_BYTES}` + ". Send a smaller one?", ""); }
+            catch (e) { console.error("trigger-poller: size refusal: " + e.message); }
+          } else {
+            try {
+              let got = fetchDocument(token, said[i].fileId);
+              if (got != "") { parkFile(db, rowId, said[i].fileName, got); }
+            } catch (e) {
+              console.error("trigger-poller: download " + said[i].fileName + ": " + e.message);
+            }
+          }
+        }
       }
     } else {
       // Refused, and told so. A message that vanishes reads as a broken bot;
@@ -207,6 +230,22 @@ function sendMessage(token: string, chatId: string, text: string, markup: string
   if (jsonText(res.body, "ok").trim() == "" && res.status >= 400) {
     throw new Error("telegram refused the message: " + `${res.status}`);
   }
+}
+
+/** The document's bytes, base64 — or "" for anything that failed. Two calls
+ *  on two HOSTS: getFile on the api host answers a short-lived path, and the
+ *  bytes live on the file host. The token rides both URLs and is never
+ *  logged, the rule this file already keeps. */
+function fetchDocument(token: string, fileId: string): string {
+  let asked = http.request(api(token, "getFile"), "POST",
+    "{\"file_id\":" + JSON.stringify(fileId) + "}", jsonHeaders());
+  if (!asked.ok) { return ""; }
+  let path = jsonText(jsonRaw(asked.body, "result"), "file_path");
+  if (path == "") { return ""; }
+  let got = http.request("https://api.telegram.org/file/bot" + token + "/" + path,
+    "GET", "", new Map<string, string>());
+  if (!got.ok || got.status != 200) { return ""; }
+  return crypto.base64Encode(got.body);
 }
 
 function jsonHeaders(): Map<string, string> {

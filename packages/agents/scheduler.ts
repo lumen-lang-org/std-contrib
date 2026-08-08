@@ -38,7 +38,8 @@ import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads
 import { tracerFor } from "./trace.ts";
 import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
-import { TRIGGER_ASK_TTL_MS, TriggerInboxRow, TriggerPendingRow, botById, claimMessage, finishMessage, forgetAsk, noteThread, pendingFor, plainly, rememberAsk, testingDraft, threadForChat } from "./triggers.ts";
+import { TURN_SEQ_NONE, binaryKind, kindOf, putArtifact } from "./artifacts.ts";
+import { TRIGGER_ASK_TTL_MS, TriggerInboxRow, TriggerPendingRow, botById, claimMessage, finishMessage, forgetAsk, noteThread, pendingFor, plainly, queueOutbound, rememberAsk, testingDraft, threadForChat } from "./triggers.ts";
 
 // How many tasks one pass will fire before leaving the rest to the next tick.
 // A bound rather than "drain it": a pass that runs forty agent turns holds the
@@ -134,6 +135,15 @@ function main(): void {
   // also cannot leak, which is this file's founding rule; a child holds the
   // transcripts of the walks it ran and gives them back to the OS minutes
   // later instead of never.
+  // What grew forever until now, trimmed on every pass. Retention, not
+  // deletion policy: a run older than a month and a message older than two
+  // weeks have stopped being operational truth and become disk — the
+  // conversations they opened remain, because THOSE are the user's history.
+  // Constants rather than env: an operator who wants different windows edits
+  // a number beside the reasoning, the caps.ts trade made the other way
+  // because nobody sizes retention per box.
+  sweep(db);
+
   let waiting = queuedMessages(db);
   if (waiting > 0) {
     let runners = waiting < TRIGGER_RUNNERS ? waiting : TRIGGER_RUNNERS;
@@ -158,6 +168,26 @@ function main(): void {
 // started here; anything else names it.
 function ownBinary(): string {
   return process.env("AGENTS_SCHEDULER_BIN") ?? "./scheduler";
+}
+
+const KEEP_RUNS_MS: number = 2592000000.0;    // 30 days of workflow runs
+const KEEP_TRAFFIC_MS: number = 1209600000.0; // 14 days of inbox/outbox rows
+
+function sweep(db: Db): void {
+  let now = Date.now() as number;
+  let runsBefore = `${now - KEEP_RUNS_MS}`;
+  let trafficBefore = `${now - KEEP_TRAFFIC_MS}`;
+  // Finished runs only: a 'waiting' run is an open question whatever its
+  // age, and deleting one would orphan its pending row's resume.
+  db.query("DELETE FROM workflow_runs WHERE started_at <> '' AND started_at < " + db.placeholder
+    + " AND status <> 'waiting' AND status <> 'running'", [runsBefore]);
+  db.query("DELETE FROM trigger_inbox WHERE created_at < " + db.placeholder
+    + " AND status <> 'queued' AND status <> 'running'", [trafficBefore]);
+  db.query("DELETE FROM trigger_outbox WHERE created_at < " + db.placeholder
+    + " AND status = 'sent'", [trafficBefore]);
+  // Expired questions are deleted at read; this catches the ones nobody
+  // ever asked about again.
+  db.query("DELETE FROM trigger_pending WHERE expires_at < " + db.placeholder, [trafficBefore]);
 }
 
 function queuedMessages(db: Db): int {
@@ -273,6 +303,44 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     // And where a TELEGRAM_REPLY step speaks to, mid-walk.
     botId: msg.botId, chatId: msg.chatId,
   };
+  // A document rode the message: file it on the chat's conversation BEFORE
+  // the walk, so retrieval, the viewer and every tool see it the way they
+  // see a console upload — TELEGRAM-FILES.md's whole design. The thread may
+  // not exist yet on a chat's first message; open it here so the artifact
+  // has a home, and hand the same id to the walk.
+  if ((msg.fileName ?? "") != "" && (msg.fileBody ?? "") != "") {
+    let home = ask.threadId ?? "";
+    if (home == "") {
+      home = openThread(db, { agentId: flow.agentId, owner: msg.owner, now: `${Date.now() as number}` });
+    }
+    if (home != "") {
+      // The store's boundary: binary kinds hold base64, text kinds hold the
+      // text itself. The poller parks base64 always (it cannot know), so a
+      // .txt/.md/.csv is decoded here — stored encoded, it "worked" because
+      // the model gamely decoded it, while the artifact panel showed
+      // gibberish.
+      let path = "/" + (msg.fileName ?? "document");
+      let body = msg.fileBody ?? "";
+      if (!binaryKind(kindOf(path))) { body = crypto.base64Decode(body); }
+      let filed = putArtifact(db, {
+        threadId: home, path: path,
+        title: msg.fileName ?? "document",
+        content: body, note: "sent over Telegram",
+        // Not mustCreate: the same file re-sent is a new VERSION of the same
+        // path, which is what a person means by sending it again.
+        origin: "uploaded", mustCreate: false,
+        turnSeq: TURN_SEQ_NONE, now: `${Date.now() as number}`,
+      });
+      if (!filed.ok) {
+        finishMessage(db, msg, "failed", "", "", filed.problem, Date.now() as number);
+        queueOutbound(db, msg.botId, msg.chatId, "", "I could not keep that file: " + filed.problem, Date.now() as number);
+        return;
+      }
+      ask = { owner: ask.owner, input: msg.input == "" ? "the file " + (msg.fileName ?? "") : msg.input,
+        master: ask.master, nowMs: ask.nowMs, threadId: home,
+        botId: ask.botId, chatId: ask.chatId };
+    }
+  }
   let done = runWorkflow(db, flow, ask);
   // Before the outcome is judged: a walk that opened a conversation and then
   // failed still opened one, and the next message should continue it rather

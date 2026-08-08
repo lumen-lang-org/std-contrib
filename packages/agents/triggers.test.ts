@@ -215,3 +215,27 @@ test("options become a keyboard the phone can tap, and a blank set none", () => 
   expect(replyKeyboard("") == "");
   expect(replyKeyboard("  \n ") == "");
 });
+
+test("a document rides in with its caption, and a bare file still speaks", () => {
+  let withDoc = "{\"ok\":true,\"result\":[{\"update_id\":30,\"message\":{\"chat\":{\"id\":9,\"type\":\"private\"},"
+    + "\"caption\":\"what is this contract about?\","
+    + "\"document\":{\"file_id\":\"F123\",\"file_name\":\"contract.pdf\",\"file_size\":52000}}}]}";
+  let seen = updatesIn(withDoc);
+  expect(seen.length == 1);
+  expect(seen[0].fileId == "F123");
+  expect(seen[0].fileName == "contract.pdf");
+  expect(seen[0].fileSize == 52000.0);
+  expect(seen[0].text == "what is this contract about?");
+
+  // No caption is not no message: the file IS the question.
+  let bare = "{\"ok\":true,\"result\":[{\"update_id\":31,\"message\":{\"chat\":{\"id\":9,\"type\":\"private\"},"
+    + "\"document\":{\"file_id\":\"F124\",\"file_name\":\"notes.txt\",\"file_size\":10}}}]}";
+  let quiet = updatesIn(bare);
+  expect(quiet.length == 1);
+  expect(quiet[0].text == "");
+  expect(quiet[0].fileId == "F124");
+
+  // A photo stays stepped over — this slice is documents alone.
+  let photo = "{\"ok\":true,\"result\":[{\"update_id\":32,\"message\":{\"chat\":{\"id\":9},\"photo\":[]}}]}";
+  expect(updatesIn(photo).length == 0);
+});
