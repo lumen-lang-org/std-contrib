@@ -28,6 +28,7 @@ import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns
 import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
+import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
@@ -437,6 +438,14 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       while (wf < flows.length) {
         specs.push(flows[wf]);
         wf = wf + 1;
+      }
+      // And the bots those workflows answer through — same gate, same reason,
+      // and the payoff that a bot's own chat can manage the bot.
+      let bots = triggerTools();
+      let bt: int = 0;
+      while (bt < bots.length) {
+        specs.push(bots[bt]);
+        bt = bt + 1;
       }
     }
   }
@@ -932,6 +941,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, agentId: agentId,
         name: calls[i].name, args: calls[i].args, nowMs: Date.now() as number,
       });
+      // Bots, same convention: three fixed names, refused without an owner.
+      let botted = callTriggerTool(db, {
+        owner: where.owner, name: calls[i].name, args: calls[i].args,
+        nowMs: Date.now() as number,
+      });
       // The web index, same convention: asked about every call, answers only
       // search_web, which belongs to no connector.
       let websearched = callWebSearchTool(calls[i].name, calls[i].args);
@@ -992,6 +1006,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = flowed.ok;
         resultText = flowed.text;
         from = "workflows";
+        calledTools.push(calls[i].name);
+      } else if (botted.handled) {
+        resultOk = botted.ok;
+        resultText = botted.text;
+        from = "triggers";
         calledTools.push(calls[i].name);
       } else if (websearched != "") {
         // BEFORE skills, and the ordering is the whole fix. callSkillTool
