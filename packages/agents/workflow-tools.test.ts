@@ -398,3 +398,51 @@ test("a said switch lands valid, and connect_steps re-points one branch", () => 
   // dangling step is the canvas's to reconnect, not a reason to lose a save.
   expect(askIn == 0);
 });
+
+test("a reply's file rides in from a sentence, and none takes it away", () => {
+  let made = call("o10", "draft_workflow",
+    "{\"name\":\"Report over chat\",\"steps\":["
+    + "{\"kind\":\"agent\",\"text\":\"Write the report to /report.md\",\"title\":\"Write\"},"
+    + "{\"kind\":\"reply\",\"text\":\"{{prev}}\",\"title\":\"Send\",\"file\":\"/report.md\"}"
+    + "]}");
+  expect(made.ok);
+  let body = replyBody("o10");
+  expect(body == "/report.md");
+
+  // change_step moves it, and "none" clears it — an empty string cannot be
+  // sent to mean "clear", so the word does the job.
+  expect(call("o10", "change_step", "{\"workflow\":\"Report over chat\",\"step\":\"Send\",\"file\":\"/summary.md\"}").ok);
+  expect(replyBody("o10") == "/summary.md");
+  expect(call("o10", "change_step", "{\"workflow\":\"Report over chat\",\"step\":\"Send\",\"file\":\"none\"}").ok);
+  expect(replyBody("o10") == "");
+
+  // A file on a step that cannot send one is a refusal, not a silent drop.
+  let wrong = call("o10", "change_step", "{\"workflow\":\"Report over chat\",\"step\":\"Write\",\"file\":\"/x.md\"}");
+  expect(!wrong.ok);
+  expect(wrong.text.includes("reply"));
+});
+
+test("a rename does not cost a switch its cases", () => {
+  // The o9 workflow of the earlier tests still holds its Route switch.
+  let renamed = call("o9", "change_step",
+    "{\"workflow\":\"Triage over chat\",\"step\":\"Route\",\"title\":\"Routing\"}");
+  expect(renamed.ok);
+  let g = parseGraph(flowsFor("o9")[0].graph).graph;
+  let kept = "";
+  let i: int = 0;
+  while (i < g.nodes.length) {
+    if (g.nodes[i].type == "SWITCH") { kept = g.nodes[i].cases ?? ""; }
+    i = i + 1;
+  }
+  expect(kept == "Log it\nSkip");
+});
+
+function replyBody(owner: string): string {
+  let g = parseGraph(flowsFor(owner)[0].graph).graph;
+  let i: int = 0;
+  while (i < g.nodes.length) {
+    if (g.nodes[i].type == "TELEGRAM_REPLY") { return g.nodes[i].body; }
+    i = i + 1;
+  }
+  return "(no reply step)";
+}

@@ -119,7 +119,8 @@ export function workflowTools(): ToolSpec[] {
     + "\"cases\":{\"type\":\"string\",\"description\":\"switch only: the values it routes on, one per line.\"},"
     + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id, from the Connectors page — such as linear.\"},"
     + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
-    + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"}},"
+    + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"},"
+    + "\"file\":{\"type\":\"string\",\"description\":\"reply only: an artifact path to send as a document, such as /report.md — the text becomes its caption. Leave out to send text alone, or when an earlier agent step names the file itself by writing [FILE]/report.md[/FILE] in its answer.\"}},"
     + "\"required\":[\"kind\",\"text\"]}},"
     + "\"schedule\":{\"type\":\"string\",\"description\":\"" + schedule + "\"},"
     + "\"timezone\":{\"type\":\"string\",\"description\":\"" + zone + "\"}},"
@@ -158,6 +159,7 @@ export function workflowTools(): ToolSpec[] {
     + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id — such as linear.\"},"
     + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
     + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"},"
+    + "\"file\":{\"type\":\"string\",\"description\":\"reply only: an artifact path to send as a document — the text becomes its caption. An earlier agent step may instead name the file at run time with [FILE]/report.md[/FILE] in its answer.\"},"
     + "\"after\":{\"type\":\"string\",\"description\":\"" + step + " Leave out to add before the end.\"}},"
     + "\"required\":[\"workflow\",\"kind\",\"text\"]}"));
 
@@ -167,7 +169,8 @@ export function workflowTools(): ToolSpec[] {
     + "\"workflow\":{\"type\":\"string\",\"description\":\"" + which + "\"},"
     + "\"step\":{\"type\":\"string\",\"description\":\"" + step + "\"},"
     + "\"text\":{\"type\":\"string\",\"description\":\"The new instruction, query or url — whole, for the kind of step it is.\"},"
-    + "\"title\":{\"type\":\"string\",\"description\":\"A new label for the canvas.\"}},"
+    + "\"title\":{\"type\":\"string\",\"description\":\"A new label for the canvas.\"},"
+    + "\"file\":{\"type\":\"string\",\"description\":\"reply only: an artifact path to send as a document. \\\"none\\\" takes it away.\"}},"
     + "\"required\":[\"workflow\",\"step\"]}"));
 
   out.push(toolSpec("remove_step",
@@ -370,10 +373,12 @@ export type SaidExtras = {
   server: string,
   tool: string,
   argsJson: string,
+  // reply only: the artifact path its send-a-document half posts.
+  file: string,
 };
 
 export function noExtras(): SaidExtras {
-  let none: SaidExtras = { options: "", cases: "", server: "", tool: "", argsJson: "" };
+  let none: SaidExtras = { options: "", cases: "", server: "", tool: "", argsJson: "", file: "" };
   return none;
 }
 
@@ -401,7 +406,7 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
     args: made == "MCP" ? extra.argsJson : "",
     url: made == "HTTP" ? text : "",
     method: made == "HTTP" ? "GET" : "",
-    body: "",
+    body: made == "TELEGRAM_REPLY" ? extra.file : "",
     query: made == "WEB_SEARCH" || made == "KNOWLEDGE" ? text : "",
     test: "", needle: "", subject: "",
     schedule: "", source: made == "SCRIPT" ? text : "",
@@ -418,6 +423,7 @@ export function extrasOf(said: string): SaidExtras {
     server: jsonText(said, "server").trim(),
     tool: jsonText(said, "tool").trim(),
     argsJson: jsonRaw(said, "arguments").trim(),
+    file: jsonText(said, "file").trim(),
   };
   return held;
 }
@@ -438,19 +444,24 @@ function startEndNode(kind: string, schedule: string, idx: int): WfNode {
 
 /** The text a step carries, changed for its kind — the one field a sentence
  *  edits. */
-function withText(node: WfNode, text: string, title: string): WfNode {
+function withText(node: WfNode, text: string, title: string, file: string): WfNode {
   let changed: WfNode = {
     id: node.id, type: node.type,
     name: title == "" ? node.name : title,
     x: node.x, y: node.y,
-    instruction: text != "" && (node.type == "AGENT" || node.type == "LLM") ? text : node.instruction,
+    instruction: text != "" && (node.type == "AGENT" || node.type == "LLM" || node.type == "TELEGRAM_REPLY" || node.type == "TELEGRAM_ASK") ? text : node.instruction,
     agentId: node.agentId,
     serverId: node.serverId, tool: node.tool, args: node.args,
     url: text != "" && node.type == "HTTP" ? text : node.url,
-    method: node.method, body: node.body,
+    method: node.method,
+    // "none" is how a sentence clears a field it cannot send as empty.
+    body: file != "" && node.type == "TELEGRAM_REPLY" ? (file == "none" ? "" : file) : node.body,
     query: text != "" && (node.type == "WEB_SEARCH" || node.type == "KNOWLEDGE") ? text : node.query,
     test: node.test, needle: node.needle, subject: node.subject,
     schedule: node.schedule, source: node.source ?? "",
+    // The optional field rides too — the copy that dropped it once cost a
+    // switch its cases.
+    cases: node.cases ?? "",
   };
   return changed;
 }
@@ -463,6 +474,7 @@ function withSchedule(node: WfNode, schedule: string): WfNode {
     url: node.url, method: node.method, body: node.body,
     query: node.query, test: node.test, needle: node.needle,
     subject: node.subject, schedule: schedule, source: node.source ?? "",
+    cases: node.cases ?? "",
   };
   return changed;
 }
@@ -899,14 +911,18 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   if (call.name == "change_step") {
     let text = jsonText(call.args, "text").trim();
     let title = jsonText(call.args, "title").trim();
-    if (text == "" && title == "") { return no("say what changes: text, a title, or both."); }
+    let file = jsonText(call.args, "file").trim();
+    if (text == "" && title == "" && file == "") { return no("say what changes: text, a title, a file, or any of them."); }
     if (text != "" && (node.type == "START" || node.type == "END" || node.type == "CONDITION" || node.type == "MCP")) {
-      return no("a " + node.type + " step is edited on the Workflows page — text here changes agent, model, web_search, knowledge and http steps.");
+      return no("a " + node.type + " step is edited on the Workflows page — text here changes agent, model, web_search, knowledge, reply and ask steps.");
+    }
+    if (file != "" && node.type != "TELEGRAM_REPLY") {
+      return no("only a reply step sends a file — the file rides a reply, with the text as its caption.");
     }
     let nodes: WfNode[] = [];
     let n: int = 0;
     while (n < graph.nodes.length) {
-      nodes.push(graph.nodes[n].id == node.id ? withText(graph.nodes[n], text, title) : graph.nodes[n]);
+      nodes.push(graph.nodes[n].id == node.id ? withText(graph.nodes[n], text, title, file) : graph.nodes[n]);
       n = n + 1;
     }
     let changed: WfGraph = { nodes: nodes, edges: graph.edges, view: graph.view };
