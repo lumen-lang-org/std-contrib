@@ -16,7 +16,7 @@ import { DbOrder, asc, executeWith, findById, listOrdered, persist, placeholderA
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
-import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelRow } from "./schema.ts";
+import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelRow, writeSetting } from "./schema.ts";
 import { listSources, normalScope } from "./knowledge.ts";
 import { enqueue, JOB_QUEUED } from "./indexing.ts";
 import { forgetDocumentFiles } from "./document-files.ts";
@@ -88,6 +88,13 @@ export function knowledgeTools(): ToolSpec[] {
     + "\"instructions\":{\"type\":\"string\",\"description\":\"The whole new body.\"}},"
     + "\"required\":[\"skill\"]}"));
 
+  out.push(toolSpec("set_banner",
+    "The one sentence shown above every visitor's page — maintenance tonight, a new "
+    + "capability, a holiday notice. Empty text takes it down. Live without a deploy.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"text\":{\"type\":\"string\",\"description\":\"The sentence, or \\\"\\\" to clear.\"}},"
+    + "\"required\":[\"text\"]}"));
+
   return out;
 }
 
@@ -138,7 +145,8 @@ function plainName(name: string): bool {
 export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResult {
   if (call.name != "add_document" && call.name != "list_documents"
     && call.name != "forget_document" && call.name != "list_skills"
-    && call.name != "create_skill" && call.name != "change_skill") {
+    && call.name != "create_skill" && call.name != "change_skill"
+    && call.name != "set_banner") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -157,6 +165,12 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (id == "") { return no("the indexing queue refused the job."); }
     return yes("Queued \"" + source + "\" under " + scope + " — searchable in about a minute. "
       + "Agents scoped to " + scope + " will retrieve and cite it.");
+  }
+
+  if (call.name == "set_banner") {
+    let said = jsonText(call.args, "text");
+    writeSetting(db, "banner", said.trim());
+    return yes(said.trim() == "" ? "Banner down." : "Up, above every page: " + said.trim());
   }
 
   if (call.name == "list_documents") {
