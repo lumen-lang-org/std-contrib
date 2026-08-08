@@ -18,10 +18,11 @@
 
 import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
-import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, emptyNode, fill, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
+import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, emptyNode, fill, headerLines, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
-import { credentialFor } from "./credentials.ts";
+import { credentialFor, destinationOf } from "./credentials.ts";
+import { secretById, secretValue, touchSecret } from "./secrets.ts";
 import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
@@ -222,11 +223,45 @@ function runScriptStep(node: WfNode, ctx: WalkCtx, runId: string): StepResult {
   return stepOk(ran.output);
 }
 
-/** The HTTP step. GET sends no body; everything else sends the filled one. */
-function fetchStep(node: WfNode, ctx: WalkCtx): StepResult {
+/** The HTTP step. GET sends no body; everything else sends the filled one.
+ *
+ *  The secret is resolved here, owner-scoped, and checked against the FILLED
+ *  url's origin even though every save already checked the unfilled one —
+ *  the run is the moment the value actually leaves, so the run re-asks. The
+ *  value goes into the header the SECRET row names, set last so a plain
+ *  header line cannot shadow it, and it never appears in an output, an error
+ *  or the recorded input — a step's trail is drawn on the canvas. */
+function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: string): StepResult {
   let url = fill(node.url, ctx);
   let headers = new Map<string, string>();
   headers.set("Content-Type", "application/json");
+  let lines = headerLines(node);
+  let h: int = 0;
+  while (h < lines.length) {
+    let colon = lines[h].indexOf(":");
+    if (colon > 0) {
+      headers.set(lines[h].slice(0, colon).trim(), fill(lines[h].slice(colon + 1, lines[h].length).trim(), ctx));
+    }
+    h = h + 1;
+  }
+  let secretId = node.secretId ?? "";
+  if (secretId != "") {
+    let secret = secretById(db, secretId, owner);
+    if (secret.id == "") {
+      return stepFailed("this step names a secret that is not here any more — pick another in the step's settings");
+    }
+    if (destinationOf(url) != secret.destination) {
+      return stepFailed("this step sends to " + (destinationOf(url) == "" ? "an address this cannot read" : destinationOf(url))
+        + ", and \"" + secret.name + "\" was stored for " + secret.destination
+        + " — a secret is only sent to the address it was stored for");
+    }
+    let value = secretValue(db, secret, master);
+    if (value == "") {
+      return stepFailed("\"" + secret.name + "\" could not be opened — delete it and add it again");
+    }
+    headers.set(secret.header, value);
+    touchSecret(db, secret.id, `${Date.now() as number}`);
+  }
   let body = node.method == "GET" ? "" : fill(node.body, ctx);
   let res = http.request(url, node.method, body, headers);
   if (res.status == 0) { return stepFailed("no answer from " + url); }
@@ -351,7 +386,9 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
     if (node.type == "HTTP") {
       let url = fill(node.url, ctx);
       let body = node.method == "GET" ? "" : fill(node.body, ctx);
-      return withInput(fetchStep(node, ctx), node.method + " " + url + (body == "" ? "" : "\n" + body));
+      // The recorded input is METHOD, url and body — never the headers, which
+      // is where a secret rides.
+      return withInput(fetchStep(db, node, ctx, ask.owner, ask.master), node.method + " " + url + (body == "" ? "" : "\n" + body));
     }
     if (node.type == "TELEGRAM_ASK") {
       let asking = fill(node.instruction, ctx);
@@ -443,6 +480,9 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
           baseSeq: atSeq,
           owner: ask.owner,
           think: false,
+          // No surface: a step's agent gets the same verbs a console chat
+          // would offer, neither narrowed nor widened by being in a walk.
+          scope: "",
         };
         let asked = runAgentAt(db, node.agentId, said, ask.master, below);
         // The run's thread, because that is where this step's files went and
@@ -458,7 +498,9 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
         tracer: tracerFor(db, ask.master),
         pick: inheritedPick(),
         think: false,
-      };
+          // A workflow's own step is not somebody typing on a canvas — it gets the whole product, like any run.
+    scope: "",
+};
       let answered = runInThreadWith(db, threadId, turn);
       if (!answered.run.ok) { return inThread(withInput(stepFailed(answered.run.error), said), threadId); }
       return inThread(withInput(stepOk(answered.text), said), threadId);

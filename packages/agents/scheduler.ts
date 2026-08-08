@@ -439,7 +439,9 @@ function fire(db: Db, task: TaskRow, master: string): void {
     tracer: tracerFor(db, master),
     pick: inheritedPick(),
     think: false,
-  };
+      // A scheduled run is nobody's screen: it gets the whole product, the way the console's chat does.
+    scope: "",
+};
   let answered = runInThreadWith(db, threadId, ask);
 
   // Filed the same way a person's turn is filed, and before the outcome is
