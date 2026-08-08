@@ -12,7 +12,7 @@
 //     `published_at` falling back to `fetched_at`, and `since=` filters on
 //     the same effective date — so a 2020 archive page re-crawled this
 //     morning no longer reaches the model, which the fetch-time window here
-//     could never say. `FRESH_HOURS` rides the query as `since=36h` and the
+//     could never say. The freshness window rides the query as `since=<n>h` and the
 //     textual filter below survives as the safety net it was always going to
 //     become. Publication dates are best-effort (~10% coverage, mostly URL
 //     paths — `published_coverage` on /analytics says exactly); an undated
@@ -37,20 +37,46 @@ import { retrieveWeb, searchApiBase } from "./webrag.ts";
 import { urlEncode } from "./mcp-oauth.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 
-/* How recent a page must be to reach the model.
+/* How the digest is tuned, read from the environment on every pass.
  *
- * 36 hours rather than 24: the crawl works through its frontier at its own
- * pace, so a story fetched at the end of yesterday is still the newest thing
- * the index has on it, and a 24-hour line drops those on a slow day. */
-const FRESH_HOURS: int = 36;
+ * These three were compile-time constants, and that was the wrong shape for
+ * them. Changing "how many cards" or "how far back" meant rebuilding a native
+ * binary and restarting the engine - a deploy, with a rollback plan, to alter
+ * a number somebody wants to try two values of. Worse, the numbers that
+ * matter are exactly the ones you learn by watching a live feed: 36 hours and
+ * six cards were reasonable guesses that measured badly, and the cost of
+ * correcting a guess should be one line in a unit file.
+ *
+ * Defaults are the old values where they were sound and the measured ones
+ * where they were not, so a deployment that sets nothing still behaves.
+ * Floors, not just defaults: a zero or a negative read from the environment
+ * would silently empty every feed, and a typo in a unit file should not be
+ * able to do that. */
+function freshHours(): int {
+  let said = process.env["AGENTS_DISCOVER_FRESH_HOURS"] ?? "";
+  if (said == "") { return 48; }
+  let n = parseInt(said, 10) ?? 48;
+  return n < 1 ? 1 : n;
+}
 
-/* How many results to read per topic, and how many stories to ask for.
- *
- * Forty in, at most six out. More than forty snippets is a prompt whose tail
- * the model skims; more than six cards is a page nobody reaches the bottom
- * of, and the sixth is always the weakest. */
-const READ: int = 40;
-const STORIES: int = 6;
+/* How many results to read per topic. Eighty, not the original forty: that
+ * pairing was sized for a 32k-context model, and the digest now runs on 131k
+ * where the tail of an eighty-snippet prompt is still read. */
+function readCap(): int {
+  let said = process.env["AGENTS_DISCOVER_READ"] ?? "";
+  if (said == "") { return 80; }
+  let n = parseInt(said, 10) ?? 80;
+  return n < 1 ? 1 : n;
+}
+
+/* The ceiling on cards per feed. Twelve rather than six - the pages this
+ * feeds were showing one to five against indexes offering dozens. */
+function storyCap(): int {
+  let said = process.env["AGENTS_DISCOVER_STORIES"] ?? "";
+  if (said == "") { return 12; }
+  let n = parseInt(said, 10) ?? 12;
+  return n < 1 ? 1 : n;
+}
 
 /* One feed the digest job maintains: a topic, for a language and a place.
  *
@@ -439,7 +465,7 @@ function recent(stamp: string, cutoff: string): bool {
  * right. */
 function cutoffText(): string {
   let secs = parseInt(`${Date.now()}`, 10) ?? 0;
-  secs = secs / 1000 - FRESH_HOURS * 3600;
+  secs = secs / 1000 - freshHours() * 3600;
 
   let days = secs / 86400;
   let rest = secs - days * 86400;
@@ -482,7 +508,7 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   // time where it did not, and `sort=recent` puts the newest first before a
   // byte arrives here. The textual cutoff below stays as the safety net.
   let url = searchApiBase() + "/search?q=" + urlEncode(query) + "&k=" + `${cap}`
-    + "&sort=recent&since=" + `${FRESH_HOURS}` + "h";
+    + "&sort=recent&since=" + `${freshHours()}` + "h";
   if (lang != "") { url = url + "&lang=" + urlEncode(lang); }
   if (country != "") { url = url + "&country=" + urlEncode(country); }
   let res = http.request(url, "GET", "", new Map<string, string>());
@@ -808,7 +834,15 @@ function stem(text: string): string {
  * deployment's choice: a digest that invents dates or pads its count is
  * broken, not differently configured. The topics ARE a choice, and those are
  * data. */
-function digestPrompt(topic: string, count: int): string {
+function langName(code: string): string {
+  if (code == "ar") { return "Arabic"; }
+  if (code == "fr") { return "French"; }
+  if (code == "en") { return "English"; }
+  if (code == "de") { return "German"; }
+  return code;
+}
+
+function digestPrompt(topic: string, count: int, outLang: string): string {
   return "You are assembling a news digest from pages a web crawler fetched in "
     + "the last day. You will be given search results for the topic \"" + topic
     + "\". Each carries a title, a url, a fetch time and a snippet.\n\n"
@@ -833,15 +867,21 @@ function digestPrompt(topic: string, count: int): string {
     + "Never infer a date from the text.\n"
     + "why: one clause under 60 characters on why it is worth attention today. "
     + "Empty string if the honest answer is that it is simply new.\n\n"
-    + "Write headline, summary and why in the language most of the snippets "
-    + "you drew on are written in — a French feed's cards read in French, an "
-    + "Arabic feed's in Arabic. Never translate local news into English.\n\n"
+    + (outLang == ""
+      ? "Write headline, summary and why in the language most of the snippets "
+        + "you drew on are written in - a French feed's cards read in French, an "
+        + "Arabic feed's in Arabic. Never translate local news into English.\n\n"
+      : "Write headline, summary and why in " + langName(outLang) + ", whatever "
+        + "language the snippets are in. Translate faithfully; keep proper names, "
+        + "institutions and figures exactly as the source gives them.\n\n")
     + "Rules that are not style:\n"
     + "1. Every claim must be in a snippet you were given. If the snippets say "
     + "a company is in talks, you may not write that a deal happened. Where "
     + "they disagree, say so rather than picking a side.\n"
-    + "2. Do not fill the count. If two results are worth a card, return two. "
-    + "An empty list is a correct answer to a quiet day.\n"
+    + "2. Cover the day, not a highlight reel: every distinct newsworthy event "
+    + "in the snippets deserves its card. Do not invent cards to fill the "
+    + "count - an empty list is still the correct answer to a genuinely "
+    + "quiet day - but when in doubt about a real event, include it.\n"
     + "3. Drop what is not news: market-research listings, SEO round-ups, "
     + "product pages, undated explainers. A crawl is mostly made of those.\n"
     + "4. Nothing about a private individual unless they are acting in a "
@@ -854,7 +894,14 @@ function digestPrompt(topic: string, count: int): string {
  *  should draw as an empty topic, never as a broken page. */
 export function digest(db: Db, topic: string, query: string, lang: string, country: string, modelId: string, master: string): DiscoverTopic {
   let empty: WrittenStory[] = [];
-  let hits = freshFor(query, lang, country, READ);
+  /* For a PLACE feed, lang is the language the cards are WRITTEN in, not a filter
+   * on what may be read. Tunisia publishes in Arabic and French; filtering
+   * retrieval to one of them halved the pool and hid half the day's news, when
+   * what was actually wanted was: read everything, write Arabic. Topic feeds keep
+   * lang as a retrieval filter - an English tech feed reading sources its readers
+   * cannot check would be summarising the unverifiable. */
+  let readLang = country == "" ? lang : "";
+  let hits = freshFor(query, readLang, country, readCap());
   // A record's fields cannot be assigned after it is built, so every exit
   // below constructs its own answer. `said` keeps that from being six copies
   // of the same literal.
@@ -888,7 +935,7 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
     id: "", modelId: model.id, temperature: 0.2, maxTokens: 12000, topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
-  let asked = complete(model, config, digestPrompt(topic, STORIES), asLines(hits), key);
+  let asked = complete(model, config, digestPrompt(topic, storyCap(), lang), asLines(hits), key);
   if (!asked.ok) { return said("the model did not answer"); }
 
   // The JSON, out of whatever the model wrapped it in. A model that fences its
