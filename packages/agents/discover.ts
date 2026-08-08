@@ -935,7 +935,22 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
     id: "", modelId: model.id, temperature: 0.2, maxTokens: 12000, topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
+  /* Up to three attempts. DeepSeek returns an entirely empty answer every few
+   * passes - not an error, not malformed JSON, just nothing - and a digest that
+   * gives up on the first one loses the whole half-hour cycle for that feed.
+   * The feeds this bit hardest were exactly the busiest ones; geo:tn failed
+   * three consecutive passes this way while forty candidates waited. A retry
+   * costs seconds against a cycle that costs thirty minutes. */
   let asked = complete(model, config, digestPrompt(topic, storyCap(), lang), asLines(hits), key);
+  let tries: int = 1;
+  while (tries < 3) {
+    if (asked.ok) {
+      let peek = replyText(model.provider, asked.text).trim();
+      if (peek.indexOf("{") >= 0) { break; }
+    }
+    asked = complete(model, config, digestPrompt(topic, storyCap(), lang), asLines(hits), key);
+    tries = tries + 1;
+  }
   if (!asked.ok) { return said("the model did not answer"); }
 
   // The JSON, out of whatever the model wrapped it in. A model that fences its
