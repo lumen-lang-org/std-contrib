@@ -925,6 +925,22 @@ export function plainly(answer: string): string {
   return clean == "" ? answer.trim() : clean;
 }
 
+/** The artifact path an answer names with [FILE]/report.md[/FILE], or "".
+ *
+ *  The reply step's file field covers the author who knows the path ahead
+ *  of time. This covers the run that only knows it at the end — an agent
+ *  told to "write a report and send it" answers with the block, and a
+ *  reply step whose own field is empty sends that document. It is the
+ *  [NAME] shape every control block has, so plainly() already keeps it
+ *  out of what the chat reads. */
+export function fileBlock(answer: string): string {
+  let open = answer.indexOf("[FILE]");
+  if (open < 0) { return ""; }
+  let shut = answer.indexOf("[/FILE]", open + 6);
+  if (shut < 0) { return ""; }
+  return answer.slice(open + 6, shut).trim();
+}
+
 /** Whether these are the letters of a control block's name: upper case, and
  *  at least one of them. */
 function isBlockName(name: string): bool {

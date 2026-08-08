@@ -26,7 +26,7 @@ import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
-import { queueOutbound, queueOutboundFile, queueOutboundWith } from "./triggers.ts";
+import { fileBlock, queueOutbound, queueOutboundFile, queueOutboundWith } from "./triggers.ts";
 import { RunContext, runAgentAt } from "./run.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
@@ -390,6 +390,14 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       // script step wrote), and it resolves on the RUN'S OWN THREAD, which
       // is where every step's files land.
       let sendPath = fill(node.body, ctx).trim();
+      if (sendPath == "") {
+        // The author may not know the path — "write a report and send it"
+        // names its file at run time. An agent that answers with
+        // [FILE]/report.md[/FILE] has chosen; the block rides into this
+        // step wherever {{prev}} put it, and plainly() keeps it out of
+        // the caption at queue time.
+        sendPath = fileBlock(saying);
+      }
       if (sendPath != "") {
         queueOutboundFile(db, bot, chat, runId, saying, threadId, sendPath, Date.now() as number);
       } else {

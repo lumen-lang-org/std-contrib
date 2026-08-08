@@ -6,7 +6,7 @@
 //
 //   cd packages/agents && lumen test triggers.test.ts
 
-import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, replyKeyboard, testingDraft, updatesIn, withRunCounted } from "./triggers.ts";
+import { fileBlock, TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, replyKeyboard, testingDraft, updatesIn, withRunCounted } from "./triggers.ts";
 
 function bot(): TriggerBotRow {
   let base = emptyBot();
@@ -252,4 +252,15 @@ test("a group names its speakers; a private chat stays bare", () => {
     + "\"from\":{\"id\":77,\"first_name\":\"Sara\"},"
     + "\"chat\":{\"id\":77,\"type\":\"private\"},\"text\":\"ship it friday\"}}]}";
   expect(updatesIn(dm)[0].speaker == "");
+});
+
+test("an answer names its file with [FILE], and the block never reaches the chat", () => {
+  expect(fileBlock("Done. [FILE] /q3-report.md [/FILE]") == "/q3-report.md");
+  expect(fileBlock("no block here") == "");
+  // Cut off mid-block: machinery, not a path.
+  expect(fileBlock("[FILE]/half.md") == "");
+  // The first named file is the one sent.
+  expect(fileBlock("[FILE]/a.md[/FILE] then [FILE]/b.md[/FILE]") == "/a.md");
+  // The caption a person reads has the block taken out already.
+  expect(plainly("Here it is. [FILE]/a.md[/FILE]") == "Here it is.");
 });
