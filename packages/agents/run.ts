@@ -31,6 +31,7 @@ import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
 import { projectTools, callProjectTool } from "./project-tools.ts";
+import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
@@ -461,6 +462,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       while (pj < groups.length) {
         specs.push(groups[pj]);
         pj = pj + 1;
+      }
+      let knowing = knowledgeTools();
+      let kn: int = 0;
+      while (kn < knowing.length) {
+        specs.push(knowing[kn]);
+        kn = kn + 1;
       }
     }
   }
@@ -971,6 +978,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, threadId: threadId,
         name: calls[i].name, args: calls[i].args, nowMs: Date.now() as number,
       });
+      // The corpus and the skills: four names.
+      let known = callKnowledgeTool(db, {
+        owner: where.owner, name: calls[i].name, args: calls[i].args,
+        nowMs: Date.now() as number,
+      });
       // The web index, same convention: asked about every call, answers only
       // search_web, which belongs to no connector.
       let websearched = callWebSearchTool(calls[i].name, calls[i].args);
@@ -1046,6 +1058,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = grouped.ok;
         resultText = grouped.text;
         from = "projects";
+        calledTools.push(calls[i].name);
+      } else if (known.handled) {
+        resultOk = known.ok;
+        resultText = known.text;
+        from = "knowledge";
         calledTools.push(calls[i].name);
       } else if (websearched != "") {
         // BEFORE skills, and the ordering is the whole fix. callSkillTool
