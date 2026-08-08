@@ -1892,6 +1892,10 @@ export type ThreadAsk = {
   // the send, not a setting the thread remembers, so an answer is never
   // re-thought because an earlier one was.
   think: bool,
+  // Which surface asked: "workflows", "tasks", "projects", "knowledge", or ""
+  // for the console's own chat. It narrows the verbs the turn is offered (see
+  // RunContext.scope in run.ts) and can only take them away.
+  scope: string,
 };
 
 // Ask a thread. Everything it already holds is replayed, this question is
@@ -1900,7 +1904,7 @@ export type ThreadAsk = {
 // Retrieval still happens for the new question: the passages already in the
 // thread were fetched for older ones, and "and in Rotterdam?" needs its own.
 export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): ThreadReply {
-  let plain: ThreadAsk = { userText: userText, master: master, tracer: tracer, pick: inheritedPick(), think: false };
+  let plain: ThreadAsk = { userText: userText, master: master, tracer: tracer, pick: inheritedPick(), think: false, scope: "" };
   return runInThreadWith(db, threadId, plain);
 }
 
@@ -1918,7 +1922,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
     // Runs against an agent that does not exist, which reports "no agent " and
     // is the truth: this thread names nothing runnable.
     let noChunks: string[] = [];
-    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: ask.think });
+    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: ask.think, scope: ask.scope });
     let noNotes: string[] = [];
     // Nothing was chosen because nothing was asked: a thread that names no
     // runnable agent has no round for a choice to apply to, and remembering an
@@ -2003,7 +2007,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
   // run before this feature passed and what run.ts reads as "the agent's own".
   // The thread's owner rides the context so a connector the person gave
   // their own token calls out as them — threadOwner is already this file's.
-  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, modelConfigId: chosen.configId, baseSeq: held.length, owner: threadOwner(db, threadId), think: ask.think });
+  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, modelConfigId: chosen.configId, baseSeq: held.length, owner: threadOwner(db, threadId), think: ask.think, scope: ask.scope });
 
   // What this run added: everything in its context past what was replayed.
   // Stored under the thread's own numbering, which continues from what is

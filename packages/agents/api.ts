@@ -74,6 +74,7 @@ import { TaskRow, MAX_PER_OWNER, compile, emptyTask, enabledCount, isOnce, nextF
 import { ensureBuilt } from "./script-wasm.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, workflowRunsOf, timingOf, withWorkflowNextAt, workflowsMapping, workflowsOf, workflowsPlan } from "./workflow-store.ts";
 import { TriggerBotRow, botsOf, emptyBot, queuedFor, triggerBotsMapping, triggersPlan } from "./triggers.ts";
+import { createSecret, forgetSecret, graphSecretProblem, secretsMapping, secretsOf, secretsPlan } from "./secrets.ts";
 import { PROJECT_FILES_KEY, ProjectRow, assignProject, emptyProject, projectsMapping, projectsOf, projectsPlan, releaseThreads, rememberFilesThread } from "./projects.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, documentFilesPlan, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
@@ -3245,6 +3246,10 @@ class ThreadApi {
       // Absent — every caller written before the toggle — reads as false,
       // which is the same request those callers were already making.
       think: jsonText(req.body, "think") == "true",
+      // Which screen this was typed on. Absent — the console's own chat, and
+      // every caller written before surfaces existed — reads as "", which is
+      // the whole product, exactly as before.
+      scope: jsonText(req.body, "scope"),
     });
     let run = answered.run;
     // The run log keeps the RAW reply — `run.text`, fences and bodies intact —
@@ -5352,6 +5357,8 @@ class WorkflowApi {
     };
     let wrong = refuseWorkflow(row);
     if (wrong != "") { return badRequest(wrong); }
+    let secretWrong = graphSecretProblem(this.db, parsed.graph, owner);
+    if (secretWrong != "") { return badRequest(secretWrong); }
     let ready = row;
     if (row.kind == "every") {
       let first = nextWorkflowFire(row, Date.now() as number);
@@ -5432,6 +5439,8 @@ class WorkflowApi {
     };
     let wrong = refuseWorkflow(edited);
     if (wrong != "") { return badRequest(wrong); }
+    let secretWrong = graphSecretProblem(this.db, parsed.graph, mine.owner);
+    if (secretWrong != "") { return badRequest(secretWrong); }
     let stored = edited;
     if (edited.kind == "every") {
       let ahead = nextWorkflowFire(edited, Date.now() as number);
@@ -5489,6 +5498,8 @@ class WorkflowApi {
     if (!parsed.ok) { return badRequest(parsed.error); }
     let wrong = refuseWorkflow(mine);
     if (wrong != "") { return badRequest(wrong); }
+    let secretWrong = graphSecretProblem(this.db, parsed.graph, mine.owner);
+    if (secretWrong != "") { return badRequest(secretWrong); }
     let now = stamp();
     executeWith(this.db,
       "UPDATE workflows SET published_graph = graph, published_at = " + this.db.placeholder
@@ -5537,6 +5548,66 @@ class WorkflowApi {
     let row: WorkflowRow = JSON.parse<WorkflowRow>(document);
     if (!holdsOwner(callerTags(req), row.owner)) { return emptyWorkflow(); }
     return row;
+  }
+}
+
+// Secrets: values a workflow step may send but never hold (secrets.ts).
+//
+// Write-only by construction: POST takes the value and nothing answers one —
+// the list is names, headers and destinations, and DELETE is the only other
+// verb. There is deliberately no PUT: a secret's destination is authorised
+// the moment its value is stored, and editing either half alone is the
+// exfiltration this table exists to refuse. Change means delete and add
+// again, with the value in hand.
+@controller("/secrets")
+class SecretApi {
+  db: Db;
+  master: string;
+
+  constructor(db: Db, master: string) { this.db = db; this.master = master; }
+
+  @get("/")
+  list(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(secretsOf(this.db, owningTag(tags)));
+  }
+
+  @post("/")
+  create(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    // The workflow rule, for the workflow reason: a secret is a standing key
+    // somebody else's API honours, and it has to belong to somebody.
+    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
+      return badRequest("signing in is what makes a secret yours to keep");
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"name\":\"...\",\"value\":\"...\",\"destination\":\"https://api.example.com\",\"header\":\"Authorization\"}");
+    }
+    let made = createSecret(this.db, {
+      owner: owner,
+      name: jsonText(req.body, "name"),
+      value: jsonText(req.body, "value"),
+      destination: jsonText(req.body, "destination"),
+      header: jsonText(req.body, "header"),
+      master: this.master,
+      now: stamp(),
+    });
+    if (made.problem != "") { return badRequest(made.problem); }
+    // The row, never the value — the secrets table has no value column to
+    // leak; the envelope lives with the credentials and no route reads it.
+    return created(findById(this.db, secretsMapping(), made.id));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    // Owner-scoped inside forgetSecret: somebody else's secret is absent,
+    // not forbidden.
+    if (!forgetSecret(this.db, param(req, "id"), owningTag(callerTags(req)))) {
+      return notFound("secret " + param(req, "id"));
+    }
+    return noContent();
   }
 }
 
@@ -6952,6 +7023,11 @@ export function migrationProblem(db: Db): string {
   let arriving = triggersPlan(db);
   let tg: int = 0;
   while (tg < arriving.length) { plan.push(arriving[tg]); tg = tg + 1; }
+  // Secrets a workflow step may send but never hold (secrets.ts). Its own
+  // plan, numbered above triggers' 108.
+  let sealed = secretsPlan(db);
+  let sk: int = 0;
+  while (sk < sealed.length) { plan.push(sealed[sk]); sk = sk + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) { return ""; }
   // Logged and carried on with, this served an API whose routes SELECT columns
@@ -7089,6 +7165,7 @@ function main(): void {
     new TaskApi(db),
     new ProjectApi(db),
     new WorkflowApi(db),
+    new SecretApi(db, master),
     new TriggerApi(db, master),
     new McpServerApi(db),
     new ScriptImageApi(db),

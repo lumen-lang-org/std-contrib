@@ -264,13 +264,26 @@ export type RunContext = {
   // A delegated child inherits it: a person asking for care wants it from the
   // agents the answer actually passes through, not only the first one.
   think: bool,
+  // Which surface asked, or "" for the console's own chat.
+  //
+  // A turn started from the workflow canvas is a turn about workflows, and
+  // handing it every standing-instruction verb in the product is how "draw me
+  // one" gets answered with a scheduled task instead of a drawing — which is
+  // exactly what it did, three takes running, and the answer was not even
+  // wrong: a thing that happens every morning IS a task. It was answered on
+  // the wrong surface. A scope narrows the families offered so the only way
+  // to say yes on this screen is the thing this screen is for.
+  //
+  // Narrowing, never widening: a scope can only take verbs away from what the
+  // owner check already allowed, so no surface can grant itself anything.
+  scope: string,
 };
 
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false };
+  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false, scope: "" };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -282,7 +295,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false };
+  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false, scope: "" };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -428,9 +441,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     // can only be refused by is a turn spent finding that out, and an offer
     // this conversation cannot honour.
     if (maySchedule(where.owner)) {
+      // Which families this surface may answer with. "" is the console's own
+      // chat, where everything the owner may do is on the table.
+      let anywhere = where.scope == "";
       let sched = taskTools();
       let td: int = 0;
-      while (td < sched.length) {
+      while (td < sched.length && (anywhere || where.scope == "tasks")) {
         specs.push(sched[td]);
         td = td + 1;
       }
@@ -438,34 +454,36 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // provider's bill attached, and both need an owner who can be told.
       let flows = workflowTools();
       let wf: int = 0;
-      while (wf < flows.length) {
+      while (wf < flows.length && (anywhere || where.scope == "workflows")) {
         specs.push(flows[wf]);
         wf = wf + 1;
       }
       // And the bots those workflows answer through — same gate, same reason,
       // and the payoff that a bot's own chat can manage the bot.
       let bots = triggerTools();
+      // The bots ride with the workflows: a trigger is how a drawing is
+      // reached, so a canvas that may draw one may say which chat starts it.
       let bt: int = 0;
-      while (bt < bots.length) {
+      while (bt < bots.length && (anywhere || where.scope == "workflows")) {
         specs.push(bots[bt]);
         bt = bt + 1;
       }
       // And the agents everything answers through — Settings, sayable.
       let selves = agentTools();
       let ag: int = 0;
-      while (ag < selves.length) {
+      while (ag < selves.length && anywhere) {
         specs.push(selves[ag]);
         ag = ag + 1;
       }
       let groups = projectTools();
       let pj: int = 0;
-      while (pj < groups.length) {
+      while (pj < groups.length && (anywhere || where.scope == "projects")) {
         specs.push(groups[pj]);
         pj = pj + 1;
       }
       let knowing = knowledgeTools();
       let kn: int = 0;
-      while (kn < knowing.length) {
+      while (kn < knowing.length && (anywhere || where.scope == "knowledge")) {
         specs.push(knowing[kn]);
         kn = kn + 1;
       }
@@ -1118,6 +1136,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             // Inherited: a person who asked for care wants it from the agents
             // the answer passes through, not only the one they addressed.
             think: where.think,
+            // A child inherits the surface: a delegate working on a workflow
+            // canvas is still working on a workflow canvas.
+            scope: where.scope,
           };
           let asked = runAgentAt(db, child.id, question, master, below2);
           if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }
