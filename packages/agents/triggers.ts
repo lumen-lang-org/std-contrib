@@ -226,9 +226,26 @@ export type TriggerOutboxRow = {
   // "queued" then "sent". Nothing retries forever: a send that throws stays
   // queued and the next poller pass tries again, the sendAnswers rule.
   status: string,
+  // Options to offer as tap buttons, one per line; "" is a plain message.
+  options?: string,
   createdAt: string,
   updatedAt: string,
 };
+
+// Frozen at what 106.3 created — the V1 rule, third time in this file.
+function triggerOutboxMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("botId", "bot_id", "text"),
+    field("chatId", "chat_id", "text"),
+    field("runId", "run_id", "text"),
+    field("text", "text", "text"),
+    field("status", "status", "text"),
+    field("createdAt", "created_at", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("trigger_outbox", "id", "id", fs);
+}
 
 export function triggerOutboxMapping(): DbRepository {
   let fs: DbField[] = [
@@ -238,6 +255,10 @@ export function triggerOutboxMapping(): DbRepository {
     field("runId", "run_id", "text"),
     field("text", "text", "text"),
     field("status", "status", "text"),
+    // Added after 106.3 shipped — the ALTER at 107.5. Newline-separated
+    // options; non-empty means the poller sends them as a one-time reply
+    // keyboard, and the tap comes back as an ordinary message.
+    field("options", "options", "text"),
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
@@ -311,13 +332,15 @@ export function triggersPlan(db: Db): Migration[] {
     // ever added, that mapping gets a frozen V1 copy first — 106.1 taught
     // this file the hard way.
     migration("106.3", "what a run says before it is done",
-      createTableSql(db, triggerOutboxMapping())),
+      createTableSql(db, triggerOutboxMappingV1())),
     // 107.3: 107–107.2 live with the workflows plan; shared numbering, one
     // history.
     migration("107.3", "a bounded window where a bot tests the draft",
       "ALTER TABLE trigger_bots ADD COLUMN draft_until " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.4", "a question waiting for its chat to answer",
       createTableSql(db, triggerPendingMapping())),
+    migration("107.5", "a question can offer its answers as buttons",
+      "ALTER TABLE trigger_outbox ADD COLUMN options " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -648,13 +671,40 @@ export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runI
  *  holds the token. Stripped of control blocks here, so the poller stays a
  *  dumb pipe — the same division as the final answer. */
 export function queueOutbound(db: Db, botId: string, chatId: string, runId: string, text: string, nowMs: number): string {
+  return queueOutboundWith(db, botId, chatId, runId, text, "", nowMs);
+}
+
+/** The same, offering answers: non-empty options become a one-time reply
+ *  keyboard on the phone — the person taps rather than types, and the tap
+ *  arrives as a message holding exactly the option's text. */
+export function queueOutboundWith(db: Db, botId: string, chatId: string, runId: string, text: string, options: string, nowMs: number): string {
   let now = `${nowMs}`;
   let row: TriggerOutboxRow = {
     id: crypto.randomUUID(), botId: botId, chatId: chatId, runId: runId,
-    text: plainly(text), status: "queued", createdAt: now, updatedAt: now,
+    text: plainly(text), status: "queued", options: options.trim(),
+    createdAt: now, updatedAt: now,
   };
   persist(db, triggerOutboxMapping(), JSON.stringify(row));
   return row.id;
+}
+
+/** Telegram's reply_markup for a set of options, or "" for none: one button
+ *  per line, one_time_keyboard so it folds away after the tap. Pure, so the
+ *  JSON a phone receives is testable without a phone. */
+export function replyKeyboard(options: string): string {
+  let out = "";
+  let lines = options.split("\n");
+  let i: int = 0;
+  while (i < lines.length) {
+    let one = lines[i].trim();
+    if (one != "") {
+      if (out != "") { out = out + ","; }
+      out = out + "[{\"text\":" + JSON.stringify(one) + "}]";
+    }
+    i = i + 1;
+  }
+  if (out == "") { return ""; }
+  return "{\"keyboard\":[" + out + "],\"one_time_keyboard\":true,\"resize_keyboard\":true}";
 }
 
 /** What is waiting to leave through this bot, oldest first — the order the

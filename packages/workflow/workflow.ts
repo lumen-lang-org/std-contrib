@@ -76,6 +76,12 @@ export type WfNode = {
   // A newline-separated string rather than a list, because WfNode is a flat
   // record with one field per idea, and the canvas's own node configuration
   // travels as scalars. Optional, for the reason `source` is.
+  //
+  // TELEGRAM_ASK borrows it: its cases are the OPTIONS offered to the chat,
+  // sent as tap buttons. The tap comes back as a message holding exactly the
+  // option's text, which is what lets a SWITCH with the same values route
+  // the reply without parsing — switchBranch matches trimmed,
+  // case-insensitive, so a button and a branch cannot drift apart by case.
   cases?: string,
   // TELEGRAM: which bot row this step is connected to (triggers.ts). The
   // token is NOT here and never will be — a graph is saved on every drag and

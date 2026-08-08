@@ -26,7 +26,7 @@ import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
-import { queueOutbound } from "./triggers.ts";
+import { queueOutbound, queueOutboundWith } from "./triggers.ts";
 import { RunContext, runAgentAt } from "./run.ts";
 import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
@@ -362,7 +362,10 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
         // the run-by-hand case, and the honest sentence is this one.
         return withInput(stepFailed("nobody can answer - this run was not started by a chat"), asking);
       }
-      queueOutbound(db, bot, chat, runId, asking, Date.now() as number);
+      // The node's cases are its OFFERED ANSWERS, sent as tap buttons; the
+      // tap arrives as a message holding the option's exact text, which a
+      // SWITCH with the same values routes without parsing.
+      queueOutboundWith(db, bot, chat, runId, asking, node.cases ?? "", Date.now() as number);
       let paused: StepResult = { ok: true, output: asking, branch: "", error: "", input: asking, suspend: true };
       return paused;
     }
