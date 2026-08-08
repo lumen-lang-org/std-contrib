@@ -6,7 +6,7 @@
 //
 //   cd packages/agents && lumen test triggers.test.ts
 
-import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, testingDraft, updatesIn, withRunCounted } from "./triggers.ts";
+import { TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, replyKeyboard, testingDraft, updatesIn, withRunCounted } from "./triggers.ts";
 
 function bot(): TriggerBotRow {
   let base = emptyBot();
@@ -204,4 +204,14 @@ test("the test window is a timestamp, so it cannot be forgotten on", () => {
   expect(!testingDraft(open, realNow + 300001.0));
   // And counting a run keeps the window: the copy carries it.
   expect(testingDraft(withRunCounted(open, realNow), realNow));
+});
+
+test("options become a keyboard the phone can tap, and a blank set none", () => {
+  let made = replyKeyboard("Log it\nSkip\n\n  ");
+  expect(made.includes("\"keyboard\":[[{\"text\":\"Log it\"}],[{\"text\":\"Skip\"}]]"));
+  // One-time: the buttons fold away after the tap rather than squatting on
+  // every later message.
+  expect(made.includes("\"one_time_keyboard\":true"));
+  expect(replyKeyboard("") == "");
+  expect(replyKeyboard("  \n ") == "");
 });

@@ -32,7 +32,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { credentialFor, masterKey } from "./credentials.ts";
-import { TriggerBotRow, TriggerOutboxRow, botById, claimBot, markOutboundSent, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, saveBot, takeMessage, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
+import { TriggerBotRow, TriggerOutboxRow, botById, claimBot, markOutboundSent, mayRun, nextOffset, noteBotPass, recentRuns, refuseMessage, replyKeyboard, saveBot, takeMessage, unsentOutbound, updatesIn, withRunCounted } from "./triggers.ts";
 import { jsonText } from "./scan.ts";
 
 // How long Telegram holds the request open with nothing to say. Long enough
@@ -140,7 +140,7 @@ function pass(db: Db, botId: string, who: string, master: string): void {
       // Refused, and told so. A message that vanishes reads as a broken bot;
       // "not now, and here is why" reads as a working one with a limit.
       if (refuseMessage(db, counted, said[i], verdict.reason, now) != "") {
-        try { sendMessage(token, said[i].chatId, verdict.reason); }
+        try { sendMessage(token, said[i].chatId, verdict.reason, ""); }
         catch (e) { console.error("trigger-poller: could not say why: " + e.message); }
       }
     }
@@ -164,7 +164,7 @@ function sendAnswers(db: Db, bot: TriggerBotRow, token: string): void {
   while (o < speaking.length && o < SEND_PER_PASS) {
     let out = speaking[o];
     try {
-      if (out.text.trim() != "") { sendMessage(token, out.chatId, out.text); }
+      if (out.text.trim() != "") { sendMessage(token, out.chatId, out.text, replyKeyboard(out.options ?? "")); }
       markOutboundSent(db, out.id, Date.now() as number);
     } catch (e) {
       console.error("trigger-poller: outbox " + out.id + ": " + e.message);
@@ -200,8 +200,9 @@ function getUpdates(token: string, offset: string): string {
   return res.body;
 }
 
-function sendMessage(token: string, chatId: string, text: string): void {
-  let ask = "{\"chat_id\":" + chatId + ",\"text\":" + JSON.stringify(text) + "}";
+function sendMessage(token: string, chatId: string, text: string, markup: string): void {
+  let ask = "{\"chat_id\":" + chatId + ",\"text\":" + JSON.stringify(text)
+    + (markup == "" ? "" : ",\"reply_markup\":" + markup) + "}";
   let res = http.request(api(token, "sendMessage"), "POST", ask, jsonHeaders());
   if (jsonText(res.body, "ok").trim() == "" && res.status >= 400) {
     throw new Error("telegram refused the message: " + `${res.status}`);
