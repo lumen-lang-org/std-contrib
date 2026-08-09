@@ -92,6 +92,25 @@ export type WfNode = {
   // that mark finally means what it says — absent parses to null instead of
   // refusing the document.
   botId?: string,
+  // HTTP: extra headers, one `Name: value` per line, values templated. For
+  // everything that is NOT a secret — a content type, an accept, a version
+  // pin. Optional, for the reason `source` is.
+  headers?: string,
+  // Which stored secrets ride along, by id, comma-separated — the botId rule
+  // again: the VALUE is never here, because this document is saved on every
+  // drag, served to the browser, and read aloud by show_workflow. The store
+  // that owns the row also owns which header each fills and which origin each
+  // may be sent to; this package only carries the references.
+  //
+  // On EVERY node kind rather than on HTTP alone: which steps can carry a
+  // credential is the runner's business and it grows, and a field that knew
+  // the answer would have to be edited every time it changed. What a step
+  // DOES with an attached secret is decided where the step runs.
+  secrets?: string,
+  // The single-secret spelling this replaced. Read when `secrets` is empty so
+  // graphs saved before the list existed keep their attachment; never
+  // written. Optional for the reason `source` is.
+  secretId?: string,
 };
 
 // An edge. `when` is "" for the ordinary case; a CONDITION's outgoing edges
@@ -229,6 +248,60 @@ export const SWITCH_ELSE: string = "else";
 export const MAX_CASES: int = 12;
 
 /** The values a switch routes on, in order, blanks dropped. */
+// A step may carry a few credentials, not a keyring. The bound is here
+// because the graph is validated whole on every write.
+export const MAX_SECRETS_PER_STEP: int = 4;
+
+/** The secrets attached to a step, by id, in order, blanks dropped.
+ *
+ *  Falls back to the single `secretId` this replaced, so a graph saved before
+ *  the list existed still sends what it was sending. */
+export function secretIds(node: WfNode): string[] {
+  let out: string[] = [];
+  let said = node.secrets ?? "";
+  if (said.trim() == "") {
+    let one = node.secretId ?? "";
+    if (one.trim() != "") { out.push(one.trim()); }
+    return out;
+  }
+  let i: int = 0;
+  let piece = "";
+  while (i < said.length) {
+    let ch = said.charAt(i);
+    if (ch == "," || ch == "\n" || ch == "\r") {
+      if (piece.trim() != "") { out.push(piece.trim()); }
+      piece = "";
+    } else {
+      piece = piece + ch;
+    }
+    i = i + 1;
+  }
+  if (piece.trim() != "") { out.push(piece.trim()); }
+  return out;
+}
+
+/** An HTTP step's plain header lines, in order, blanks dropped — the same
+ *  reading `casesOf` gives a switch, for the same reason: a flat record
+ *  carries a list as lines, and one function decides what a line is. */
+export function headerLines(node: WfNode): string[] {
+  let out: string[] = [];
+  let said = node.headers ?? "";
+  let i: int = 0;
+  let one = "";
+  while (i < said.length) {
+    let ch = said.charAt(i);
+    if (ch == "\n" || ch == "\r") {
+      if (one.trim() != "") { out.push(one.trim()); }
+      one = "";
+    } else {
+      one = one + ch;
+    }
+    i = i + 1;
+  }
+  if (one.trim() != "") { out.push(one.trim()); }
+  return out;
+}
+
 export function casesOf(node: WfNode): string[] {
   let out: string[] = [];
   let said = node.cases ?? "";
@@ -377,6 +450,22 @@ function refuseNode(node: WfNode): string {
     return (node.name == "" ? node.id : node.name) + " carries more text than a step may (" + `${MAX_TEXT}` + " characters)";
   }
   let label = node.name == "" ? node.id : node.name;
+  // Every kind, because the field is on every kind. Whether a secret is
+  // MEANINGFUL on a given step is the runner's to say; how many may be
+  // attached, and that none is listed twice, is the graph's.
+  let held = secretIds(node);
+  if (held.length > MAX_SECRETS_PER_STEP) {
+    return label + " carries " + `${held.length}` + " secrets — the most one step may carry is " + `${MAX_SECRETS_PER_STEP}`;
+  }
+  let d: int = 0;
+  while (d < held.length) {
+    let e = d + 1;
+    while (e < held.length) {
+      if (held[e] == held[d]) { return label + " lists the same secret twice"; }
+      e = e + 1;
+    }
+    d = d + 1;
+  }
   if (node.type == "AGENT" && node.instruction.trim() == "") { return label + " needs an instruction — what should the agent do?"; }
   if (node.type == "LLM" && node.instruction.trim() == "") { return label + " needs an instruction — what should the model be asked?"; }
   // TELEGRAM_REPLY: what to say. Telegram-specific on purpose, the way the
@@ -422,6 +511,19 @@ function refuseNode(node: WfNode): string {
     let m = node.method;
     if (m != "GET" && m != "POST" && m != "PUT" && m != "DELETE" && m != "PATCH") {
       return label + ": \"" + m + "\" is not a method — GET, POST, PUT, DELETE or PATCH";
+    }
+    let lines = headerLines(node);
+    if ((node.headers ?? "").length > MAX_TEXT) {
+      return label + " carries more headers than a step may (" + `${MAX_TEXT}` + " characters)";
+    }
+    let h: int = 0;
+    while (h < lines.length) {
+      let colon = lines[h].indexOf(":");
+      let name = colon < 0 ? "" : lines[h].slice(0, colon).trim();
+      if (name == "" || name.indexOf(" ") >= 0) {
+        return label + ": \"" + lines[h].slice(0, 40) + "\" is not a header — one \"Name: value\" per line";
+      }
+      h = h + 1;
     }
   }
   if (node.type == "CONDITION") {

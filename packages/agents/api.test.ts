@@ -108,6 +108,8 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS scheduled_tasks");
   execute(database, "DROP TABLE IF EXISTS workflows");
   execute(database, "DROP TABLE IF EXISTS workflow_runs");
+  // Secrets (109): created fresh each run so a test's rows cannot outlive it.
+  execute(database, "DROP TABLE IF EXISTS secrets");
   // ALTERed at 103 (files_thread_id), so it joins the list above for the
   // reason auth_providers did: left standing, the second run of this fixture
   // meets a duplicate column and the plan stops there.

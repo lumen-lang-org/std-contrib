@@ -21,7 +21,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { WfGraph } from "../workflow/workflow.ts";
+import { WfGraph, secretIds } from "../workflow/workflow.ts";
 import { destinationOf, storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
 
 // Bounded where every per-owner thing is bounded, at a number nobody real
@@ -46,6 +46,13 @@ export type SecretRow = {
   // authorised the moment the secret is, and moving it means storing the
   // secret again.
   destination: string,
+  // What it is filed under in the picker: "Payments", "Weather", "Internal".
+  // Free text, the owner's own vocabulary — a list of twenty keys is a list
+  // you read from the top every time, and grouped it is one you scan. Empty
+  // means the picker groups it by the host it goes to.
+  //
+  // Optional so rows written before 109.1 still parse.
+  category?: string,
   createdAt: string,
   lastUsedAt: string,
 };
@@ -57,6 +64,7 @@ export function secretsMapping(): DbRepository {
     field("name", "name", "text"),
     field("header", "header", "text"),
     field("destination", "destination", "text"),
+    field("category", "category", "text"),
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
@@ -68,16 +76,35 @@ export function secretsPlan(db: Db): Migration[] {
   // already applied refuses the whole plan.
   return [
     migration("109", "secrets: a value a step may send but never hold",
-      createTableSql(db, secretsMapping())),
+      createTableSqlV1(db)),
+    migration("109.1", "and what it is filed under",
+      "ALTER TABLE secrets ADD COLUMN category " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
 export function emptySecret(): SecretRow {
   let none: SecretRow = {
-    id: "", owner: "", name: "", header: "", destination: "",
+    id: "", owner: "", name: "", header: "", destination: "", category: "",
     createdAt: "", lastUsedAt: "",
   };
   return none;
+}
+
+// Frozen at what 109 created — the workflow-store rule: 109 generates its
+// CREATE from a mapping, so a column added to the live mapping above would
+// rewrite an applied migration and every deployed database would refuse the
+// whole plan. New columns are ALTERs at new versions.
+function createTableSqlV1(db: Db): string {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("owner", "owner", "text"),
+    field("name", "name", "text"),
+    field("header", "header", "text"),
+    field("destination", "destination", "text"),
+    field("createdAt", "created_at", "text"),
+    field("lastUsedAt", "last_used_at", "text"),
+  ];
+  return createTableSql(db, repository("secrets", "id", "id", fs));
 }
 
 // Where a secret's value lives in the credential store. Spelled in one place
@@ -143,6 +170,8 @@ export type SecretWrite = {
   destination: string,
   // "" means Authorization.
   header: string,
+  // Free text, "" for "group it by its host".
+  category: string,
   master: string,
   now: string,
 };
@@ -164,6 +193,7 @@ export function createSecret(db: Db, ask: SecretWrite): SecretMade {
     name: ask.name.trim(),
     header: ask.header.trim() == "" ? "Authorization" : ask.header.trim(),
     destination: destinationOf(ask.destination),
+    category: ask.category.trim(),
     createdAt: ask.now,
     lastUsedAt: "",
   };
@@ -239,20 +269,28 @@ export function graphSecretProblem(db: Db, graph: WfGraph, owner: string): strin
   let i: int = 0;
   while (i < graph.nodes.length) {
     let node = graph.nodes[i];
-    let id = node.secretId ?? "";
-    if (node.type == "HTTP" && id != "") {
-      let label = node.name == "" ? node.id : node.name;
-      let row = secretById(db, id, owner);
+    let label = node.name == "" ? node.id : node.name;
+    let held = secretIds(node);
+    let s: int = 0;
+    while (s < held.length) {
+      let row = secretById(db, held[s], owner);
       if (row.id == "") {
         return label + " names a secret that is not here — list_secrets says which exist, or pick one in the step's settings";
       }
-      let to = destinationOf(node.url);
-      if (to != row.destination) {
-        return label + " sends to " + (to == "" ? "an address this cannot read" : to)
-          + ", and \"" + row.name + "\" was stored for " + row.destination
-          + " — a secret is only sent to the address it was stored for."
-          + " Delete the secret and add it again if the address has moved.";
+      // The address check applies wherever the step HAS an address, which
+      // today is the HTTP step. A step with no url of its own has nothing to
+      // compare, and the run-time check is what stands for it — this is a
+      // rule about addresses, not about kinds.
+      if (node.url.trim() != "") {
+        let to = destinationOf(node.url);
+        if (to != row.destination) {
+          return label + " sends to " + (to == "" ? "an address this cannot read" : to)
+            + ", and \"" + row.name + "\" was stored for " + row.destination
+            + " — a secret is only sent to the address it was stored for."
+            + " Delete the secret and add it again if the address has moved.";
+        }
       }
+      s = s + 1;
     }
     i = i + 1;
   }

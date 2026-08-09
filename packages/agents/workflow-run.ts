@@ -18,7 +18,7 @@
 
 import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
-import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, emptyNode, fill, headerLines, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
+import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, emptyNode, fill, headerLines, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
@@ -244,9 +244,12 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
     }
     h = h + 1;
   }
-  let secretId = node.secretId ?? "";
-  if (secretId != "") {
-    let secret = secretById(db, secretId, owner);
+  // Every secret the step carries, each into the header its own row names —
+  // set after the plain lines so a typed header cannot shadow one.
+  let held = secretIds(node);
+  let s: int = 0;
+  while (s < held.length) {
+    let secret = secretById(db, held[s], owner);
     if (secret.id == "") {
       return stepFailed("this step names a secret that is not here any more — pick another in the step's settings");
     }
@@ -261,6 +264,7 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
     }
     headers.set(secret.header, value);
     touchSecret(db, secret.id, `${Date.now() as number}`);
+    s = s + 1;
   }
   let body = node.method == "GET" ? "" : fill(node.body, ctx);
   let res = http.request(url, node.method, body, headers);
