@@ -50,6 +50,7 @@ import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
 import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
 import { projectTools, callProjectTool } from "./project-tools.ts";
+import { forgetRoster, mcpRosterPlan, rememberRoster, rosterOf, rosterWithSwitches } from "./mcp-roster.ts";
 import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, forgetSuppliedClient, setSuppliedClient, suppliedClientId, toolsOff, setToolOn } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, rememberRouteKey, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
@@ -2420,8 +2421,30 @@ class ServerApi {
     // reporting "could not be asked" until somebody starts a conversation.
     let listed = toolListing(server, accessTokenFor(this.db, server, owningTag(callerTags(req)), this.master));
     let declined = toolsOff(this.db, server.id);
+
+    // A listing that worked is kept, so the next caller who cannot get one —
+    // not signed in, token stale, server down — still has real tool names to
+    // choose from. Only on success: overwriting a good roster with an empty
+    // one on a network blip is how a cache stops being worth having.
+    if (listed.problem == "") {
+      rememberRoster(this.db, server.id, listed.tools, `${Date.now()}`);
+    } else {
+      // Nothing live. Answer what it last said, dated, and keep the problem
+      // in the reply — the screen shows both: the names, and why they are not
+      // fresh. `listedAt` empty means it has never been listed at all, which
+      // is the honest "there is nothing to show you yet".
+      let held = rosterOf(this.db, server.id);
+      if (held.listedAt != "") {
+        return ok("{\"serverId\":" + JSON.stringify(server.id)
+          + ",\"problem\":" + JSON.stringify(listed.problem)
+          + ",\"stale\":true,\"listedAt\":" + JSON.stringify(held.listedAt)
+          + ",\"tools\":" + rosterWithSwitches(held.tools, declined) + "}");
+      }
+    }
+
     let out = "{\"serverId\":" + JSON.stringify(server.id)
-      + ",\"problem\":" + JSON.stringify(listed.problem) + ",\"tools\":[";
+      + ",\"problem\":" + JSON.stringify(listed.problem)
+      + ",\"stale\":false,\"listedAt\":\"\",\"tools\":[";
     let i: int = 0;
     while (i < listed.tools.length) {
       if (i > 0) { out = out + ","; }
@@ -2619,6 +2642,10 @@ class ServerApi {
     forgetServer(this.db, param(req, "id"));
     // Every token anyone stored for it, and the registration behind them.
     forgetConnector(this.db, param(req, "id"), this.master);
+    // And what it last said it could do — a roster outliving its server is a
+    // list of tools nothing can call, and would be handed to the next server
+    // that happened to reuse the id.
+    forgetRoster(this.db, param(req, "id"));
     return noContent();
   }
 
@@ -7399,6 +7426,11 @@ export function migrationProblem(db: Db): string {
   let tmpl = envTemplatesPlan(db);
   let tp: int = 0;
   while (tp < tmpl.length) { plan.push(tmpl[tp]); tp = tp + 1; }
+  // What each connector last said it offers (mcp-roster.ts), above
+  // env-templates' 112.
+  let roster = mcpRosterPlan(db);
+  let ro: int = 0;
+  while (ro < roster.length) { plan.push(roster[ro]); ro = ro + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) {
     // The schema is up: push any stored sandbox limits into the enforcing
