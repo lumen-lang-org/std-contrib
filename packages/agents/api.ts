@@ -69,7 +69,7 @@ import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./i
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
 import { AgentWebRagRow, agentWebRagMapping, webRagFor, webRagPlan } from "./webrag.ts";
 import { ToolCardRow, allToolCards, toolCardsMapping, toolCardsPlan } from "./toolcards.ts";
-import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, ensureGeoFeed, feedById, geoCode, refreshFeed, storiesFor, storyById } from "./discover.ts";
+import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, discoverText, discoverTextMapping, setDiscoverText, ensureGeoFeed, feedById, geoCode, refreshFeed, storiesFor, storyById } from "./discover.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping, cardPluginsPlan } from "./plugincards.ts";
 import { TaskRow, MAX_PER_OWNER, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, tasksPlan, withNextAt } from "./tasks.ts";
 import { ensureBuilt } from "./script-wasm.ts";
@@ -3697,6 +3697,39 @@ function artifactJson(a: ArtifactRow): string {
  */
 @controller("/discover")
 class DiscoverApi {
+  /* The digest prompt, as text an operator may edit.
+   *
+   * Under /discover and operator-only: this wording decides what every reader of
+   * every feed is shown, which is not a public control. GET answers the override
+   * or "" when the compiled default stands; PUT replaces it; DELETE returns to
+   * the built-in. The tokens {topic}, {count} and {language} are substituted.
+   */
+  @get("/prompt")
+  readPrompt(req: Request): Reply {
+    let held = discoverText(this.db, "digest-prompt");
+    return ok("{\"prompt\":" + JSON.stringify(held)
+      + ",\"usingDefault\":" + (held.trim() == "" ? "true" : "false") + "}");
+  }
+
+  /* Writes here are operator-only by the console's own middleware, which admits a
+   * guest to exactly one write path (/api/threads) and refuses every write under
+   * /api/discover — the same gate the feed editor beside this route trusts. */
+  @put("/prompt")
+  writePrompt(req: Request): Reply {
+    let asked = jsonText(req.body, "prompt");
+    // A prompt that names none of its tokens still works; one that is blank is a
+    // request for the default, and is answered as one rather than as an empty prompt
+    // — the digest must never run with nothing to follow.
+    if (asked.trim() == "") {
+      deleteById(this.db, discoverTextMapping(), "digest-prompt");
+      return ok("{\"prompt\":\"\",\"usingDefault\":true}");
+    }
+    if (asked.length > 20000) { return badRequest("a prompt over 20000 characters is refused"); }
+    let problem = setDiscoverText(this.db, "digest-prompt", asked, stamp());
+    if (problem != "") { return badRequest(problem); }
+    return ok("{\"prompt\":" + JSON.stringify(asked) + ",\"usingDefault\":false}");
+  }
+
   db: Db;
 
   constructor(db: Db) {

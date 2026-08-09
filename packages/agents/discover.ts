@@ -239,6 +239,38 @@ function storiesAsCreated(): DbRepository {
   return repository("discover_stories", "id", "id", fs);
 }
 
+/** Operator-written text the digest uses, keyed by name.
+ *
+ *  A prompt is CONTENT, not code. It lived in this file and every wording change
+ *  meant compiling and restarting the engine — which is the wrong shape for the
+ *  thing most likely to need a tweak at 2am, and the reason a feed drifting out of
+ *  its language took a rebuild to correct. The compiled prompt below stays as the
+ *  default and the fallback; a row here overrides it, is read on the next pass, and
+ *  is editable from the console. */
+export function discoverTextMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("value", "value", "text"),
+    field("updatedAt", "updated_at", "text"),
+  ];
+  return repository("discover_text", "id", "id", fs);
+}
+
+/** The override for a named piece of text, or "" when the built-in stands. */
+export function discoverText(db: Db, name: string): string {
+  let held = findById(db, discoverTextMapping(), name);
+  if (held == "") { return ""; }
+  return jsonText(held, "value");
+}
+
+export function setDiscoverText(db: Db, name: string, value: string, now: string): string {
+  let row = "{\"id\":" + JSON.stringify(name) + ",\"value\":" + JSON.stringify(value)
+    + ",\"updatedAt\":" + JSON.stringify(now) + "}";
+  let written = persist(db, discoverTextMapping(), row);
+  if (!written.ok) { return written.error; }
+  return "";
+}
+
 export function discoverPlan(db: Db): Migration[] {
   return [
     migration("98.1", "the feeds the digest job maintains",
@@ -266,6 +298,10 @@ export function discoverPlan(db: Db): Migration[] {
     // the deployment's order, not to this module's series.
     migration("105", "what each source called the story",
       "ALTER TABLE discover_stories ADD COLUMN source_titles " + db.textType + " NOT NULL DEFAULT ''"),
+    // 114: see the note above 100 and 105 — the number belongs to the deployment's
+    // applied order, not to this module's series. 113 has run.
+    migration("114", "prompts and other text the operator may edit",
+      createTableSql(db, discoverTextMapping())),
   ];
 }
 
@@ -854,8 +890,32 @@ function langName(code: string): string {
   return code;
 }
 
+/** The prompt, with the operator's wording when there is one.
+ *
+ *  Substitution is deliberately three named tokens rather than a template engine:
+ *  a prompt is edited by a person in a text box, and the failure mode of anything
+ *  cleverer is a digest that stops running because a brace was mistyped. */
+function digestPromptWith(override: string, topic: string, count: int, outLang: string): string {
+  if (override.trim() == "") { return digestPrompt(topic, count, outLang); }
+  let out = override.replaceAll("{topic}", topic).replaceAll("{count}", `${count}`);
+  out = out.replaceAll("{language}", outLang == "" ? "the language of the sources" : langName(outLang));
+  return out;
+}
+
 function digestPrompt(topic: string, count: int, outLang: string): string {
-  return "You are assembling a news digest from pages a web crawler fetched in "
+  /* The output language is stated FIRST and again LAST, and that is not
+   * belt-and-braces — it is what stopped the Tunisian feed drifting back into
+   * French. The rule used to sit in the middle of the prompt, which held while
+   * the reading cap was fifty snippets and broke the day it became eighty: the
+   * model reads a long body of French sources with one line about Arabic buried
+   * behind them and writes what it just read. Primacy and recency are the two
+   * positions a long prompt does not lose. */
+  let lead = outLang == "" ? ""
+    : "WRITE EVERY headline, summary and why in " + langName(outLang) + ". The "
+      + "sources below are in other languages; translate them. This is not "
+      + "negotiable and applies to every card.\n\n";
+  return lead
+    + "You are assembling a news digest from pages a web crawler fetched in "
     + "the last day. You will be given search results for the topic \"" + topic
     + "\". Each carries a title, a url, a fetch time and a snippet.\n\n"
     + "Group them into at most " + `${count}` + " STORIES. A story is one event "
@@ -900,7 +960,11 @@ function digestPrompt(topic: string, count: int, outLang: string): string {
     + "product pages, undated explainers. A crawl is mostly made of those.\n"
     + "4. Nothing about a private individual unless they are acting in a "
     + "public role.\n"
-    + "5. No opinion of your own, on the event or on the coverage.";
+    + "5. No opinion of your own, on the event or on the coverage."
+    + (outLang == "" ? ""
+      : "\n6. The language rule at the top governs: every headline, summary and "
+        + "why in " + langName(outLang) + ", however the sources are written. A "
+        + "card in another language is a failed card.");
 }
 
 /** A digest for one topic. Everything that can go wrong lands in `problem`
@@ -955,14 +1019,15 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
    * The feeds this bit hardest were exactly the busiest ones; geo:tn failed
    * three consecutive passes this way while forty candidates waited. A retry
    * costs seconds against a cycle that costs thirty minutes. */
-  let asked = complete(model, config, digestPrompt(topic, storyCap(), lang), asLines(hits), key);
+  let written = discoverText(db, "digest-prompt");
+  let asked = complete(model, config, digestPromptWith(written, topic, storyCap(), lang), asLines(hits), key);
   let tries: int = 1;
   while (tries < 3) {
     if (asked.ok) {
       let peek = replyText(model.provider, asked.text).trim();
       if (peek.indexOf("{") >= 0) { break; }
     }
-    asked = complete(model, config, digestPrompt(topic, storyCap(), lang), asLines(hits), key);
+    asked = complete(model, config, digestPromptWith(written, topic, storyCap(), lang), asLines(hits), key);
     tries = tries + 1;
   }
   if (!asked.ok) { return said("the model did not answer"); }
