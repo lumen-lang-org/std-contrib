@@ -39,6 +39,8 @@ import { Db } from "../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
 import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
+import { masterKey } from "./credentials.ts";
+import { envKeyFileBody, touchEnvKeys } from "./env-keys.ts";
 import { normalScope } from "./knowledge.ts";
 import { AgentRow, ScriptImageRow, SkillRow, SkillFileRow, agentsMapping, scriptImagesMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 
@@ -707,6 +709,48 @@ export function scriptImageForEnv(db: Db, agentId: string, envName: string): str
   return "";
 }
 
+// The deployment default has no row in script_images, and a key has to hang
+// off something. This is that something: keys stored against it are the ones
+// a person's scripts get when nobody chose an image at all.
+export const DEFAULT_IMAGE_ID: string = "default";
+
+// The catalog ROW behind an environment, which is what an environment key is
+// scoped to.
+//
+// scriptImageForEnv answers with a reference ("agents-runtime:1") because a
+// reference is what docker is handed. A key belongs to the row a person picked
+// in settings, not to the string that row currently resolves to: retagging an
+// image must not silently move somebody's keys somewhere else, and two rows
+// are allowed to name one reference.
+export function scriptImageIdFor(db: Db, agentId: string): string {
+  if (agentId == "") { return DEFAULT_IMAGE_ID; }
+  let held = findById(db, agentsMapping(), agentId);
+  if (held == "") { return DEFAULT_IMAGE_ID; }
+  let chosen = JSON.parse<AgentRow>(held).scriptImageId;
+  if (chosen == "") { return DEFAULT_IMAGE_ID; }
+  let row = findById(db, scriptImagesMapping(), chosen);
+  if (row == "") { return DEFAULT_IMAGE_ID; }
+  let image: ScriptImageRow = JSON.parse<ScriptImageRow>(row);
+  // A disabled row falls back to the default image, so its keys fall back
+  // with it — the alternative is a script running in one environment holding
+  // the keys stored for another.
+  if (!image.enabled || image.image == "") { return DEFAULT_IMAGE_ID; }
+  return image.id;
+}
+
+// "" when the name matches no enabled row — the same answer scriptImageForEnv
+// gives, and the caller refuses the run on it before any key is read.
+export function scriptImageIdForEnv(db: Db, agentId: string, envName: string): string {
+  if (envName == "" || envName == "main") { return scriptImageIdFor(db, agentId); }
+  let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
+  let i: int = 0;
+  while (i < rows.length) {
+    if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") { return rows[i].id; }
+    i = i + 1;
+  }
+  return "";
+}
+
 export function scriptImageFor(db: Db, agentId: string): string {
   if (agentId == "") { return scriptImage(); }
   let held = findById(db, agentsMapping(), agentId);
@@ -1180,10 +1224,43 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // The guard rails are the container's — capabilities dropped to the few
   // apt and pip need, no-new-privileges so nothing inside can regain the
   // rest, and the memory/cpu/pid caps on the container itself.
-  let ran = scriptDocker(["exec", "--user", SCRIPT_UID, "--workdir", runDir,
-    "-e", "HOME=/workspace", "-e", "PATH=/workspace/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    container,
-    "timeout", "-k", SCRIPT_KILL_GRACE, `${scriptWallSeconds()}`, runtime, jobAt]);
+  // The person's own keys for this environment, staged as the docker CLI's
+  // --env-file and read by the CLI on THIS host, so the values travel inside
+  // the daemon's API call.
+  //
+  // Never `-e NAME=value`: that spells a secret into the argv of a process on
+  // whichever machine runs the daemon, where `ps` is all it takes to read it —
+  // and since the daemon moved to its own VM, that argv is on a different
+  // machine from the one that decided to trust the key.
+  //
+  // Scoped to the CONVERSATION's owner, not to whoever's turn it is: an agent
+  // runs scripts on its own turns, and the keys that belong in them are the
+  // ones the person who owns the thread stored.
+  let execArgs: string[] = ["exec", "--user", SCRIPT_UID, "--workdir", runDir];
+  let owner = scriptThreadOwner(db, run.threadId);
+  let imageId = scriptImageIdForEnv(db, run.agentId, envName);
+  if (owner != "" && imageId != "") {
+    let body = envKeyFileBody(db, owner, imageId, masterKey());
+    if (body != "") {
+      let keysAt = stage + "/env";
+      let staged = scriptHostSecretFile(keysAt, body);
+      // Refused rather than run without them: a script whose key is silently
+      // absent fails at somebody else's API with a 401, which reads as "my
+      // token is wrong" and sends a person to rotate a key that was fine.
+      if (staged != "") { return scriptBail(container, stage, staged); }
+      // Before the platform's own -e, so that HOME and PATH win however the
+      // CLI resolves a collision. refuseEnvKey already refuses both names;
+      // this makes the order not matter.
+      execArgs.push("--env-file"); execArgs.push(keysAt);
+      touchEnvKeys(db, owner, imageId, run.now);
+    }
+  }
+  execArgs.push("-e"); execArgs.push("HOME=/workspace");
+  execArgs.push("-e"); execArgs.push("PATH=/workspace/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+  execArgs.push(container);
+  execArgs.push("timeout"); execArgs.push("-k"); execArgs.push(SCRIPT_KILL_GRACE);
+  execArgs.push(`${scriptWallSeconds()}`); execArgs.push(runtime); execArgs.push(jobAt);
+  let ran = scriptDocker(execArgs);
 
   // The output caps are enforced here on the host: what the model reads back
   // is at most the prefix, whatever the script printed.
@@ -1304,6 +1381,39 @@ function scriptHostFile(path: string, body: string): string {
     return "the script could not be staged for the run";
   }
   return "";
+}
+
+// The same, for a file that holds secrets: written, then narrowed to its owner
+// before anything else on this host can read it.
+//
+// Two calls and not one because writeFileSync creates with the process umask,
+// which is a deployment's setting and not this file's to assume. The window
+// between them is why the staging directory matters: it is created by this
+// process under /tmp and holds nothing else of interest.
+function scriptHostSecretFile(path: string, body: string): string {
+  let wrote = scriptHostFile(path, body);
+  if (wrote != "") { return "the environment keys could not be staged for the run"; }
+  try {
+    fs.chmodSync(path, 384);
+  } catch (e) {
+    return "the environment keys could not be staged for the run";
+  }
+  return "";
+}
+
+// The conversation's owner, read as one column of SQL rather than through
+// threads.ts.
+//
+// That module imports run.ts, which imports tools.ts, which imports THIS file
+// — the cycle the compiler refuses, and the same reason foldName is spelled
+// here rather than imported. One column of one row is cheaper than threading
+// an owner through three call sites and every test that builds one.
+function scriptThreadOwner(db: Db, threadId: string): string {
+  if (!db.query("SELECT owner FROM threads WHERE id = " + placeholderAt(db, 1), [threadId])) {
+    return "";
+  }
+  if (db.rows() == 0) { return ""; }
+  return db.value(0, 0);
 }
 
 function scriptHostDrop(dir: string): void {

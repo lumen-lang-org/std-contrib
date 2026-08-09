@@ -11,12 +11,14 @@
 
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { connectDatabase, dropTable, listWhere, persist } from "../plume/plume.ts";
-import { migrate, forgetMigrations } from "../plume/migrate.ts";
+import { connectDatabase, createTableSql, dropTable, listWhere, persist } from "../plume/plume.ts";
+import { migrate, forgetMigrations, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { WorkflowRow, parseGraph, workflowRunsMapping, workflowsMapping, workflowsPlan } from "./workflow-store.ts";
 import { callWorkflowTool, workflowTools } from "./workflow-tools.ts";
 import { jsonComplete } from "./scan.ts";
+import { credentialsMapping } from "./schema.ts";
+import { createSecret, secretsMapping, secretsPlan } from "./secrets.ts";
 
 let database: Db = sqlite();
 
@@ -84,9 +86,9 @@ const DRAFT = "{\"name\":\"Morning brief\",\"steps\":["
   + "{\"kind\":\"agent\",\"text\":\"Summarise {{prev}} in five lines\",\"title\":\"Summarise\"}"
   + "],\"schedule\":\"every weekday at 08:00\",\"timezone\":\"Europe/Paris\"}";
 
-test("the twelve names are offered, and nothing else answers to them", () => {
+test("the thirteen names are offered, and nothing else answers to them", () => {
   let specs = workflowTools();
-  expect(specs.length == 12);
+  expect(specs.length == 13);
   expect(specs[0].name == "list_workflows");
   // By name, not index: an inserted verb shifted every position once and a
   // test that counts positions re-breaks on every addition.
@@ -446,3 +448,68 @@ function replyBody(owner: string): string {
   }
   return "(no reply step)";
 }
+
+// --- secrets through the tools ----------------------------------------------
+
+// The workflow fixture plus the two tables a secret lives across: its row,
+// and the credential envelope its value is sealed in.
+function seededWithSecrets(): void {
+  let cfg: DbConfig = { filename: "/tmp/agents_workflow_tools_test.db" };
+  connectDatabase(database, cfg);
+  forgetMigrations(database);
+  dropTable(database, workflowsMapping());
+  dropTable(database, workflowRunsMapping());
+  dropTable(database, secretsMapping());
+  dropTable(database, credentialsMapping());
+  // One plan, extended — a second migrate() call refuses a plan that lacks
+  // the versions already recorded.
+  let plan = workflowsPlan(database);
+  let extra = secretsPlan(database);
+  let i: int = 0;
+  while (i < extra.length) { plan.push(extra[i]); i = i + 1; }
+  plan.push(migration("8", "provider credentials", createTableSql(database, credentialsMapping())));
+  migrate(database, plan);
+}
+
+test("a secret is attached by name, never created, and never leaves its address", () => {
+  seededWithSecrets();
+  // Nothing yet: the tool says where secrets come from, not how to say one.
+  let none = call("o1", "list_secrets", "{}");
+  expect(none.handled);
+  expect(none.ok);
+  expect(none.text.indexOf("No secrets stored") >= 0);
+
+  let made = createSecret(database, { owner: "o1", name: "api key", value: "Bearer sk-t-1",
+    destination: "https://api.example.com", header: "", category: "", master: "0123456789abcdef0123456789abcdef", now: "t" });
+  expect(made.problem == "");
+  let drafted = call("o1", "draft_workflow",
+    "{\"name\":\"Fetch\",\"steps\":[{\"kind\":\"http\",\"text\":\"https://api.example.com/v1\",\"title\":\"Fetch\"}]}");
+  expect(drafted.ok);
+
+  // An unknown name is refused, pointing at the list rather than inviting a
+  // value into the chat.
+  let wrong = call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"secret\":\"nope\"}");
+  expect(!wrong.ok);
+  expect(wrong.text.indexOf("list_secrets") >= 0);
+
+  let attached = call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"secret\":\"api key\"}");
+  expect(attached.ok);
+  expect((parseGraph(flowsFor("o1")[0].graph).graph.nodes[1].secrets ?? "") == made.id);
+
+  // The step can no longer be pointed at another host: the write is refused
+  // in the same sentence the canvas would get.
+  let moved = call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"text\":\"https://evil.example/x\"}");
+  expect(!moved.ok);
+  expect(moved.text.indexOf("stored for") >= 0);
+
+  // "none" detaches, and then the move is an ordinary edit again.
+  expect(call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"secret\":\"none\"}").ok);
+  expect(call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"text\":\"https://evil.example/x\"}").ok);
+
+  // The list names the secret and its address, and no value ever.
+  let listed = call("o1", "list_secrets", "{}");
+  expect(listed.text.indexOf("api key") >= 0);
+  expect(listed.text.indexOf("https://api.example.com") >= 0);
+  expect(listed.text.indexOf("Bearer") < 0);
+  expect(listed.text.indexOf("sk-t-1") < 0);
+});

@@ -34,8 +34,9 @@ import { FileToolResult } from "./workspace.ts";
 import { jsonFlag, jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { maySchedule } from "./task-tools.ts";
 import { civil, knownZone } from "./../cron/cron.ts";
-import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
+import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGraph, secretIds, startOf } from "../workflow/workflow.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
+import { SecretRow, graphSecretProblem, secretByName, secretsOf } from "./secrets.ts";
 import { stampMs } from "./tasks.ts";
 
 // The step kinds a sentence can ask for, in the words a model would reach
@@ -170,8 +171,15 @@ export function workflowTools(): ToolSpec[] {
     + "\"step\":{\"type\":\"string\",\"description\":\"" + step + "\"},"
     + "\"text\":{\"type\":\"string\",\"description\":\"The new instruction, query or url — whole, for the kind of step it is.\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"A new label for the canvas.\"},"
-    + "\"file\":{\"type\":\"string\",\"description\":\"reply only: an artifact path to send as a document. \\\"none\\\" takes it away.\"}},"
+    + "\"file\":{\"type\":\"string\",\"description\":\"reply only: an artifact path to send as a document. \\\"none\\\" takes it away.\"},"
+    + "\"secret\":{\"type\":\"string\",\"description\":\"The name of a stored secret this step may send, or several separated by commas — list_secrets says which exist. \\\"none\\\" detaches them. Values are never typed here.\"}},"
     + "\"required\":[\"workflow\",\"step\"]}"));
+
+  out.push(toolSpec("list_secrets",
+    "The stored secrets an http step can send: names, which header each fills, and the one address "
+    + "each may be sent to. Never their values — a secret is written once, on the Workflows page or "
+    + "in Settings, and can only be attached or deleted after that.",
+    "{\"type\":\"object\",\"properties\":{}}"));
 
   out.push(toolSpec("remove_step",
     "Take one step out of a workflow's chain, joining the steps around it. START and END stay; "
@@ -411,6 +419,7 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
     test: "", needle: "", subject: "",
     schedule: "", source: made == "SCRIPT" ? text : "",
     cases: made == "TELEGRAM_ASK" ? extra.options : made == "SWITCH" ? extra.cases : "",
+    secrets: "", secretId: "",
   };
   return built;
 }
@@ -459,11 +468,55 @@ function withText(node: WfNode, text: string, title: string, file: string): WfNo
     query: text != "" && (node.type == "WEB_SEARCH" || node.type == "KNOWLEDGE") ? text : node.query,
     test: node.test, needle: node.needle, subject: node.subject,
     schedule: node.schedule, source: node.source ?? "",
-    // The optional field rides too — the copy that dropped it once cost a
+    // The optional fields ride too — the copy that dropped one once cost a
     // switch its cases.
     cases: node.cases ?? "",
+    headers: node.headers ?? "",
+    // Carried through the single-secret spelling too, so an old graph edited
+    // by a sentence keeps what it was sending.
+    secrets: node.secrets ?? "", secretId: node.secretId ?? "",
   };
   return changed;
+}
+
+/** The same step carrying these stored secrets, by id — "" attaches none.
+ *  The VALUE never passes through here: a sentence attaches names, and the
+ *  names were resolved against the caller's own rows before this is called.
+ *
+ *  `secretId` is cleared whenever the list is written: two spellings of the
+ *  same attachment, with the list winning, is a step whose visible pick and
+ *  actual pick can disagree. */
+function withSecrets(node: WfNode, ids: string): WfNode {
+  let changed: WfNode = {
+    id: node.id, type: node.type, name: node.name, x: node.x, y: node.y,
+    instruction: node.instruction, agentId: node.agentId,
+    serverId: node.serverId, tool: node.tool, args: node.args,
+    url: node.url, method: node.method, body: node.body,
+    query: node.query, test: node.test, needle: node.needle,
+    subject: node.subject, schedule: node.schedule, source: node.source ?? "",
+    cases: node.cases ?? "",
+    headers: node.headers ?? "", secrets: ids, secretId: "",
+  };
+  return changed;
+}
+
+/** A said list — "stripe key, weather key" — as its pieces, blanks dropped. */
+function splitSaid(said: string): string[] {
+  let out: string[] = [];
+  let piece = "";
+  let i: int = 0;
+  while (i < said.length) {
+    let ch = said.charAt(i);
+    if (ch == "," || ch == "\n") {
+      if (piece.trim() != "") { out.push(piece.trim()); }
+      piece = "";
+    } else {
+      piece = piece + ch;
+    }
+    i = i + 1;
+  }
+  if (piece.trim() != "") { out.push(piece.trim()); }
+  return out;
 }
 
 function withSchedule(node: WfNode, schedule: string): WfNode {
@@ -475,6 +528,7 @@ function withSchedule(node: WfNode, schedule: string): WfNode {
     query: node.query, test: node.test, needle: node.needle,
     subject: node.subject, schedule: schedule, source: node.source ?? "",
     cases: node.cases ?? "",
+    secrets: node.secrets ?? "", secretId: node.secretId ?? "",
   };
   return changed;
 }
@@ -543,6 +597,14 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     let bad: Stored = { ok: false, row: row, error: wrong };
     return bad;
   }
+  // The secrets rule, at the tools' one choke point — every conversational
+  // graph write lands here, so an agent re-pointing an HTTP step away from
+  // its secret's address is refused in the same sentence the canvas gets.
+  let secretWrong = graphSecretProblem(db, graph, row.owner);
+  if (secretWrong != "") {
+    let bad: Stored = { ok: false, row: row, error: secretWrong };
+    return bad;
+  }
   let ready = edited;
   if (edited.kind == "every") {
     let first = nextWorkflowFire(edited, nowMs);
@@ -583,7 +645,8 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     && call.name != "change_step" && call.name != "remove_step"
     && call.name != "schedule_workflow" && call.name != "change_workflow"
     && call.name != "run_workflow" && call.name != "delete_workflow"
-    && call.name != "publish_workflow" && call.name != "connect_steps") {
+    && call.name != "publish_workflow" && call.name != "connect_steps"
+    && call.name != "list_secrets") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -597,6 +660,22 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let i: int = 0;
     while (i < rows.length) {
       out = out + "\n\n" + describe(rows[i], false);
+      i = i + 1;
+    }
+    return yes(out);
+  }
+
+  if (call.name == "list_secrets") {
+    let rows = JSON.parse<SecretRow[]>(secretsOf(db, call.owner));
+    if (rows.length == 0) {
+      return yes("No secrets stored. They are added on the Workflows page (in an http step's settings) or in Settings — never here: a value said in chat is a value in the transcript.");
+    }
+    let out = `${rows.length}` + " secret" + (rows.length == 1 ? "" : "s") + " — names only, values are write-only:";
+    let i: int = 0;
+    while (i < rows.length) {
+      out = out + "\n- \"" + rows[i].name + "\" fills " + rows[i].header
+        + ", sent only to " + rows[i].destination
+        + (rows[i].lastUsedAt == "" ? " (never used)" : "");
       i = i + 1;
     }
     return yes(out);
@@ -846,6 +925,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       // The optional fields ride too — this copy dropped `cases` once and a
       // said switch arrived caseless, refused by the graph's own rule.
       cases: built.cases ?? "",
+      secrets: built.secrets ?? "", secretId: built.secretId ?? "",
     };
     let nodes: WfNode[] = [];
     let n: int = 0;
@@ -912,17 +992,53 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let text = jsonText(call.args, "text").trim();
     let title = jsonText(call.args, "title").trim();
     let file = jsonText(call.args, "file").trim();
-    if (text == "" && title == "" && file == "") { return no("say what changes: text, a title, a file, or any of them."); }
+    let secretSaid = jsonText(call.args, "secret").trim();
+    if (text == "" && title == "" && file == "" && secretSaid == "") { return no("say what changes: text, a title, a file, a secret, or any of them."); }
     if (text != "" && (node.type == "START" || node.type == "END" || node.type == "CONDITION" || node.type == "MCP")) {
       return no("a " + node.type + " step is edited on the Workflows page — text here changes agent, model, web_search, knowledge, reply and ask steps.");
     }
     if (file != "" && node.type != "TELEGRAM_REPLY") {
       return no("only a reply step sends a file — the file rides a reply, with the text as its caption.");
     }
+    // Secrets are ATTACHED here, never created: a person types values on the
+    // Workflows page or in Settings, and a conversation only points at them.
+    //
+    // No kind test: which steps can carry one is the runner's business (see
+    // WfNode.secrets), and a tool that decided it here would have to be
+    // edited every time that changed. Attaching one to a step that cannot
+    // send it does nothing rather than lying.
+    let ids = "";
+    let s: int = 0;
+    let already = secretIds(node);
+    while (s < already.length) {
+      ids = ids == "" ? already[s] : ids + "," + already[s];
+      s = s + 1;
+    }
+    if (secretSaid != "") {
+      if (secretSaid == "none") {
+        ids = "";
+      } else {
+        // A list, so "stripe key, weather key" attaches both — the graph
+        // bounds how many, and refuses a repeat.
+        let wanted = splitSaid(secretSaid);
+        ids = "";
+        let w: int = 0;
+        while (w < wanted.length) {
+          let held = secretByName(db, wanted[w], call.owner);
+          if (held.id == "") {
+            return no("there is no secret called \"" + wanted[w] + "\" — list_secrets says which exist; new ones are added in the step's settings or in Settings, never in chat.");
+          }
+          ids = ids == "" ? held.id : ids + "," + held.id;
+          w = w + 1;
+        }
+      }
+    }
     let nodes: WfNode[] = [];
     let n: int = 0;
     while (n < graph.nodes.length) {
-      nodes.push(graph.nodes[n].id == node.id ? withText(graph.nodes[n], text, title, file) : graph.nodes[n]);
+      nodes.push(graph.nodes[n].id == node.id
+        ? withSecrets(withText(graph.nodes[n], text, title, file), ids)
+        : graph.nodes[n]);
       n = n + 1;
     }
     let changed: WfGraph = { nodes: nodes, edges: graph.edges, view: graph.view };

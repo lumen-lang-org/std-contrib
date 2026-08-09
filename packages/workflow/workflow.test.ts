@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, emptyNode, fill, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
+import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -528,4 +528,39 @@ test("an ask needs a telegram trigger in front of it", () => {
     withText(node("q", "TELEGRAM_ASK"), "sure?"), node("z", "END")],
     [edge("e1", "s", "q", ""), edge("e2", "q", "z", "")]);
   expect(refuse(stray).indexOf("Telegram trigger") >= 0);
+});
+
+test("an http step's headers are Name: value lines, and anything else is refused", () => {
+  // A node with headers, built whole — records are immutable.
+  let plain = node("h", "HTTP");
+  let good: WfNode = {
+    id: plain.id, type: plain.type, name: plain.name, x: plain.x, y: plain.y,
+    instruction: plain.instruction, agentId: plain.agentId,
+    serverId: plain.serverId, tool: plain.tool, args: plain.args,
+    url: plain.url, method: plain.method, body: plain.body,
+    query: plain.query, test: plain.test, needle: plain.needle,
+    subject: plain.subject, schedule: plain.schedule, source: plain.source,
+    headers: "Accept: application/json\nX-Api-Version: {{input}}",
+  };
+  let g1 = graphOf([node("s", "START"), good, node("z", "END")],
+    [edge("e1", "s", "h", ""), edge("e2", "h", "z", "")]);
+  expect(refuse(g1) == "");
+  expect(headerLines(good).length == 2);
+  expect(headerLines(good)[0] == "Accept: application/json");
+
+  let bad: WfNode = {
+    id: plain.id, type: plain.type, name: plain.name, x: plain.x, y: plain.y,
+    instruction: plain.instruction, agentId: plain.agentId,
+    serverId: plain.serverId, tool: plain.tool, args: plain.args,
+    url: plain.url, method: plain.method, body: plain.body,
+    query: plain.query, test: plain.test, needle: plain.needle,
+    subject: plain.subject, schedule: plain.schedule, source: plain.source,
+    headers: "just some words with no colon",
+  };
+  let g2 = graphOf([node("s", "START"), bad, node("z", "END")],
+    [edge("e1", "s", "h", ""), edge("e2", "h", "z", "")]);
+  expect(refuse(g2).indexOf("Name: value") >= 0);
+
+  // A node stored before headers existed parses to none, not a refusal.
+  expect(headerLines(plain).length == 0);
 });
