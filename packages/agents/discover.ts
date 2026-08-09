@@ -509,6 +509,11 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   // byte arrives here. The textual cutoff below stays as the safety net.
   let url = searchApiBase() + "/search?q=" + urlEncode(query) + "&k=" + `${cap}`
     + "&sort=recent&since=" + `${freshHours()}` + "h";
+  // A keyword feed asks for ANY of its words, not all of them. The query is a topic
+  // sketch, not a phrase: as a conjunction "company acquisition earnings" found 4
+  // fresh pages in a corpus holding hundreds, because no article contains all three.
+  // The digest model is the precision stage; retrieval's job here is recall.
+  if (query != "*") { url = url + "&match=any"; }
   if (lang != "") { url = url + "&lang=" + urlEncode(lang); }
   if (country != "") { url = url + "&country=" + urlEncode(country); }
   let res = http.request(url, "GET", "", new Map<string, string>());
