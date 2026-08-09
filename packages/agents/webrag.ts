@@ -236,7 +236,41 @@ export function webSearchTools(): ToolSpec[] {
     + "\"query\":{\"type\":\"string\",\"description\":\"What to look for. Keywords, names, versions or an error string — not a sentence.\"},"
     + "\"count\":{\"type\":\"integer\",\"description\":\"How many passages to return. 1 to 20; 5 is a good default.\"}},"
     + "\"required\":[\"query\"]}"));
+  out.push(toolSpec("read_link",
+    "Read one web page in full - an article the person attached or linked, or any URL "
+    + "worth reading whole rather than searching for. The page is served from the "
+    + "deployment's own index when the crawler already has it, and fetched live "
+    + "otherwise, so this works for pages published minutes ago. Returns the page's "
+    + "extracted text as markdown. When it refuses, it names why (a paywall shell, a "
+    + "navigation page, a fetch error) - pass that on rather than guessing at the "
+    + "page's contents.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"url\":{\"type\":\"string\",\"description\":\"The page to read, absolute http(s).\"}},"
+    + "\"required\":[\"url\"]}"));
   return out;
+}
+
+/** Answer `read_link`, or "" when the call is not this tool's. */
+export function callReadLinkTool(name: string, args: string): string {
+  if (name != "read_link") { return ""; }
+  let url = jsonText(args, "url").trim();
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    return "read_link needs an absolute url: {\"url\":\"https://...\"}.";
+  }
+  let res = http.request(searchApiBase() + "/fetch?url=" + urlEncode(url), "GET", "", new Map<string, string>());
+  if (!res.ok) { return "The page could not be fetched: the index did not answer."; }
+  if (res.status == 422) {
+    let why = jsonText(res.body, "reason");
+    return "The page could not be read: " + (why == "" ? "the extractor refused it" : why)
+      + ". Say so plainly rather than guessing at its contents.";
+  }
+  if (res.status != 200) { return "The page could not be fetched: the index answered " + `${res.status}` + "."; }
+  let title = jsonText(res.body, "title");
+  let md = jsonText(res.body, "markdown");
+  let published = jsonText(res.body, "published_at");
+  if (md == "") { return "The page answered but had no readable text."; }
+  return "# " + title + "\n" + (published == "" ? "" : "Published: " + published + "\n")
+    + "Source: " + url + "\n\n" + md;
 }
 
 /** Answer `search_web`, or "" when the call is not this tool's.
