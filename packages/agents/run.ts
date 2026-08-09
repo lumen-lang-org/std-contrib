@@ -37,7 +37,7 @@ import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
-import { WebPassage, webRagFor, generateQuery, retrieveWeb, asWebContext, webSummary, webSearchTools, callWebSearchTool } from "./webrag.ts";
+import { WebPassage, webRagFor, generateQuery, retrieveWeb, asWebContext, webSummary, webSearchTools, callWebSearchTool, callReadLinkTool } from "./webrag.ts";
 import { cardHintFor } from "./toolcards.ts";
 import { casesBriefing } from "./plugincards.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -1004,6 +1004,8 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       // The web index, same convention: asked about every call, answers only
       // search_web, which belongs to no connector.
       let websearched = callWebSearchTool(calls[i].name, calls[i].args);
+      // One page read whole, on demand — the other half of the web pair.
+      let linkread = callReadLinkTool(calls[i].name, calls[i].args);
       // find_tools before everything: it is this package's own, it takes no
       // side effect, and a connector that happened to export a tool of that
       // name must never answer it.
@@ -1081,6 +1083,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = known.ok;
         resultText = known.text;
         from = "knowledge";
+        calledTools.push(calls[i].name);
+      } else if (linkread != "") {
+        // Same placement and same reason as search_web below: a real tool of
+        // this package must answer before a skill of the same name could.
+        resultOk = true;
+        resultText = linkread;
+        from = "web-index";
         calledTools.push(calls[i].name);
       } else if (websearched != "") {
         // BEFORE skills, and the ordering is the whole fix. callSkillTool
