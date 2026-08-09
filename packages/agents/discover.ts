@@ -902,6 +902,38 @@ function digestPromptWith(override: string, topic: string, count: int, outLang: 
   return out;
 }
 
+/** Whether a card is written in the script its feed asked for.
+ *
+ *  Asking was not enough. The rule leads the prompt and closes it, and one card in
+ *  twenty still came back in the sources' language — a French headline at the top of
+ *  an Arabic feed, which is the first thing a reader sees. So the rule is enforced
+ *  rather than requested: a card that fails is dropped, and the feed shows nineteen
+ *  right cards instead of twenty with a wrong one leading.
+ *
+ *  Script, not language: Lumen's charCodeAt addresses UTF-8 BYTES, and a script that
+ *  has its own byte range can be recognised without a language model. Arabic
+ *  (U+0600-U+06FF) encodes as a lead byte of 0xD8-0xDB, Hebrew 0xD6-0xD7, Greek
+ *  0xCE-0xCF, and the CJK and Cyrillic ranges likewise. A Latin-script target is not
+ *  checked at all: French, English, German and Turkish share their bytes, so there is
+ *  nothing here that could tell them apart, and a check that cannot fail honestly
+ *  must not pretend to. */
+function scriptOk(text: string, outLang: string): bool {
+  let lo: int = 0;
+  let hi: int = 0;
+  if (outLang == "ar" || outLang == "fa" || outLang == "ur") { lo = 216; hi = 219; }
+  else if (outLang == "he") { lo = 214; hi = 215; }
+  else if (outLang == "el") { lo = 206; hi = 207; }
+  else if (outLang == "ru" || outLang == "uk" || outLang == "bg") { lo = 208; hi = 209; }
+  else { return true; }
+  let i: int = 0;
+  while (i < text.length) {
+    let c = text.charCodeAt(i);
+    if (c >= lo && c <= hi) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
 function digestPrompt(topic: string, count: int, outLang: string): string {
   /* The output language is stated FIRST and again LAST, and that is not
    * belt-and-braces — it is what stopped the Tunisian feed drifting back into
@@ -1061,8 +1093,10 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   // place that may ask it anything.
   let wrote: WrittenStory[] = [];
   let parsed = JSON.parse<DiscoverStory[]>(raw);
+  let wrongLang: int = 0;
   let w: int = 0;
   while (w < parsed.length) {
+    if (!scriptOk(parsed[w].headline, lang)) { wrongLang = wrongLang + 1; w = w + 1; continue; }
     let text = bodyFor(parsed[w], hits);
     let one: WrittenStory = {
       story: parsed[w], body: text, readMinutes: readingMinutes(text),
@@ -1071,6 +1105,29 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
     };
     wrote.push(one);
     w = w + 1;
+  }
+  /* Every card failing means the check is wrong, not the model — a language whose
+   * range this does not know, or a feed configured with a code nothing writes. Keeping
+   * them is the safer error: an empty feed is a worse answer than a feed in the wrong
+   * language, and the operator can see which happened. */
+  if (wrote.length == 0 && wrongLang > 0) {
+    let all: WrittenStory[] = [];
+    let k: int = 0;
+    while (k < parsed.length) {
+      let t = bodyFor(parsed[k], hits);
+      let o: WrittenStory = {
+        story: parsed[k], body: t, readMinutes: readingMinutes(t),
+        image: imageFor(parsed[k], hits), sourceTitles: titlesFor(parsed[k], hits),
+      };
+      all.push(o);
+      k = k + 1;
+    }
+    console.error("discover: every card failed the " + lang + " script check; keeping them");
+    wrote = all;
+    wrongLang = 0;
+  }
+  if (wrongLang > 0) {
+    console.error("discover: dropped " + `${wrongLang}` + " card(s) not written in " + lang);
   }
 
   let told: DiscoverTopic = {
