@@ -50,7 +50,7 @@ import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
 import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
 import { projectTools, callProjectTool } from "./project-tools.ts";
-import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, toolsOff, setToolOn } from "./connect.ts";
+import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, forgetSuppliedClient, setSuppliedClient, suppliedClientId, toolsOff, setToolOn } from "./connect.ts";
 import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
 import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, rememberRouteKey, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
 import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
@@ -59,10 +59,10 @@ import { FileToolResult, workspacePlan, putFile, getFile, listFiles, deleteFile,
 // `mimeOf` is deliberately not taken from here: workspace.ts already owns that
 // name in this file, and an artifact's type is on its row anyway.
 import { ArtifactRow, ArtifactCard, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, libraryFor, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
-import { scriptEnvNameProblem } from "./run-script.ts";
+import { scriptEnvNameProblem, scriptImage } from "./run-script.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "./office-render.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
-import { EnvSweep, ENV_IDLE_MS, envPlan, envDockerUp, envIdle } from "./environments.ts";
+import { EnvSweep, ENV_IDLE_MS, envPlan, envDockerUp, envIdle, envOwned, envDrop, envImagePresent } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
 import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
@@ -75,7 +75,10 @@ import { ensureBuilt } from "./script-wasm.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, workflowRunsOf, timingOf, withWorkflowNextAt, workflowsMapping, workflowsOf, workflowsPlan } from "./workflow-store.ts";
 import { TriggerBotRow, botsOf, emptyBot, queuedFor, triggerBotsMapping, triggersPlan } from "./triggers.ts";
 import { createSecret, forgetSecret, graphSecretProblem, secretsMapping, secretsOf, secretsPlan } from "./secrets.ts";
-import { createEnvKey, envKeysMapping, envKeysOwnedBy, envKeysPlan, forgetEnvKey } from "./env-keys.ts";
+import { EnvKeyRow, createEnvKey, envKeysMapping, envKeysOf, envKeysOwnedBy, envKeysPlan, forgetEnvKey } from "./env-keys.ts";
+import { UserEnvRow, createUserEnv, forgetUserEnv, userEnvById, userEnvsMapping, userEnvsOf, userEnvsPlan } from "./user-environments.ts";
+import { SandboxLimits, applySandboxLimits, defaultLimits, sandboxLimits, saveSandboxLimits } from "./sandbox-limits.ts";
+import { EnvTemplateRow, EnvTemplateWrite, emptyEnvTemplate, envTemplateById, envTemplatesAll, envTemplatesMapping, envTemplatesPlan, forgetEnvTemplate, saveEnvTemplate } from "./env-templates.ts";
 import { PROJECT_FILES_KEY, ProjectRow, assignProject, emptyProject, projectsMapping, projectsOf, projectsPlan, releaseThreads, rememberFilesThread } from "./projects.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, documentFilesPlan, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
 import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
@@ -2643,6 +2646,12 @@ class ServerApi {
         + ",\"authKind\":" + JSON.stringify(rows[i].authKind)
         + ",\"state\":" + JSON.stringify(held.state)
         + ",\"whose\":" + JSON.stringify(held.whose)
+        // Whether an operator gave this connector an OAuth client of its own,
+        // so the console can say "an app is needed" before somebody presses a
+        // button that cannot finish. The client id is not a secret — it rides
+        // in the consent URL the browser visits — and the secret beside it is
+        // answered by nothing.
+        + ",\"clientId\":" + JSON.stringify(suppliedClientId(this.db, rows[i].id, this.master))
         + ",\"connectedAt\":" + JSON.stringify(held.connectedAt) + "}";
       i = i + 1;
     }
@@ -2658,6 +2667,12 @@ class ServerApi {
  * and "fixed" rules out anything with an id in it. The server is identified by
  * the `state` instead, which is the one thing that makes the round trip.
  */
+// The two halves of an OAuth client, as PUT /connect/:id/client is given them.
+type SuppliedClientAsk = {
+  clientId: string,
+  clientSecret: string,
+};
+
 @controller("/connect")
 class ConnectApi {
   db: Db;
@@ -2691,6 +2706,38 @@ class ConnectApi {
       req.query.get("state") ?? "", req.query.get("code") ?? "");
     if (done.problem != "") { return connectPage(false, done.problem); }
     return connectPage(true, done.serverName);
+  }
+
+  // Give this connector an OAuth client created by hand in the vendor's own
+  // developer console.
+  //
+  // For the connectors that do not register clients automatically — Asana's v2
+  // server, Slack, Box — which is most of the ones people actually ask for.
+  // Deployment-wide and not per person, because the connector row it hangs off
+  // is deployment-wide: the app belongs to whoever runs Joule, and each person
+  // then signs in to it with their own account.
+  //
+  // Answered back is the client id only, and only because it is not a secret:
+  // it travels in the consent URL every browser visits. The secret goes in and
+  // never comes out, like every other credential here.
+  @put("/:id/client")
+  setClient(req: Request): Reply {
+    let id = param(req, "id");
+    if (!existsById(this.db, mcpServersMapping(), id)) { return notFound("server " + id); }
+    let ask: SuppliedClientAsk = JSON.parse<SuppliedClientAsk>(req.body);
+    let refused = setSuppliedClient(this.db, id, ask.clientId, ask.clientSecret, this.master);
+    if (refused != "") { return badRequest(refused); }
+    return ok("{\"clientId\":" + JSON.stringify(suppliedClientId(this.db, id, this.master)) + "}");
+  }
+
+  // Take it away again. The connector goes back to registering itself, which
+  // works where the vendor allows it and says so plainly where it does not.
+  @del("/:id/client")
+  dropClient(req: Request): Reply {
+    let id = param(req, "id");
+    if (!existsById(this.db, mcpServersMapping(), id)) { return notFound("server " + id); }
+    forgetSuppliedClient(this.db, id);
+    return noContent();
   }
 
   // Hand a connection back. The caller's own, never anybody else's — the owner
@@ -5613,6 +5660,205 @@ class SecretApi {
   }
 }
 
+// The environments themselves, as their users see them.
+//
+// /script-images is the operator's table: image references, admin-tier,
+// where rows are made. This is the same catalog read from the other side —
+// what a signed-in person may run scripts IN, plus the containers their own
+// conversations already hold. Two doors to one table, because "curate the
+// deployment" and "manage my environments" are different permissions that
+// happen to meet at the same rows.
+@controller("/environments")
+class EnvironmentApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  // The choosable environments: the caller's own first, then the
+  // deployment's. Label and summary, which is what choosing needs — never
+  // the image reference for curated rows, which is how the operator spells
+  // it; a person's own row shows its source, because they wrote it.
+  // `present` is whether the daemon holds the image already; a person's own
+  // are present by construction — created means built or pulled.
+  @get("/")
+  catalog(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    let out = "[";
+    let mine = userEnvsOf(this.db, owningTag(tags));
+    let m: int = 0;
+    while (m < mine.length) {
+      if (m > 0) { out = out + ","; }
+      out = out + "{\"id\":" + JSON.stringify(mine[m].id)
+        + ",\"label\":" + JSON.stringify(mine[m].name)
+        + ",\"summary\":" + JSON.stringify(mine[m].source == "dockerfile" ? "built from your Dockerfile" : mine[m].image)
+        + ",\"mine\":true,\"present\":" + `${envImagePresent(mine[m].image)}` + "}";
+      m = m + 1;
+    }
+    let rows = JSON.parse<ScriptImageRow[]>(listWhere(this.db, scriptImagesMapping(), "enabled = " + placeholderAt(this.db, 1), ["1"]));
+    let i: int = 0;
+    while (i < rows.length) {
+      if (m + i > 0) { out = out + ","; }
+      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
+        + ",\"label\":" + JSON.stringify(rows[i].label)
+        + ",\"summary\":" + JSON.stringify(rows[i].summary)
+        + ",\"mine\":false,\"present\":" + `${envImagePresent(rows[i].image)}` + "}";
+      i = i + 1;
+    }
+    // The deployment default rides along under the id the env-keys door
+    // already uses for it, so the two screens name one thing one way.
+    if (m + i > 0) { out = out + ","; }
+    out = out + "{\"id\":\"default\",\"label\":\"Default\",\"summary\":"
+      + "\"the image an agent gets when nobody chose one\""
+      + ",\"mine\":false,\"present\":" + `${envImagePresent(scriptImage())}` + "}";
+    return ok(out + "]");
+  }
+
+  // Make an environment: a name and an image to pull, a name and a Dockerfile
+  // to build, or a name and a `templateId` from the catalog — in which case
+  // the image or Dockerfile is the operator's, copied from the template. The
+  // reply is the row or the build's own last lines; a create that returns is
+  // an environment that starts.
+  @post("/")
+  create(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
+      return badRequest("signing in is what makes an environment yours to keep");
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"name\":\"...\",\"image\":\"...\"}, {\"name\":\"...\",\"dockerfile\":\"FROM ...\"}, or {\"name\":\"...\",\"templateId\":\"...\"}");
+    }
+    // From a catalog template: the recipe is the operator's, so the model on
+    // the model's side of the wire still never names an image — it named a
+    // template id, and the image or Dockerfile behind it was written here.
+    // A name defaults to the template's when the person did not give one.
+    let image = jsonText(req.body, "image");
+    let dockerfile = jsonText(req.body, "dockerfile");
+    let name = jsonText(req.body, "name");
+    let templateId = jsonText(req.body, "templateId");
+    if (templateId != "") {
+      let t = envTemplateById(this.db, templateId);
+      if (t.id == "") { return badRequest("no template has the id \"" + templateId + "\" — the catalog says which exist"); }
+      image = t.image;
+      dockerfile = t.dockerfile;
+      if (name.trim() == "") { name = t.name; }
+    }
+    let made = createUserEnv(this.db, {
+      owner: owner, name: name, image: image, dockerfile: dockerfile, now: stamp(),
+    });
+    if (made.problem != "") { return badRequest(made.problem); }
+    return created(findById(this.db, userEnvsMapping(), made.id));
+  }
+
+  // Forget one of mine: the row, the image when we built it, and every key
+  // stored against it — a key scoped to an environment that no longer exists
+  // is unreachable by construction, so keeping its envelope keeps nothing.
+  @del("/:id")
+  remove(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    let id = param(req, "id");
+    if (!forgetUserEnv(this.db, id, owner)) {
+      return notFound("environment " + id);
+    }
+    let keys = JSON.parse<EnvKeyRow[]>(envKeysOf(this.db, owner, id));
+    let k: int = 0;
+    while (k < keys.length) { forgetEnvKey(this.db, keys[k].id, owner); k = k + 1; }
+    return noContent();
+  }
+
+  // The containers this person's conversations hold, joined to the titles
+  // that make them recognisable. Names and states, never anybody else's.
+  @get("/mine")
+  mine(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(JSON.stringify(envOwned(this.db, owningTag(tags))));
+  }
+
+  // Drop one: the container, its row, and — when it was the conversation's
+  // last — the shared workspace volume. The next run_script naming this
+  // environment rebuilds it fresh, so this is "start me over", never "break
+  // the conversation". Owner-checked the way every thread route is: somebody
+  // else's is absent, not forbidden.
+  @del("/mine/:threadId/:name")
+  drop(req: Request): Reply {
+    let tags = callerTags(req);
+    let threadId = param(req, "threadId");
+    if (!holdsOwner(tags, threadOwner(this.db, threadId))) {
+      return notFound("environment " + param(req, "name"));
+    }
+    if (!envDrop(this.db, threadId, param(req, "name"))) {
+      return notFound("environment " + param(req, "name"));
+    }
+    return noContent();
+  }
+}
+
+// The operator's catalog of environment recipes (env-templates.ts).
+//
+// Two audiences, one table. Anyone signed in reads it — that is browsing the
+// catalog, and the console proxy tiers a GET here as user. Only an operator
+// writes it, because a template carries a Dockerfile that builds as root, and
+// the proxy default-denies the writes to admin the same way it does the
+// script_images table. The engine keeps no auth of its own here for the same
+// reason every admin route does not: :8100 is never directly reachable, which
+// is the launch gate that makes the proxy's tiering the boundary.
+@controller("/env-templates")
+class EnvTemplateApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  // The whole catalog, featured first. Read by anyone signed in, to browse.
+  @get("/")
+  list(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(JSON.stringify(envTemplatesAll(this.db)));
+  }
+
+  // Create or update, keyed by id — an empty id mints one. Operator only.
+  @post("/")
+  save(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required: {\"name\":\"...\",\"summary\":\"...\",\"image\":\"...\"} or a dockerfile instead of image"); }
+    // featuredRank is a number token, hand-parsed: parseInt answers i32|null
+    // here, and a bare digit walk is the codebase's habit for reading one off
+    // a request. Anything non-numeric reads as 0 — not featured.
+    let rankRaw = jsonRaw(req.body, "featuredRank");
+    let rank: int = 0;
+    let ri: int = 0;
+    while (ri < rankRaw.length) {
+      let c = rankRaw.charCodeAt(ri);
+      if (c < 48 || c > 57) { rank = 0; break; }
+      rank = rank * 10 + (c - 48);
+      ri = ri + 1;
+    }
+    let t: EnvTemplateWrite = {
+      id: jsonText(req.body, "id"),
+      name: jsonText(req.body, "name"),
+      summary: jsonText(req.body, "summary"),
+      tags: jsonText(req.body, "tags"),
+      image: jsonText(req.body, "image"),
+      dockerfile: jsonText(req.body, "dockerfile"),
+      featuredRank: rank,
+      now: stamp(),
+    };
+    let problem = saveEnvTemplate(this.db, t);
+    if (problem != "") { return badRequest(problem); }
+    return ok(JSON.stringify(envTemplatesAll(this.db)));
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    if (!forgetEnvTemplate(this.db, param(req, "id"))) {
+      return notFound("template " + param(req, "id"));
+    }
+    return noContent();
+  }
+}
+
 // The variables a person's scripts run with (env-keys.ts).
 //
 // A sibling of /secrets and deliberately so: same ownership rule, same
@@ -5659,8 +5905,10 @@ class EnvKeyApi {
     // while no script could ever see it. "default" is the deployment's own
     // image, which has no row by definition.
     let imageId = jsonText(req.body, "imageId");
-    if (imageId != "default" && !existsById(this.db, scriptImagesMapping(), imageId)) {
-      return badRequest("no environment has the id \"" + imageId + "\" — pick one this deployment offers, or \"default\" for the one an agent gets when nobody chose");
+    if (imageId != "default"
+        && !existsById(this.db, scriptImagesMapping(), imageId)
+        && userEnvById(this.db, imageId, owner).id == "") {
+      return badRequest("no environment has the id \"" + imageId + "\" — one of yours, one this deployment offers, or \"default\" for the one an agent gets when nobody chose");
     }
     let made = createEnvKey(this.db, {
       owner: owner,
@@ -6350,6 +6598,39 @@ class BannerApi {
     let problem = writeSetting(this.db, "banner", text);
     if (problem != "") { return badRequest(problem); }
     return ok("{\"text\":" + JSON.stringify(text) + "}");
+  }
+}
+
+// The sandbox's limits, operator-set. The numbers a script container is
+// bounded by, and the counts that bound how many environments and keys pile
+// up — every one of which used to be a constant that needed a rebuild to
+// change. Admin-tier like every other configuration surface (the console
+// proxy tiers it; a bare :8100 is the launch gate's problem, not this
+// route's). The reply always carries `defaults` too, so the screen can show
+// what a field left at 0 will fall back to.
+@controller("/sandbox-limits")
+class SandboxLimitsApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @get("/")
+  show(req: Request): Reply {
+    return ok("{\"limits\":" + JSON.stringify(sandboxLimits(this.db))
+      + ",\"defaults\":" + JSON.stringify(defaultLimits()) + "}");
+  }
+
+  // Written whole, like the tracing connection and for the same reason: these
+  // numbers are one policy, and a partial update is how a box ends with a
+  // memory cap from one intention and a wall clock from another.
+  @put("/")
+  change(req: Request): Reply {
+    if (req.body == "") { return badRequest("a body is required: the seven limits, 0 for any that should keep the default"); }
+    let l: SandboxLimits = JSON.parse<SandboxLimits>(req.body);
+    let problem = saveSandboxLimits(this.db, l);
+    if (problem != "") { return badRequest(problem); }
+    // saveSandboxLimits already applied them to the running process.
+    return this.show(req);
   }
 }
 
@@ -7108,8 +7389,28 @@ export function migrationProblem(db: Db): string {
   let vars = envKeysPlan(db);
   let ek: int = 0;
   while (ek < vars.length) { plan.push(vars[ek]); ek = ek + 1; }
+  // The environments people define themselves (user-environments.ts), above
+  // env-keys' 110.
+  let uenv = userEnvsPlan(db);
+  let ue: int = 0;
+  while (ue < uenv.length) { plan.push(uenv[ue]); ue = ue + 1; }
+  // The operator's catalog of environment recipes (env-templates.ts), above
+  // user environments' 111.
+  let tmpl = envTemplatesPlan(db);
+  let tp: int = 0;
+  while (tp < tmpl.length) { plan.push(tmpl[tp]); tp = tp + 1; }
   let ran = migrate(db, plan);
-  if (ran.ok) { return ""; }
+  if (ran.ok) {
+    // The schema is up: push any stored sandbox limits into the enforcing
+    // modules, so a box that set them keeps them across a restart. On an
+    // unconfigured box this sets every override to 0, which is the default.
+    applySandboxLimits(db);
+    // And put a few recipes in the catalog if it is empty — separately from
+    // seed(), which only runs on a box with no agents. Production has agents
+    // and no templates, so the catalog needs its own "is it empty" gate.
+    seedEnvTemplates(db);
+    return "";
+  }
   // Logged and carried on with, this served an API whose routes SELECT columns
   // that do not exist: every one of them answers 500, at a distance from the
   // one line that said why. The master key already refuses to start without
@@ -7121,6 +7422,24 @@ export function migrationProblem(db: Db): string {
   return "the schema is not up to date: " + ran.error;
 }
 
+
+// A starting catalog, put down once. Guarded on the table being empty rather
+// than on the deployment being fresh, because an existing box has agents but
+// no templates and would otherwise show an empty catalog forever. An operator
+// deletes or edits these like any other row; they are a starting point, not a
+// fixture, so this never re-adds one that was removed.
+function seedEnvTemplates(db: Db): void {
+  if (countWhere(db, envTemplatesMapping(), "", []) > 0) { return; }
+  let now = stamp();
+  let starters: EnvTemplateWrite[] = [
+    { id: "", name: "Python", summary: "python 3.12, pip and the standard library — the everyday scripting environment", tags: "python,scripting", image: "python:3.12-slim", dockerfile: "", featuredRank: 1, now: now },
+    { id: "", name: "Node.js", summary: "node 20 and npm — for a JavaScript or TypeScript script", tags: "node,javascript", image: "node:20-slim", dockerfile: "", featuredRank: 2, now: now },
+    { id: "", name: "Data science", summary: "python with pandas, numpy and matplotlib installed — for shaping and charting data", tags: "python,data,pandas", image: "", dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir pandas numpy matplotlib", featuredRank: 3, now: now },
+    { id: "", name: "Web scraping", summary: "python with requests, beautifulsoup4 and lxml — fetch a page and pull data out of it", tags: "python,web,scraping", image: "", dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir requests beautifulsoup4 lxml", featuredRank: 0, now: now },
+  ];
+  let i: int = 0;
+  while (i < starters.length) { saveEnvTemplate(db, starters[i]); i = i + 1; }
+}
 
 function seed(db: Db): void {
   if (countWhere(db, agentsMapping(), "", []) > 0) { return; }
@@ -7246,6 +7565,8 @@ function main(): void {
     new ProjectApi(db),
     new WorkflowApi(db),
     new SecretApi(db, master),
+    new EnvironmentApi(db),
+    new EnvTemplateApi(db),
     new EnvKeyApi(db, master),
     new TriggerApi(db, master),
     new McpServerApi(db),
@@ -7274,6 +7595,7 @@ function main(): void {
     new ToolCardApi(db),
     new CardPluginApi(db),
     new BannerApi(db),
+    new SandboxLimitsApi(db),
     new CaptchaApi(db, master),
     new HealthApi(db),
     new UsageApi(db),
