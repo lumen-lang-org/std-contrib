@@ -178,6 +178,82 @@ function ownerOfKey(serverId: string, key: string): string {
 
 function clientSecretKey(serverId: string): string { return "mcpclient:" + serverId; }
 
+// --- an OAuth client the operator obtained by hand ---------------------------
+//
+// Most of the shelf registers itself: the authorization server publishes a
+// `registration_endpoint`, `clientFor` below registers at connect time, and
+// there is nothing per-deployment to keep. That is why those cards are one
+// press.
+//
+// A great many vendors do not offer it, and they are not exotic — Asana's v2
+// server, Slack and Box all publish a real hosted MCP endpoint and all three
+// require a client id and secret created by a person in their developer
+// console. Without somewhere to keep that pair, Connect on such a card is a
+// button that opens a screen which cannot finish.
+//
+// The pair lives in the credential store rather than in a column, and that is
+// the whole of the mechanism — no migration, no new table. Three reasons it
+// fits there rather than on `mcp_oauth`:
+//
+//   - The secret has to be encrypted anyway, and `mcp_oauth` is a plain row.
+//     Half a credential in a column and half in the store is the arrangement
+//     that eventually leaks the wrong half.
+//   - `mcp_oauth` is a CACHE of a registration — `clientFor` deletes and
+//     rebuilds it whenever the redirect changes. A supplied client must
+//     survive exactly that, so it cannot live in the thing being rebuilt.
+//   - The row's CREATE is generated from `mcpOauthMapping()`, so a column
+//     added to it rewrites an applied migration and every deployed database
+//     refuses the whole plan.
+//
+// The client id is not a secret and is stored beside the secret anyway: it is
+// half of one credential, it is deleted with the other half, and a second home
+// for it would be a second thing to keep in step.
+function clientIdKey(serverId: string): string { return "mcpclientid:" + serverId; }
+
+/** The client id an operator supplied for this connector, or "". Presence is
+ *  the flag: a connector with one registers nothing and uses this instead. */
+export function suppliedClientId(db: Db, serverId: string, master: string): string {
+  if (!hasCredential(db, clientIdKey(serverId))) { return ""; }
+  return credentialFor(db, clientIdKey(serverId), master);
+}
+
+/** Give this connector an OAuth client created by hand. "" on success.
+ *
+ *  Both halves or neither: a client id with no secret gets as far as the
+ *  consent screen and fails at the token exchange, which is the most confusing
+ *  place for it to fail. A vendor that issues a public client with no secret
+ *  is served by the automatic path, not this one. */
+export function setSuppliedClient(db: Db, serverId: string, clientId: string, clientSecret: string, master: string): string {
+  let id = clientId.trim();
+  let secret = clientSecret.trim();
+  if (id == "") { return "an OAuth client needs a client id"; }
+  if (secret == "") { return "an OAuth client needs a client secret"; }
+  let wroteId = storeCredential(db, { provider: clientIdKey(serverId),
+    apiKey: id, masterKey: master, now: stamp() });
+  if (wroteId != "") { return wroteId; }
+  let wroteSecret = storeCredential(db, { provider: clientSecretKey(serverId),
+    apiKey: secret, masterKey: master, now: stamp() });
+  if (wroteSecret != "") {
+    // Take the id back out rather than leave a half-supplied client, which
+    // would read as configured and behave as broken.
+    forgetCredential(db, clientIdKey(serverId));
+    return wroteSecret;
+  }
+  // The cached registration named the old client. Drop it so the next Connect
+  // rebuilds the row around the supplied one.
+  deleteById(db, mcpOauthMapping(), serverId);
+  return "";
+}
+
+/** Take the supplied client away, and the registration built from it. The
+ *  connector falls back to registering itself, which works where the vendor
+ *  allows it and says so plainly where it does not. */
+export function forgetSuppliedClient(db: Db, serverId: string): void {
+  forgetCredential(db, clientIdKey(serverId));
+  forgetCredential(db, clientSecretKey(serverId));
+  deleteById(db, mcpOauthMapping(), serverId);
+}
+
 function markUnrefreshable(db: Db, key: string): void {
   let document = findById(db, mcpGrantsMapping(), key);
   if (document == "") { return; }
@@ -228,6 +304,10 @@ function noClient(why: string): ClientLookup {
 
 // The registration for this connector, made if there is not one yet.
 function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: string): ClientLookup {
+  // An operator-supplied client wins over anything registered. Read first
+  // because it also decides whether a cached row is still the right one.
+  let supplied = suppliedClientId(db, server.id, master);
+
   let had = findById(db, mcpOauthMapping(), server.id);
   if (had != "") {
     let row: McpOauthRow = JSON.parse<McpOauthRow>(had);
@@ -235,7 +315,12 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
     // moved — or a connector re-pointed at a different endpoint — needs a new
     // one, and silently reusing the old client id would fail at the consent
     // screen with an error only the vendor can see.
-    if (row.redirectUri == redirectUri && row.clientId != "") {
+    //
+    // The third clause is for a client that was supplied, or replaced, after
+    // this row was built: the row still names the client it was built around,
+    // and using it would sign in as the wrong application.
+    let sameClient = supplied == "" || row.clientId == supplied;
+    if (row.redirectUri == redirectUri && row.clientId != "" && sameClient) {
       return { row: row, problem: "" };
     }
     deleteById(db, mcpOauthMapping(), server.id);
@@ -243,15 +328,31 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
 
   let found: Discovery = discover(server.endpoint);
   if (found.problem != "") { return noClient(found.problem); }
-  let made = registerClient(found.registerUrl, redirectUri, "Joule");
-  if (made.problem != "") { return noClient(made.problem); }
 
-  if (made.clientSecret != "") {
-    let stored = storeCredential(db, { provider: clientSecretKey(server.id),
-      apiKey: made.clientSecret, masterKey: master, now: stamp() });
-    if (stored != "") { return noClient(stored); }
-  } else {
-    forgetCredential(db, clientSecretKey(server.id));
+  let clientId = supplied;
+  if (supplied == "") {
+    let made = registerClient(found.registerUrl, redirectUri, "Joule");
+    if (made.problem != "") {
+      // The commonest failure on this path, and the only one with a way out
+      // the reader can act on. Said here rather than in `mcp-oauth.ts`,
+      // because the way out is a route this file's caller owns and the
+      // redirect URL is only known here.
+      if (found.registerUrl == "") {
+        return noClient(server.serverName + " does not hand out OAuth clients automatically,"
+          + " so it needs an app created in the vendor's own developer console."
+          + " Give this connector that app's client id and secret, and set its redirect URL to "
+          + redirectUri);
+      }
+      return noClient(made.problem);
+    }
+    clientId = made.clientId;
+    if (made.clientSecret != "") {
+      let stored = storeCredential(db, { provider: clientSecretKey(server.id),
+        apiKey: made.clientSecret, masterKey: master, now: stamp() });
+      if (stored != "") { return noClient(stored); }
+    } else {
+      forgetCredential(db, clientSecretKey(server.id));
+    }
   }
 
   let row: McpOauthRow = {
@@ -259,7 +360,7 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
     issuer: found.issuer,
     authorizeUrl: found.authorizeUrl,
     tokenUrl: found.tokenUrl,
-    clientId: made.clientId,
+    clientId: clientId,
     scope: found.scopesSupported,
     redirectUri: redirectUri,
     registeredAt: stamp(),
@@ -486,6 +587,7 @@ export function forgetConnector(db: Db, serverId: string, master: string): void 
   forgetCredential(db, sharedTokenKey(serverId));
   forgetCredential(db, refreshKey(sharedTokenKey(serverId)));
   forgetCredential(db, clientSecretKey(serverId));
+  forgetCredential(db, clientIdKey(serverId));
   deleteById(db, mcpOauthMapping(), serverId);
 
   let rows = JSON.parse<McpGrantRow[]>(listWhere(db, mcpGrantsMapping(),
