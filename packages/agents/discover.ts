@@ -844,6 +844,13 @@ function langName(code: string): string {
   if (code == "fr") { return "French"; }
   if (code == "en") { return "English"; }
   if (code == "de") { return "German"; }
+  if (code == "tr") { return "Turkish"; }
+  if (code == "es") { return "Spanish"; }
+  if (code == "it") { return "Italian"; }
+  if (code == "pt") { return "Portuguese"; }
+  // A code this list does not know must not reach the prompt as a bare "tr" —
+  // the model reads that as a shrug and writes English. Saying nothing keeps the
+  // digest in the sources' own language, which is the honest fallback.
   return code;
 }
 
