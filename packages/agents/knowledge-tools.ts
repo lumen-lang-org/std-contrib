@@ -1,16 +1,3 @@
-// The corpus, kept by a sentence — and skills, which are the OTHER kind of
-// knowledge: instructions an agent loads by name.
-//
-// "Add this to my docs under /hackathon" queues the same indexing job the
-// Knowledge page queues; "make a skill called release-checklist that…" is
-// where GENERATION earns its keep — the model writes the skill body the way
-// it already writes prompts, and the tool stores what it wrote. A skill row
-// is name + one-line description + the whole instructions; use_skill serves
-// it back to any agent, which makes a well-written skill a colleague's
-// checklist rather than a prompt's appendix.
-//
-//   cd packages/agents && lumen test knowledge-tools.test.ts
-
 import { Db } from "../plume/driver.ts";
 import { DbOrder, asc, executeWith, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
@@ -105,7 +92,6 @@ export type KnowledgeToolCall = {
   nowMs: number,
 };
 
-/** The deployment's usable embedder, or empty — add_document needs one. */
 function anyEmbedder(db: Db): ModelRow {
   let keys: DbOrder[] = [asc("label")];
   let rows = JSON.parse<ModelRow[]>(listOrdered(db, modelsMapping(), "", [], keys));
@@ -190,8 +176,6 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     let source = jsonText(call.args, "source").trim();
     if (source == "") { return no("say which source: {\"source\":\"...\"} — list_documents shows them."); }
     executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder, [source]);
-    // And the kept original, the door's own rule: a file whose text is gone
-    // is unreachable, and leaving it is a leak that grows per deletion.
     forgetDocumentFiles(db, source);
     return yes("Forgotten: \"" + source + "\" — out of every agent's retrieval now.");
   }
@@ -221,15 +205,9 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     let row: SkillRow = {
       id: crypto.randomUUID(), skillName: name, description: description,
       body: instructions,
-      // The Settings default: visible to this deployment's own users.
-      // local: written here, edited here — a repo skill's next sync would
-      // clobber a chat edit, so those are refused below.
       source: "local", sourceUrl: "", visibility: "private", featuredRank: 0, updatedAt: `${call.nowMs}`,
     };
     persist(db, skillsMapping(), JSON.stringify(row));
-    // Attached to the default agent at birth: a skill no agent carries is a
-    // row use_skill refuses, and "created but unreachable" is the kind of
-    // half-done a caller cannot see. Other agents attach in Settings.
     let keys2: DbOrder[] = [asc("agent_name")];
     let agents = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), "", [], keys2));
     let a: int = 0;
@@ -246,7 +224,6 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
       + "use_skill(\"" + name + "\") loads it — " + `${instructions.length}` + " characters of instructions.");
   }
 
-  // change_skill.
   let saidName = jsonText(call.args, "skill").trim();
   if (saidName == "") { return no("say which skill: {\"skill\":\"...\"} — list_skills shows them."); }
   let skill = skillSaid(db, saidName);

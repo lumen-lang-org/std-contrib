@@ -9,25 +9,12 @@ import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
 import { ToolCardRow, toolCardsMapping } from "../../toolcards.ts";
 import { CardInput, CaseInput } from "./types.ts";
 
-// The /card-plugins routes.
-
 function rawListOr(body: string, member: string): string {
   let raw = jsonRaw(body, member);
   if (raw == "") { return "[]"; }
   return raw;
 }
 
-// Card plugins: install, list, disable, remove.
-//
-// A plugin is the unit somebody actually manages — it owns its cards
-// (/tool-cards, plugin_id) and its cases (below), so switching one off makes
-// its markers stop being taught and its lines stop being briefed without
-// deleting anything. See plugincards.ts for why that is a table rather than
-// three unrelated rows.
-//
-// Install is deliberately one POST carrying the whole plugin: a plugin that
-// arrives as four requests can half-arrive, and a half-installed plugin is a
-// model told to emit a marker nothing draws.
 @controller("/card-plugins")
 export class CardPluginApi {
   db: Db;
@@ -41,10 +28,6 @@ export class CardPluginApi {
     return ok(listOrdered(this.db, cardPluginsMapping(), "", [], [asc("plugin_name")]));
   }
 
-  // Everything the plugin is, in one body:
-  //   {"id","pluginName","description","sourceUrl","version",
-  //    "cards":[{"toolName","marker","payload","hint"}],
-  //    "cases":[{"when","then"}]}
   @post("/")
   install(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required"); }
@@ -66,8 +49,6 @@ export class CardPluginApi {
       enabled: true, installedAt: stamp(),
     };
 
-    // The cards first, so a refused marker refuses the whole install rather
-    // than leaving a plugin row with nothing under it.
     let cards = JSON.parse<CardInput[]>(rawListOr(req.body, "cards"));
     let c: int = 0;
     while (c < cards.length) {
@@ -105,8 +86,6 @@ export class CardPluginApi {
     return ok(JSON.stringify(plugin));
   }
 
-  // Off rather than gone. The rows stay and nothing is briefed — the state
-  // for working out whether a plugin is what is making a model behave oddly.
   @put("/:id")
   change(req: Request): Reply {
     let id = req.params.get("id") ?? "";
@@ -117,10 +96,6 @@ export class CardPluginApi {
       id: row.id, pluginName: row.pluginName, description: row.description,
       sourceUrl: row.sourceUrl, version: row.version,
       rendererUrl: row.rendererUrl, rendererSource: row.rendererSource,
-      // Same trap as the captcha row, one controller over: a JSON boolean
-      // false read as "" through jsonText, and "" != "false" is true — so
-      // switching a plugin off with {"enabled":false} switched it ON. The
-      // default when the member is absent is unchanged.
       enabled: jsonFlag(req.body, "enabled", true),
       installedAt: row.installedAt,
     };
@@ -128,9 +103,6 @@ export class CardPluginApi {
     return ok(JSON.stringify(after));
   }
 
-  // Uninstall takes exactly what the install created, by plugin_id — a card
-  // somebody added by hand carries no plugin and survives, which is what the
-  // person who added it expects.
   @del("/:id")
   remove(req: Request): Reply {
     let id = req.params.get("id") ?? "";
@@ -143,18 +115,6 @@ export class CardPluginApi {
     return ok("{\"uninstalled\":" + JSON.stringify(id) + "}");
   }
 
-  // Install from where the plugin lives, rather than from a body somebody
-  // pasted. The url is fetched, and what comes back is the same manifest the
-  // POST above takes — so a plugin is publishable as one JSON file, and the
-  // row records where it came from, which is the first question when a card
-  // draws wrongly.
-  //
-  // Nothing executable is fetched, and that is deliberate rather than
-  // unfinished. A manifest names markers and cases; the RENDERER stays in the
-  // console, looked up by marker. A plugin that could ship its own drawing
-  // code would be a way to put markup of somebody else's choosing inside a
-  // transcript, and no amount of sandboxing makes that a good trade for a
-  // cycle chart. A marker with no renderer degrades to the model's own line.
   @post("/from-source")
   fromSource(req: Request): Reply {
     let url = jsonText(req.body, "sourceUrl");
@@ -167,20 +127,11 @@ export class CardPluginApi {
     if (res.status != 200) {
       return badRequest(url + " answered " + `${res.status}`);
     }
-    // The manifest decides everything except where it came from: that is this
-    // deployment's record of the install, not the publisher's claim about it.
     let manifest = res.body;
     if (jsonText(manifest, "id") == "") {
       return badRequest("that url did not answer a plugin manifest (no id)");
     }
 
-    // The renderer, snapshotted NOW — the whole reason installs go through
-    // this route. "./renderer.js" resolves against the manifest's own url, so
-    // a repo can hold many plugins as folders. An install whose renderer
-    // cannot be fetched is refused whole: a plugin row whose markers nothing
-    // will ever draw is exactly the half-install this route exists to
-    // prevent. A manifest that names no renderer installs fine — its markers
-    // may be ones the console already draws.
     let rendererUrl = "";
     let rendererSource = "";
     let renderer = jsonText(manifest, "renderer");
@@ -202,9 +153,6 @@ export class CardPluginApi {
     return this.install(forward);
   }
 
-  // The snapshot, as the module the console's sandbox imports. Served from
-  // this database rather than from the CDN it came from — see rendererSource
-  // in plugincards.ts for the three reasons in order.
   @get("/:id/renderer")
   renderer(req: Request): Reply {
     let id = req.params.get("id") ?? "";
@@ -219,8 +167,6 @@ export class CardPluginApi {
     return reply;
   }
 
-  // The cases, listed and edited on their own — a plugin's behaviour is
-  // mostly these lines, and tuning one should not be a reinstall.
   @get("/:id/cases")
   cases(req: Request): Reply {
     let id = req.params.get("id") ?? "";

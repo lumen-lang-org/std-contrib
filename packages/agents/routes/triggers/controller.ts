@@ -9,17 +9,6 @@ import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
 import { TriggerBotRow, botsOf, emptyBot, queuedFor, triggerBotsMapping } from "../../triggers.ts";
 import { workflowsMapping } from "../../workflow-store.ts";
 
-// The /triggers routes.
-
-// A workflow started by something arriving rather than by a clock: for now, a
-// Telegram bot (triggers.ts).
-//
-// This door records the bot and holds its token; it never polls. The poll is
-// a separate process — `joule-trigger@<id>`, one per bot — because getUpdates
-// blocks for 25 seconds and a request thread that did that would be a request
-// thread not serving requests. So creating a bot here is half of switching
-// one on; the other half is systemd, and the reply says so rather than
-// leaving somebody watching a bot that answers nothing.
 @controller("/triggers")
 export class TriggerApi {
   db: Db;
@@ -34,8 +23,6 @@ export class TriggerApi {
     return ok(botsOf(this.db, owningTag(tags)));
   }
 
-  // The token arrives once and is never readable again — credentials.ts's
-  // rule, and the reason the row keeps a `credentialRef` rather than a token.
   @post("/")
   create(req: Request): Reply {
     let tags = callerTags(req);
@@ -53,8 +40,6 @@ export class TriggerApi {
 
     let id = crypto.randomUUID();
     let ref = "telegram:" + id;
-    // A string, and "" is success — credentials.ts answers with the problem
-    // rather than a record.
     let refused = storeCredential(this.db, { provider: ref, apiKey: token, masterKey: this.master, now: stamp() });
     if (refused != "") { return badRequest(refused); }
 
@@ -63,8 +48,6 @@ export class TriggerApi {
       id: id, owner: owner, kind: "telegram",
       name: jsonText(req.body, "name"), workflowId: workflowId,
       credentialRef: ref, offset: "0", leaseBy: "", leaseUntil: "",
-      // Off until somebody starts its poller. A bot switched on with nothing
-      // polling it looks broken; a bot switched off looks off.
       enabled: false,
       runsToday: 0, dayStartedAt: now, lastAt: "", lastError: "",
       draftUntil: "", createdAt: now, updatedAt: now,
@@ -81,9 +64,6 @@ export class TriggerApi {
     return ok(JSON.stringify(mine));
   }
 
-  // Switched on, switched off, renamed, or pointed at another workflow. The
-  // token is not editable here: replacing one is deleting the bot and making
-  // it again, which is also what BotFather makes you do.
   @put("/:id")
   update(req: Request): Reply {
     let mine = this.owned(req);
@@ -110,17 +90,10 @@ export class TriggerApi {
     return ok(findById(this.db, triggerBotsMapping(), edited.id));
   }
 
-  // Point this bot at the DRAFT for a bounded window — the n8n test button,
-  // with n8n's honesty about it: the stream cannot be split, so testing IS
-  // prod traffic for the duration, made loud and short instead of hidden.
-  // {"minutes": 5} starts one (capped at 30), {"minutes": 0} ends it now.
-  // The revert needs no daemon: the window is a timestamp the scheduler
-  // compares on every claim, so forgetting it is impossible — it just ends.
   @post("/:id/test")
   test(req: Request): Reply {
     let mine = this.owned(req);
     if (mine.id == "") { return notFound("bot " + param(req, "id")); }
-    // jsonRaw, not jsonText — a JSON number, the ok/update_id lesson.
     let minutes = parseInt(jsonRaw(req.body, "minutes").trim(), 10) ?? 5;
     if (minutes < 0) { minutes = 0; }
     if (minutes > 30) { minutes = 30; }
@@ -133,9 +106,6 @@ export class TriggerApi {
     return ok(findById(this.db, triggerBotsMapping(), mine.id));
   }
 
-  // What is waiting to be answered. The console shows this beside the bot,
-  // because "nothing is happening" and "six messages are queued behind a
-  // ceiling" look identical from the chat.
   @get("/:id/queue")
   queue(req: Request): Reply {
     let mine = this.owned(req);
@@ -147,8 +117,6 @@ export class TriggerApi {
   remove(req: Request): Reply {
     let mine = this.owned(req);
     if (mine.id == "") { return notFound("bot " + param(req, "id")); }
-    // The token goes with the bot. A credential outliving the row that named
-    // it is a secret nothing can ever reach to delete.
     forgetCredential(this.db, mine.credentialRef);
     executeWith(this.db, "DELETE FROM trigger_inbox WHERE bot_id = " + this.db.placeholder, [mine.id]);
     let gone = deleteById(this.db, triggerBotsMapping(), mine.id);

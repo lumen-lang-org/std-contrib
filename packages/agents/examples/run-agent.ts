@@ -1,7 +1,3 @@
-// An agent answering a user's question, configured entirely from the database.
-//
-//   LUMEN_MASTER_KEY=<32 bytes> MISTRAL_API_KEY=... lumen run examples/run-agent.ts
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
@@ -42,7 +38,6 @@ function main(): void {
   console.log("ok=" + `${first.ok}` + " status=" + `${first.status}` + " " + first.error);
   if (first.text != "") { console.log("reply " + first.text); }
 
-  // Change the prompt in the database. Nothing is reloaded.
   execute(db, "UPDATE agents SET prompt_id = 'p2' WHERE id = 'a1'");
   let second = runAgent(db, "a1", "What is 2 plus 40?", master);
   console.log("");

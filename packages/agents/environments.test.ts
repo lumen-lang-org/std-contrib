@@ -1,16 +1,3 @@
-// The environments table and its containers, with docker played by a shell
-// script.
-//
-// Every docker invocation goes through one door that runs `envDockerBin()`,
-// and the tests point that at a fake — a script that appends its argv to a
-// log and answers canned output — so what is asserted is exactly what would
-// have been asked of the real daemon: which verb, which container name, in
-// which order. The override function exists because a Lumen process can read
-// its environment but not write it, so AGENTS_DOCKER itself cannot be set
-// from inside a test; the fake is what AGENTS_DOCKER would point at.
-//
-//   cd packages/agents && lumen test environments.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
@@ -27,13 +14,9 @@ function fresh(): void {
   migrate(database, envPlan(database));
 }
 
-// --- the fake docker ------------------------------------------------------------
-
 const FAKE_DIR = "/tmp/agents_env_fake";
 const FAKE_LOG = "/tmp/agents_env_fake/argv.log";
 
-// Write a shell script, make it executable, point the docker seam at it, and
-// start its argv log empty.
 function fakeDocker(script: string): void {
   if (!fs.existsSync(FAKE_DIR)) { fs.mkdirSync(FAKE_DIR); }
   let bin = FAKE_DIR + "/docker";
@@ -43,9 +26,6 @@ function fakeDocker(script: string): void {
   envDockerOverride(bin);
 }
 
-// A docker that always succeeds, printing a container id for `run` the way
-// the real one does — and reporting every container up, which is what
-// `inspect` answers on a host where nothing has stopped.
 function dockerFine(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
@@ -54,9 +34,6 @@ function dockerFine(): void {
     + "exit 0\n");
 }
 
-// A docker whose container is down while the row still calls it running: the
-// state after an OOM kill, a daemon restart, or an operator's `docker stop`.
-// The container is still there, so `start` works — nothing has to be rebuilt.
 function dockerStoppedBehindOurBack(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
@@ -65,8 +42,6 @@ function dockerStoppedBehindOurBack(): void {
     + "exit 0\n");
 }
 
-// A docker whose daemon is unreachable: everything fails the way the real
-// CLI fails, on stderr with a non-zero exit.
 function dockerBroken(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
@@ -74,8 +49,6 @@ function dockerBroken(): void {
     + "exit 1\n");
 }
 
-// A docker that has lost its containers — `inspect` and `start` fail the way
-// they do after a prune — but can still `run` new ones.
 function dockerPruned(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
@@ -111,8 +84,6 @@ function sweep(now: string, idleMs: int): int {
   return envIdle(database, s);
 }
 
-// --- tests ----------------------------------------------------------------------
-
 test("first use creates the container and the row, named main by default", () => {
   fresh();
   dockerFine();
@@ -124,15 +95,6 @@ test("first use creates the container and the row, named main by default", () =>
   expect(made.container == "agents-env-t1-main");
   expect(made.problem == "");
 
-  // The container was asked for offline — network is a creation-time choice,
-  // false in this fixture — with a process to keep alive, and then given its
-  // persistent, run-user-owned home.
-  //
-  // The -v is the conversation's shared workspace, named after the THREAD and
-  // not after the environment: every environment of one conversation mounts
-  // the same volume, which is the whole reason `office` can write a file that
-  // `main` then reads. Asserted here as a whole line rather than a substring
-  // because the order of these flags is the order docker applies them.
   let asked = argvLines();
   expect(asked.length == 2);
   expect(asked[0] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
@@ -159,14 +121,10 @@ test("a second call reuses the running container, having asked docker whether it
   expect(!again.created);
   expect(!again.warmed);
 
-  // One question and no action. The question is the cheapest call docker
-  // has, and it is what stands between a reuse and an exec into a container
-  // that stopped while nobody was looking.
   let asked = argvLines();
   expect(asked.length == 1);
   expect(asked[0] == "inspect -f {{.State.Running}} agents-env-t1-main");
 
-  // The touch is recorded, so the idle sweep measures from this call.
   let rows = envList(database, "t1");
   expect(rows.length == 1);
   expect(rows[0].lastUsedAt == "1700000005000");
@@ -178,9 +136,6 @@ test("returning to a stopped environment is a docker start, not a create", () =>
   ensure("t1", "main", "python:3.12-slim", "1700000000000");
   expect(sweep("1700000900001", ENV_IDLE_MS) == 1);
   clearLog();
-  // The sweep really did stop it, so docker now says so — the fixture answers
-  // `inspect` the way the daemon would after that stop, not the way it did
-  // before it.
   dockerStoppedBehindOurBack();
 
   let back = ensure("t1", "main", "", "1700001000000");
@@ -201,8 +156,6 @@ test("a container that stopped behind the row's back is started, not exec'd into
   fresh();
   dockerFine();
   ensure("t1", "main", "python:3.12-slim", "1700000000000");
-  // No sweep: the row still says running, because nothing in this package
-  // stopped it. The OOM killer did.
   expect(envList(database, "t1")[0].status == "running");
   clearLog();
   dockerStoppedBehindOurBack();
@@ -212,8 +165,6 @@ test("a container that stopped behind the row's back is started, not exec'd into
   expect(back.warmed);
   expect(!back.created);
 
-  // Started, not recreated — the container still exists, so the workspace and
-  // everything installed into it survive.
   let asked = argvLines();
   expect(asked.length == 2);
   expect(asked[0] == "inspect -f {{.State.Running}} agents-env-t1-main");
@@ -227,8 +178,6 @@ test("the idle sweep stops what is past the deadline and keeps what is not", () 
   ensure("t2", "main", "python:3.12-slim", "1700000600000");
   clearLog();
 
-  // Deadline is now minus 15 minutes: t1 is exactly on it and stops, t2 is
-  // inside it and keeps running.
   expect(sweep("1700000900000", ENV_IDLE_MS) == 1);
 
   let asked = argvLines();
@@ -240,9 +189,6 @@ test("the idle sweep stops what is past the deadline and keeps what is not", () 
 });
 
 test("the deadline arithmetic survives a borrow across every digit", () => {
-  // 1000000000000 - 1 is 999999999999: the subtraction borrows through the
-  // whole stamp, and parseInt could never have held either side. A row used
-  // one millisecond before the deadline stops; a row used on the dot stays.
   fresh();
   dockerFine();
   ensure("t1", "main", "python:3.12-slim", "999999999998");
@@ -267,10 +213,6 @@ test("forgetting a thread removes its rows and its containers, and only its own"
   expect(asked.length == 3);
   expect(asked[0] == "rm -f agents-env-t1-main");
   expect(asked[1] == "rm -f agents-env-t1-web");
-  // The shared volume goes last and goes once — it belongs to the thread, not
-  // to either container, so removing it per-environment would have destroyed
-  // web's files while main was still using them. Its absence here would be a
-  // disk leak nothing else in the system ever collects.
   expect(asked[2] == "volume rm -f agents-ws-t1");
 
   expect(envList(database, "t1").length == 0);
@@ -278,21 +220,15 @@ test("forgetting a thread removes its rows and its containers, and only its own"
 });
 
 test("container names are docker-legal whatever the thread id holds", () => {
-  // A space, a slash, and a two-byte character: each byte outside docker's
-  // charset becomes one dash, so the multi-byte character becomes two.
   expect(envContainerName("t 1/x", "wé b") == "agents-env-t-1-x-w---b");
   expect(envContainerName("thread.A_9", "main") == "agents-env-thread.A_9-main");
 
-  // And the sanitised name is what docker is actually asked for.
   fresh();
   dockerFine();
   let made = ensure("t 1/x", "", "python:3.12-slim", "1700000000000");
   expect(made.ok);
   expect(made.container == "agents-env-t-1-x-main");
   let asked = argvLines();
-  // The volume name is sanitised by the same rule and off the same thread id,
-  // so an unspellable thread cannot produce a container docker accepts and a
-  // volume it refuses.
   expect(asked[0] == "run -d --name agents-env-t-1-x-main -v agents-ws-t-1-x:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
 });
 
@@ -307,8 +243,6 @@ test("a docker failure is a problem sentence, not a thrown error and not a row",
   expect(made.problem.includes("docker"));
   expect(made.problem.includes("Cannot connect to the Docker daemon"));
 
-  // No container means no environment: the row is only minted when the
-  // container exists, so a retry after docker recovers starts clean.
   expect(envList(database, "t1").length == 0);
 });
 
@@ -324,9 +258,6 @@ test("a pruned container is recreated from the row's image, reported as created"
   expect(back.created);
   expect(!back.warmed);
 
-  // Asked, then start tried and failed, then the name released — a name an
-  // exited container still holds would fail the run below — and the recreate
-  // used the image the row remembers, the caller having passed none.
   let asked = argvLines();
   expect(asked.length == 5);
   expect(asked[0] == "inspect -f {{.State.Running}} agents-env-t1-main");
@@ -350,7 +281,6 @@ test("an environment needs a conversation and, on first use, an image", () => {
   expect(!imageless.ok);
   expect(imageless.problem != "");
 
-  // Neither refusal reached docker or the table.
   expect(argvLines().length == 0);
   expect(envList(database, "t1").length == 0);
 });
@@ -370,31 +300,22 @@ test("two names in one thread are two rows and two containers", () => {
 });
 
 test("a container is created with its guard rails: caps dropped, no new privileges, resources bounded", () => {
-  // `language` constrains nothing — a python script may shell out, cd, apt-get
-  // and curl on purpose — so these are what actually bound a run. Asserted as
-  // one list because a rail quietly dropped from the argv is invisible
-  // otherwise: the container would still work, and be weaker.
   fresh();
   dockerFine();
   ensure("t1", "", "python:3.12-slim", "1700000000000");
   let made = argvLines()[0];
 
-  // Resources: a runaway script cannot take the host's memory, cores or pids.
   expect(made.indexOf("--memory 1024m") > 0);
   expect(made.indexOf("--cpus 2") > 0);
   expect(made.indexOf("--pids-limit 256") > 0);
-  // A browser needs shared memory; 64MB renders blank rather than failing.
   expect(made.indexOf("--shm-size 512m") > 0);
-  // Privilege: nothing inside may gain what it did not start with.
   expect(made.indexOf("--security-opt no-new-privileges") > 0);
-  // Capabilities: all off, then back only the five apt and pip need.
   expect(made.indexOf("--cap-drop ALL") > 0);
   expect(made.indexOf("--cap-add CHOWN") > 0);
   expect(made.indexOf("--cap-add DAC_OVERRIDE") > 0);
   expect(made.indexOf("--cap-add FOWNER") > 0);
   expect(made.indexOf("--cap-add SETUID") > 0);
   expect(made.indexOf("--cap-add SETGID") > 0);
-  // And the ones that must never come back, whatever else changes here.
   expect(made.indexOf("SYS_ADMIN") < 0);
   expect(made.indexOf("NET_ADMIN") < 0);
   expect(made.indexOf("NET_RAW") < 0);
@@ -402,12 +323,7 @@ test("a container is created with its guard rails: caps dropped, no new privileg
   expect(made.indexOf("--privileged") < 0);
 });
 
-// --- is the daemon there ----------------------------------------------------------
-
 test("the probe asks the daemon for its version, not the client for its own", () => {
-  // A client binary that exists and a daemon that answers are different facts,
-  // and only the second one lets a script run. `{{.Server.Version}}` is what
-  // makes the CLI go and ask.
   dockerFine();
   envDockerForget();
   expect(envDockerUp("1700000000000"));
@@ -426,39 +342,23 @@ test("the answer is reused for a few seconds, because the probe's door is the pu
   expect(envDockerUp("1700000000000"));
   clearLog();
 
-  // `/healthz` is the one route the gateway leaves open, and a route that
-  // spawns a process per request is a lever whoever finds it can pull.
   dockerBroken();
   expect(envDockerUp("1700000004999"));
   expect(argvLines().length == 0);
 
-  // Five seconds on, it asks again — docker does come and go, just not that
-  // fast.
   expect(!envDockerUp("1700000005001"));
   expect(argvLines().length == 1);
 });
 
 test("an image with its own entrypoint still becomes an environment", () => {
-  // A validator, a linter, a converter: an image built to DO something carries
-  // an ENTRYPOINT, and appending `sleep infinity` to it hands those words to
-  // that program instead of running sleep. The container exits at once and the
-  // environment is unusable — which is exactly how a real pulled image failed.
-  // Overriding the entrypoint is what makes any curated image usable; the
-  // program is still in there for a script to call.
   fresh();
   dockerFine();
   ensure("t1", "", "nuralyio/docflow-validator:latest", "1700000000000");
   let made = argvLines()[0];
   expect(made.indexOf("--entrypoint sleep nuralyio/docflow-validator:latest infinity") > 0);
-  // And the words after the image are the sleep's, not a program's arguments.
   expect(made.endsWith("infinity"));
 });
 
-// --- managing what somebody's conversations hold --------------------------------
-
-// The join in envOwned reads the threads table, which this suite does not
-// otherwise have. Three columns are all it reads, so three columns are what
-// the fixture makes — the real table's shape is threads.ts's business.
 function withThreads(): void {
   execute(database, "DROP TABLE IF EXISTS threads");
   execute(database, "CREATE TABLE threads (id text PRIMARY KEY, owner text, title text)");
@@ -476,7 +376,6 @@ test("envOwned lists a person's containers with their conversations' titles, and
   envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, now: "3000" });
   let mine = envOwned(database, "o1");
   expect(mine.length == 2);
-  // Titles are the point of the join: a thread id identifies nothing to a person.
   expect(mine[0].threadTitle == "Weather digest" || mine[1].threadTitle == "Weather digest");
   let i: int = 0;
   while (i < mine.length) { expect(mine[i].threadId != "t9"); i = i + 1; }
@@ -493,14 +392,11 @@ test("envDrop takes the container and row, and the workspace volume with the las
   expect(envDrop(database, "t1", "main"));
   let logged = fs.readFileSync(FAKE_LOG);
   expect(logged.indexOf("rm -f " + envContainerName("t1", "main")) >= 0);
-  // The other environment still mounts the volume, so the volume stays.
   expect(logged.indexOf("volume rm") < 0);
   expect(envList(database, "t1").length == 1);
-  // The last one out turns off the lights.
   expect(envDrop(database, "t1", "office"));
   expect(fs.readFileSync(FAKE_LOG).indexOf("volume rm -f agents-ws-t1") >= 0);
   expect(envList(database, "t1").length == 0);
-  // Gone is gone: a second drop is false, for the route to turn into a 404.
   expect(!envDrop(database, "t1", "office"));
 });
 
@@ -509,7 +405,6 @@ test("envImagePresent asks the daemon and believes the answer", () => {
   dockerFine();
   expect(envImagePresent("img:1"));
   expect(!envImagePresent(""));
-  // A daemon that does not hold the image answers nonzero, and that is a no.
   fakeDocker("#!/bin/sh\necho \"$@\" >> " + FAKE_LOG + "\nexit 1\n");
   expect(!envImagePresent("img:ghost"));
 });

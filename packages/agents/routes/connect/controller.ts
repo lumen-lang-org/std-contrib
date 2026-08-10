@@ -8,14 +8,6 @@ import { owningTag } from "../../owner.ts";
 import { McpServerRow, mcpServersMapping } from "../../schema.ts";
 import { SuppliedClientAsk } from "./types.ts";
 
-// The /connect routes.
-
-// The address a connector sends the browser back to, or "" when this
-// deployment does not know its own public name.
-//
-// It has to be absolute and it has to match what was registered, so it cannot
-// be derived from the request: behind the console's proxy and the gateway, the
-// Host this process sees is an internal one. One variable, set once.
 function callbackUri(): string {
   let origin = (process.env("AGENTS_PUBLIC_ORIGIN") ?? "").trim();
   if (origin == "") { return ""; }
@@ -23,11 +15,6 @@ function callbackUri(): string {
   return origin + "/api/connect/callback";
 }
 
-// The page the browser lands on after a consent screen.
-//
-// Deliberately plain and deliberately self-closing. A person who pressed
-// Connect is looking at a popup over the console, and the useful outcome is
-// that it goes away and the page behind it knows to refresh.
 function connectPage(worked: bool, detail: string): Reply {
   let title = worked ? "Connected" : "Not connected";
   let line = worked
@@ -41,10 +28,6 @@ function connectPage(worked: bool, detail: string): Reply {
     + "h1{font-size:17px;margin:0 0 .35rem}p{margin:0;color:#6b6b70}"
     + "</style></head><body><div><h1>" + title + (worked ? " to " + jsonSafe(detail) : "")
     + "</h1><p>" + line + "</p></div>"
-    // The opener is told which way it went, so the console can reload the one
-    // list that changed rather than everything. `postMessage` is targeted at
-    // this deployment's own origin; a popup that shouted at "*" would tell any
-    // page that happened to open it.
     + "<script>try{if(window.opener){window.opener.postMessage("
     + "{joule:\"connector\",ok:" + (worked ? "true" : "false") + "},window.location.origin)}}catch(e){}"
     + "setTimeout(function(){window.close()}," + (worked ? "900" : "4000") + ")</script>"
@@ -58,7 +41,6 @@ export class ConnectApi {
   master: string;
   constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
-  // Where the browser should go to approve this connector.
   @post("/:id/start")
   start(req: Request): Reply {
     let document = findById(this.db, mcpServersMapping(), param(req, "id"));
@@ -69,11 +51,6 @@ export class ConnectApi {
     return ok("{\"url\":" + JSON.stringify(began.url) + "}");
   }
 
-  // Where the connector sends the browser back to.
-  //
-  // Answers HTML rather than JSON, uniquely in this file, because the reader
-  // is a browser window a person is looking at and not a program. It closes
-  // itself; the console notices through the opener and reloads.
   @get("/callback")
   callback(req: Request): Reply {
     let refused = req.query.get("error") ?? "";
@@ -87,18 +64,6 @@ export class ConnectApi {
     return connectPage(true, done.serverName);
   }
 
-  // Give this connector an OAuth client created by hand in the vendor's own
-  // developer console.
-  //
-  // For the connectors that do not register clients automatically — Asana's v2
-  // server, Slack, Box — which is most of the ones people actually ask for.
-  // Deployment-wide and not per person, because the connector row it hangs off
-  // is deployment-wide: the app belongs to whoever runs Joule, and each person
-  // then signs in to it with their own account.
-  //
-  // Answered back is the client id only, and only because it is not a secret:
-  // it travels in the consent URL every browser visits. The secret goes in and
-  // never comes out, like every other credential here.
   @put("/:id/client")
   setClient(req: Request): Reply {
     let id = param(req, "id");
@@ -109,8 +74,6 @@ export class ConnectApi {
     return ok("{\"clientId\":" + JSON.stringify(suppliedClientId(this.db, id, this.master)) + "}");
   }
 
-  // Take it away again. The connector goes back to registering itself, which
-  // works where the vendor allows it and says so plainly where it does not.
   @del("/:id/client")
   dropClient(req: Request): Reply {
     let id = param(req, "id");
@@ -119,8 +82,6 @@ export class ConnectApi {
     return noContent();
   }
 
-  // Hand a connection back. The caller's own, never anybody else's — the owner
-  // is read from the verified header, exactly as DELETE /servers/:id/mine is.
   @del("/:id")
   drop(req: Request): Reply {
     if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {

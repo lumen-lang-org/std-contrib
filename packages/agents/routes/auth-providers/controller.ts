@@ -8,16 +8,11 @@ import { createProblem, jsonId } from "../../payload.ts";
 import { jsonText } from "../../scan.ts";
 import { AuthProviderRow, authProvidersMapping } from "../../schema.ts";
 
-// The /auth-providers routes.
-
-// Why a provider row will not do, in words, or "".
 export function authProviderProblem(row: AuthProviderRow): string {
   if (row.id.trim() == "") { return "a provider needs an id — it is what the callback URL carries"; }
   if (row.label.trim() == "") { return "a provider needs a label — it is what the sign-in button says"; }
   let kind = row.kind == "" ? "oidc" : row.kind;
   if (kind != "oidc" && kind != "github") { return "kind is 'oidc' or 'github'"; }
-  // github's endpoints are the framework's, not the row's — it carries no
-  // issuer. Only an OIDC provider is discovered from one.
   if (kind == "oidc" && !row.issuer.startsWith("https://")) {
     return "the issuer is an https address whose /.well-known/openid-configuration describes the provider";
   }
@@ -52,10 +47,6 @@ export class AuthProviderApi {
     return ok(out + "]");
   }
 
-  // What the console's auth actually needs: the enabled rows WITH their
-  // secrets, so it can complete an OAuth exchange. Its own route because it
-  // is the one place a secret leaves this process, and the gateway admits
-  // only the console's own server to it.
   @get("/resolved")
   resolved(req: Request): Reply {
     let rows = JSON.parse<AuthProviderRow[]>(listWhere(this.db, authProvidersMapping(),
@@ -64,8 +55,6 @@ export class AuthProviderApi {
     let i: int = 0;
     while (i < rows.length) {
       let secret = credentialFor(this.db, "oauth:" + rows[i].id, this.master);
-      // A provider with no secret stored cannot complete a sign-in, and
-      // offering its button would be offering a dead end.
       if (secret != "") {
         if (out.length > 1) { out = out + ","; }
         out = out + "{\"id\":" + JSON.stringify(rows[i].id)

@@ -1,18 +1,3 @@
-// An agent that calls tools, with nothing about it compiled in.
-//
-//   python3 mcpserver.py 8200 &
-//   export LUMEN_MASTER_KEY=...            # 32 bytes
-//   export MISTRAL_API_KEY=...             # stored encrypted, then forgotten
-//   cd packages/agents && lumen run examples/run-with-tools.ts
-//
-// The model, its wire name, the prompt, the MCP server's address and the link
-// between the agent and that server are all rows. This file names none of
-// them twice: it writes them once to show what a no-code builder would write,
-// and then runs the agent by id.
-//
-// What it prints is the two halves of a run kept apart — the answer a person
-// reads, and the tool calls that produced it.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
@@ -46,8 +31,6 @@ function main(): void {
   dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  // --- what a no-code builder would write -----------------------------------
-
   let model: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(model));
 
@@ -63,16 +46,10 @@ function main(): void {
   let agent: AgentRow = { id: "a1", agentName: "parts-desk", description: "answers stock questions", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-25" };
   persist(db, agentsMapping(), JSON.stringify(agent));
 
-  // The link is what gives the agent its tools. Deleting this row takes them
-  // away again, on the next run, with nothing rebuilt.
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a1','s1')");
 
   storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-25" });
 
-  // --- what the agent can reach ---------------------------------------------
-
-  // The master key, because mounting reads each server's stored token to
-  // reach it — the row names the server, the credential store holds the way in.
   let mounted = mountTools(db, "a1", master);
   console.log("mounted   " + `${mounted.tools.length}` + " tools from " + `${mounted.servers.length}` + " server(s)");
   let t: int = 0;
@@ -85,8 +62,6 @@ function main(): void {
     console.log("  ! " + mounted.problems[p]);
     p = p + 1;
   }
-
-  // --- the run ---------------------------------------------------------------
 
   let question = "We need 40 units of A-114. Is there enough in Rotterdam, and what would 40 cost?";
   console.log("");

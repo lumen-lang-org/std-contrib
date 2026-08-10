@@ -10,16 +10,6 @@ import { ownedThread } from "../../threads.ts";
 import { deleteFile, getFile, listFiles, mimeOf, promoteFile, putFile } from "../../workspace.ts";
 import { FilePromote, FilePull, FileUpload } from "./types.ts";
 
-// The /threads/:id/files routes.
-
-// The files a conversation is working on: uploaded by the user, written by
-// the model with its write_file tool, or pulled in from the corpus.
-//
-// Every route here opens with `ownedThread`, before it looks at a name or a
-// body. Three of them used to resolve the file straight out of
-// `workspace_files` by (thread, name) — correct about which row, silent about
-// whose — so a conversation id was the whole of the authorisation to read,
-// delete or publish somebody else's upload.
 @controller("/threads/:id/files")
 export class WorkspaceApi {
   db: Db;
@@ -50,8 +40,6 @@ export class WorkspaceApi {
     return ok(out + "]");
   }
 
-  // Upload. The body is JSON text; a binary file needs base64 at this edge and
-  // is not pretended to work.
   @post("/")
   upload(req: Request): Reply {
     if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
@@ -89,8 +77,6 @@ export class WorkspaceApi {
     return noContent();
   }
 
-  // Pull a corpus document into the workspace, as a pointer with its body. The
-  // agent can then read it whole, which retrieval never offers.
   @post("/pull")
   pull(req: Request): Reply {
     if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
@@ -108,13 +94,8 @@ export class WorkspaceApi {
     return created("{\"name\":" + JSON.stringify(body.name) + ",\"documentId\":" + JSON.stringify(body.documentId) + "}");
   }
 
-  // Make a file part of the corpus, under a scope. Explicit, never a side
-  // effect of saving: this is the moment a conversation's artifact becomes
-  // team knowledge, and the file's documentId is the audit trail.
   @post("/:name/promote")
   promote(req: Request): Reply {
-    // Ownership first, even before the dialect check: which database this runs
-    // on is not something a caller with no business here needs told.
     if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }

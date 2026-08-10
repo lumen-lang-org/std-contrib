@@ -1,14 +1,3 @@
-// A lead agent that owns no tools, and a specialist that does.
-//
-//   python3 mcpserver.py 8200 &
-//   export LUMEN_MASTER_KEY=... MISTRAL_API_KEY=...
-//   cd packages/agents && lumen run examples/delegate.ts
-//
-// The lead cannot reach the parts server — no row links them. What it has is
-// a child that can, offered to it as `ask_parts-desk`, and the run's trace
-// shows the delegation beside an ordinary tool call because to the loop they
-// are the same thing.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
@@ -55,7 +44,6 @@ function main(): void {
   persist(db, agentsMapping(), JSON.stringify(lead));
   persist(db, agentsMapping(), JSON.stringify(desk));
 
-  // The desk reaches the server. The lead reaches the desk. Two rows.
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a2','s1')");
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
 

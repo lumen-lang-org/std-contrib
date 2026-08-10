@@ -1,14 +1,3 @@
-// Running a Langfuse dataset against the agent tree.
-//
-//   python3 mcpserver.py 8200 &
-//   docker compose up -d          # a Langfuse with a dataset in it
-//   export LUMEN_MASTER_KEY=... MISTRAL_API_KEY=...
-//   cd packages/agents && lumen run examples/evals.ts
-//
-// The cases come out of Langfuse, the answers come from the lead agent (which
-// delegates to the parts desk, which calls MCP tools), and the judge is itself
-// an agent — so what judges, and how strictly, is a row.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
@@ -57,8 +46,6 @@ function main(): void {
   let deskPrompt: PromptRow = { id: "p2", promptName: "parts-desk", version: 1, createdAt: "2026-07-26", body: "You answer questions about parts and stock using the tools. Never guess a number." };
   persist(db, promptsMapping(), JSON.stringify(deskPrompt));
 
-  // The judge is an agent: its model and its strictness are rows, and swapping
-  // it is an UPDATE rather than an edit to the eval code.
   let judgePrompt: PromptRow = { id: "p3", promptName: "judge", version: 1, createdAt: "2026-07-26", body: "You grade answers. You are given a question, a reference answer and an answer to grade. Reply with JSON only and nothing else: {\"score\": <0 to 1>, \"reason\": \"<one sentence>\"}. Score 1 when the facts and numbers match the reference, 0 when they contradict it, and in between when something asked for is missing." };
   persist(db, promptsMapping(), JSON.stringify(judgePrompt));
 

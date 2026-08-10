@@ -1,25 +1,3 @@
-// Workflows: a graph of steps somebody keeps, and what happened when it ran.
-//
-// The rows only, as tasks.ts is the rows for scheduled tasks. The graph
-// itself — what a node is, what makes one wrong, how a walk proceeds — lives
-// in `packages/workflow` and knows nothing about databases or owners; this
-// module is where a graph becomes somebody's: an owner, a name, a switch, a
-// schedule, and a history of runs.
-//
-// A workflow is not a task. A task is one instruction fired on a schedule; a
-// workflow is steps with edges between them, drawn on a canvas, walked in
-// order. They share the schedule grammar (`compile`, tasks.ts) because a
-// person says "every weekday at 08:00" identically to both — and nothing
-// else. Separate tables, so neither can bend the other's shape.
-//
-// The graph is ONE column, the whole document, saved and read together.
-// nuraly's service splits nodes and edges into their own tables behind six
-// REST endpoints, and its client then needs an id-remapping dance to relate
-// what it just POSTed to what it drew (persistence-mixin.ts). A document
-// cannot half-save, cannot dangle, and is validated whole on every write —
-// which matters more here, because a model authors these graphs as often as
-// a person does.
-
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, asc, createTableSql, desc, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
@@ -27,29 +5,17 @@ import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
 import { knownZone } from "../cron/cron.ts";
 
-// What a runaway workflow costs, as limits rather than hope — the same
-// posture as tasks.ts, at the same numbers where the same thing is bounded.
 export const MAX_WORKFLOWS_PER_OWNER: int = 10;
-// How large a graph document may be on the wire. The per-field bounds live
-// with the graph; this is the envelope, so a client cannot post a megabyte of
-// nodes and have the refusal come from the parser.
 export const MAX_GRAPH_CHARS: int = 65536;
 
 export type WorkflowRow = {
   id: string,
-  // Whose it is. Every read and every write is scoped by this.
   owner: string,
-  // The agent an AGENT step with no agentId of its own runs as, and the agent
-  // the run's conversation is filed under. Resolved at create, as tasks do.
   agentId: string,
   modelChoiceId: string,
   name: string,
   description: string,
-  // The whole drawing: nodes, edges, viewport, as JSON text.
   graph: string,
-  // "manual" — runs when somebody presses Run. "every" — fires on cronExpr.
-  // "once" — fires at nextAt and is done. Decided by the START step's own
-  // schedule words, never sent directly.
   kind: string,
   cronExpr: string,
   tz: string,
@@ -63,41 +29,26 @@ export type WorkflowRow = {
   lastStatus: string,
   lastError: string,
   runCount: int,
-  // What production runs: the graph as it stood at the last Publish. The
-  // n8n split — `graph` is the draft the canvas autosaves, and nothing a
-  // person is mid-way through editing reaches a chat or the clock. Optional
-  // marks (absent-able since compiler spec 481) so rows written before 107
-  // still parse.
   publishedGraph?: string,
   publishedAt?: string,
   createdAt: string,
   updatedAt: string,
 };
 
-// One firing of one workflow. `steps` is the walk's own record — an array of
-// {nodeId, type, status, ms, output, error} — stored as JSON and handed to
-// the canvas as node statuses without a transform.
 export type WorkflowRunRow = {
   id: string,
   workflowId: string,
   owner: string,
-  // "running", "ok", "failed".
   status: string,
   input: string,
   answer: string,
   error: string,
-  // The conversation the run's answer was filed in.
   threadId: string,
   steps: string,
   startedAt: string,
   endedAt: string,
 };
 
-// Frozen at what 101 created — the threads.ts/triggers.ts rule: a
-// migration's text is checksummed and 101 generates its CREATE from a
-// mapping, so a column added to the LIVE mapping below rewrites an applied
-// migration and every deployed database refuses the whole plan. New columns
-// are ALTERs at new versions.
 function workflowsMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
@@ -148,7 +99,6 @@ export function workflowsMapping(): DbRepository {
     field("lastStatus", "last_status", "text"),
     field("lastError", "last_error", "text"),
     field("runCount", "run_count", "int"),
-    // Added after 101 shipped, so they arrive as ALTERs at 107.
     field("publishedGraph", "published_graph", "text"),
     field("publishedAt", "published_at", "text"),
     field("createdAt", "created_at", "text"),
@@ -175,32 +125,19 @@ export function workflowRunsMapping(): DbRepository {
 }
 
 export function workflowsPlan(db: Db): Migration[] {
-  // 101: tasks.ts owns 99, discover.ts owns 100, and a migration that sorts
-  // below one already applied refuses the whole plan. Check
-  // `SELECT version FROM plume_schema_history ORDER BY installed_rank DESC`
-  // before choosing a number, not after.
   return [
     migration("101", "workflows: steps somebody drew",
       createTableSql(db, workflowsMappingV1())),
     migration("101.1", "and what happened when they ran",
       createTableSql(db, workflowRunsMapping())),
-    // 107: not 101.2 — plume orders by version and 106.x is already applied,
-    // so a late 101.x would sort below history and refuse the plan.
     migration("107", "what production runs: the graph as last published",
       "ALTER TABLE workflows ADD COLUMN published_graph " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.1", "and when it was published",
       "ALTER TABLE workflows ADD COLUMN published_at " + db.textType + " NOT NULL DEFAULT ''"),
-    // Every existing workflow keeps working exactly as it did: what it runs
-    // today becomes its published version, and the first divergence is the
-    // first unpublished edit after this ships.
     migration("107.2", "what already runs is what is published",
       "UPDATE workflows SET published_graph = graph, published_at = updated_at"),
   ];
 }
-
-// ---------------------------------------------------------------------------
-// The graph column, read and refused
-// ---------------------------------------------------------------------------
 
 export type ParsedGraph = {
   ok: bool,
@@ -208,11 +145,6 @@ export type ParsedGraph = {
   error: string,
 };
 
-/** The graph column as a graph, or why it is not one.
- *
- *  The parse is typed and the failure is caught here so that everywhere else
- *  reads `ok` instead of wrapping a try — and so the sentence a model gets
- *  back names the problem rather than quoting a parser. */
 export function parseGraph(text: string): ParsedGraph {
   let none: WfGraph = { nodes: [], edges: [], view: { x: 0.0, y: 0.0, zoom: 1.0 } };
   if (text.length > MAX_GRAPH_CHARS) {
@@ -231,11 +163,6 @@ export function parseGraph(text: string): ParsedGraph {
   }
 }
 
-/** What the START step's words mean for the row's schedule half.
- *
- *  "" is a workflow run by hand. "every ..." compiles through the same
- *  grammar tasks use; "on ... at ..." is a single instant. The zone must
- *  already be on the row. */
 export type WfTiming = {
   ok: bool,
   kind: string,
@@ -268,11 +195,6 @@ export function timingOf(graph: WfGraph, zone: string, nowMs: number): WfTiming 
   return every;
 }
 
-/** Everything wrong with a workflow somebody just described, or "".
- *
- *  The graph's own rules are `packages/workflow`'s and are not repeated here
- *  — this adds only what a graph cannot know: the owner, the agent, the zone
- *  and the schedule's meaning. */
 export function refuseWorkflow(row: WorkflowRow): string {
   if (row.name.trim() == "") { return "a workflow needs a name for the list"; }
   if (row.agentId == "") { return "a workflow needs an agent to run as"; }
@@ -291,10 +213,6 @@ export function refuseWorkflow(row: WorkflowRow): string {
   return "";
 }
 
-// ---------------------------------------------------------------------------
-// Rows
-// ---------------------------------------------------------------------------
-
 export function emptyWorkflow(): WorkflowRow {
   let none: WorkflowRow = {
     id: "", owner: "", agentId: "", modelChoiceId: "", name: "", description: "",
@@ -306,7 +224,6 @@ export function emptyWorkflow(): WorkflowRow {
   return none;
 }
 
-/** This owner's workflows, most recently touched first. */
 export function workflowsOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [desc("updated_at")];
   return listOrdered(db, workflowsMapping(), "owner = " + db.placeholder, [owner], keys);
@@ -324,7 +241,6 @@ export function enabledWorkflowCount(db: Db, owner: string): int {
   return n;
 }
 
-/** One workflow's runs, newest first. */
 export function workflowRunsOf(db: Db, workflowId: string, owner: string): string {
   let keys: DbOrder[] = [desc("started_at")];
   return listOrdered(db, workflowRunsMapping(),
@@ -332,10 +248,6 @@ export function workflowRunsOf(db: Db, workflowId: string, owner: string): strin
     [workflowId, owner], keys);
 }
 
-/** The next firing after `afterMs` for a scheduled workflow.
- *
- *  Through the task's own function, by lending it the row's schedule half —
- *  one implementation of "when does cron fire next in this zone", not two. */
 export function nextWorkflowFire(row: WorkflowRow, afterMs: number): Scheduled {
   let asTask: TaskRow = {
     id: row.id, owner: row.owner, agentId: row.agentId, modelChoiceId: "",
@@ -348,8 +260,6 @@ export function nextWorkflowFire(row: WorkflowRow, afterMs: number): Scheduled {
   return nextFire(asTask, afterMs);
 }
 
-/** The same workflow with a different next firing — records are immutable, so
- *  "set one field" is "build the row again", written once. */
 export function withWorkflowNextAt(row: WorkflowRow, at: string): WorkflowRow {
   let moved: WorkflowRow = {
     id: row.id, owner: row.owner, agentId: row.agentId,
@@ -361,18 +271,12 @@ export function withWorkflowNextAt(row: WorkflowRow, at: string): WorkflowRow {
     lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,
     lastStatus: row.lastStatus, lastError: row.lastError,
     runCount: row.runCount,
-    // Carried, not defaulted: this copy is what persist writes back, and a
-    // copy that forgot the published half would blank production on the
-    // next autosave — the exact quiet failure the optional mark invites.
     publishedGraph: row.publishedGraph ?? "", publishedAt: row.publishedAt ?? "",
     createdAt: row.createdAt, updatedAt: row.updatedAt,
   };
   return moved;
 }
 
-/** The same row about to be walked with different graph bytes — how the
- *  scheduler hands the walk the PUBLISHED graph (or a test window's draft)
- *  while everything else about the row stays itself. */
 export function withGraph(row: WorkflowRow, bytes: string): WorkflowRow {
   let swapped: WorkflowRow = {
     id: row.id, owner: row.owner, agentId: row.agentId,
@@ -390,24 +294,12 @@ export function withGraph(row: WorkflowRow, bytes: string): WorkflowRow {
   return swapped;
 }
 
-// ---------------------------------------------------------------------------
-// Claiming — the same shape as tasks.ts, against the other table, for the
-// same reasons: SKIP LOCKED so two runners cannot fire one workflow twice,
-// and the claim stamped in the same statement so a crash cannot re-fire on
-// every tick forever.
-// ---------------------------------------------------------------------------
-
-/** One due scheduled workflow, claimed, or an empty row. */
 export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
   let none = emptyWorkflow();
   let now = `${nowMs}`;
   let stale = `${(nowMs as i64) - (RUN_TIMEOUT_MS as i64)}`;
   let sql = "UPDATE workflows SET running_since = " + db.placeholder
     + " WHERE id = (SELECT id FROM workflows"
-    // No kind test: a manual workflow ordinarily has no next_at and is never
-    // due, and "run now" IS a next_at — the one write that makes it due once.
-    // The first version excluded kind='manual' here, and Run soon on an
-    // unscheduled workflow was silently never claimed.
     + " WHERE enabled = true AND next_at <> '' AND next_at <= " + placeholderAt(db, 2)
     + " AND (running_since = '' OR running_since < " + placeholderAt(db, 3) + ")"
     + " ORDER BY next_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
@@ -439,9 +331,6 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
   return got;
 }
 
-/** A run that worked: claim released, schedule moved on, a one-off switched
- *  off rather than left as a workflow that can never fire again. A manual
- *  workflow has no next firing and stays enabled. */
 export function markWorkflowRan(db: Db, row: WorkflowRow, runId: string, nowMs: number): void {
   let ahead = nextWorkflowFire(row, nowMs);
   let stillOn = row.kind == "manual" || (row.kind == "every" && ahead.ok);
@@ -459,8 +348,6 @@ export function markWorkflowRan(db: Db, row: WorkflowRow, runId: string, nowMs: 
   db.query(sql, [now, runId, stillOn ? "true" : "false", again, now, row.id]);
 }
 
-/** A run that did not work: counted, and at PAUSE_AFTER the workflow switches
- *  itself off with the reason on it. */
 export function markWorkflowFailed(db: Db, row: WorkflowRow, why: string, nowMs: number): void {
   let failures = row.failures + 1;
   let done = failures >= PAUSE_AFTER;

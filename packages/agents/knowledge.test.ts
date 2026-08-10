@@ -1,10 +1,3 @@
-// What retrieval refuses before it embeds anything.
-//
-// The search itself needs PostgreSQL and a credential, so it lives in
-// examples/rag.ts; everything that can be decided from rows is here.
-//
-//   cd packages/agents && lumen test knowledge.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
@@ -48,8 +41,6 @@ test("an embedding model is read from its row, with its own width", () => {
 
 test("a chat model is not an embedding model, however it is asked for", () => {
   fresh();
-  // Same provider, same credential, different endpoint — worth refusing here
-  // rather than at the provider.
   expect(embeddingModel(database, "m1").id == "");
 });
 
@@ -61,7 +52,6 @@ test("a model that is not there reads as absent, not as an error", () => {
 test("a corpus cannot be created without a width", () => {
   fresh();
   expect(createDocuments(database, embeddingModel(database, "e2")).indexOf("how wide") >= 0);
-  // And not at all without a model.
   expect(createDocuments(database, embeddingModel(database, "nope")).indexOf("no embedding model") >= 0);
 });
 
@@ -104,15 +94,9 @@ test("context is labelled with where each chunk came from", () => {
   expect(text.indexOf("[plume/d1]") >= 0);
   expect(text.indexOf("[rest/d2]") >= 0);
   expect(text.indexOf("First chunk.") >= 0);
-  // It still guards the corpus's voice — nothing may be attributed to it
-  // that these passages do not say —
   expect(text.indexOf("never attribute to the corpus") >= 0);
-  // — but it must not forbid the rest of the agent: "Use only the following
-  // context" once made a tool-carrying agent refuse a repair because the
-  // retrieval for "fix it" came back as license text.
   expect(text.indexOf("Use only") < 0);
   expect(text.indexOf("tools or skills") >= 0);
-  // And it opens with the words threads.ts recognises passage turns by.
   expect(text.indexOf("Passages retrieved from the knowledge base") == 0);
 });
 
@@ -127,10 +111,7 @@ test("the suite leaves nothing behind", () => {
   database.close();
 });
 
-// --- scopes ---------------------------------------------------------------------------
-
 test("a scope is normalised to one spelling", () => {
-  // Two spellings of the same folder is how a grant silently matches nothing.
   expect(normalScope("/specs/") == "/specs");
   expect(normalScope("specs") == "/specs");
   expect(normalScope("  /specs/plume//  ") == "/specs/plume");
@@ -142,13 +123,10 @@ test("a scope covers its own folder and everything under it", () => {
   expect(scopeCovers("/specs", "/specs"));
   expect(scopeCovers("/specs", "/specs/plume"));
   expect(scopeCovers("/specs", "/specs/plume/relations"));
-  // The root covers everything.
   expect(scopeCovers("/", "/anything/at/all"));
 });
 
 test("a scope does not cover a folder that merely starts the same way", () => {
-  // The whole point of scopes. A string prefix would hand /specifications to
-  // anyone granted /spec.
   expect(!scopeCovers("/spec", "/specs"));
   expect(!scopeCovers("/specs", "/specifications"));
   expect(!scopeCovers("/specs/plume", "/specs"));
@@ -171,10 +149,6 @@ test("the scope clause binds two parameters per scope", () => {
   expect(args[3] == "/policies/%");
 });
 
-// A grant is compared twice: in SQL, to pick documents, and in memory, to draw
-// the folder tree. The two have to give the same answer, and LIKE has two
-// wildcards that a folder name is entitled to contain.
-
 test("a scope holding an underscore grants that folder and no lookalike", () => {
   fresh();
   execute(database, "CREATE TABLE IF NOT EXISTS scope_probe (scope text)");
@@ -185,13 +159,9 @@ test("a scope holding an underscore grants that folder and no lookalike", () => 
   let granted: string[] = ["/team_docs"];
   let sql = "SELECT scope FROM scope_probe WHERE " + scopeClause(database, granted, 1) + " ORDER BY scope";
   database.query(sql, scopeArgs(granted));
-  // "_" is LIKE's single-character wildcard, so an unescaped pattern hands
-  // /team-docs to whoever was granted /team_docs.
   expect(database.rows() == 1);
   expect(database.value(0, 0) == "/team_docs/handbook");
 
-  // And the tree says the same thing. Two answers to "who may read this" is
-  // worse than either answer on its own.
   expect(scopeCovers("/team_docs", "/team_docs/handbook"));
   expect(!scopeCovers("/team_docs", "/team-docs/handbook"));
 });
@@ -235,18 +205,14 @@ test("no scopes produces no clause, and the root binds a wildcard", () => {
   expect(scopeArgs(root)[1] == "/%");
 });
 
-// --- chunking -------------------------------------------------------------------------
-
 test("a document is split on paragraph boundaries", () => {
   let body = "First paragraph.\n\nSecond paragraph.\n\nThird.";
   let chunks = splitIntoChunks(body, 30);
   expect(chunks.length >= 2);
-  // Nothing is cut mid-sentence when a boundary was available.
   expect(chunks[0] == "First paragraph.");
 });
 
 test("short paragraphs are packed together rather than stored one by one", () => {
-  // A chunk per sentence retrieves fragments with no context.
   let body = "One.\n\nTwo.\n\nThree.";
   let chunks = splitIntoChunks(body, 1000);
   expect(chunks.length == 1);
@@ -255,7 +221,6 @@ test("short paragraphs are packed together rather than stored one by one", () =>
 });
 
 test("a paragraph longer than the cap is split rather than refused", () => {
-  // Refusing would mean a document with one long section cannot be stored.
   let long = "x".repeat(2500);
   let chunks = splitIntoChunks(long, 1000);
   expect(chunks.length == 3);
@@ -268,8 +233,6 @@ test("blank paragraphs are not chunks", () => {
 });
 
 test("no scopes granted reads nothing, rather than everything", () => {
-  // The dangerous default. Treating an empty grant as a wildcard would make
-  // revoking an agent's access the most destructive edit in the system.
   fresh();
   let m = embeddingModel(database, "e1");
   let none: string[] = [];

@@ -7,9 +7,6 @@ import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom
 import { jsonText } from "../../scan.ts";
 import { McpServerRow, SkillRow, mcpServersMapping, pluginsMapping, skillsMapping } from "../../schema.ts";
 
-// The /plugins routes.
-
-// A read manifest, as the console reads it back.
 function manifestJson(m: Manifest, clash: string): string {
   let out = "{\"name\":" + JSON.stringify(m.pluginName)
     + ",\"description\":" + JSON.stringify(m.description)
@@ -36,13 +33,6 @@ function manifestJson(m: Manifest, clash: string): string {
   return out + "]}";
 }
 
-// Bundles, installed from a manifest somebody else publishes.
-//
-// Four routes and no editing: a plugin is not a form. Its skills and its
-// connectors are ordinary rows the moment they land, and they are edited —
-// or refused, in the case of a skill a repository owns — through the routes
-// that already own those tables. What is here is the acquisition: what is
-// installed, install one, look before you install, take it back out.
 @controller("/plugins")
 export class PluginApi {
   db: Db;
@@ -55,9 +45,6 @@ export class PluginApi {
     return ok(listOrdered(this.db, pluginsMapping(), "", [], keys));
   }
 
-  // What a plugin brought, by id, so the console can say "3 skills, 1
-  // connector" without joining anything itself and can name them on the way
-  // to a delete that will remove them.
   @get("/:id/items")
   items(req: Request): Reply {
     if (!existsById(this.db, pluginsMapping(), param(req, "id"))) {
@@ -76,9 +63,6 @@ export class PluginApi {
         let held = findById(this.db, mcpServersMapping(), rows[i].itemId);
         if (held != "") { name = JSON.parse<McpServerRow>(held).serverName; }
       }
-      // A receipt whose row is gone reads as "" and is still listed: it is
-      // the honest answer to "what did this bring", and hiding it would make
-      // a plugin look smaller than the mess it left.
       out = out + "{\"kind\":" + JSON.stringify(rows[i].kind)
         + ",\"itemId\":" + JSON.stringify(rows[i].itemId)
         + ",\"name\":" + JSON.stringify(name) + "}";
@@ -87,12 +71,6 @@ export class PluginApi {
     return ok(out + "]");
   }
 
-  // Read a manifest and say what installing it would do — without doing it.
-  //
-  // The confirm step exists because a manifest is somebody else's code path
-  // into this deployment's skill table, and "install" with no preview is a
-  // button that does an unknown number of unknown things. It is also where a
-  // name collision surfaces while it is still cheap.
   @post("/inspect")
   inspect(req: Request): Reply {
     let url = jsonText(req.body, "sourceUrl");
@@ -112,7 +90,6 @@ export class PluginApi {
     if (got.problem != "") { return badRequest(got.problem); }
     let m = manifestFrom(got.body);
     if (m.problem != "") { return badRequest(m.problem); }
-    // Checked here and not only in the console: the console is one caller.
     let clash = installProblem(this.db, m);
     if (clash != "") { return badRequest(clash); }
     let made = install(this.db, m, manifestUrl(url), stamp());

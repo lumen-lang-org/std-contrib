@@ -1,23 +1,3 @@
-// Agents, made and changed by a sentence.
-//
-// "Make an agent that answers in French from my docs" is the multiplier: an
-// agent is this product's atom — the bot answers through one, every workflow
-// AGENT step runs as one — and until now the only door was the Settings
-// form. These verbs follow the task-tools shape: fixed names, one sentence
-// back, and SHOW BEFORE CHANGE for the one field where a careless write
-// destroys work — the prompt. A prompt row is never edited (api.ts's own
-// rule): changing one writes a NEW VERSION and repoints the agent, so a bad
-// instruction is a roll-back, not a loss.
-//
-// Agents are deployment rows, not owner rows — the same truth the Settings
-// page lives by. The gate here is the same as workflows': signed-in, not a
-// guest. What a signed-in person may see in Settings they may say here.
-//
-// Written as tomorrow's MCP surface, deliberately: every schema is complete,
-// every refusal is a sentence a stranger's agent can act on.
-//
-//   cd packages/agents && lumen test agent-tools.test.ts
-
 import { Db } from "../plume/driver.ts";
 import { DbOrder, asc, desc, executeWith, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
@@ -102,7 +82,6 @@ export type AgentToolCall = {
   nowMs: number,
 };
 
-/** One agent said by name or id. */
 function agentSaid(db: Db, said: string): AgentRow {
   let doc = findById(db, agentsMapping(), said);
   if (doc != "") { return JSON.parse<AgentRow>(doc); }
@@ -133,7 +112,6 @@ function emptyAgent(): AgentRow {
   return none;
 }
 
-/** A model config said by id or label, or empty. */
 function configSaid(db: Db, said: string): ModelConfigRow {
   let doc = findById(db, modelConfigRows(db), said);
   if (doc != "") { return JSON.parse<ModelConfigRow>(doc); }
@@ -155,8 +133,6 @@ function labelOrder(): DbOrder[] {
   return keys;
 }
 
-/** The deployment default config: the default agent's, or the first
- *  selectable one — the same "what would Settings offer first" answer. */
 function defaultConfig(db: Db): string {
   let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), "", [], noOrder()));
   let i: int = 0;
@@ -173,7 +149,6 @@ function defaultConfig(db: Db): string {
   return "";
 }
 
-/** The prompt an agent points at, or an empty row. */
 function promptOf(db: Db, promptId: string): PromptRow {
   let doc = findById(db, promptsMapping(), promptId);
   if (doc != "") { return JSON.parse<PromptRow>(doc); }
@@ -181,7 +156,6 @@ function promptOf(db: Db, promptId: string): PromptRow {
   return none;
 }
 
-/** A new prompt VERSION under a name — never an edit, api.ts's own rule. */
 function writePromptVersion(db: Db, promptName: string, body: string, nowMs: number): string {
   let newest: DbOrder[] = [desc("version")];
   let page = pageOrdered(db, promptsMapping(), "prompt_name = " + db.placeholder, [promptName], newest, 1, 0);
@@ -214,7 +188,6 @@ function promptAtVersion(db: Db, promptName: string, version: int): string {
 }
 
 function boolLit(db: Db, v: bool): string {
-  // The dialect split boolColumn exists for, at the literal.
   if (db.name == "postgres") { return v ? "TRUE" : "FALSE"; }
   return v ? "1" : "0";
 }
@@ -240,8 +213,6 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     && call.name != "delete_agent") {
     return not();
   }
-  // The workflows gate: what a signed-in person may do in Settings they may
-  // say here; a guest may do neither.
   if (!maySchedule(call.owner)) {
     return no("signing in is what makes the deployment theirs to configure — say so.");
   }
@@ -304,7 +275,6 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     return yes("Deleted \"" + agent.agentName + "\". Any workflow step or bot that still names it will fail with its name — worth checking if one might.");
   }
 
-  // change_agent.
   let description = jsonText(call.args, "description").trim();
   let promptText = jsonText(call.args, "prompt");
   let configWord = jsonText(call.args, "model_config").trim();

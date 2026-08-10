@@ -1,69 +1,21 @@
-// Scheduled tasks: a person describes something they want done later or
-// repeatedly, and it happens without them.
-//
-// A task is an owner, an agent, an instruction, a schedule and a switch. When
-// one fires the result is an ordinary conversation — which is the whole
-// delivery mechanism, and the reason this module is small. There is no results
-// store, no second rendering path and no new message type. A task that fired
-// is a conversation somebody did not have to type.
-//
-// Nothing here keeps time or runs anything: this module answers *when* and
-// *which*, and `scheduler.ts` — a separate process on a systemd timer — does
-// the firing. That split is not taste. A worker function may not throw
-// (`Worker.run` takes `() => T`), so the only way to run one inside the engine
-// is a `try` around the whole loop, which means the first provider timeout
-// ends every task on the deployment until someone restarts it. See indexer.ts,
-// which is a process for the same reason.
-//
-// The schedule maths is `packages/cron` — ccronexpr plus the system zone
-// database — so "every weekday at 08:00 in Europe/Paris" is a real answer that
-// moves with daylight saving rather than an offset that is wrong for half the
-// year.
-
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, asc, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { next as nextFiring, problem as cronProblem, civil, knownZone } from "../cron/cron.ts";
 
-// A task, as stored.
-//
-// Every stamp is text holding epoch milliseconds, which is what the rest of
-// this package does (`${Date.now()}`) and not an oversight: `int` is 32 bits
-// here and a millisecond epoch does not fit. Ordering and `<=` still behave,
-// because every value is thirteen digits wide until the year 2286 and
-// lexicographic order over equal-width digits is numeric order.
 export type TaskRow = {
   id: string,
-  // Who it belongs to. Every route filters on this; a scheduler that ignored
-  // it would run one tenant's instruction and file the answer in another's
-  // sidebar.
   owner: string,
-  // What runs it, resolved when the task is created rather than at fire time.
-  // Storing "the default" would mean changing the default silently rewrote
-  // every task anyone had ever made.
   agentId: string,
   modelChoiceId: string,
-  // What a person sees in the list, and what the model is actually asked.
   title: string,
   instruction: string,
-  // "once" — fires at `nextAt` and is done. "every" — fires on `cronExpr`.
   kind: string,
-  // Six fields, seconds first, empty for a "once" task. This is compiled from
-  // the words a person typed (see `compile`) and is never shown to them:
-  // nobody writes cron correctly on the first try, and a wrong expression is a
-  // silently wrong answer rather than an error.
   cronExpr: string,
-  // An IANA name — "Europe/Paris". Not an offset: an offset is wrong for half
-  // the year in every zone that observes daylight saving.
   tz: string,
-  // When it fires next. The only column the runner queries on.
   nextAt: string,
-  // "" when idle, otherwise when a runner claimed it. A claim older than
-  // RUN_TIMEOUT_MS belonged to a process that died and is taken back.
   runningSince: string,
   enabled: bool,
-  // Consecutive failures. At PAUSE_AFTER the task switches itself off with a
-  // reason, because a task that fails every hour forever is a bill.
   failures: int,
   pausedReason: string,
   lastRunAt: string,
@@ -75,14 +27,6 @@ export type TaskRow = {
   updatedAt: string,
 };
 
-/** A stamp as a number, or 0.
- *
- *  `parseFloat` and not `parseInt`, which is the trap this function exists to
- *  stop anyone falling into twice: `parseInt` answers an **i32**, and an epoch
- *  in milliseconds needs 41 bits. It does not overflow loudly — it fails to
- *  parse, answers null, and `?? 0` turns every stamp in the system into 1970.
- *  A double carries an integer exactly to 2^53, which is epoch milliseconds
- *  until the year 287396. */
 export function stampMs(said: string): number {
   if (said == "") { return 0.0; }
   return parseFloat(said) ?? 0.0;
@@ -117,37 +61,15 @@ export function tasksMapping(): DbRepository {
 
 export function tasksPlan(db: Db): Migration[] {
   return [
-    // 99, not 98: discover.ts owns 98.1 through 98.5, and a migration that
-    // sorts below one already applied is refused outright — which took the
-    // engine down for as long as it took to notice. Check
-    // `SELECT version FROM plume_schema_history ORDER BY installed_rank DESC`
-    // before choosing a number, not after.
     migration("99", "tasks that run on a schedule",
       createTableSql(db, tasksMapping())),
   ];
 }
 
-// What a task costs if it goes wrong, expressed as limits rather than as hope.
-// A scheduler is a loop with a provider's credit card attached, so each of
-// these is enforced server-side and none of them is advisory.
 export const MAX_PER_OWNER: int = 10;
 export const MIN_EVERY_MINUTES: int = 15;
 export const PAUSE_AFTER: int = 5;
-// How long a claim may stand before the runner holding it is presumed dead.
-// Longer than any sane agent turn, shorter than a person's patience.
 export const RUN_TIMEOUT_MS: int = 1800000;
-
-// ---------------------------------------------------------------------------
-// The grammar
-//
-// People say "every weekday at 8". Cron says "0 0 8 * * 1-5". This translates
-// the first into the second and nothing translates back, because cron is an
-// implementation detail that never reaches a person.
-//
-// The grammar is deliberately small — small enough to test exhaustively, large
-// enough for what people actually ask for. Widening it is a change here; it is
-// not a reason to accept raw cron from a form.
-// ---------------------------------------------------------------------------
 
 export type Compiled = {
   ok: bool,
@@ -165,8 +87,6 @@ function good(expr: string): Compiled {
   return c;
 }
 
-// "mon" -> 1 ... "sun" -> 0, matching ccronexpr's day-of-week numbering.
-// -1 for anything else.
 function dayNumber(said: string): int {
   if (said == "sunday" || said == "sun") { return 0; }
   if (said == "monday" || said == "mon") { return 1; }
@@ -178,9 +98,6 @@ function dayNumber(said: string): int {
   return -1;
 }
 
-// "08:30" -> minutes since midnight, or -1. Refuses "8:30" as well as "25:00":
-// a form that accepts both spellings has two ways to be wrong and one of them
-// is silent.
 function clockMinutes(said: string): int {
   if (said.length != 5 || said.charAt(2) != ":") { return -1; }
   let hh = parseInt(said.slice(0, 2), 10) ?? -1;
@@ -200,17 +117,6 @@ function digitsOnly(said: string): bool {
   return true;
 }
 
-/** The words a person typed, as a cron expression — or why they cannot be.
- *
- *  Accepted, and this list is the whole of it:
- *
- *    every day at HH:MM
- *    every weekday at HH:MM
- *    every <monday|tue|...> at HH:MM
- *    every N hours
- *    every N minutes            (N >= MIN_EVERY_MINUTES)
- *
- *  A "once" task has no expression: it holds an instant, not a recurrence. */
 export function compile(said: string): Compiled {
   let text = said.toLowerCase().trim();
   let words = text.split(" ");
@@ -224,7 +130,6 @@ export function compile(said: string): Compiled {
     return bad("a schedule starts with \"every\" — \"every weekday at 08:00\", \"every 30 minutes\"");
   }
 
-  // every N minutes | every N hours
   if (digitsOnly(clean[1])) {
     if (clean.length != 3) { return bad("say \"every " + clean[1] + " minutes\" or \"every " + clean[1] + " hours\""); }
     let n = parseInt(clean[1], 10) ?? 0;
@@ -243,7 +148,6 @@ export function compile(said: string): Compiled {
     return bad("\"" + unit + "\" is not minutes or hours");
   }
 
-  // every <day|weekday|weekend|monday...> at HH:MM
   if (clean.length != 4 || clean[2] != "at") {
     return bad("say \"every " + clean[1] + " at 08:00\"");
   }
@@ -261,14 +165,9 @@ export function compile(said: string): Compiled {
   return bad("\"" + dow + "\" is not a day, \"weekday\", \"weekend\" or \"day\"");
 }
 
-/** Whether these words describe a single instant rather than a recurrence. */
 export function isOnce(said: string): bool {
   return said.toLowerCase().trim().startsWith("on ");
 }
-
-// ---------------------------------------------------------------------------
-// When it fires
-// ---------------------------------------------------------------------------
 
 export type Scheduled = {
   ok: bool,
@@ -281,11 +180,6 @@ function noFire(why: string): Scheduled {
   return s;
 }
 
-/** The next firing after `afterMs`, as a stamp, or why there is none.
- *
- *  A "once" task answers its own instant while it is still ahead, and answers
- *  nothing once it is behind — a task with no next firing is a finished task,
- *  which is how `scheduler.ts` knows to close it. */
 export function nextFire(row: TaskRow, afterMs: number): Scheduled {
   if (row.kind == "once") {
     let at = stampMs(row.nextAt);
@@ -302,25 +196,6 @@ export function nextFire(row: TaskRow, afterMs: number): Scheduled {
   return out;
 }
 
-/** "on 2026-08-06 at 09:00" as an instant in `zone`, or why it is not one.
- *
- *  The other half of the grammar. `compile` answers recurrences and a one-off
- *  is not one — "tomorrow at nine" is a single firing and then the task is
- *  finished — so this is where a date lands. It exists because a person
- *  describing work to be done later means a date about as often as they mean a
- *  weekday, and the alternative was every caller computing epoch milliseconds
- *  and sending them, which is how a task ends up scheduled in 1970.
- *
- *  The date is resolved through the same cron machinery as everything else
- *  rather than by arithmetic here: a day-of-month plus a month is an
- *  expression, and its first firing in the zone is the instant — daylight
- *  saving, leap years and "there is no 31st of April" all decided by the
- *  library that already knows them.
- *
- *  A year in the past is the trap that makes the check at the end necessary: a
- *  cron expression carries no year, so "2019-08-06" would answer this coming
- *  August. The answer is compared back against what was asked and refused when
- *  they differ. */
 export function onceInstant(said: string, zone: string, nowMs: number): Scheduled {
   let text = said.toLowerCase().trim();
   let words = text.split(" ");
@@ -349,8 +224,6 @@ export function onceInstant(said: string, zone: string, nowMs: number): Schedule
   let expr = "0 " + `${when % 60}` + " " + `${when / 60}` + " " + `${day}` + " " + `${month}` + " *";
   let fire = nextFiring(zone == "" ? "UTC" : zone, expr, nowMs as i64);
   if (!fire.ok) { return noFire("there is no " + date + " at " + clean[3] + " to run at"); }
-  // The year, checked by reading the answer back rather than by trusting the
-  // expression that produced it.
   let reads = civil(zone == "" ? "UTC" : zone, fire.at);
   if (!reads.startsWith(date)) {
     return noFire(date + " is in the past — the soonest " + `${day}` + "/" + `${month}`
@@ -360,12 +233,6 @@ export function onceInstant(said: string, zone: string, nowMs: number): Schedule
   return at;
 }
 
-/** Everything wrong with a task somebody just described, or "".
- *
- *  Called where a person can still fix it — on create and on edit — rather
- *  than in the runner. A schedule that fails to parse at fire time is a task
- *  that silently never runs, and silence is the one failure a scheduler must
- *  not have. */
 export function refuse(row: TaskRow): string {
   if (row.instruction == "") { return "a task with no instruction has nothing to do"; }
   if (row.agentId == "") { return "a task needs an agent to run it"; }
@@ -383,9 +250,6 @@ export function refuse(row: TaskRow): string {
   return "";
 }
 
-/** How many enabled tasks this owner already has — the limit is enforced on
- *  the way in, because the cheapest place to stop a runaway is before it is a
- *  row. */
 export function enabledCount(db: Db, owner: string): int {
   let rows = JSON.parse<TaskRow[]>(listWhere(db, tasksMapping(),
     "owner = " + db.placeholder, [owner]));
@@ -398,39 +262,16 @@ export function enabledCount(db: Db, owner: string): int {
   return n;
 }
 
-/** This owner's tasks, soonest first. */
 export function tasksOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [asc("next_at")];
   return listOrdered(db, tasksMapping(), "owner = " + db.placeholder, [owner], keys);
 }
 
-// ---------------------------------------------------------------------------
-// Claiming
-//
-// The runner claims a row before it runs it, and the claim advances `next_at`
-// in the same statement. Both halves matter and neither is ceremony:
-//
-//   `FOR UPDATE SKIP LOCKED` is what stops two runners firing one task twice.
-//   There is one runner today; the day there are two, this is the difference
-//   between a config change and every subscriber getting two copies of their
-//   morning briefing. It is the same primitive `indexing.ts` uses.
-//
-//   advancing `next_at` inside the claim is what stops a run that crashes from
-//   re-firing on the next tick, forever.
-// ---------------------------------------------------------------------------
-
-/** One due task, claimed, or an empty row.
- *
- *  `nextAt` on the returned row is the time it was claimed FOR, not the next
- *  one — the caller needs the former to record what it ran, and the row in the
- *  database already holds the latter. */
 export function claimDue(db: Db, nowMs: number): TaskRow {
   let none = emptyTask();
   let now = `${nowMs}`;
   let stale = `${(nowMs as i64) - (RUN_TIMEOUT_MS as i64)}`;
 
-  // The claim, in one statement: pick the soonest task that is due, enabled,
-  // and either idle or abandoned by a dead runner.
   let sql = "UPDATE scheduled_tasks SET running_since = " + db.placeholder
     + " WHERE id = (SELECT id FROM scheduled_tasks"
     + " WHERE enabled = true AND next_at <> '' AND next_at <= " + placeholderAt(db, 2)
@@ -463,9 +304,6 @@ export function claimDue(db: Db, nowMs: number): TaskRow {
   return got;
 }
 
-/** A run that worked: the claim is released, the schedule moves on, and a
- *  one-off switches itself off rather than lingering as a task that can never
- *  run again. */
 export function markRan(db: Db, row: TaskRow, runId: string, nowMs: number): void {
   let ahead = nextFire(row, nowMs);
   let stillOn = row.kind == "every" && ahead.ok;
@@ -482,10 +320,6 @@ export function markRan(db: Db, row: TaskRow, runId: string, nowMs: number): voi
   db.query(sql, [now, runId, stillOn ? "true" : "false", stillOn ? ahead.at : "", now, row.id]);
 }
 
-/** A run that did not work. The failure is counted and, at PAUSE_AFTER, the
- *  task switches itself off with the reason on it — visible, undoable, and not
- *  spending a provider call an hour on something that has failed five times in
- *  a row. */
 export function markFailed(db: Db, row: TaskRow, why: string, nowMs: number): void {
   let failures = row.failures + 1;
   let done = failures >= PAUSE_AFTER;
@@ -505,12 +339,6 @@ export function markFailed(db: Db, row: TaskRow, why: string, nowMs: number): vo
     stillOn ? ahead.at : "", now, row.id]);
 }
 
-/** The same task with a different next firing.
- *
- *  Records are immutable, so "set one field" is "build the row again". It is
- *  written once here rather than at each call site, where the long literal is
- *  exactly the kind of thing that loses a field in a copy-paste and drops an
- *  owner or a failure count on the floor. */
 export function withNextAt(row: TaskRow, at: string): TaskRow {
   let moved: TaskRow = {
     id: row.id, owner: row.owner, agentId: row.agentId,
@@ -526,8 +354,6 @@ export function withNextAt(row: TaskRow, at: string): TaskRow {
   return moved;
 }
 
-/** A row with every field empty — what a claim that found nothing returns, and
- *  what a create starts from. `id == ""` is the test for "nothing". */
 export function emptyTask(): TaskRow {
   let none: TaskRow = {
     id: "", owner: "", agentId: "", modelChoiceId: "", title: "", instruction: "",

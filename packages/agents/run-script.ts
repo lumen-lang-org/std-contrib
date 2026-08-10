@@ -1,40 +1,3 @@
-// The half of run_script that loses data if it is wrong: moving artifact
-// bytes into a run directory and moving the run's changes back.
-//
-//   let snapshot = scriptMaterialise(db, threadId, ["/notes.md"], dir);
-//   ... the script runs, rewriting files under dir ...
-//   let done = scriptReconcile(db, { threadId: threadId, dir: dir,
-//                                    snapshot: snapshot, mayCreate: false,
-//                                    note: "run_script", turnSeq: seq, now: now });
-//
-// Materialise writes each named path's newest version into the directory at
-// its own relative path; the returned list is the snapshot — which version
-// each file started from — and reconcile is a comparison against exactly that.
-// A byte-identical file mints no version. A changed file appends one through
-// the same validation putArtifact applies, with an explicit INSERT at
-// snapshot+1 so a version that moved mid-run is refused rather than buried
-// (the artifacts-edit.ts idiom, minus the retry: an edit can re-match against
-// the winner's body, but a script's output was computed from the snapshot and
-// replaying it on a newer base is exactly the stale overwrite the
-// precondition exists to refuse). A file missing from the directory is
-// reported and nothing else — a run deletes nothing, ever. A new file needs
-// mayCreate, and lands through putArtifact so a script cannot reach a path a
-// write_artifact could not.
-//
-// The directory here is a plain directory, and nothing in the materialise/
-// reconcile half knows docker exists. The run half further down (RUN-SCRIPT.md,
-// build order steps 3 and 4) is what drives the docker CLI: it stages such a
-// directory on the host, copies it into the conversation's container, execs
-// the script under its caps, copies the run directory back and reconciles it
-// here — with the ceilings refusing, never queueing, in front of all of it.
-//
-// No failure path below throws. The fs calls that can throw are held inside
-// their own try in the function that makes them — a throw does not cross a
-// lambda, so nothing above the dispatch loop could catch one — and failure is
-// a returned `problem` sentence, in putArtifact's refusal() idiom.
-//
-//   cd packages/agents && lumen test run-script.test.ts
-
 import { Db } from "../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
@@ -45,9 +8,6 @@ import { userEnvByName } from "./user-environments.ts";
 import { normalScope } from "./knowledge.ts";
 import { AgentRow, ScriptImageRow, SkillRow, SkillFileRow, agentsMapping, scriptImagesMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 
-// One materialised path: which version the run directory holds, or why it
-// holds nothing. The list of these IS the snapshot reconcile compares against
-// — path and version together are the precondition for landing a change.
 export type ScriptFile = {
   path: string,
   version: int,
@@ -55,63 +15,36 @@ export type ScriptFile = {
   problem: string,
 };
 
-// What one reconcile is asked to do. A record and not six positional
-// arguments: three strings in a row, and `note` sitting where `dir` belongs
-// would file an audit comment as the directory to walk.
 export type ScriptReconcile = {
   threadId: string,
-  // The run directory the script wrote into. Walked, never escaped: every
-  // artifact path is relative to it, and a symbolic link inside it is refused
-  // unread — a script that plants one is asking the reconcile to read a file
-  // the run was never given.
   dir: string,
-  // What scriptMaterialise returned before the run. Entries that were not ok
-  // never reached the directory and are ignored here.
   snapshot: ScriptFile[],
-  // Whether files the snapshot does not name may become new artifacts.
   mayCreate: bool,
-  // The note every version this reconcile appends will carry. "" is fine.
   note: string,
   turnSeq: int,
   now: string,
 };
 
-// A path and the version this reconcile left it at.
 export type ScriptVersioned = {
   path: string,
   version: int,
 };
 
-// A path this reconcile would not land, and the sentence saying why.
 export type ScriptRefusal = {
   path: string,
   problem: string,
 };
 
-// The reconcile's whole answer. `ok` is about the walk itself — a missing or
-// unreadable run directory — never about any one path: a per-path failure is
-// a ScriptRefusal, and the other paths still land.
 export type ScriptReconciled = {
   ok: bool,
   changed: ScriptVersioned[],
   created: ScriptVersioned[],
   unchanged: ScriptVersioned[],
-  // Snapshot paths with no file left in the directory. Reported and nothing
-  // more: a run deletes nothing, so "the script removed it" is information
-  // for the model, not an instruction to the database.
   missing: string[],
   refused: ScriptRefusal[],
   problem: string,
 };
 
-// --- materialise ------------------------------------------------------------------
-
-// Write each named path's newest version into `dir` at its own relative path,
-// creating parent directories on the way. One entry per requested path, in
-// request order; a path that is not an artifact of this thread is refused by
-// name and writes nothing. Whether a refused path aborts the whole run is the
-// caller's decision (RUN-SCRIPT.md says it does), so the list reports every
-// path rather than stopping at the first.
 export function scriptMaterialise(db: Db, threadId: string, paths: string[], dir: string): ScriptFile[] {
   let out: ScriptFile[] = [];
   let i: int = 0;
@@ -132,12 +65,8 @@ function materialiseOne(db: Db, threadId: string, raw: string, dir: string): Scr
   if (threadId == "") { return fileRefusal(path, "an artifact belongs to a thread"); }
   let artifact = getArtifact(db, threadId, path);
   if (artifact.id == "") {
-    // read_artifact's sentence, so the two doors describe absence identically.
     return fileRefusal(path, "There is no artifact at " + path + " in this conversation.");
   }
-  // The pointer's version, and the refusal when the pointer is broken — the
-  // edit door's rule (artifacts-edit.ts): a pointer naming a version the log
-  // lacks is a state to surface, not to paper over with MAX(version).
   let current = getVersion(db, artifact.id, artifact.currentVersion);
   if (current.id == "") {
     return fileRefusal(path, "Artifact " + path + " points at version "
@@ -149,19 +78,12 @@ function materialiseOne(db: Db, threadId: string, raw: string, dir: string): Scr
   return out;
 }
 
-// Write one body under the run directory, parents first. "" on success. The
-// try is here, around the only fs writes materialise makes, because a throw
-// would not cross the lambda the dispatch loop will one day call this from.
 function placeFile(dir: string, path: string, body: string): string {
   let cut = path.lastIndexOf("/");
   let parent = dir + path.slice(0, cut);
   try {
     fs.mkdirSync(parent, true);
     if (binaryKind(kindOf(path))) {
-      // The stored body is base64; the script wants the real bytes. Decoded
-      // through sh only because base64 -d reads stdin — the paths here are
-      // the run dir (ours) and an artifact path (whose charset has no quote
-      // to escape), so the single-quoted words below cannot be broken out of.
       fs.writeFileSync(dir + path + ".b64", body);
       let dec = child_process.spawnSync("sh", ["-c",
         "base64 -d < '" + dir + path + ".b64' > '" + dir + path + "' && rm '" + dir + path + ".b64'"]);
@@ -175,11 +97,6 @@ function placeFile(dir: string, path: string, body: string): string {
   return "";
 }
 
-// --- the walk -------------------------------------------------------------------
-
-// What the walk over the run directory found: regular files and symbolic
-// links as artifact-shaped relative paths, or the sentence for a directory
-// that could not be read at all.
 type ScriptWalk = {
   files: string[],
   links: string[],
@@ -196,14 +113,6 @@ function walkFailed(): ScriptWalk {
   return out;
 }
 
-// Walk one directory level, names sorted so the reply's order never depends
-// on readdir's. Regular files and links accumulate as "/relative/paths";
-// directories recurse, their results folded into this level's. Accumulation
-// is by return value, not through a shared parameter — an array pushed
-// through a parameter stays the callee's copy here. A file the script
-// replaced with a directory is simply not in `files`, so it reports as
-// missing — and whatever is inside arrives as new files, each facing the
-// create gate on its own.
 function walkRun(base: string, rel: string): ScriptWalk {
   let files: string[] = [];
   let links: string[] = [];
@@ -238,15 +147,8 @@ function walkRun(base: string, rel: string): ScriptWalk {
   return out;
 }
 
-// One directory entry: "file", "link", "dir", "gone" for an entry that could
-// not be examined, or "" for anything else (a socket, a fifo — nothing a
-// reconcile could store anyway). Its own function so the try around the fs
-// calls sits next to them.
 function classifyEntry(base: string, path: string): string {
   try {
-    // readlink answers "" for anything that is not a symbolic link, so this
-    // is the link test — stat follows links, which is exactly what must not
-    // decide here.
     if (fs.readlinkSync(base + path) != "") { return "link"; }
     let st = fs.statSync(base + path);
     if (st.isDirectory) { return "dir"; }
@@ -257,13 +159,6 @@ function classifyEntry(base: string, path: string): string {
   return "";
 }
 
-// --- reconcile --------------------------------------------------------------------
-
-// What one path's reconcile amounted to. `kind` is one of "changed",
-// "created", "unchanged" or "refused"; version rides the first three,
-// problem the last. Returned rather than pushed into the caller's record,
-// because record fields are immutable here — accumulation happens in local
-// arrays at the top.
 type ScriptOutcome = {
   kind: string,
   path: string,
@@ -294,16 +189,11 @@ function reconcileProblem(why: string): ScriptReconciled {
   return out;
 }
 
-// Compare every file now in the run directory against the snapshot and land
-// the differences, path by path, each in its own transaction — one refused
-// path never holds another's version hostage.
 export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled {
   if (run.threadId == "") { return reconcileProblem("an artifact belongs to a thread"); }
   let badNote = labelProblem("note", run.note, ARTIFACT_NOTE_MAX);
   if (badNote != "") { return reconcileProblem(badNote); }
   if (!fs.existsSync(run.dir)) {
-    // The whole directory gone is not "every file deleted" — reporting it
-    // that way would tell the model the run removed work it never touched.
     return reconcileProblem("the run directory is gone; nothing was reconciled");
   }
 
@@ -318,9 +208,6 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
   let missing: string[] = [];
   let refused: ScriptRefusal[] = [];
 
-  // Every regular file, known paths against their snapshot version and new
-  // ones through the create gate. The walk sorted each level, so the reply
-  // lists paths in one stable order.
   let i: int = 0;
   while (i < files.length) {
     let path = files[i];
@@ -344,9 +231,6 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
     i = i + 1;
   }
 
-  // A symbolic link is refused unread, wherever it points: following one
-  // would store bytes from a file the run was never given, under a path the
-  // conversation trusts.
   let ln: int = 0;
   while (ln < links.length) {
     let linked: ScriptRefusal = {
@@ -357,9 +241,6 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
     ln = ln + 1;
   }
 
-  // Snapshot paths with nothing left in the directory. Reported, never acted
-  // on: deletion does not propagate, by design. The listedIn(missing, ...)
-  // check keeps a duplicated snapshot entry from reporting twice.
   let m: int = 0;
   while (m < run.snapshot.length) {
     let snap = run.snapshot[m];
@@ -377,9 +258,6 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
   return out;
 }
 
-// The snapshot entry for a path, or -1. Only ok entries count: a path that
-// was refused at materialise never reached the directory, so a file there now
-// is the script's creation, not a change.
 function snapshotAt(snapshot: ScriptFile[], path: string): int {
   let i: int = 0;
   while (i < snapshot.length) {
@@ -398,14 +276,11 @@ function listedIn(list: string[], path: string): bool {
   return false;
 }
 
-// --- reading the run directory back -----------------------------------------------
-
 type ScriptRead = {
   ok: bool,
   body: string,
 };
 
-// A file's size without reading it, or -1. The try sits here, beside the call.
 function sizeOf(path: string): int {
   try {
     let st = fs.statSync(path);
@@ -415,13 +290,6 @@ function sizeOf(path: string): int {
   }
 }
 
-// A file's bytes, or ok: false — never a throw, for the lambda rule above.
-//
-// An image is the exception to "read it as a string": a PNG is not UTF-8 and
-// a Lumen string is, so raster files are carried as base64 from the moment
-// they leave the run directory. The encoding is the system base64 binary via
-// spawnSync — an argv vector, no shell — because the runtime has no byte
-// array to hold the raw form in.
 function readBack(artifactPath: string, path: string): ScriptRead {
   if (binaryKind(kindOf(artifactPath))) {
     let enc = child_process.spawnSync("base64", ["-w0", path]);
@@ -442,13 +310,10 @@ function readBack(artifactPath: string, path: string): ScriptRead {
   }
 }
 
-// --- the version-preconditioned append --------------------------------------------
-
 type ScriptAppend = {
   threadId: string,
   path: string,
   body: string,
-  // The version the run directory's copy came from — the precondition.
   baseVersion: int,
   note: string,
   turnSeq: int,
@@ -466,24 +331,13 @@ function appendRefusal(why: string): ScriptAppended {
   return out;
 }
 
-// Both versions in one sentence, because the model's next move needs both:
-// what it computed from, and what stands now.
 function movedRefusal(path: string, base: int, newest: int): ScriptAppended {
   return appendRefusal("the newest version of " + path + " moved from " + `${base}`
     + " to " + `${newest}` + " while the script ran; its change was not saved — "
     + "read the current version and apply the change again");
 }
 
-// Append `body` at exactly baseVersion + 1, or refuse. The editAttempt idiom
-// (artifacts-edit.ts) without the retry: the INSERT lands at base+1 and the
-// unique index on (artifact_id, version) from migration 53 is the
-// compare-and-swap, so a concurrent append makes the INSERT fail — and here
-// that is a refusal naming both versions, never a retry on the newer base,
-// because this body was computed from the snapshot and knows nothing about
-// what the winner wrote.
 function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
-  // putArtifact's byte checks, in putArtifact's words, so the model learns
-  // the same rule whichever door refused it.
   let bytes = utf8Length(append.body);
   if (bytes > ARTIFACT_MAX) {
     return appendRefusal("an artifact is at most " + `${ARTIFACT_MAX}` + " bytes; this one is " + `${bytes}`);
@@ -495,13 +349,9 @@ function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
   let artifact = getArtifact(db, append.threadId, append.path);
   if (artifact.id == "") {
     rollbackTransaction(db);
-    // Deleted while the script ran. Recreating it would resurrect what
-    // someone deliberately removed, so the change stays unlanded.
     return appendRefusal("There is no artifact at " + append.path + " in this conversation.");
   }
 
-  // The log's MAX, not the pointer: the pointer is a cache and this check is
-  // the precondition, so it reads the same truth the unique index defends.
   let past = nextVersion(db, artifact.id);
   if (past < 2) {
     rollbackTransaction(db);
@@ -523,8 +373,6 @@ function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
     return appendRefusal("a thread's artifacts hold at most " + `${THREAD_BYTES_MAX}` + " bytes across all versions; this write would exceed that");
   }
 
-  // Explicit INSERT at exactly base+1, never `persist`: persist upserts, and
-  // an upsert on the append-only log is a silent overwrite (artifacts.ts:529).
   let version = append.baseVersion + 1;
   let wrote = executeWith(db,
     "INSERT INTO artifact_versions (id, artifact_id, version, body, bytes, origin, turn_seq, note, created_at) VALUES ("
@@ -532,21 +380,14 @@ function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
     + placeholderAt(db, 4) + ", " + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ", "
     + placeholderAt(db, 7) + ", " + placeholderAt(db, 8) + ", " + placeholderAt(db, 9) + ")",
     [artifact.id + ":" + `${version}`, artifact.id, `${version}`, append.body, `${bytes}`,
-     // Fixed, not read from anywhere: a script's output is the model writing.
      "generated", `${append.turnSeq}`, append.note, append.now]);
   if (!wrote.ok) {
     rollbackTransaction(db);
-    // Someone landed base+1 between the check above and this INSERT. The
-    // refusal re-reads what stands now so the sentence names both versions.
     let raced = nextVersion(db, artifact.id);
     let standing = raced < 2 ? append.baseVersion + 1 : raced - 1;
     return movedRefusal(append.path, append.baseVersion, standing);
   }
 
-  // A column-scoped UPDATE of the pointer, never a full-row persist — a
-  // full-row persist is how the rotate bug once rewound a pointer and
-  // orphaned a version (api.ts:1351). Title, kind, mime, slot and
-  // previewToken are untouched: a reconcile has no opinion about metadata.
   let moved = executeWith(db,
     "UPDATE artifacts SET current_version = " + placeholderAt(db, 1)
     + ", updated_at = " + placeholderAt(db, 2)
@@ -566,13 +407,7 @@ function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
   return out;
 }
 
-// --- landing one path -------------------------------------------------------------
-
-// A snapshot path: identical bytes mint nothing, changed bytes append at
-// exactly snapshot+1.
 function reconcileKnown(db: Db, run: ScriptReconcile, snap: ScriptFile): ScriptOutcome {
-  // Size before body: a script can grow a file without bound, and the cap
-  // should refuse it without reading half a gigabyte into a string first.
   let size = sizeOf(run.dir + snap.path);
   if (size > ARTIFACT_MAX) {
     return outcomeRefused(snap.path,
@@ -588,9 +423,6 @@ function reconcileKnown(db: Db, run: ScriptReconcile, snap: ScriptFile): ScriptO
     return outcomeRefused(snap.path, "the version history of " + snap.path + " could not be read");
   }
   if (read.body == base.body) {
-    // Byte-identical with what the run started from: nothing happened to this
-    // file, so nothing is written — even when the artifact moved on
-    // underneath, because there is no change to conflict with.
     return outcomeLanded("unchanged", snap.path, snap.version);
   }
 
@@ -604,10 +436,6 @@ function reconcileKnown(db: Db, run: ScriptReconcile, snap: ScriptFile): ScriptO
   return outcomeLanded("changed", snap.path, landed.version);
 }
 
-// A path the snapshot does not name. Through putArtifact with mustCreate, so
-// a script faces every rule write_artifact does — and cannot append to an
-// artifact the run never materialised, because there is no snapshot version
-// to precondition that append on.
 function reconcileNew(db: Db, run: ScriptReconcile, path: string): ScriptOutcome {
   let existing = getArtifact(db, run.threadId, path);
   if (existing.id != "") {
@@ -638,58 +466,10 @@ function reconcileNew(db: Db, run: ScriptReconcile, path: string): ScriptOutcome
   return outcomeLanded("created", path, put.version);
 }
 
-// --- the run itself ---------------------------------------------------------------
-//
-// scriptRun is materialise -> run -> reconcile with a container in the middle.
-// The container is the conversation's environment (environments.ts), reached
-// through the same envDockerBin seam, so one fake binary stands in for the
-// daemon across both modules.
-//
-// The run directory travels by `docker cp` of a staged host directory, not by
-// a bind mount: a mount is a creation-time property of a container, and the
-// container here is created once per conversation and lives across runs — a
-// fresh per-run mount would mean a fresh per-run container, which is exactly
-// what the environment model rejects. cp also keeps host paths out of the
-// container's view entirely.
-//
-// The wall clock is coreutils `timeout` inside the exec — the spec's "exec
-// timeout" option. Killing the docker *client* from the host would leave the
-// script running in the container, and `docker kill` would take the whole
-// environment down with it (the keep-alive `sleep infinity` is pid 1). The
-// default image is Debian-based, so `timeout` is present.
-
-// What every environment is built from. Python and sh out of the box; a node
-// script in this image stops with "no node runtime", which is the failure
-// table's answer until per-language images arrive with network environments.
-// The runtime image: python AND node with the system libraries the common
-// packages need at run time (cairo, pango, pixbuf), built from the Dockerfile
-// beside RUN-SCRIPT.md. python:3.12-slim alone was a trap a real model walked
-// straight into — it offered node in the tool description and had no node,
-// and every cairo-backed package imported fine and died at load.
-// AGENTS_SCRIPT_IMAGE overrides for a deployment that builds its own.
 export function scriptImage(): string {
   return process.env("AGENTS_SCRIPT_IMAGE") ?? "agents-runtime:1";
 }
 
-// The image THIS agent's environments are built from: its curated choice, or
-// the deployment default when it has none.
-//
-// Resolved from the agent's row rather than taken from the call, and never
-// from the model: a run_script that could name its own image would let a
-// sentence in a retrieved document make this server pull an arbitrary image
-// off the internet and run it. The operator curates script_images; an agent
-// points at one; a conversation inherits whatever its agent had when its
-// container was created.
-//
-// A disabled or missing row falls back to the default rather than refusing —
-// an operator retiring an image should not break every conversation that
-// pointed at it, and the fallback is a working image by definition.
-// A named environment picks its image by name: "office" runs in the curated
-// row whose label lowercases to "office". The list stays the operator's —
-// a name with no enabled row refuses rather than falling back, because the
-// fallback would be a skill silently running without the libraries its
-// briefing promised. "main" keeps the agent's own image, which is the whole
-// pre-environment behaviour unchanged.
 export function foldName(n: string): string {
   return n.toLowerCase().replaceAll("-", "").replaceAll("_", "").replaceAll(" ", "").replaceAll("+", "");
 }
@@ -699,30 +479,14 @@ export function scriptImageForEnv(db: Db, agentId: string, envName: string): str
   let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
   let i: int = 0;
   while (i < rows.length) {
-    // Separator-insensitive, the same fold use_skill applies to a skill name
-    // and for the same reason: "python + node" is a label a person wrote and
-    // "python+node" is what a model types back. Defined here rather than
-    // imported from tools.ts, which already imports THIS file — a cycle the
-    // compiler refuses, and a four-line helper is cheaper than breaking it.
     if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") { return rows[i].image; }
     i = i + 1;
   }
   return "";
 }
 
-// The deployment default has no row in script_images, and a key has to hang
-// off something. This is that something: keys stored against it are the ones
-// a person's scripts get when nobody chose an image at all.
 export const DEFAULT_IMAGE_ID: string = "default";
 
-// The catalog ROW behind an environment, which is what an environment key is
-// scoped to.
-//
-// scriptImageForEnv answers with a reference ("agents-runtime:1") because a
-// reference is what docker is handed. A key belongs to the row a person picked
-// in settings, not to the string that row currently resolves to: retagging an
-// image must not silently move somebody's keys somewhere else, and two rows
-// are allowed to name one reference.
 export function scriptImageIdFor(db: Db, agentId: string): string {
   if (agentId == "") { return DEFAULT_IMAGE_ID; }
   let held = findById(db, agentsMapping(), agentId);
@@ -732,15 +496,10 @@ export function scriptImageIdFor(db: Db, agentId: string): string {
   let row = findById(db, scriptImagesMapping(), chosen);
   if (row == "") { return DEFAULT_IMAGE_ID; }
   let image: ScriptImageRow = JSON.parse<ScriptImageRow>(row);
-  // A disabled row falls back to the default image, so its keys fall back
-  // with it — the alternative is a script running in one environment holding
-  // the keys stored for another.
   if (!image.enabled || image.image == "") { return DEFAULT_IMAGE_ID; }
   return image.id;
 }
 
-// "" when the name matches no enabled row — the same answer scriptImageForEnv
-// gives, and the caller refuses the run on it before any key is read.
 export function scriptImageIdForEnv(db: Db, agentId: string, envName: string): string {
   if (envName == "" || envName == "main") { return scriptImageIdFor(db, agentId); }
   let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
@@ -765,54 +524,19 @@ export function scriptImageFor(db: Db, agentId: string): string {
   return image.image;
 }
 
-// How many scripts the whole deployment may run at once. Well below the HTTP
-// pool size on purpose: a script holds its handler thread for the entire run,
-// and the API must keep answering — including the steps poll that draws the
-// card showing the script run.
 export const SCRIPT_MAX_RUNNING: int = 2;
 
-// The wall clock, and how much output each stream may bring back. Bytes of
-// UTF-8, like every cap in this package.
 export const SCRIPT_WALL_SECONDS: int = 60;
 export const SCRIPT_OUTPUT_MAX: int = 65536;
 
-// The unprivileged user a script runs as. Numeric, not a name, so it holds in
-// any image whether or not /etc/passwd has a row for it.
-// Scripts run as root INSIDE the container — an isolated, per-conversation,
-// unprivileged container is the boundary, not the uid — because a real model
-// reaches for apt-get within its first few steps and "Permission denied" as
-// nobody turned a solvable problem into a burned step budget. The host is
-// protected by the container, not by the uid inside it.
 const SCRIPT_UID: string = "0:0";
 
-// Seconds between timeout's TERM and its KILL, for a script that ignores TERM.
 const SCRIPT_KILL_GRACE: string = "5";
 
-// Where a run's artifacts are, inside the container. One known path, named in
-// the tool's own description, and the script's working directory besides.
-//
-// It used to be /tmp/lumen-run-<id>, unguessable by construction, which was
-// fine while the only thing that had to find it was this package. It is not
-// fine for the model: an agent handed an uploaded docflow spent every step it
-// had guessing where the file was — the artifact path, /tmp, /workspace, /app,
-// a made-up /artifacts/1/1 — and one small model, unable to find the file it
-// was asked to repair, wrote a plausible docflow of its own instead and
-// validated that. A path a model can be told once and rely on is worth more
-// than a path no collision can reach.
-//
-// Fixed is safe here because RUN-SCRIPT.md already forbids the collision: one
-// script at a time per environment, and no two conversations share a
-// container. The directory is still made fresh for every run — the guarantee
-// that matters is that it holds this run's artifacts and nothing stale, not
-// that its name is unique.
 export const SCRIPT_RUN_DIR: string = "/artifacts";
 
-// The note every version a run appends carries.
 const SCRIPT_NOTE: string = "run_script";
 
-// Test seams for the two per-run caps, in the envDockerOverride idiom: a test
-// cannot set an environment variable in-process and cannot wait a minute for
-// a real wall clock. Zero means "the constant".
 let scriptWallChosen: int = 0;
 export function scriptWallOverride(seconds: int): void { scriptWallChosen = seconds; }
 function scriptWallSeconds(): int {
@@ -825,12 +549,6 @@ function scriptOutputMax(): int {
   return scriptOutputChosen > 0 ? scriptOutputChosen : SCRIPT_OUTPUT_MAX;
 }
 
-// --- the docker probe -------------------------------------------------------------
-
-// Whether docker is present and its daemon answers, asked once per process
-// and remembered. This is the gate on offering the tool at all: absent or
-// broken means run_script never appears in a tool list, because a model
-// cannot call a tool it was never told about (RUN-SCRIPT.md's last rule).
 let scriptProbed: int = -1;
 
 export function scriptProbeReset(): void { scriptProbed = -1; }
@@ -843,9 +561,6 @@ export function scriptDockerWorks(): bool {
   return scriptProbed == 1;
 }
 
-// The same one-door rule as envDocker: an argument vector through the same
-// seam, never a shell string, so nothing a model writes can be quoted into a
-// command — and a missing binary is status -1, never a throw.
 function scriptDocker(args: string[]): EnvDockerReply {
   let res = child_process.spawnSync(envDockerBin(), args);
   let reply: EnvDockerReply = { status: res.status, stdout: res.stdout, stderr: res.stderr };
@@ -867,8 +582,6 @@ function scriptFirstLine(text: string): string {
   return text.slice(0, end).trim();
 }
 
-// A byte-capped prefix that never ends mid-character: the cut walks back off
-// any UTF-8 continuation byte, the same care argsPreview takes.
 function scriptCut(text: string, cap: int): string {
   if (text.length <= cap) { return text; }
   let cut = cap;
@@ -879,20 +592,6 @@ function scriptCut(text: string, cap: int): string {
   }
   return text.slice(0, cut);
 }
-
-// --- the ceilings -----------------------------------------------------------------
-//
-// Module state, and deliberately a string rather than an array: a string
-// reassigned whole is the one kind of module-level mutation this codebase has
-// proven across calls (envChosenDocker). One line per running script,
-// "container since", newline-terminated; container names are docker's
-// character set, so the space is a safe delimiter.
-//
-// Both ceilings refuse and never queue: a queue built from blocked handler
-// threads is the same exhaustion with a longer name (RUN-SCRIPT.md). The
-// per-environment lock is per *container name* — two conversations never
-// share one, so the cross-thread race this guards is structural already; what
-// it stops is one conversation's second script racing its first.
 
 let scriptHeldNow: string = "";
 
@@ -912,8 +611,6 @@ export function scriptRunningCount(): int {
   return scriptHeldLines().length;
 }
 
-// Claim a slot for one run in `container`, or say why not. "" means claimed,
-// and the caller owes a scriptRelease on every path out.
 export function scriptAcquire(container: string, envName: string, now: string): string {
   let held = scriptHeldLines();
   if (held.length >= SCRIPT_MAX_RUNNING) {
@@ -948,38 +645,18 @@ export function scriptRelease(container: string): void {
   scriptHeldNow = out;
 }
 
-// --- one run ----------------------------------------------------------------------
-
-// What one run is asked to do. A record for the same reason ScriptReconcile
-// is: language, source and environment are three strings in a row, and
-// swapped positionally nothing would refuse them.
 export type ScriptRun = {
   threadId: string,
-  // "python", "node" or "sh" — anything else is refused naming those three.
   language: string,
-  // The program, verbatim. Untrusted model output: it reaches the container
-  // as a file and an argv entry, never a shell string.
   source: string,
-  // The artifacts to materialise, explicit, never "all". A path that is not
-  // an artifact of this thread refuses the whole call before any container
-  // exists.
   paths: string[],
   mayCreate: bool,
-  // Which environment runs it; "" means "main".
   environment: string,
-  // Whose curated image to build the container from. The agent's id, not an
-  // image reference: the choice belongs to configuration, never to the call.
   agentId: string,
   turnSeq: int,
   now: string,
 };
 
-// The whole answer. stdout and stderr come back always — especially on
-// failure, they are how the model learns what its program did. `stopped`
-// names what ended a run early ("" when it completed); `problem` is the
-// sentence for a call that was refused or broke before or after the script
-// itself. `recreated` says the environment came back cold: its workspace
-// cache is gone, and the reply must say so (RUN-SCRIPT.md failure table).
 export type ScriptRan = {
   ok: bool,
   stdout: string,
@@ -994,7 +671,6 @@ export type ScriptRan = {
   problem: string,
 };
 
-// Every list empty; the scalar outcomes as given.
 function scriptRanFlat(ok: bool, stdout: string, stderr: string, stopped: string, recreated: bool, problem: string): ScriptRan {
   let changed: ScriptVersioned[] = [];
   let created: ScriptVersioned[] = [];
@@ -1013,17 +689,12 @@ function scriptRefused(why: string): ScriptRan {
   return scriptRanFlat(false, "", "", "", false, why);
 }
 
-// A refusal after the slot was claimed but before the container was touched.
 function scriptBail(container: string, stage: string, why: string): ScriptRan {
   scriptHostDrop(stage);
   scriptRelease(container);
   return scriptRefused(why);
 }
 
-// The way out once the container holds run debris: best-effort removal of the
-// run directory and the script (failure ignored — the next run uses fresh
-// names, and the reaper for a hoarding workspace is the disk quota), the host
-// stage dropped, the slot released.
 function scriptDone(container: string, stage: string, runDir: string, jobAt: string, out: ScriptRan): ScriptRan {
   scriptDocker(["exec", container, "rm", "-rf", runDir, jobAt]);
   scriptHostDrop(stage);
@@ -1031,22 +702,8 @@ function scriptDone(container: string, stage: string, runDir: string, jobAt: str
   return out;
 }
 
-// Distinguishes runs within one millisecond stamp; reassigned module state,
-// like the ceiling ledger.
 let scriptRunSeq: int = 0;
 
-// Materialise the named artifacts, run the script in the conversation's
-// environment, reconcile what came back. Every refusal is a sentence, never a
-// throw, and the order below is a promise: everything that can refuse a call
-// outright — arguments, ceilings, the artifacts themselves — refuses before
-// any container is created, so a refused call never mints an environment.
-// An environment name is part of a container's name, so it is refused rather
-// than sanitised: two different names that sanitise alike would silently share
-// a container, which is the cross-environment contamination the model was
-// promising to avoid by naming one. The charset is the container charset, and
-// the cap is bytes of UTF-8 and says so — a name written outside ASCII counts
-// more than one per letter, and a refusal that said "characters" would hand
-// the model arithmetic it cannot reproduce.
 export const SCRIPT_ENV_NAME_MAX: int = 40;
 
 export function scriptEnvNameProblem(name: string): string {
@@ -1078,17 +735,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   if (run.source == "") {
     return scriptRefused("there is no script to run: source is empty");
   }
-  // A weaker model sometimes fills `source` with the whole run_script(...) call
-  // instead of the script — the shell then chokes on the `(` with a cryptic
-  // "word unexpected". Caught here so the reply names the mistake the model can
-  // fix, rather than a dash parse error it cannot.
-  // A model-token slip with exactly one honest reading: <<'EOF followed by a
-  // newline is an unterminated quote in sh, never a working script, so
-  // closing it cannot break anything and not closing it fails the run with
-  // "Unterminated quoted string" — which one fine-tune emitted on every
-  // single heredoc while getting the whole rest of the script right. The
-  // matching closer line EOF needs no repair; only the opener drops its
-  // quote. Both quote styles, same reasoning.
   if (run.language == "sh") {
     run = { language: run.language, threadId: run.threadId, agentId: run.agentId,
       source: run.source.replaceAll("<<'EOF\n", "<<'EOF'\n").replaceAll("<<\"EOF\n", "<<\"EOF\"\n"),
@@ -1098,10 +744,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   if (run.source.trim().startsWith("run_script(")) {
     return scriptRefused("source is the run_script(...) call itself, not a script: pass only the command to run — e.g. source=\"python skill.py 'query'\", not source=\"run_script(...)\"");
   }
-  // An empty paths list is an install-only run: nothing materialised, nothing
-  // to reconcile against, and mayCreate still gates anything the script
-  // leaves behind. Refusing this cost a real model two steps of its budget
-  // retrying pip install with paths it did not have.
   let envName = run.environment == "" ? "main" : run.environment;
   let named = scriptEnvNameProblem(envName);
   if (named != "") { return scriptRefused(named); }
@@ -1116,8 +758,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   let staged = scriptHostDir(stage + "/files");
   if (staged != "") { return scriptBail(container, stage, staged); }
 
-  // Materialise before the environment exists: it needs no docker, and every
-  // artifact refusal must land while there is still nothing to pay for.
   let snapshot = scriptMaterialise(db, run.threadId, run.paths, stage + "/files");
   let sn: int = 0;
   while (sn < snapshot.length) {
@@ -1131,9 +771,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   let job = scriptHostFile(stage + "/job." + ext, run.source);
   if (job != "") { return scriptBail(container, stage, job); }
 
-  // Whether the environment's row existed before this call, because envEnsure
-  // reports `created` for a first use and for a recreation alike — and only
-  // one of those lost a workspace the conversation had built.
   let before = envList(db, run.threadId);
   let known = false;
   let b: int = 0;
@@ -1141,14 +778,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     if (before[b].name == envName) { known = true; }
     b = b + 1;
   }
-  // With the network: the whole point of a persistent container is what a
-  // script installs into it, and an installer with nowhere to fetch from is
-  // decoration. Creation-time only — the row records it, a script cannot
-  // flip it.
-  // The conversation owner's own environments answer first: a person who made
-  // one named "scraper" means THEIRS, whatever the deployment also offers.
-  // The model still only ever said a name — whose image that name resolves to
-  // is decided here, from configuration, exactly as before.
   let ownEnvId = "";
   let image = "";
   if (envName != "main") {
@@ -1168,15 +797,8 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   if (!ensured.ok) { return scriptBail(container, stage, ensured.problem); }
   let recreated = known && ensured.created;
 
-  // The staged directory becomes the run directory inside the container, and
-  // the script lands beside it — never inside, or the reconcile's walk would
-  // meet it as a file the run "created".
   let runDir = SCRIPT_RUN_DIR;
   let jobAt = "/tmp/lumen-job-" + id + "." + ext;
-  // A run that crashed hard enough to skip its cleanup would otherwise leave
-  // its files here, and `docker cp` into an existing directory nests rather
-  // than replaces — /artifacts/files. Cleared first, so the directory a script
-  // meets holds this run's artifacts and nothing else.
   scriptDocker(["exec", container, "rm", "-rf", runDir]);
   let placed = scriptDocker(["cp", stage + "/files", container + ":" + runDir]);
   if (placed.status != 0) {
@@ -1189,12 +811,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
       scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("place the script", carried)));
   }
 
-  // The agent's skill files, at /skills/<skill-name>/<path> — the path each
-  // skill's body promises. Staged fresh on every run, the artifact staleness
-  // rule: an edit to a skill file is what the very next run executes, and a
-  // script that scribbled over /skills damaged one run, not the environment.
-  // Outside the run directory on purpose, so the reconcile's walk never meets
-  // a skill file as something the run "created".
   let skillSet = scriptSkillRows(db, run.agentId);
   if (skillSet.length > 0) {
     let stagedSkills = scriptHostDir(stage + "/skills");
@@ -1220,54 +836,21 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     }
   }
 
-  // docker cp leaves root ownership; the script runs unprivileged and must be
-  // able to write its own run directory.
   let owned = scriptDocker(["exec", container, "chown", "-R", SCRIPT_UID, runDir]);
   if (owned.status != 0) {
     return scriptDone(container, stage, runDir, jobAt,
       scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("prepare the run directory", owned)));
   }
 
-  // HOME is /workspace — writable, owned by the run user, and OUTSIDE the
-  // per-run directory, so `pip install` and `npm install -g` land somewhere
-  // that persists between runs. That is the point of the environment: the
-  // second script finds what the first one installed.
-  //
-  // `language` picks an interpreter and constrains nothing else: a python
-  // script may shell out, change directory, apt-get and curl, deliberately.
-  // The guard rails are the container's — capabilities dropped to the few
-  // apt and pip need, no-new-privileges so nothing inside can regain the
-  // rest, and the memory/cpu/pid caps on the container itself.
-  // The person's own keys for this environment, staged as the docker CLI's
-  // --env-file and read by the CLI on THIS host, so the values travel inside
-  // the daemon's API call.
-  //
-  // Never `-e NAME=value`: that spells a secret into the argv of a process on
-  // whichever machine runs the daemon, where `ps` is all it takes to read it —
-  // and since the daemon moved to its own VM, that argv is on a different
-  // machine from the one that decided to trust the key.
-  //
-  // Scoped to the CONVERSATION's owner, not to whoever's turn it is: an agent
-  // runs scripts on its own turns, and the keys that belong in them are the
-  // ones the person who owns the thread stored.
   let execArgs: string[] = ["exec", "--user", SCRIPT_UID, "--workdir", runDir];
   let owner = scriptThreadOwner(db, run.threadId);
-  // Keys follow the environment that actually answered: a person's own
-  // environment carries the keys stored against it, a curated one the keys
-  // stored against its row.
   let imageId = ownEnvId != "" ? ownEnvId : scriptImageIdForEnv(db, run.agentId, envName);
   if (owner != "" && imageId != "") {
     let body = envKeyFileBody(db, owner, imageId, masterKey());
     if (body != "") {
       let keysAt = stage + "/env";
       let staged = scriptHostSecretFile(keysAt, body);
-      // Refused rather than run without them: a script whose key is silently
-      // absent fails at somebody else's API with a 401, which reads as "my
-      // token is wrong" and sends a person to rotate a key that was fine.
       if (staged != "") { return scriptBail(container, stage, staged); }
-      // Before the platform's own -e, so that HOME and PATH win however the
-      // CLI resolves a collision. refuseEnvKey already refuses both names;
-      // this makes the order not matter.
       execArgs.push("--env-file"); execArgs.push(keysAt);
       touchEnvKeys(db, owner, imageId, run.now);
     }
@@ -1279,8 +862,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   execArgs.push(`${scriptWallSeconds()}`); execArgs.push(runtime); execArgs.push(jobAt);
   let ran = scriptDocker(execArgs);
 
-  // The output caps are enforced here on the host: what the model reads back
-  // is at most the prefix, whatever the script printed.
   let cap = scriptOutputMax();
   let sout = scriptCut(ran.stdout, cap);
   let serr = scriptCut(ran.stderr, cap);
@@ -1289,9 +870,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
       scriptRanFlat(false, sout, serr, scriptStopped(ran.status, runtime), recreated, ""));
   }
   if (sout.length != ran.stdout.length || serr.length != ran.stderr.length) {
-    // Past the cap nothing is written (RUN-SCRIPT.md failure table): the run
-    // is treated as failed with its prefix kept, so a script cannot buy an
-    // unreadable reply and a reconcile with the same print loop.
     return scriptDone(container, stage, runDir, jobAt,
       scriptRanFlat(false, sout, serr,
         "the output cap of " + `${cap}` + " bytes of UTF-8; the prefix was kept and nothing was saved",
@@ -1316,9 +894,6 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   return scriptDone(container, stage, runDir, jobAt, out);
 }
 
-// What a non-zero exit means, in the model's terms. 124 is timeout's own
-// verdict; 127 is "no such command", which in a fixed image means the
-// language asked for is not in it.
 function scriptStopped(status: int, runtime: string): string {
   if (status == 124) {
     return "the wall-clock limit of " + `${scriptWallSeconds()}` + " seconds";
@@ -1342,8 +917,6 @@ function scriptExt(language: string): string {
   return "sh";
 }
 
-// The digits of a stamp and nothing else, for paths built from a caller's
-// `now`: whatever arrives, what reaches a path is [0-9].
 function scriptDigits(text: string): string {
   let out = "";
   let i: int = 0;
@@ -1355,20 +928,8 @@ function scriptDigits(text: string): string {
   return out == "" ? "0" : out;
 }
 
-// The host-side fs, each try beside its calls for the lambda rule above.
-// The skill rows and files this run stages. Local readers rather than the
-// ones in tools.ts, which imports this file — the queries are two lines each,
-// and a cycle costs more than the repetition.
 function scriptSkillRows(db: Db, agentId: string): SkillRow[] {
-  // A run without an agent has no skills to stage — and the guard is what
-  // keeps a bare scriptRun off tables its caller never migrated.
   if (agentId == "") { let none: SkillRow[] = []; return none; }
-  // Attachment or the public tier — the same rule use_skill resolves by
-  // (tools.ts). Staging that only knew about attachments was how a public
-  // skill answered use_skill with a briefing that told the model to import
-  // /skills/<name>/edit_doc.py, and then the run met an empty directory:
-  // "No module named 'edit_doc'". A skill the model can load is a skill whose
-  // files must be there.
   let where = "id IN (SELECT skill_id FROM agent_skills WHERE agent_id = " + placeholderAt(db, 1) + ")"
     + " OR visibility = 'public'";
   let document = listWhere(db, skillsMapping(), where, [agentId]);
@@ -1400,13 +961,6 @@ function scriptHostFile(path: string, body: string): string {
   return "";
 }
 
-// The same, for a file that holds secrets: written, then narrowed to its owner
-// before anything else on this host can read it.
-//
-// Two calls and not one because writeFileSync creates with the process umask,
-// which is a deployment's setting and not this file's to assume. The window
-// between them is why the staging directory matters: it is created by this
-// process under /tmp and holds nothing else of interest.
 function scriptHostSecretFile(path: string, body: string): string {
   let wrote = scriptHostFile(path, body);
   if (wrote != "") { return "the environment keys could not be staged for the run"; }
@@ -1418,13 +972,6 @@ function scriptHostSecretFile(path: string, body: string): string {
   return "";
 }
 
-// The conversation's owner, read as one column of SQL rather than through
-// threads.ts.
-//
-// That module imports run.ts, which imports tools.ts, which imports THIS file
-// — the cycle the compiler refuses, and the same reason foldName is spelled
-// here rather than imported. One column of one row is cheaper than threading
-// an owner through three call sites and every test that builds one.
 function scriptThreadOwner(db: Db, threadId: string): string {
   if (!db.query("SELECT owner FROM threads WHERE id = " + placeholderAt(db, 1), [threadId])) {
     return "";

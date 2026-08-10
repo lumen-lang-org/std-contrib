@@ -1,32 +1,9 @@
-// Installing somebody else's bundle.
-//
-// A plugin is the third noun beside a skill and a connector, and the split is
-// about how a thing is ACQUIRED rather than what it does: you write a skill,
-// you address a connector, and a plugin you install from a manifest somebody
-// else publishes. Claude's directory draws the same three; ours had two of
-// them filed under one wrong name for a month.
-//
-// The install itself is deliberately unglamorous. It reads a JSON document,
-// writes ordinary rows into `skills` and `mcp_servers`, and records what it
-// wrote in `plugin_items`. Nothing downstream learns a new concept: use_skill
-// resolves the skill it created exactly as it resolves one typed into the
-// settings form, and the tool loop mounts the connector the same way. The
-// plugin row is a receipt, and the receipt is what makes an uninstall possible
-// — without it, removing a bundle means guessing which rows came from it.
-//
-// The manifest is read leniently, with scan.ts rather than `JSON.parse<T>`.
-// That is not laziness: JSON.parse refuses a document that carries a member
-// the record does not declare, so a publisher adding one field to their own
-// manifest would break every installer that had ever worked. A format other
-// people write has to tolerate members we do not know about.
-
 import { Db } from "../plume/driver.ts";
 import { persist, listWhere, deleteById, countWhere, placeholderAt } from "../plume/plume.ts";
 import { PluginRow, PluginItemRow, SkillRow, SkillFileRow, McpServerRow, pluginsMapping, pluginItemsMapping, skillsMapping, skillFilesMapping, mcpServersMapping } from "./schema.ts";
 import { jsonRaw, jsonText, jsonList } from "./scan.ts";
 import { scriptEnvNameProblem } from "./run-script.ts";
 
-// A file a manifest's skill ships.
 export type SeedFile = {
   path: string,
   body: string,
@@ -47,8 +24,6 @@ export type ConnectorSeed = {
   authHeader: string,
 };
 
-// A manifest, read. `problem` non-empty means nothing in the other fields is
-// worth looking at.
 export type Manifest = {
   problem: string,
   pluginName: string,
@@ -64,13 +39,6 @@ function failedManifest(why: string): Manifest {
   return bad;
 }
 
-// The document with a member's value cut out of it.
-//
-// jsonFind answers the FIRST occurrence of a key anywhere in the document,
-// nesting included — so a manifest whose top-level "description" comes after
-// its skills array would read a skill's description as the plugin's. Removing
-// the arrays before reading the scalars makes "first" mean "top level", which
-// is what every reader here assumes.
 function without(document: string, raw: string): string {
   if (raw == "") { return document; }
   let at = document.indexOf(raw);
@@ -81,9 +49,6 @@ function without(document: string, raw: string): string {
 export function manifestFrom(document: string): Manifest {
   if (document.trim() == "") { return failedManifest("that URL answered with nothing"); }
   if (!document.trim().startsWith("{")) {
-    // The usual way this fails is a GitHub *page* URL rather than a raw one:
-    // the answer is HTML, 200, and utterly unparseable. Saying so beats "not
-    // valid JSON", which sends people to look at their manifest.
     return failedManifest("that URL answered with something that is not a JSON manifest — a GitHub page URL answers HTML; use the raw one");
   }
   let skillsRaw = jsonRaw(document, "skills");
@@ -110,9 +75,6 @@ export function manifestFrom(document: string): Manifest {
     while (f < raws.length) {
       let file: SeedFile = { path: jsonText(raws[f], "path"), body: jsonText(raws[f], "body") };
       if (file.path.trim() == "") { return failedManifest("a skill file needs a \"path\""); }
-      // The same guard the skill-files route keeps, for the same reason: this
-      // path is joined into a container path, and a manifest is written by
-      // somebody who is not us.
       if (file.path.indexOf("/") >= 0 || file.path.indexOf("..") >= 0) {
         return failedManifest("a skill file is a plain name; \"" + file.path + "\" is a path");
       }
@@ -177,12 +139,6 @@ export function manifestFrom(document: string): Manifest {
   return read;
 }
 
-// The manifest at a URL.
-//
-// One redirect-free GET, because a manifest is a static file. A `github.com`
-// blob URL is rewritten to raw.githubusercontent rather than refused: it is
-// the URL a person has in their clipboard, and the alternative is teaching
-// everyone the raw form by way of an error message.
 export function manifestUrl(url: string): string {
   let at = url.trim();
   if (at.startsWith("https://github.com/") && at.indexOf("/blob/") > 0) {
@@ -218,12 +174,6 @@ export function fetchManifest(url: string): Fetched {
   return got;
 }
 
-// What an install would collide with, in words, or "".
-//
-// Checked before anything is written rather than repaired afterwards. A
-// half-installed plugin — three skills in, the fourth name taken — leaves rows
-// nobody asked for and a receipt that does not match them, and there is no
-// transaction here to lean on.
 export function installProblem(db: Db, m: Manifest): string {
   if (countWhere(db, pluginsMapping(), "plugin_name = " + placeholderAt(db, 1), [m.pluginName]) > 0) {
     return "\"" + m.pluginName + "\" is already installed — remove it first to install it again";
@@ -250,18 +200,6 @@ function receipt(db: Db, pluginId: string, kind: string, itemId: string): void {
   persist(db, pluginItemsMapping(), JSON.stringify(row));
 }
 
-// Write the bundle. `installProblem` has already answered "" for this db.
-//
-// Skills arrive PRIVATE and connectors arrive DISABLED, which is the same rule
-// the ready-made connector shelf keeps: installing something is interest, not
-// trust. A connector that needs a token would otherwise fail every call from
-// the moment it landed, and a public skill would join every user's briefing
-// because one operator tried a bundle out.
-//
-// source is 'repo' and sourceUrl is the manifest: a plugin's skill is edited
-// where the plugin is published, and the skills route already refuses the
-// write and points at "copy to local". That is not a new rule for plugins; it
-// is the rule for anything this deployment did not write, reused.
 export function install(db: Db, m: Manifest, sourceUrl: string, now: string): PluginRow {
   let plugin: PluginRow = {
     id: crypto.randomUUID(),
@@ -322,7 +260,6 @@ export function install(db: Db, m: Manifest, sourceUrl: string, now: string): Pl
   return plugin;
 }
 
-// What a plugin brought, as rows.
 export function itemsOf(db: Db, pluginId: string): PluginItemRow[] {
   let held = listWhere(db, pluginItemsMapping(), "plugin_id = " + placeholderAt(db, 1), [pluginId]);
   if (held == "" || held == "[]") {
@@ -332,13 +269,6 @@ export function itemsOf(db: Db, pluginId: string): PluginItemRow[] {
   return JSON.parse<PluginItemRow[]>(held);
 }
 
-// Take the bundle back out.
-//
-// Only what the receipts name. A skill somebody copied to local afterwards is
-// a different row with no receipt and survives on purpose — the copy exists
-// precisely because they wanted to keep it — and a connector they re-pointed
-// at their own endpoint goes, because it is still the row the plugin created
-// and leaving it would leave a server nobody can account for.
 export function uninstall(db: Db, pluginId: string): void {
   let items = itemsOf(db, pluginId);
   let i: int = 0;

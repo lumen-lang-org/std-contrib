@@ -1,9 +1,3 @@
-// Calling a model whose name came out of the database.
-//
-// The provider, the wire name and the knobs are all rows, so pointing an agent
-// at a different model — or a different provider — is an UPDATE. This file
-// names no model.
-
 import { ModelRow, ModelConfigRow } from "./schema.ts";
 import { JsonText, jsonFind, jsonRaw, jsonText, jsonList, jsonStringMember, jsonComplete } from "./scan.ts";
 import { vertexBearer } from "./vertex.ts";
@@ -13,27 +7,17 @@ export type Completion = {
   text: string,
   status: int,
   error: string,
-  // What the provider said this cost. Zero when it did not say — which is not
-  // the same as zero tokens, and `counted` is how a caller tells them apart.
   inputTokens: int,
   outputTokens: int,
   counted: bool,
 };
 
-// The token counts a reply reports.
-//
-// Read here because this is the only place that sees the provider's reply. A
-// collector can price tokens and chart them; it cannot invent them, and a model
-// whose tokenizer it does not know is charted at zero forever.
 export type Usage = {
   inputTokens: int,
   outputTokens: int,
   counted: bool,
 };
 
-// The counts out of a reply. Two spellings, because the providers disagree:
-// OpenAI and Mistral say prompt_tokens and completion_tokens, Anthropic says
-// input_tokens and output_tokens.
 export function usageFrom(provider: string, body: string): Usage {
   let none: Usage = { inputTokens: 0, outputTokens: 0, counted: false };
   let usage = jsonRaw(body, "usage");
@@ -55,20 +39,12 @@ export function usageFrom(provider: string, body: string): Usage {
   return out;
 }
 
-// Where a provider's embedding endpoint lives. Empty when this does not know
-// of one, which is not the same as the provider having none.
 export function embeddingEndpoint(provider: string): string {
   if (provider == "mistral") { return "https://api.mistral.ai/v1/embeddings"; }
   if (provider == "openai") { return "https://api.openai.com/v1/embeddings"; }
   return "";
 }
 
-// The address a model row actually calls. A base URL on the row wins: an
-// OpenAI-compatible gateway is the same wire format at a different host, so
-// it is an override rather than a provider of its own.
-//
-// The path is appended, because a gateway publishes a root — "/v1" — and not
-// the whole endpoint. A row that already names the full path keeps it.
 export function endpointFor(model: ModelRow, path: string): string {
   if (model.baseUrl == "") {
     if (path == "embeddings") { return embeddingEndpoint(model.provider); }
@@ -82,18 +58,11 @@ export function endpointFor(model: ModelRow, path: string): string {
 
 export type Embedding = {
   ok: bool,
-  // The vector in pgvector's own literal form, "[0.1,-0.2,...]", so it can be
-  // bound straight into a statement without a second conversion.
   vector: string,
   dimensions: int,
   error: string,
 };
 
-// The key a request actually carries. For every provider but one this is the
-// stored credential itself. Vertex is the exception: its stored credential is
-// a service-account JSON, and the wire wants an OAuth2 access token minted
-// from it — vertex.ts mints and caches those. Empty key answers empty, so the
-// callers' own no-key refusals keep firing first.
 export type WireKey = {
   ok: bool,
   key: string,
@@ -115,8 +84,6 @@ export function wireKey(provider: string, apiKey: string): WireKey {
 }
 
 
-// One embedding. The model is named by its row like any other, so which model
-// embeds is a column and changing it does not touch this file.
 export function embedText(model: ModelRow, text: string, apiKey: string): Embedding {
   let endpoint = endpointFor(model, "embeddings");
   if (endpoint == "") {
@@ -137,13 +104,6 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
     let unminted: Embedding = { ok: false, vector: "", dimensions: 0, error: carried.error };
     return unminted;
   }
-  // Vertex embeds through its native :predict shape, not the OpenAI-compatible
-  // one: the compat surface answers chat but 500s on /embeddings (verified
-  // against a live project, both with and without the dimensions member).
-  // The row's baseUrl names the :predict URL whole, and the reply is asked
-  // for the row's own width — Gemini defaults to 3072 and truncates on
-  // request (MRL), the vector column was sized by the row, and cosine `<=>`
-  // is scale-invariant so the un-normalised truncated vector ranks the same.
   if (model.provider == "vertex") {
     if (!model.baseUrl.endsWith(":predict")) {
       let misaimed: Embedding = { ok: false, vector: "", dimensions: 0,
@@ -179,10 +139,6 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
   return vectorFrom(res.body);
 }
 
-// The vector out of a native :predict reply: predictions[0].embeddings.values.
-// Its own scan rather than vectorFrom's, which looks for "embedding" with the
-// closing quote — the native reply says "embeddings", and its first array is
-// the statistics block, so the anchor here is the "values" member.
 function vertexVectorFrom(body: string): Embedding {
   let at = body.indexOf("\"values\"");
   if (at < 0) {
@@ -197,9 +153,6 @@ function vertexVectorFrom(body: string): Embedding {
     return malformed;
   }
   let pretty = rest.substring(open, close + 1);
-  // The predict reply is pretty-printed — newlines and indentation between
-  // every number — and the literal becomes a pgvector parameter, whose parser
-  // is owed digits and commas, not a transcript of Google's formatter.
   let literal = "";
   let dims: int = 0;
   let i: int = 0;
@@ -215,12 +168,6 @@ function vertexVectorFrom(body: string): Embedding {
   return out;
 }
 
-// The first `"embedding":[...]` array, as a pgvector literal.
-//
-// Read by scanning rather than with JSON.parse: the reply carries usage
-// counts and provider-specific keys that a strict parse would refuse, and the
-// numbers are wanted verbatim — reformatting them through a float would change
-// the values that get stored.
 export function vectorFrom(body: string): Embedding {
   let at = body.indexOf("\"embedding\"");
   if (at < 0) {
@@ -235,7 +182,6 @@ export function vectorFrom(body: string): Embedding {
     return malformed;
   }
   let literal = rest.substring(open, close + 1);
-  // One more comma than numbers, unless the array is empty.
   let commas: int = 0;
   let i: int = 0;
   while (i < literal.length) {
@@ -249,26 +195,8 @@ export function vectorFrom(body: string): Embedding {
   return out;
 }
 
-// Where a provider's chat endpoint lives. A column would be better still —
-// this is the one thing here that is not a row — but a provider's URL shape is
-// closer to code than to configuration, and there are three of them.
-/* Why a call failed, said to the person in the conversation.
- *
- * Two audiences, and this is the wrong place for one of them. A reader of a
- * chat needs to know that the answer did not happen, whether waiting or
- * switching models helps, and nothing else. An operator needs the address,
- * the status and the provider's own words — and those belong in the log,
- * where `streamDetail` sends them, not in a transcript that a person may
- * screenshot, paste or share. An internal hostname in a chat bubble is an
- * infrastructure leak with a plausible excuse.
- *
- * So: no addresses, no model ids, no provider bodies here. The model's LABEL
- * only, because a person picked it from a menu by that name and needs to know
- * which choice failed.
- */
 export function streamProblem(model: ModelRow, status: int, body: string): string {
   let who = model.label == "" ? "This model" : model.label;
-  // Below 100 is not an HTTP status at all — nothing answered.
   if (status < 100) {
     return who + " is not responding. If it runs on your own machine, check it is"
       + " still up; otherwise pick another model from the menu beside the composer.";
@@ -297,9 +225,6 @@ export function streamProblem(model: ModelRow, status: int, body: string): strin
   return who + " could not answer this one. Retry, or pick another model.";
 }
 
-/* The same failure for the log: everything the sentence above deliberately
- * withholds. One line, so an operator greps it out of the engine log with the
- * status, the address it used and what the provider actually said. */
 export function streamDetail(model: ModelRow, status: int, body: string): string {
   let cut = body.length > 300 ? body.slice(0, 300) + "…" : body;
   return "provider failure: model=" + model.id + " (" + model.apiName + ")"
@@ -314,25 +239,15 @@ export function chatEndpoint(provider: string): string {
   return "";
 }
 
-// The path a provider's chat endpoint hangs off a root.
-//
-// Behind a gateway this is the whole of the address, and the wire format
-// belongs to the provider rather than to the gateway: Anthropic speaks
-// `/messages` wherever it is hosted. Asking for `chat/completions` regardless —
-// which is what the one call site used to hardcode — 404s every Anthropic row
-// that has a baseUrl, and only the empty-baseUrl path ever worked.
 export function chatPath(provider: string): string {
   if (provider == "anthropic") { return "messages"; }
   return "chat/completions";
 }
 
-// The address a model row's completions are actually sent to.
 export function chatEndpointFor(model: ModelRow): string {
   return endpointFor(model, chatPath(model.provider));
 }
 
-// Providers disagree about where the key goes and what the body is called, and
-// nothing about that is worth abstracting away — it is two `if`s.
 function authHeaders(provider: string, apiKey: string): Map<string, string> {
   let headers = new Map<string, string>();
   headers.set("content-type", "application/json");
@@ -345,10 +260,6 @@ function authHeaders(provider: string, apiKey: string): Map<string, string> {
   return headers;
 }
 
-// --- what the model is told it can call ---------------------------------------
-
-// A tool, as the model needs it described. `schema` is JSON Schema as text,
-// because it belongs to whoever wrote the tool.
 export type ToolSpec = {
   name: string,
   description: string,
@@ -360,9 +271,6 @@ export function toolSpec(name: string, description: string, schema: string): Too
   return s;
 }
 
-// The tool list in a provider's own shape. Two shapes, not one abstraction:
-// OpenAI and Mistral wrap each tool in a `function` object, Anthropic does not,
-// and pretending otherwise would cost more than the two branches.
 export function toolsJson(provider: string, tools: ToolSpec[]): string {
   if (tools.length == 0) { return ""; }
   let out = "[";
@@ -385,30 +293,16 @@ export function toolsJson(provider: string, tools: ToolSpec[]): string {
   return out + "]";
 }
 
-// --- the model's context, which is not the conversation -----------------------
-
-// One thing the model is shown. A run's context holds every one of these; the
-// conversation a user reads holds only the text of some of them. They are
-// deliberately different types, because they are different things: a tool call,
-// its result, and a retrieved passage all belong in the context and none of
-// them belongs in a transcript.
-
 export type ToolCall = {
-  // The provider's id for this call. A tool result has to name the call it
-  // answers, and within one request the ids must agree.
   id: string,
   name: string,
-  // The arguments as a JSON object in text, the tool's own shape.
   args: string,
 };
 
 export type Turn = {
-  // "user", "assistant" or "tool".
   role: string,
   text: string,
-  // What an assistant turn asked to call; empty for the others.
   calls: ToolCall[],
-  // Which call a tool turn answers, and which tool ran.
   callId: string,
   toolName: string,
 };
@@ -435,9 +329,6 @@ export function toolTurn(callId: string, toolName: string, text: string): Turn {
   return t;
 }
 
-// One assistant turn in OpenAI's and Mistral's shape. `content` is null rather
-// than absent when the turn is only calls, which is what they send back and
-// what they expect to be given.
 function openAiAssistant(turn: Turn): string {
   let out = "{\"role\":\"assistant\",\"content\":";
   if (turn.text == "") { out = out + "null"; } else { out = out + JSON.stringify(turn.text); }
@@ -446,8 +337,6 @@ function openAiAssistant(turn: Turn): string {
   let i: int = 0;
   while (i < turn.calls.length) {
     if (i > 0) { out = out + ","; }
-    // `arguments` is a *string* holding JSON, not an object. Both of these
-    // providers send it that way and reject it sent any other way.
     out = out + "{\"id\":" + JSON.stringify(turn.calls[i].id)
       + ",\"type\":\"function\",\"function\":{\"name\":" + JSON.stringify(turn.calls[i].name)
       + ",\"arguments\":" + JSON.stringify(turn.calls[i].args) + "}}";
@@ -456,8 +345,6 @@ function openAiAssistant(turn: Turn): string {
   return out + "]}";
 }
 
-// The same turn in Anthropic's shape: content is a list of blocks, and a call
-// is a block beside the text rather than a field next to it.
 function anthropicAssistant(turn: Turn): string {
   let out = "{\"role\":\"assistant\",\"content\":[";
   let written: int = 0;
@@ -479,11 +366,6 @@ function anthropicAssistant(turn: Turn): string {
   return out + "]}";
 }
 
-// The context as a provider's `messages` array.
-//
-// Anthropic needs every tool result for one assistant turn inside a single
-// user message, so consecutive tool turns are merged; OpenAI and Mistral want
-// one message each. That is the whole of the difference between them here.
 export function messagesJson(provider: string, systemPrompt: string, turns: Turn[]): string {
   let out = "[";
   let written: int = 0;
@@ -535,46 +417,11 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
   return out + "]";
 }
 
-// Asking the model to think, in whatever way its provider spells that.
-//
-// Nothing happens by default. Anthropic answers with a thinking block only when
-// the request enables one and gives it a token budget; OpenAI's reasoning
-// models take an effort instead. So the config carries text, and what the text
-// means is decided here, per provider, rather than by pretending the two are
-// the same knob.
-//
-// Anthropic also insists on a temperature of exactly 1 while thinking, and on a
-// budget below `max_tokens`. Both are enforced here rather than left for the
-// provider to refuse: a 400 at the first conversation is a bad way to learn it.
 export function thinkingJson(provider: string, config: ModelConfigRow): string {
-  // "off" is a turn that asked NOT to think, which is different from a config
-  // that never asks: a reasoning model reasons by default, and the only way to
-  // stop it is to say so. vLLM reads the switch off the chat template, so it
-  // travels as chat_template_kwargs rather than a field of its own; providers
-  // that have no such switch simply send nothing, which is what they already
-  // did. Sent for every OpenAI-compatible provider, not only vLLM: an unknown
-  // member is ignored by the ones that do not have it, and naming the vendor
-  // here would mean this stops working the day the model moves.
   if (config.thinking == "off") {
-    // vLLM and ollama only. The switch lives in the model's chat template, so
-    // it is these two — the servers that HAVE one — that read it; a hosted API
-    // has no template to parameterise and answers 400 to a member it does not
-    // know, which is how Mistral stopped answering the first time this was
-    // sent to everybody. Silence is the right "do not think" for the rest:
-    // none of them think unless a config asks, and "off" is that config not
-    // asking.
     if (provider == "vllm" || provider == "ollama") {
       return ",\"chat_template_kwargs\":{\"enable_thinking\":false}";
     }
-    // Gemini is the exception to "none of them think unless asked": 2.5
-    // reasons BY DEFAULT with a dynamic budget, and the thought is spent
-    // inside max_tokens — the Discover digest watched 5,240 of its 6,000
-    // tokens go to reasoning and the visible answer truncate mid-JSON.
-    // Silence is not "off" there, so the nearest honest thing is said. "low"
-    // rather than "none", measured not cautious: low bounds the reasoning to
-    // ~1k tokens on both Gemini models, while "none" is refused outright by
-    // gemini-2.5-pro, whose thinking cannot be disabled — and a 400 at the
-    // first conversation is a bad way to learn that.
     if (provider == "vertex") {
       return ",\"reasoning_effort\":\"low\"";
     }
@@ -588,9 +435,6 @@ export function thinkingJson(provider: string, config: ModelConfigRow): string {
     if (budget <= 0) { return ""; }
     return ",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":" + `${budget}` + "}";
   }
-  // An effort, for the models that take one. A number here is not an effort and
-  // is not sent: a provider that receives one answers 400, and a config written
-  // for Anthropic should not quietly change what an OpenAI model does.
   if (config.thinking == "low" || config.thinking == "medium" || config.thinking == "high") {
     return ",\"reasoning_effort\":" + JSON.stringify(config.thinking);
   }
@@ -599,7 +443,6 @@ export function thinkingJson(provider: string, config: ModelConfigRow): string {
 
 function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[]): string {
   let asked = thinkingJson(model.provider, config);
-  // Anthropic refuses any temperature but 1 while thinking is enabled.
   let temperature = config.temperature;
   if (asked != "" && model.provider == "anthropic") { temperature = 1; }
   let body = "{\"model\":" + JSON.stringify(model.apiName)
@@ -615,38 +458,11 @@ function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: stri
   return body + "}";
 }
 
-// --- what came back -----------------------------------------------------------
-
-// Why the model stopped writing, in the provider's own word, or "" when it did
-// not say.
-//
-// Two spellings and two homes: OpenAI and Mistral put `finish_reason` on the
-// choice, Anthropic puts `stop_reason` on the reply. Each is looked for under
-// its own provider only — finding the other's would report a finished reply as
-// a cut-off one.
 export function stopReasonOf(provider: string, body: string): string {
   if (provider == "anthropic") { return jsonText(body, "stop_reason"); }
   return jsonText(body, "finish_reason");
 }
 
-// The sentence to fail a round with when the model ran out of output space, or
-// "" when it did not.
-//
-// This is the only thing that says a reply was cut short. A reply truncated
-// mid-tool-call loses that call to `jsonComplete` and arrives with no calls at
-// all, which is indistinguishable from a model that has finished — so the
-// round stored the provider's raw JSON as the assistant's answer where
-// `content` was null, and stored the question with no answer at all where it
-// was "". A reply cut mid-*text* nothing noticed in any shape.
-//
-// Emptiness is not the test, then: the reason is, which `wasTruncated` reads.
-// Whether a reply stopped because it hit the output ceiling.
-//
-// The three spellings live here and only here: `max_tokens` is Anthropic's
-// word, `length` OpenAI's and vertex's, `model_length` Mistral's. Separate from
-// the sentence below because two callers want the fact and only one wants the
-// advice — router.ts has its own thing to say about a routing call that ran out
-// of room, and a second copy of this list is a list that drifts.
 export function wasTruncated(provider: string, body: string): bool {
   let reason = stopReasonOf(provider, body);
   return reason == "length" || reason == "max_tokens" || reason == "model_length";
@@ -660,8 +476,6 @@ export function truncationProblem(provider: string, body: string, maxTokens: int
     + `${maxTokens}` + ".";
 }
 
-// The calls a reply asked for, in order. None is the ordinary case: it is how
-// a model says it has finished.
 export function toolCallsFrom(provider: string, body: string): ToolCall[] {
   let out: ToolCall[] = [];
 
@@ -671,16 +485,7 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
     while (b < blocks.length) {
       if (jsonText(blocks[b], "type") == "tool_use") {
         let input = jsonRaw(blocks[b], "input");
-        // No `input` member at all is a tool that takes no arguments. An
-        // `input` that is there and reads as nothing is a value jsonValueAt
-        // refused to hand back half of — a different thing entirely, and
-        // turning it into "{}" is how write_artifact came to be called with
-        // an empty path.
         if (input == "" && jsonFind(blocks[b], "input") < 0) { input = "{}"; }
-        // The same check the OpenAI branch below makes, and for the same
-        // reason: what is stored here is replayed to the provider verbatim,
-        // and a tool_use whose input is not one JSON object is refused —
-        // along with every later message in that conversation.
         if (jsonComplete(input)) {
           out.push(toolCall(jsonText(blocks[b], "id"), jsonText(blocks[b], "name"), input));
         }
@@ -695,20 +500,10 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
   while (i < calls.length) {
     let fn = jsonRaw(calls[i], "function");
     if (fn != "") {
-      // `arguments` is documented as a JSON string, and arrives as an object
-      // often enough that reading it either way is cheaper than deciding which
-      // providers can be trusted about it.
       let raw = jsonRaw(fn, "arguments");
       let args = raw;
       if (raw.startsWith("\"")) { args = jsonText(fn, "arguments"); }
       if (args == "") { args = "{}"; }
-      // A call whose arguments do not close is a call the model did not
-      // finish writing — it ran out of output space partway through, which
-      // happens the moment a model is asked for a file bigger than its
-      // maxTokens. Dropping it here keeps the round consistent: the assistant
-      // turn announces exactly the calls that will be answered. Keeping it
-      // stored a turn whose own JSON could not be parsed back, and every
-      // later message in that conversation was refused by the provider.
       if (jsonComplete(args)) {
         out.push(toolCall(jsonText(calls[i], "id"), jsonText(fn, "name"), args));
       }
@@ -718,11 +513,6 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
   return out;
 }
 
-// Whether a reply carries any assistant text at all, and what it is.
-//
-// Separate from `replyText` because a turn that is only tool calls has no
-// text, and "" and "there is none" are different things to a caller deciding
-// what to record.
 export function assistantText(provider: string, body: string): JsonText {
   if (provider == "anthropic") {
     let blocks = jsonList(jsonRaw(body, "content"));
@@ -734,24 +524,11 @@ export function assistantText(provider: string, body: string): JsonText {
       }
       i = i + 1;
     }
-    // A reply in some other shape still gets read the old way rather than
-    // reported as textless.
     return jsonStringMember(body, "text");
   }
   return jsonStringMember(body, "content");
 }
 
-// What the model thought before it answered, when it says so.
-//
-// Three shapes, because three providers disagree: Anthropic puts a block of
-// `type: "thinking"` in `content`, and the OpenAI-compatible ones that expose
-// it at all put a `reasoning_content` (Mistral's magistral, DeepSeek) or a
-// `reasoning` string on the message. A provider that returns none — most of
-// them, most of the time — answers "", which is not a failure and is not
-// reported as one.
-//
-// Never parsed into a record: a reply carries keys nobody declared, and this is
-// read out of the same body the answer came from.
 export function assistantThinking(provider: string, body: string): string {
   if (provider == "anthropic") {
     let blocks = jsonList(jsonRaw(body, "content"));
@@ -768,21 +545,11 @@ export function assistantThinking(provider: string, body: string): string {
   if (reasoned.found && reasoned.text != "") { return reasoned.text; }
   let plain = jsonStringMember(body, "reasoning");
   if (plain.found) { return plain.text; }
-  // Nothing structured: a reasoning model served without its parser leaves the
-  // block inline instead, and the thought is still a thought.
   let inline = assistantText(provider, body);
   if (inline.found) { return inlineThinking(inline.text); }
   return "";
 }
 
-// A `<think>…</think>` block a reply opens with, and "" for everything else.
-//
-// vLLM only fills `reasoning_content` when it is started with a reasoning
-// parser (`--reasoning-parser qwen3` and kin); without one, a Qwen3 answer
-// arrives with the whole thought inline at the front of `content`, and the
-// console printed it to the reader as if it were the answer. Only a LEADING
-// block is treated this way — prose that happens to discuss `<think>` later in
-// a sentence is text, not a thought.
 export function inlineThinking(text: string): string {
   let open = text.indexOf("<think>");
   if (open < 0 || text.slice(0, open).trim() != "") { return ""; }
@@ -791,60 +558,23 @@ export function inlineThinking(text: string): string {
   return text.slice(open + 7, close).trim();
 }
 
-// The same reply with that leading block removed.
 export function withoutInlineThinking(text: string): string {
   if (inlineThinking(text) == "") { return text; }
   let close = text.indexOf("</think>");
   return text.slice(close + 8).trim();
 }
 
-// The assistant's text out of a provider's reply.
-//
-// Scanned rather than parsed: the reply carries usage counts, tool-call slots
-// and provider-specific keys, and a strict parse would refuse the lot. The
-// shapes differ — `choices[0].message.content` for Mistral and OpenAI,
-// `content[0].text` for Anthropic — so the provider decides which key to look
-// for, and an unknown one gets the whole body rather than a guess.
 export function replyText(provider: string, body: string): string {
   let found = assistantText(provider, body);
   if (!found.found) { return body; }
-  // The thought a reasoning model inlined is not the answer: assistantThinking
-  // has already taken it, and leaving it here printed it twice — once as the
-  // reply, once as the thinking the console draws above it.
   return withoutInlineThinking(found.text);
 }
 
 
-// --- streaming ------------------------------------------------------------------------
-
-// A reply, fetched as it is written.
-//
-// The point is not speed: it is that a rotation's *thinking* is readable while
-// the model is still producing it, instead of arriving whole when the rotation
-// ends. Everything else about the run is unchanged, and that is deliberate —
-// the deltas are reassembled here into exactly the body the buffered path
-// returns, so `toolCallsFrom`, `assistantText`, `truncationProblem` and every
-// storage rule downstream see what they have always seen. Streaming is how the
-// reply is fetched, not a second shape for the rest of the package to learn.
-//
-// `onThinking` is called with the reasoning accumulated so far, each time it
-// grows. It must not throw: a throw does not cross a function value here, so it
-// would escape every `try` between this and the handler.
-// Both halves of what has streamed so far: the reasoning and the ANSWER.
-// One callback because they grow interleaved from the same events, and a
-// caller that wants only one ignores the other.
 export type Thinking = (soFar: string, contentSoFar: string) => void;
 
-// Asked mid-stream: "should this generation keep going?" Answering true
-// closes the stream where it stands. The caller decides what the question
-// means — for the agent loop it is "did the person press stop" — and the
-// throttle below decides how often it is worth asking, because the answer
-// may cost a database read and a stream delivers many events a second.
 export type Halt = () => bool;
 
-// One tool call, assembled from the fragments a stream delivers. OpenAI sends
-// `tool_calls[i]` in pieces — an id on one chunk, a name on the next, the
-// arguments a character at a time — keyed only by `index`.
 type CallFragment = {
   index: int,
   id: string,
@@ -878,7 +608,6 @@ function withFragment(frags: CallFragment[], index: int, id: string, name: strin
   return out;
 }
 
-// The assembled reply, in the shape the buffered path produces.
 function assembledBody(content: string, reasoning: string, frags: CallFragment[], finish: string): string {
   let calls = "";
   let i: int = 0;
@@ -896,8 +625,6 @@ function assembledBody(content: string, reasoning: string, frags: CallFragment[]
     + ",\"message\":" + message + "}}]}";
 }
 
-// The text after `data: ` on an SSE line, or "" for anything else — a comment,
-// a blank keep-alive, an event name.
 export function sseData(line: string): string {
   if (!line.startsWith("data:")) { return ""; }
   let rest = line.slice(5, line.length);
@@ -905,17 +632,12 @@ export function sseData(line: string): string {
   return rest;
 }
 
-// One completion, streamed. Falls back to nothing: a caller that wants the
-// buffered path calls `completeTurns` instead.
 export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string, onThinking: Thinking, shouldHalt: Halt): Completion {
   let endpoint = chatEndpointFor(model);
   if (endpoint == "") {
     let nowhere: Completion = { ok: false, text: "", status: 0, error: "no chat endpoint for \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
     return nowhere;
   }
-  // The same refusal `completeTurns` makes, because a switched-off row means
-  // switched off on every transport — without it, which door a run takes
-  // decides whether the model's own enabled column is honoured.
   if (!model.enabled) {
     let off: Completion = { ok: false, text: "", status: 0, error: model.label + " is disabled", inputTokens: 0, outputTokens: 0, counted: false };
     return off;
@@ -931,24 +653,6 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     return unminted;
   }
   let body = requestBody(model, config, systemPrompt, turns, tools);
-  // Two differences from the buffered request: ask for the stream, and ask to
-  // be told what it cost.
-  //
-  // The second one is not optional decoration. An OpenAI-compatible API sends
-  // NO usage block in a stream unless `stream_options.include_usage` is set,
-  // so without this line the reader below finds no usage, every completion
-  // reports `counted: false`, and the zero travels all the way out: the run row
-  // stores 0 input and 0 output tokens, the collector shows a generation with
-  // no tokens, and every screen built on either reports a spend nobody can
-  // explain. Measured on this deployment before it was added: 2,585
-  // generations, 133 of them with a token count, and not one with a cost.
-  //
-  // Only on the streamed path, and the streamed path is the OpenAI-compatible
-  // one — Anthropic is answered buffered (see the note below), where usage
-  // arrives unasked. A provider that does not know the field ignores it, which
-  // is the shape of every OpenAI-compatible API this talks to; one that
-  // REFUSES it would refuse the whole request, so a provider that stops
-  // answering after this change is telling you exactly which line to remove.
   let streamed = body.slice(0, body.length - 1)
     + ",\"stream\":true,\"stream_options\":{\"include_usage\":true}}";
   let s = http.stream(endpoint, "POST", streamed, authHeaders(model.provider, carried.key));
@@ -962,9 +666,6 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       drained = drained + line;
     }
     s.close();
-    // The operator's half goes to the log; the person's half goes back as the
-    // error. Both derived from the same failure, neither leaking into the
-    // other's audience.
     console.error(streamDetail(model, status, drained));
     let refused: Completion = { ok: false, text: drained, status: status, error: streamProblem(model, status, drained), inputTokens: 0, outputTokens: 0, counted: false };
     return refused;
@@ -976,12 +677,6 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
   let frags: CallFragment[] = [];
   let inTokens: int = 0;
   let outTokens: int = 0;
-  // Events since shouldHalt was last asked. Every 5th event: the check is a
-  // primary-key read, a stream that delivers coarse chunks (Gemini bundles
-  // many tokens per event) still gets asked early, and a fast stream pays a
-  // few reads a second. 25 was measured first and a ten-paragraph Gemini
-  // answer sailed past the press — fewer, fatter events than the count
-  // assumed.
   let sinceAsked: int = 0;
 
   while (!s.done()) {
@@ -990,26 +685,11 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       sinceAsked = 0;
       if (shouldHalt()) {
         s.close();
-        // ok:false with a named error, not a partial success: the caller
-        // that asked for the halt knows why, and no caller should mistake
-        // a cut-off generation for the model's whole answer.
         let halted: Completion = { ok: false, text: "", status: status, error: "stopped mid-stream at the caller's request", inputTokens: inTokens, outputTokens: outTokens, counted: false };
         return halted;
       }
     }
     let line = s.readLine();
-    // The line is READ BEFORE the stream is asked whether it is finished, so
-    // it has to be processed before the loop leaves. Breaking on `done()` here
-    // threw away whatever had just been read, and what an OpenAI-compatible
-    // API puts in that last event is the usage block: prompt_tokens and
-    // completion_tokens arrived on every streamed turn this engine ever made
-    // and were dropped one line before they were parsed. That is why 2,452 of
-    // 2,585 generations recorded no tokens, why no generation ever recorded a
-    // cost, and why the spend panel had nothing to attribute.
-    //
-    // An empty line is SSE's own event separator, so it is skipped rather than
-    // treated as the end; the loop leaves when the stream is done AND has
-    // nothing more to hand over.
     if (line == "") {
       if (s.done()) { break; }
       continue;
@@ -1022,8 +702,6 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       let piece = jsonText(delta, "content");
       if (piece != "") {
         content = content + piece;
-        // Told as it grows, like the reasoning below: this is what lets the
-        // person watch the answer being written instead of meeting it whole.
         onThinking(reasoning, content);
       }
       let thought = jsonText(delta, "reasoning_content");
@@ -1035,13 +713,6 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       let calls = jsonList(jsonRaw(delta, "tool_calls"));
       let c: int = 0;
       while (c < calls.length) {
-        // `jsonRaw`, not `jsonText`: the index is a number, and jsonText reads
-        // string members only — it answered "" for every fragment, so each one
-        // fell back to its position in *this* event's array, which is always 0
-        // when a provider sends one call per event. Three writes merged into a
-        // single call whose name was the three names concatenated and whose
-        // arguments were three documents spliced together; `jsonComplete` then
-        // dropped the lot and the round answered with nothing.
         let at = parseInt(jsonRaw(calls[c], "index"), 10) ?? c;
         let fn = jsonRaw(calls[c], "function");
         frags = withFragment(frags, at, jsonText(calls[c], "id"),
@@ -1053,13 +724,6 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     if (reason != "") { finish = reason; }
     let usage = jsonRaw(data, "usage");
     if (usage != "") {
-      // `jsonRaw` and not `jsonText`, which is the same trap the tool-call
-      // fragments fell into a few lines up: jsonText reads STRING members, and
-      // a token count is a number, so it answered "" for every field and
-      // parseInt turned that into null. `?? inTokens` then kept the zero it
-      // started with, so a stream that reported its usage perfectly well was
-      // recorded as having used nothing. The buffered path next door has used
-      // jsonRaw since it was written.
       inTokens = parseInt(jsonRaw(usage, "prompt_tokens"), 10) ?? inTokens;
       outTokens = parseInt(jsonRaw(usage, "completion_tokens"), 10) ?? outTokens;
     }
@@ -1073,17 +737,12 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
   return whole;
 }
 
-// One completion. Every value comes from the rows passed in; the key comes
-// from the environment, because a credential is the one thing that does not
-// belong in the database.
 export function complete(model: ModelRow, config: ModelConfigRow, systemPrompt: string, userText: string, apiKey: string): Completion {
   let turns: Turn[] = [userTurn(userText)];
   let none: ToolSpec[] = [];
   return completeTurns(model, config, systemPrompt, turns, none, apiKey);
 }
 
-// One completion over a whole context, with the tools the model may call.
-// `complete` above is this with one turn and no tools.
 export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string): Completion {
   let endpoint = chatEndpointFor(model);
   if (endpoint == "") {

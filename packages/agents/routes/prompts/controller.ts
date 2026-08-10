@@ -4,9 +4,6 @@ import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, ok, queryParam } from "../../../rest/server.ts";
 import { PromptRow, promptsMapping } from "../../schema.ts";
 
-// The /prompts routes.
-
-// The highest version a prompt name has, 0 when it has none.
 function maxVersion(db: Db, name: string): int {
   let newest: DbOrder[] = [desc("version")];
   let page = pageOrdered(db, promptsMapping(), "prompt_name = " + db.placeholder, [name], newest, 1, 0);
@@ -21,7 +18,6 @@ export class PromptApi {
   db: Db;
   constructor(db: Db) { this.db = db; }
 
-  // All versions, or one name's versions newest first — the roll-back view.
   @get("/")
   list(req: Request): Reply {
     let name = queryParam(req, "name", "");
@@ -33,17 +29,6 @@ export class PromptApi {
     return ok(listOrdered(this.db, promptsMapping(), "prompt_name = " + this.db.placeholder, [name], newest));
   }
 
-  // A prompt row is never edited, so the only write is a new version. Both
-  // the version and the id are assigned here rather than taken from the
-  // caller:
-  //
-  // - the version, because letting a caller pick one is how two writers both
-  //   create version 4;
-  // - the id, because a caller with no id to hand reaches for one it already
-  //   knows, and an id that is already a row turns a create into an edit. A
-  //   POST that reused an id was observed replacing version 3's text in place
-  //   while every agent pointing at it silently changed behaviour. An id it
-  //   sends is still honoured, and still refused if taken.
   @post("/")
   create(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required"); }

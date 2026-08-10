@@ -1,9 +1,3 @@
-// Retrieval-augmented answering, with every part of it a row.
-//
-//   LUMEN_MASTER_KEY=<32 bytes> MISTRAL_API_KEY=... lumen run examples/rag.ts
-//
-// PostgreSQL, because the search is pgvector's.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { postgres } from "../../plume/postgres.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
@@ -33,9 +27,6 @@ function main(): void {
   if (key != "") { storeCredential(db, { provider: "mistral", apiKey: key, masterKey: master, now: "2026-07-25" }); }
   let stored = credentialFor(db, "mistral", master);
 
-  // The embedding model is a row like every other, and it carries its own
-  // width — so pointing the corpus at a different one is an INSERT and an
-  // UPDATE, not an edit here.
   let embedRow: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(embedRow));
 
@@ -45,15 +36,12 @@ function main(): void {
   let problem = createDocuments(db, embedder);
   if (problem != "") { console.error(problem); return; }
 
-  // A small corpus of things the model cannot know.
   indexDocument(db, embedder, { id: "d1", source: "plume", scope: "/specs/plume", body: "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name." }, stored);
   indexDocument(db, embedder, { id: "d2", source: "plume", scope: "/specs/plume", body: "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order." }, stored);
   indexDocument(db, embedder, { id: "d3", source: "rest", scope: "/specs/rest", body: "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds." }, stored);
   console.log("indexed 3 documents");
 
   let question = "Why does plume refuse an unordered page?";
-  // Granted /specs, so both folders under it are readable; granting
-  // /specs/plume alone would leave the rest chunk out.
   let granted: string[] = ["/specs"];
   let found = retrieve(db, embedder, granted, question, 2, stored);
   if (!found.ok) { console.error(found.error); return; }
@@ -65,7 +53,6 @@ function main(): void {
     i = i + 1;
   }
 
-  // The agent is configured from rows; the context is prepended to its prompt.
   let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(chat));
   let conf: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 120, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };

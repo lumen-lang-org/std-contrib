@@ -1,12 +1,3 @@
-// Projects, kept by a sentence.
-//
-// "Make a project for the hackathon and put this conversation in it" — the
-// grouping verbs, plus the one field that makes a project more than a
-// folder: its instructions, told verbatim to every conversation inside.
-// task-tools' shape; owner-scoped like the rows themselves.
-//
-//   cd packages/agents && lumen test project-tools.test.ts
-
 import { Db } from "../plume/driver.ts";
 import { findById, persist } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
@@ -59,7 +50,6 @@ export function projectTools(): ToolSpec[] {
 
 export type ProjectToolCall = {
   owner: string,
-  // The conversation the sentence was said in — what move_to_project moves.
   threadId: string,
   name: string,
   args: string,
@@ -128,7 +118,6 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
       + " move_to_project puts this conversation in it.");
   }
 
-  // move_to_project.
   if (call.threadId == "") {
     return no("this run has no conversation to move — say it in the conversation that should move.");
   }

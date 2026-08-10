@@ -1,34 +1,3 @@
-// Scheduling, as tools an agent can call.
-//
-// The Tasks page is a form: you type an instruction, you type "every weekday
-// at 08:00", you press a button. This is the other door onto the same rows —
-// "every morning at eight, tell me what changed in my Linear cycle" said in a
-// conversation, and a task exists.
-//
-// Two doors, one set of rules. Every refusal here is `tasks.ts`'s own —
-// `compile`, `refuse`, `nextFire`, MAX_PER_OWNER — called from this side
-// rather than reworded, because the alternative is a model being told the
-// shortest interval is a minute by one door and fifteen by the other. The only
-// thing this module owns is how an answer is written for something that is
-// going to read it as prose.
-//
-// WHAT IT MAY NOT DO IS AS IMPORTANT AS WHAT IT DOES:
-//
-//   Nothing here fires anything. `run_task_now` moves `next_at` and stops,
-//   exactly as the route does, so there stays one place a task can be claimed,
-//   counted and recorded (scheduler.ts).
-//
-//   Nothing here crosses an owner. Every call carries the owner of the
-//   conversation it was made in, and a row that belongs to somebody else is
-//   not "forbidden" but absent — the same answer as a row that was deleted,
-//   which is the only answer that leaks nothing about what other people have
-//   automated.
-//
-//   Nobody unnamed schedules. A guest is refused, and so is a signed-out
-//   visitor on a deployment that scopes by owner at all. A task is a standing
-//   instruction with a provider's bill attached and it has to belong to
-//   somebody who can be told about it.
-
 import { Db } from "../plume/driver.ts";
 import { deleteById, executeWith, findById, listWhere, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
@@ -38,40 +7,19 @@ import { trustsProxyAuth } from "./owner.ts";
 import { civil, knownZone } from "../cron/cron.ts";
 import { MAX_PER_OWNER, MIN_EVERY_MINUTES, TaskRow, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, withNextAt } from "./tasks.ts";
 
-// How many tasks one listing prints in full. Above this the list is still
-// complete — it is the instructions that stop being quoted — because a model
-// that cannot see the last row cannot be asked to change it.
 const QUOTE_LIMIT: int = 200;
 
-/** Whether this caller may touch tasks at all.
- *
- *  "" is two different callers and the difference decides this. On a
- *  deployment that trusts a proxy to say who is calling, "" is a signed-out
- *  visitor: refused, exactly as the route refuses them. On a deployment that
- *  scopes by nobody — the community edition, where the header is never read —
- *  "" is the single tenant, every row belongs to them, and refusing would
- *  switch the feature off for the installs most likely to want it. */
 export function maySchedule(owner: string): bool {
   if (owner.startsWith("guest:")) { return false; }
   if (owner == "" && trustsProxyAuth()) { return false; }
   return true;
 }
 
-// One call, as a record. The same shape and the same reasoning as
-// ArtifactToolCall: `owner`, `agentId`, `name` and `args` are four strings with
-// no shape between them, and swapped they would file one person's task under
-// another's name without anything in the types objecting.
 export type TaskToolCall = {
-  // Whose conversation this is. The scope of every read and every write.
   owner: string,
-  // What runs the task. The agent answering now — a task made in a
-  // conversation runs as the thing that was being talked to, which is the only
-  // answer that does not surprise whoever asked.
   agentId: string,
-  // The model choice the task should run on, or "" for the agent's own.
   modelChoiceId: string,
   name: string,
-  // The arguments as the model sent them: JSON text.
   args: string,
   nowMs: number,
 };
@@ -91,20 +39,7 @@ function yes(text: string): FileToolResult {
   return good;
 }
 
-// The five tools, described for a model.
-//
-// The descriptions carry the grammar rather than pointing at it. A model that
-// has to guess the schedule language spends a turn being refused, and a
-// refusal it could have avoided reads to the person watching as the feature
-// not working.
 export function taskTools(): ToolSpec[] {
-  // Every quote in here is written as \\\" — an escaped quote in the JSON this
-  // string BECOMES, not a quote in the Lumen source. A schema goes to the
-  // provider verbatim (provider.ts stringifies a description and does not
-  // touch this), so one bare quote in an example ends the JSON string early
-  // and the provider refuses the whole request: DeepSeek answered
-  // "expected `,` or `}` at line 1 column 27431", which reads on the screen as
-  // the model being unable to hold the conversation.
   let schedule = "How often, in words. Repeating: \\\"every day at 07:30\\\", \\\"every weekday at 08:00\\\", "
     + "\\\"every monday at 09:15\\\", \\\"every 30 minutes\\\" (at least " + `${MIN_EVERY_MINUTES}` + "), \\\"every 6 hours\\\". "
     + "Once, then finished: \\\"on 2026-08-06 at 09:00\\\" - a date and a time, never \\\"tomorrow\\\" or \\\"next friday\\\", "
@@ -164,19 +99,11 @@ export function taskTools(): ToolSpec[] {
   return out;
 }
 
-/** This owner's tasks, as rows. */
 function rowsOf(db: Db, owner: string): TaskRow[] {
   return JSON.parse<TaskRow[]>(listWhere(db, tasksMapping(),
     "owner = " + db.placeholder, [owner]));
 }
 
-/** The zone to schedule in.
- *
- *  Asked first, then whatever this person's other tasks use, then the
- *  deployment's, then UTC. The middle step is what makes a second task land in
- *  the right place without anybody being asked twice — the first one carried
- *  the browser's zone in from the page, and it is a better guess than any
- *  default. */
 function zoneFor(db: Db, owner: string, asked: string): string {
   if (asked != "") { return asked; }
   let rows = rowsOf(db, owner);
@@ -190,13 +117,6 @@ function zoneFor(db: Db, owner: string, asked: string): string {
   return "UTC";
 }
 
-/** The task this call is about, or an empty row.
- *
- *  By id, then by name. The second is not indulgence: the id is a UUID a model
- *  has to carry from one tool result to the next, and one that hands back the
- *  title instead is right about which task it means. Ambiguity is refused
- *  rather than resolved — two tasks called "morning" and a guess between them
- *  is the wrong one half the time, and one of the doors it opens is delete. */
 function mine(db: Db, owner: string, said: string): TaskRow {
   let none = emptyTask();
   if (said == "") { return none; }
@@ -223,7 +143,6 @@ function mine(db: Db, owner: string, said: string): TaskRow {
   return none;
 }
 
-/** When a task next runs, as a person's own clock reads it. */
 function nextReads(row: TaskRow): string {
   if (!row.enabled) { return "paused"; }
   let at = stampMs(row.nextAt);
@@ -231,7 +150,6 @@ function nextReads(row: TaskRow): string {
   return civil(row.tz == "" ? "UTC" : row.tz, at as i64);
 }
 
-/** One task, in a line and a half. */
 function describe(row: TaskRow, full: bool): string {
   let name = row.title == "" ? "(unnamed)" : row.title;
   let line = name + " [" + row.id + "]";
@@ -247,10 +165,6 @@ function describe(row: TaskRow, full: bool): string {
   return line;
 }
 
-/** A schedule, compiled — either into a recurrence or into a single instant.
- *
- *  Returns the row it would produce the schedule half of: kind, expression and
- *  first firing. `error` non-empty means nothing was decided. */
 type Timing = {
   ok: bool,
   kind: string,
@@ -278,17 +192,12 @@ function timingFor(said: string, zone: string, nowMs: number): Timing {
   return every;
 }
 
-// Dispatch one call. `handled` false means the name is not ours — the same
-// convention every other dispatcher in the run loop follows.
 export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
   if (call.name != "list_tasks" && call.name != "schedule_task"
     && call.name != "change_task" && call.name != "run_task_now"
     && call.name != "delete_task") {
     return not();
   }
-  // Handled, and refused: a model that reached one of these names has been
-  // offered it, and answering "no such tool" would send it looking for another
-  // way to do the same thing.
   if (!maySchedule(call.owner)) {
     return no("signing in is what makes a task yours to run — say so, and offer to set it up once they have.");
   }
@@ -383,7 +292,6 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
     return yes("Deleted \"" + (row.title == "" ? row.instruction : row.title) + "\". It will not run again.");
   }
 
-  // change_task.
   let asked = jsonText(call.args, "timezone").trim();
   if (asked != "" && !knownZone(asked)) {
     return no("\"" + asked + "\" is not a timezone this server knows — an IANA name such as Europe/Paris.");
@@ -412,9 +320,6 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
     kind: kind, cronExpr: expr, tz: zone,
     nextAt: at, runningSince: row.runningSince,
     enabled: on,
-    // Switching a paused task back on clears its failures, exactly as the
-    // route does: leaving them would pause it again on the next failure rather
-    // than the fifth.
     failures: on && !row.enabled ? 0 : row.failures,
     pausedReason: on ? "" : row.pausedReason,
     lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,

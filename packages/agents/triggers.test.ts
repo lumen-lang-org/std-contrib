@@ -1,11 +1,3 @@
-// The parts of a trigger that can be wrong without a bot: what Telegram said,
-// where the cursor goes next, and what a bot is allowed to cost.
-//
-// Everything here is pure, which is deliberate — the half that talks to
-// Telegram is a poll and a POST, and the half that decides is this.
-//
-//   cd packages/agents && lumen test triggers.test.ts
-
 import { fileBlock, TRIGGER_INPUT_MAX, TRIGGER_RUNS_PER_DAY, TRIGGER_RUNS_PER_MINUTE, TriggerBotRow, TriggerUpdate, emptyBot, emptyMessage, mayRun, nextOffset, plainly, replyKeyboard, testingDraft, updatesIn, withRunCounted } from "./triggers.ts";
 
 function bot(): TriggerBotRow {
@@ -47,9 +39,6 @@ test("the messages in a getUpdates body, with their chat and their words", () =>
 });
 
 test("everything that is not a message with words is stepped over", () => {
-  // A reaction, an edit, a photo with no caption, and a body that is not ok:
-  // none of these is an instruction, and a workflow fired by one would run on
-  // the empty string or on somebody changing their profile photo.
   let odd = "{\"ok\":true,\"result\":["
     + "{\"update_id\":20,\"edited_message\":{\"chat\":{\"id\":1},\"text\":\"fixed typo\"}},"
     + "{\"update_id\":21,\"message\":{\"chat\":{\"id\":1},\"photo\":[]}},"
@@ -74,8 +63,6 @@ test("a very long message is cut before it becomes a row", () => {
 test("the cursor moves past the highest update, and never backwards", () => {
   let seen = updatesIn(TWO_MESSAGES);
   expect(nextOffset(seen, "0") == "12");
-  // Nothing new leaves it where it was: asking again with a lower cursor
-  // would hand back messages already answered.
   let none: TriggerUpdate[] = [];
   expect(nextOffset(none, "12") == "12");
   expect(nextOffset(seen, "99") == "99");
@@ -85,18 +72,15 @@ test("a bot's ceilings refuse with a sentence, not with silence", () => {
   let b = bot();
   expect(mayRun(b, 0, 2000.0).ok);
 
-  // The day's bill.
   let spent = counted(b, TRIGGER_RUNS_PER_DAY, "1000");
   let no = mayRun(spent, 0, 2000.0);
   expect(!no.ok);
   expect(no.reason.includes("today"));
 
-  // A burst — a group chat waking up.
   let fast = mayRun(b, TRIGGER_RUNS_PER_MINUTE, 2000.0);
   expect(!fast.ok);
   expect(fast.reason.includes("minute"));
 
-  // Switched off is a refusal too, and says which one it is.
   let off = counted(b, 0, "1000");
   let dark: TriggerBotRow = {
     id: off.id, owner: off.owner, kind: off.kind, name: off.name,
@@ -111,14 +95,11 @@ test("a bot's ceilings refuse with a sentence, not with silence", () => {
 
 test("the day's count rolls over rather than standing forever", () => {
   let b = counted(bot(), TRIGGER_RUNS_PER_DAY, "1000");
-  // A day and a bit later, the same bot is free again — and the ceiling that
-  // refused a moment ago now lets it through.
   let later = 1000.0 + 86400000.0 + 1000.0;
   expect(mayRun(b, 0, later).ok);
   let rolled = withRunCounted(b, later);
   expect(rolled.runsToday == 1);
   expect(rolled.dayStartedAt == `${later}`);
-  // Within the same day it simply climbs.
   let same = withRunCounted(bot(), 2000.0);
   expect(same.runsToday == 1);
   expect(same.dayStartedAt == "1000");
@@ -128,23 +109,14 @@ test("an answer is sent as prose, not as the machinery around it", () => {
   let raw = "Tunis is on CET all year.\n\n[FOLLOWUPS]{\"items\":[\"What time is it?\"]}[/FOLLOWUPS]";
   expect(plainly(raw) == "Tunis is on CET all year.");
 
-  // A block the model never closed: everything from the opening tag is
-  // machinery, and half of it on screen is worse than none.
   expect(plainly("Here you go.\n[FOLLOWUPS]{\"items\":[").trim() == "Here you go.");
 
-  // An ordinary bracket is not a block, and a markdown link keeps working.
   expect(plainly("See [the docs](https://example.com) for more.") == "See [the docs](https://example.com) for more.");
 
-  // Nothing but a block: the message is sent as it came rather than as
-  // nothing at all.
   expect(plainly("[TEXT]{\"body\":\"x\"}[/TEXT]").length > 0);
 });
 
 test("the ceilings work at a real clock, not only at toy timestamps", () => {
-  // The bug this test exists for: every other test here used stamps like
-  // "1000", where `parseInt` and `as int` both behave. At a real epoch an i32
-  // is 41 bits short, `nowMs as int` is out of bounds, and the poller
-  // crash-looped on its first pass against a live bot.
   let realNow = 1786124262180.0;
   let today = `${realNow - 3600000.0}`;
   let live: TriggerBotRow = {
@@ -156,7 +128,6 @@ test("the ceilings work at a real clock, not only at toy timestamps", () => {
   };
   expect(mayRun(live, 0, realNow).ok);
 
-  // The day still rolls over, and the count still climbs, at that clock.
   let counted = withRunCounted(live, realNow);
   expect(counted.runsToday == 4);
   expect(counted.dayStartedAt == today);
@@ -174,22 +145,14 @@ test("the ceilings work at a real clock, not only at toy timestamps", () => {
 });
 
 test("a chat's messages land in one conversation, not one each", () => {
-  // Pure half only: the row carries the thread, so the lookup has something
-  // to find. The query itself is exercised against a database by the run.
   let row = emptyMessage();
   expect(row.threadId == "");
-  // A refused message never ran, so it never opened a conversation — and it
-  // must not be mistaken for one when the next message looks for the chat's
-  // thread. That is what the `thread_id <> ''` in threadForChat is for.
   expect(row.status == "");
 });
 
 test("the test window is a timestamp, so it cannot be forgotten on", () => {
   let realNow = 1786124262180.0;
   let b = bot();
-  // No window: published. Inside one: draft. After it: published again,
-  // enforced by comparison rather than by anything remembering to turn it
-  // off — the property the whole feature hangs on.
   expect(!testingDraft(b, realNow));
   let open: TriggerBotRow = {
     id: b.id, owner: b.owner, kind: b.kind, name: b.name,
@@ -202,15 +165,12 @@ test("the test window is a timestamp, so it cannot be forgotten on", () => {
   };
   expect(testingDraft(open, realNow));
   expect(!testingDraft(open, realNow + 300001.0));
-  // And counting a run keeps the window: the copy carries it.
   expect(testingDraft(withRunCounted(open, realNow), realNow));
 });
 
 test("options become a keyboard the phone can tap, and a blank set none", () => {
   let made = replyKeyboard("Log it\nSkip\n\n  ");
   expect(made.includes("\"keyboard\":[[{\"text\":\"Log it\"}],[{\"text\":\"Skip\"}]]"));
-  // One-time: the buttons fold away after the tap rather than squatting on
-  // every later message.
   expect(made.includes("\"one_time_keyboard\":true"));
   expect(replyKeyboard("") == "");
   expect(replyKeyboard("  \n ") == "");
@@ -227,7 +187,6 @@ test("a document rides in with its caption, and a bare file still speaks", () =>
   expect(seen[0].fileSize == 52000.0);
   expect(seen[0].text == "what is this contract about?");
 
-  // No caption is not no message: the file IS the question.
   let bare = "{\"ok\":true,\"result\":[{\"update_id\":31,\"message\":{\"chat\":{\"id\":9,\"type\":\"private\"},"
     + "\"document\":{\"file_id\":\"F124\",\"file_name\":\"notes.txt\",\"file_size\":10}}}]}";
   let quiet = updatesIn(bare);
@@ -235,7 +194,6 @@ test("a document rides in with its caption, and a bare file still speaks", () =>
   expect(quiet[0].text == "");
   expect(quiet[0].fileId == "F124");
 
-  // A photo stays stepped over — this slice is documents alone.
   let photo = "{\"ok\":true,\"result\":[{\"update_id\":32,\"message\":{\"chat\":{\"id\":9},\"photo\":[]}}]}";
   expect(updatesIn(photo).length == 0);
 });
@@ -257,10 +215,7 @@ test("a group names its speakers; a private chat stays bare", () => {
 test("an answer names its file with [FILE], and the block never reaches the chat", () => {
   expect(fileBlock("Done. [FILE] /q3-report.md [/FILE]") == "/q3-report.md");
   expect(fileBlock("no block here") == "");
-  // Cut off mid-block: machinery, not a path.
   expect(fileBlock("[FILE]/half.md") == "");
-  // The first named file is the one sent.
   expect(fileBlock("[FILE]/a.md[/FILE] then [FILE]/b.md[/FILE]") == "/a.md");
-  // The caption a person reads has the block taken out already.
   expect(plainly("Here it is. [FILE]/a.md[/FILE]") == "Here it is.");
 });

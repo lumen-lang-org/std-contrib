@@ -1,9 +1,3 @@
-// Workspace files: what a name may be, what the tools answer, and what
-// promotion means. The live half — a model actually writing an artifact — is
-// exercised through a thread against a real provider.
-//
-//   cd packages/agents && lumen test workspace.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
@@ -18,16 +12,10 @@ function fresh(): void {
   forgetMigrations(database);
   execute(database, "DROP INDEX IF EXISTS files_by_thread");
   execute(database, "DROP TABLE IF EXISTS workspace_files");
-  // The plan starts at 22; alone in a fresh database that is fine — the
-  // history is per-database and these tests own theirs.
   migrate(database, workspacePlan(database));
 }
 
-// --- names --------------------------------------------------------------------------
-
 test("a file name that climbs is refused at the door", () => {
-  // These names arrive from the model as tool arguments. "../etc/passwd"
-  // dies here, not in whatever later touches the file.
   expect(!fileNameOk("../etc/passwd"));
   expect(!fileNameOk("a/../../b"));
   expect(!fileNameOk("notes/../secret.md"));
@@ -47,8 +35,6 @@ test("a separator of any kind is not a name", () => {
   expect(!fileNameOk("a\\b.md"));
   expect(!fileNameOk("a:b.md"));
 });
-
-// --- storage ------------------------------------------------------------------------
 
 test("writing a name that exists replaces it", () => {
   fresh();
@@ -83,10 +69,6 @@ test("deleting removes one file, not the workspace", () => {
   expect(listFiles(database, "t1")[0].fileName == "keep.md");
 });
 
-// --- the byte cap ---------------------------------------------------------------------
-
-// A body of exactly `n` bytes, doubled into place. Concatenating one character
-// at a time is quadratic and this is a megabyte.
 function bulk(n: int): string {
   let out = "x";
   while (out.length * 2 <= n) { out = out + out; }
@@ -96,20 +78,14 @@ function bulk(n: int): string {
 
 test("a file past the cap is refused, and nothing is written", () => {
   fresh();
-  // This door had no cap at all: whatever JSON arrived went into a text
-  // column, and a thread could be filled by one POST.
   let refused = putFile(database, { threadId: "t1", fileName: "huge.md", mime: "text/markdown", origin: "uploaded", body: bulk(UPLOAD_MAX + 1), documentId: "", now: "now" });
   expect(refused.indexOf("at most " + `${UPLOAD_MAX}` + " bytes") >= 0);
-  // Named, because a person looking at a failed upload of six files needs to
-  // know which one.
   expect(refused.indexOf("huge.md") >= 0);
   expect(listFiles(database, "t1").length == 0);
 });
 
 test("the model's own door inherits the cap", () => {
   fresh();
-  // write_file goes through putFile, so a model cannot walk around a limit
-  // the console obeys.
   let wrote = callWorkspaceTool(database, "t1", "write_file", "essay.md", bulk(UPLOAD_MAX + 1), "now");
   expect(wrote.handled);
   expect(!wrote.ok);
@@ -119,14 +95,10 @@ test("the model's own door inherits the cap", () => {
 
 test("with nothing configured the cap is a megabyte, and a file under it lands", () => {
   fresh();
-  // Today's value as the default, which is the whole contract of moving these
-  // to the environment: an operator who sets nothing gets what shipped.
   expect(UPLOAD_MAX == 1048576);
   expect(putFile(database, { threadId: "t1", fileName: "big.md", mime: "text/markdown", origin: "uploaded", body: bulk(UPLOAD_MAX), documentId: "", now: "now" }) == "");
   expect(getFile(database, "t1", "big.md").body.length == UPLOAD_MAX);
 });
-
-// --- the tools ----------------------------------------------------------------------
 
 test("the three tools are described with schemas", () => {
   let ts = workspaceTools();
@@ -138,8 +110,6 @@ test("the three tools are described with schemas", () => {
 });
 
 test("outside a thread the tools do not answer at all", () => {
-  // handled=false sends the call on to MCP; a workspace tool must not shadow
-  // a server's tool for a run that has no workspace.
   fresh();
   expect(!callWorkspaceTool(database, "", "list_files", "", "", "now").handled);
 });
@@ -152,7 +122,6 @@ test("list, write and read behave as a loop would use them", () => {
 
   let wrote = callWorkspaceTool(database, "t1", "write_file", "draft.md", "# Title", "now");
   expect(wrote.handled && wrote.ok);
-  // What the model wrote is a generated file with a mime from its name.
   let file = getFile(database, "t1", "draft.md");
   expect(file.origin == "generated");
   expect(file.mime == "text/markdown");
@@ -181,8 +150,6 @@ test("a model-invented name is refused with the rule, not stored", () => {
   expect(!bad.ok);
   expect(listFiles(database, "t1").length == 0);
 });
-
-// --- promotion helpers ---------------------------------------------------------------
 
 test("a file name becomes a plain document source", () => {
   expect(sourceOf("Q3 forecast.csv") == "Q3_forecast_csv");

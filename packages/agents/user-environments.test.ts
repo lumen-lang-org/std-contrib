@@ -1,7 +1,3 @@
-// Environments a person defines, with docker played by a shell script.
-//
-//   cd packages/agents && lumen test user-environments.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
@@ -45,8 +41,6 @@ test("a pulled-image environment is created only once the pull succeeds", () => 
   let row = userEnvById(database, made.id, "o1");
   expect(row.image == "python:3.12-slim");
   expect(row.source == "image");
-  // Resolution folds the way run_script folds: "My Scraper" is "scraper"? No —
-  // but separators are: a model typing "SCRAPER" or "scr-aper" still lands.
   expect(userEnvByName(database, "o1", "SCR_APER").id == made.id);
 });
 
@@ -74,7 +68,6 @@ test("a Dockerfile builds into a deterministic tag, from a context holding nothi
   let row = userEnvById(database, made.id, "o1");
   expect(row.source == "dockerfile");
   expect(row.image == uenvTag(made.id));
-  // The staging directory did not outlive the build.
   expect(!fs.existsSync("/tmp/agents-uenv-" + made.id));
 });
 
@@ -99,7 +92,6 @@ test("the shapes an environment refuses before docker is asked", () => {
   expect(reserved.problem.indexOf("already means something") >= 0);
   let fromless = createUserEnv(database, { owner: "o1", name: "x", image: "", dockerfile: "RUN echo hi", now: "t1" });
   expect(fromless.problem.indexOf("FROM") >= 0);
-  // Nothing above reached docker.
   expect(fs.readFileSync(FAKE_LOG) == "");
 });
 
@@ -111,10 +103,8 @@ test("somebody else's environment is absent, and deleting mine removes only a bu
   expect(userEnvById(database, pulled.id, "o2").id == "");
   expect(!forgetUserEnv(database, pulled.id, "o2"));
   fs.writeFileSync(FAKE_LOG, "");
-  // A pulled image was never ours alone: the row goes, the image stays.
   expect(forgetUserEnv(database, pulled.id, "o1"));
   expect(fs.readFileSync(FAKE_LOG).indexOf("image rm") < 0);
-  // A built image is ours: it goes with the row.
   expect(forgetUserEnv(database, built.id, "o1"));
   expect(fs.readFileSync(FAKE_LOG).indexOf("image rm -f " + uenvTag(built.id)) >= 0);
   expect(userEnvsOf(database, "o1").length == 0);

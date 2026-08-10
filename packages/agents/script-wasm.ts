@@ -1,35 +1,5 @@
-// A SCRIPT step: source in, wasm out, run with nothing granted.
-//
-//   let built = ensureBuilt(node.source);           // compiles once per hash
-//   let ran   = runScript(built.path, inputJson);   // no net, no env, one dir
-//
-// WHY WASM AND NOT A CONTAINER. A native binary calls libc directly, so its
-// permissions can only be enforced around the process — seccomp, namespaces,
-// an egress proxy — and every layer is a thing to get wrong. A wasm module's
-// only doors are the imports the host supplies. Compiling a program that
-// calls http.request to wasm produces a module importing thirty WASI
-// functions and NOT ONE SOCKET CALL: the network is not denied, the
-// instruction for it does not exist. That is a stronger claim than any
-// sandbox configuration, and it is free.
-//
-// What a script may therefore do: compute. It reads the step's input from a
-// file in the one directory the runner grants and writes its answer to
-// stdout. It cannot open a socket, read the engine's environment, or see any
-// path outside that directory — verified: without the --dir the same read
-// answers PermissionDenied.
-//
-// Reaching out is the GRAPH's job. There is an HTTP step, a web search step
-// and a documents step already, each with its own credentials and its own
-// refusals. A script that cannot do I/O is not a crippled script; it is the
-// half of the work that has no business holding a credential.
-//
-//   cd packages/agents && lumen test script-wasm.test.ts
-
 import { MAX_SOURCE } from "../workflow/workflow.ts";
 
-// Where the compiler and the runtime are. Both overridable because a
-// deployment may keep them anywhere, and both defaulting to the name on the
-// PATH, which is what a developer's box has.
 export function lumenBin(): string {
   return process.env("AGENTS_LUMEN_BIN") ?? "lumen";
 }
@@ -38,59 +8,27 @@ export function wasmtimeBin(): string {
   return process.env("AGENTS_WASMTIME_BIN") ?? "wasmtime";
 }
 
-/** Where built modules live, keyed by the hash of their source. */
 export function scriptCacheDir(): string {
   return process.env("AGENTS_SCRIPT_CACHE") ?? "/tmp/joule-script-wasm";
 }
 
-// How long a step's script may run before the runtime stops it, and how much
-// it may answer with. The timeout is wasmtime's own epoch interruption, so a
-// `while (true)` costs exactly this and not a hung scheduler — measured at
-// 2.07s for a 2s budget against a spinning loop.
 export const SCRIPT_TIMEOUT_S: int = 5;
-// And the wall clock, which is what actually bounds a script: the epoch
-// budget above is spent on wasm instructions and cannot see a blocking host
-// call. Larger than the epoch, so an ordinary overrun is still reported as
-// the runtime's own interruption rather than as a kill.
 export const SCRIPT_WALL_S: int = 8;
 export const SCRIPT_OUT_MAX: int = 262144;
 
 export type ScriptBuild = {
   ok: bool,
   path: string,
-  // The compiler's own words when it refused, first line, for the panel.
   error: string,
-  // Whether this call did the compiling. False means the cache had it.
   fresh: bool,
 };
 
-// Not `ScriptRun` — run-script.ts, the docker runner, already owns that name
-// in this package, and two types with one name is a refusal from the
-// compiler. The two are neighbours on purpose: that one runs a person's
-// script in a container with their files; this one runs a step's script in a
-// sandbox with nothing.
 export type WasmRun = {
   ok: bool,
   output: string,
   error: string,
 };
 
-/* What every script gets above its own text.
- *
- * The expression language reads {{prev}}, {{input}} and {{node.<id>}}; a
- * script reads prev(), input() and node("<id>"). Same vocabulary, so moving a
- * step from a field to a script is a rewrite of the logic and not of the
- * nouns.
- *
- * They are FILES, not a JSON document to parse. The runner grants exactly one
- * directory, so that directory can be the API: one file per value, read
- * whole. No parser in the prelude, no escaping to get wrong, and a script
- * that wants a step's answer as bytes gets it as bytes. `given()` is the
- * whole envelope for anything that wants to iterate.
- *
- * The user's own `main()` is still the entry point. Wrapping their body in a
- * function of ours would mean their line numbers no longer match the compiler
- * errors they are shown, and those errors are the only debugger they have. */
 const PRELUDE: string =
   "// --- given by the workflow ------------------------------------------\n"
   + "// These are the step's inputs. Everything else is up to you; there is\n"
@@ -106,18 +44,10 @@ const PRELUDE: string =
   + "function node(id: string): string { return given(\"node-\" + id); }\n"
   + "// --------------------------------------------------------------------\n";
 
-/** The source as it is actually compiled: the prelude, then what was
- *  written. */
 export function fullSource(source: string): string {
   return PRELUDE + source;
 }
 
-/** The name a source compiles to. The hash is the identity: the same text is
- *  the same module, so editing a step and putting it back costs nothing.
- *
- *  Over the WHOLE source, prelude included — change what a script is handed
- *  and every module must be built again, which a hash of the body alone
- *  would not notice. */
 export function scriptHash(source: string): string {
   return crypto.sha256(fullSource(source));
 }
@@ -130,12 +60,6 @@ export function scriptWasmPath(hash: string): string {
   return scriptDir(hash) + "/step.wasm";
 }
 
-/** The first line with anything on it.
- *
- *  Not simply the first line: a Lumen program's uncaught error is preceded by
- *  a blank one, so taking line zero answered "" and every guest failure was
- *  reported as "stopped without saying why" — the message was there the whole
- *  time, one line further down. */
 function firstLine(text: string): string {
   let i: int = 0;
   while (i < text.length) {
@@ -151,7 +75,6 @@ function firstLine(text: string): string {
   return "";
 }
 
-/** How many lines the prelude adds above what somebody wrote. */
 function preludeLines(): int {
   let n: int = 0;
   let i: int = 0;
@@ -162,14 +85,6 @@ function preludeLines(): int {
   return n;
 }
 
-/** A diagnostic's line number, moved back onto the line the person typed.
- *
- *  The compiler and the guest both count from the top of the file they were
- *  given, and that file begins with the prelude — so an error on the second
- *  line of a script was reported at line 15, and the reader counted down
- *  fifteen lines of code they never wrote. The subtraction happens here
- *  rather than by making the prelude a single line, because the prelude is
- *  the documentation of what a script may reach and should stay readable. */
 function atUserLine(said: string): string {
   let colon = said.indexOf(":");
   if (colon <= 0) { return said; }
@@ -179,22 +94,12 @@ function atUserLine(said: string): string {
   return `${line - preludeLines()}` + said.slice(colon);
 }
 
-/** A path prefix on a diagnostic, cut back to the file name.
- *
- *  Both the compiler and the guest report `<path>.ts:3:7: ...`, and the path
- *  is a cache directory named after a hash that nobody has heard of. What is
- *  worth showing starts at the line number. */
 function withoutPath(line: string): string {
   let at = line.indexOf(".ts:");
   if (at < 0) { return line.trim(); }
   return atUserLine(line.slice(at + 4).trim());
 }
 
-/** The compiler's refusal, as a sentence somebody can act on.
- *
- *  Lumen reports `file.ts:3:7: error: ...` with the offending line under it.
- *  The path is a temporary directory nobody has heard of, so it is cut off
- *  and what remains is the position and the reason. */
 export function compilerSaid(stderr: string, stdout: string): string {
   let text = stderr.trim() == "" ? stdout : stderr;
   let i: int = 0;
@@ -203,10 +108,6 @@ export function compilerSaid(stderr: string, stdout: string): string {
     let j = i;
     while (j < text.length && text.charCodeAt(j) != 10) { line = line + text.charAt(j); j = j + 1; }
     if (line.includes("error:")) {
-      // The source is named for its hash, so there is no fixed prefix to cut
-      // at — the first version looked for "step.ts:" and, once the file was
-      // renamed, showed the reader an absolute cache path instead of a line
-      // and column.
       let said = withoutPath(line);
       return said.length > 300 ? said.slice(0, 297) + "..." : said;
     }
@@ -216,11 +117,6 @@ export function compilerSaid(stderr: string, stdout: string): string {
   return one == "" ? "the compiler refused it and said nothing" : one;
 }
 
-/** Compile this source to wasm, unless a module for it is already built.
- *
- *  Compiling needs the network — URL imports resolve here, at build time, and
- *  never at run time — which is exactly why the two are separate: the build
- *  reaches out, the run cannot. */
 export function ensureBuilt(source: string): ScriptBuild {
   let hash = scriptHash(source);
   let dir = scriptDir(hash);
@@ -248,15 +144,7 @@ export function ensureBuilt(source: string): ScriptBuild {
       error: "the script could not be written down to compile: " + e.message, fresh: false };
     return broke;
   }
-  // --wasm, never a native build: the whole safety argument is that the
-  // artifact has no instruction for the network.
   let res = child_process.spawnSync(lumenBin(), ["compile", "--wasm", dir + "/" + hash + ".ts"]);
-  // THE OUTPUT LANDS IN THE WORKING DIRECTORY, not beside the source, and
-  // `lumen compile` takes no -o. So the source is named for its hash and the
-  // artifact is moved into place: two compiles at once cannot then collide
-  // over one `step.wasm` in the engine's own directory. The first version
-  // wrote to the cache and looked for it there, and every build "failed"
-  // while quietly succeeding.
   let dropped = hash + ".wasm";
   if (res.status != 0 || !fs.existsSync(dropped)) {
     try { if (fs.existsSync(dropped)) { fs.rmSync(dropped, false); } } catch { }
@@ -277,26 +165,12 @@ export function ensureBuilt(source: string): ScriptBuild {
   return made;
 }
 
-// How many built modules to keep. Each is around 50KB of wasm beside the
-// source it came from, and every edit of a step mints another — so left
-// alone this grows for as long as somebody is working, which on a disk that
-// is already 90% full is a slow leak with a date on it rather than a
-// theoretical one.
 export const SCRIPT_CACHE_KEEP: int = 200;
 
-/** Drop the oldest built modules once there are too many.
- *
- *  Oldest by the directory's own mtime, which the build sets when it writes
- *  the source — near enough to "least recently built", and it needs no
- *  bookkeeping file of our own to go stale. Called after a FRESH build only:
- *  a cache hit changes nothing, and sweeping on every run would stat the
- *  whole directory to learn that. */
 function sweepCache(): void {
   try {
     let names = fs.readdirSync(scriptCacheDir());
     if (names.length <= SCRIPT_CACHE_KEEP) { return; }
-    // The oldest one, dropped per sweep. A build happens once per new source,
-    // so one out per one in holds the size steady without a sort.
     let oldestAt: number = 0.0;
     let oldest = "";
     let i: int = 0;
@@ -308,20 +182,12 @@ function sweepCache(): void {
     }
     if (oldest != "") { fs.rmSync(oldest, true); }
   } catch (e) {
-    // A cache that cannot be swept is a disk problem, not a run problem: the
-    // step still has its module and the next build will try again.
   }
 }
 
-/** Run a built module over one input.
- *
- *  Everything the module can reach is in this argument vector: one directory,
- *  holding one file, which this function wrote. No --env, no network flag
- *  (there is none to give), and a timeout the runtime enforces itself. */
 export type ScriptGiven = {
   input: string,
   prev: string,
-  // Every earlier answer, as id and text. Written one file per entry.
   outputs: ScriptOut[],
 };
 
@@ -330,9 +196,6 @@ export type ScriptOut = {
   output: string,
 };
 
-/** An id that may become a filename. The ids a drawing makes are already
- *  tame, but a name is a path the moment it is joined to one, and a step
- *  called "../../etc" must not be able to say where its file goes. */
 function tameId(id: string): bool {
   if (id == "" || id.length > 64) { return false; }
   let i: int = 0;
@@ -347,17 +210,12 @@ function tameId(id: string): bool {
 
 export function runScript(wasmPath: string, given: ScriptGiven, callDir: string): WasmRun {
   try {
-    // Both levels: mkdirSync makes one directory, not a path, and a missing
-    // PARENT here failed silently — no throw to catch — leaving wasmtime to
-    // report "No such file or directory" about a preopen, which reads as a
-    // broken module rather than a directory nobody made.
     let cut = callDir.lastIndexOf("/");
     if (cut > 0) {
       let parent = callDir.slice(0, cut);
       if (!fs.existsSync(parent)) { fs.mkdirSync(parent); }
     }
     if (!fs.existsSync(callDir)) { fs.mkdirSync(callDir); }
-    // One file per value: the granted directory IS the API the prelude reads.
     fs.writeFileSync(callDir + "/input", given.input);
     fs.writeFileSync(callDir + "/prev", given.prev);
     let o: int = 0;
@@ -372,7 +230,6 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
       error: "the step's input could not be handed over: " + e.message };
     return broke;
   }
-  // Checked, not assumed, for the same reason.
   if (!fs.existsSync(callDir + "/prev")) {
     let gone: WasmRun = { ok: false, output: "",
       error: "the step's input could not be written to " + callDir };
@@ -382,10 +239,6 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
   args.push("run");
   args.push("-W");
   args.push("timeout=" + `${SCRIPT_TIMEOUT_S}` + "s");
-  // The host directory, mounted as the guest's root — the arrangement that
-  // works: a preopen at "/" and a RELATIVE read inside the module. Mapping it
-  // to a named directory and reading an absolute path answers
-  // PermissionDenied, which cost an afternoon to learn.
   args.push("--dir=" + callDir + "::/");
   args.push(wasmPath);
   let timed: string[] = [];
@@ -397,11 +250,6 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
   while (a < args.length) { timed.push(args[a]); a = a + 1; }
   let res = child_process.spawnSync("timeout", timed);
   if (res.status != 0) {
-    // The epoch budget is spent on WASM INSTRUCTIONS, so a script sitting in
-    // a blocking host call is not interrupted by it — a network attempt ran
-    // for twenty-five seconds against a five second budget, because the time
-    // went inside poll_oneoff and not in the module. `timeout` bounds the
-    // wall clock the epoch cannot see; 124 is what it reports.
     if (res.status == 124 || res.status == 137) {
       let late: WasmRun = { ok: false, output: "",
         error: "the script ran longer than " + `${SCRIPT_WALL_S}` + " seconds and was stopped" };
@@ -414,9 +262,6 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
     } else if (why == "") {
       why = "the script stopped without saying why";
     } else {
-      // The guest's own diagnostic, minus the cache path in front of it. It
-      // already names what it could not reach, so nothing is prepended: two
-      // sentences glued together read as one confused one.
       why = withoutPath(why);
     }
     let failed: WasmRun = { ok: false, output: "", error: why };
@@ -428,9 +273,6 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
       error: "the script answered " + `${said.length}` + " characters — the most a step may pass on is " + `${SCRIPT_OUT_MAX}` };
     return loud;
   }
-  // The call directory held one run's input and has no reader left. Kept, a
-  // workflow that runs every minute leaves a directory a minute behind it
-  // forever.
   try { fs.rmSync(callDir, true); } catch (e) { }
   let done: WasmRun = { ok: true, output: said.trim(), error: "" };
   return done;

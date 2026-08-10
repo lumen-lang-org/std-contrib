@@ -5,10 +5,6 @@ import { readSetting, writeSetting } from "../../schema.ts";
 import { jsonText } from "../../scan.ts";
 import { utf8Length } from "../../artifacts.ts";
 
-// The /banner routes: the controller and what it decides.
-
-// A sentence, not a page. Bytes rather than characters, because the limit is
-// what the column holds and an accented sentence is longer than it looks.
 export const BANNER_MAX: int = 500;
 
 export function bannerProblem(text: string): string {
@@ -26,8 +22,6 @@ export function bannerShow(db: Db): Reply {
   return ok(bannerJson(readSetting(db, "banner")));
 }
 
-// "" takes the banner down — same row, empty value — so there is no delete
-// route to keep in step.
 export function bannerChange(db: Db, body: string): Reply {
   if (body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
   let text = jsonText(body, "text");
@@ -46,15 +40,11 @@ export class BannerApi {
     this.db = db;
   }
 
-  // Public in the same sense the healthz is: it is one string the operator
-  // wrote for everyone to read, and a guest sees the banner too.
   @get("/")
   show(req: Request): Reply {
     return bannerShow(this.db);
   }
 
-  // Writing goes through the gateway's authenticated tier like every other
-  // operator surface.
   @put("/")
   change(req: Request): Reply {
     return bannerChange(this.db, req.body);

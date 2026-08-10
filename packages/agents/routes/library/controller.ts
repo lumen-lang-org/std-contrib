@@ -4,8 +4,6 @@ import { Reply, Request, ok } from "../../../rest/server.ts";
 import { callerTags } from "../../api-core.ts";
 import { libraryFor } from "../../artifacts.ts";
 
-// The /artifacts routes.
-
 @controller("/artifacts")
 export class LibraryApi {
   db: Db;

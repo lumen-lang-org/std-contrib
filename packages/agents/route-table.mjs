@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Derives the REST route table statically from the controllers, so a refactor can prove it moved no route.
-// Usage: node route-table.mjs [files...] > before.txt   then diff after the split.
 
 import { readFileSync } from "node:fs";
 
@@ -17,7 +15,6 @@ for (const file of files) {
     if (prefix && !cls) { const k = /\bclass\s+(\w+)/.exec(line); if (k) { cls = k[1]; continue; } }
     const v = /@(get|post|put|patch|del|head)\("([^"]*)"\)/.exec(line);
     if (v && prefix) { pending.push({ method: VERB[v[1]], path: v[2] }); continue; }
-    // The decorators sit above the method they describe; the name closes them.
     const m = /^\s*(?:@\w+\([^)]*\)\s*)*(\w+)\s*\(\s*\w+\s*:\s*Request\s*\)/.exec(line);
     if (m && pending.length) {
       for (const p of pending) {

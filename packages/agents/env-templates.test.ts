@@ -1,7 +1,3 @@
-// The operator's catalog of environment recipes.
-//
-//   cd packages/agents && lumen test env-templates.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
@@ -33,7 +29,6 @@ test("a template stores its recipe and normalises its tags", () => {
   expect(all.length == 1);
   expect(all[0].source == "image");
   expect(all[0].image == "python:3.12-slim");
-  // Tags lowercased, trimmed, empties dropped.
   expect(all[0].tags == "python,data");
 });
 
@@ -58,7 +53,6 @@ test("featured templates sort to the front by rank, the rest by name", () => {
   let all = envTemplatesAll(database);
   expect(all[0].name == "Featured-one");
   expect(all[1].name == "Featured-two");
-  // Then the unfeatured, alphabetical.
   expect(all[2].name == "Apple");
   expect(all[3].name == "Zebra");
 });

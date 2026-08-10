@@ -1,29 +1,5 @@
-// Google service-account auth, for Vertex AI.
-//
-//   let bearer = vertexBearer(saJson, Date.now());
-//   if (!bearer.ok) { /* bearer.error is a sentence */ }
-//   headers.set("authorization", "Bearer " + bearer.token);
-//
-// Vertex is the one provider whose credential is not the thing sent on the
-// wire: the stored secret is a service-account JSON, and what the request
-// carries is an OAuth2 access token minted from it — signed JWT in, token
-// out, dead within the hour. So the credential store keeps the JSON (it never
-// expires and rotation is an operator action), and this file turns it into
-// tokens on demand, caching each one until just before its expiry.
-//
-// The signing is RS256 through the openssl binary, file-based — the same
-// shell-out idiom the package already uses for docker and base64. No SDK: the
-// whole exchange is one signature and one POST, and a dependency for that is
-// a supply chain for two curl-sized steps.
-
 import { Db } from "../plume/driver.ts";
 
-// A service-account JSON, whole. JSON.parse here is strict in both
-// directions — a field the record does not declare refuses the parse, and so
-// does a declared field the document lacks — so this declares exactly what
-// Google's console exports, all eleven fields, though only four are read.
-// A future Google field would refuse a freshly rotated key at the door;
-// when that happens the fix is one line here.
 export type ServiceAccount = {
   type: string,
   project_id: string,
@@ -41,8 +17,6 @@ export type ServiceAccount = {
 export type VertexBearer = {
   ok: bool,
   token: string,
-  // Epoch millis after which the token must not be reused. Held for the
-  // cache; a caller never needs it.
   expiresAt: number,
   error: string,
 };
@@ -52,22 +26,14 @@ function bearerRefused(why: string): VertexBearer {
   return out;
 }
 
-// One cached token per service account, keyed by client_email — two agents
-// on the same account share a token, two accounts never collide. Reassigned
-// module state, like the script-run counter.
 let vertexTokens: Map<string, VertexBearer> = new Map<string, VertexBearer>();
 
-// How much of a token's life must remain for the cache to hand it out. Five
-// minutes: a token that expires mid-run fails on the last round of a long
-// agent turn, which is the most expensive possible moment to learn the time.
 const VERTEX_EXPIRY_SLACK_MS: number = 300000;
 
 export function vertexForget(): void {
   vertexTokens = new Map<string, VertexBearer>();
 }
 
-// Base64url of a file's bytes, via openssl: encode, then swap the alphabet
-// and drop the padding. File-based throughout — spawnSync carries no stdin.
 function b64urlOfFile(path: string): string {
   let res = child_process.spawnSync("openssl", ["base64", "-A", "-in", path]);
   if (res.status != 0) { return ""; }
@@ -84,10 +50,6 @@ function b64urlOfFile(path: string): string {
   return out;
 }
 
-// The access token for one service-account JSON, minted or cached.
-//
-// `now` is a parameter rather than a call to the clock so a test can hold
-// time still — and hand it a token's whole lifetime in one tick.
 export function vertexBearer(saJson: string, now: number): VertexBearer {
   let sa: ServiceAccount = { type: "", project_id: "", private_key_id: "", private_key: "",
     client_email: "", client_id: "", auth_uri: "", token_uri: "",
@@ -112,9 +74,6 @@ export function vertexBearer(saJson: string, now: number): VertexBearer {
 }
 
 function mintToken(sa: ServiceAccount, now: number): VertexBearer {
-  // A private working directory per mint. The private key touches disk —
-  // openssl signs files, not arguments — so the directory is 0700, the files
-  // live for milliseconds, and everything is removed on every path out.
   let dir = "/tmp/agents-vertex-" + crypto.randomUUID();
   try {
     fs.mkdirSync(dir, true);
@@ -156,8 +115,6 @@ function mintTokenIn(dir: string, sa: ServiceAccount, now: number): VertexBearer
   let signed = child_process.spawnSync("openssl",
     ["dgst", "-sha256", "-sign", dir + "/key.pem", "-out", dir + "/sig", dir + "/input"]);
   if (signed.status != 0) {
-    // openssl's first stderr line names the real problem ("unable to load
-    // key"), which is what an operator with a mispasted key needs to read.
     let detail = signed.stderr.split("\n")[0];
     return bearerRefused("the service-account key did not sign: " + detail);
   }
@@ -186,8 +143,6 @@ function mintTokenIn(dir: string, sa: ServiceAccount, now: number): VertexBearer
   return minted;
 }
 
-// access_token out of the exchange's answer, without trusting the rest of
-// its shape.
 function tokenFrom(body: string): string {
   let at = body.indexOf("\"access_token\"");
   if (at < 0) { return ""; }

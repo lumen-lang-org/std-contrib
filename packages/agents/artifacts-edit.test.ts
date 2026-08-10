@@ -1,10 +1,3 @@
-// What edit_artifact's transaction promises: refusals that quote what they
-// saw, a version log nothing ever replaces, and a pointer whose metadata an
-// edit never touches. All against a SQLite temp file — nothing here reaches
-// :8100, :5173, or the live database.
-//
-//   cd packages/agents && lumen test artifacts-edit.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/plume.ts";
@@ -23,7 +16,6 @@ function fresh(): void {
   migrate(database, artifactPlan(database));
 }
 
-// The one body most cases start from.
 function seeded(body: string): void {
   fresh();
   putArtifact(database, {
@@ -42,8 +34,6 @@ function edit(oldText: string, newText: string): ArtifactEdit {
   return out;
 }
 
-// A version row inserted behind the pointer's back — the concurrent winner
-// of the race cases, and the broken states the refusals guard.
 function outOfBand(artifactId: string, version: int, body: string): void {
   executeWith(database,
     "INSERT INTO artifact_versions (id, artifact_id, version, body, bytes, origin, turn_seq, note, created_at) VALUES ("
@@ -54,15 +44,12 @@ function outOfBand(artifactId: string, version: int, body: string): void {
      "generated", "9", "out of band", "1500"]);
 }
 
-// n copies of `piece`.
 function fill(piece: string, n: int): string {
   let out = "";
   let i: int = 0;
   while (i < n) { out = out + piece; i = i + 1; }
   return out;
 }
-
-// --- the happy path, and what it leaves untouched ---------------------------------
 
 test("an edit appends the next version and moves only the pointer's version and date", () => {
   seeded("alpha\nbeta\ngamma\n");
@@ -73,13 +60,9 @@ test("an edit appends the next version and moves only the pointer's version and 
   expect(done.version == 2);
   expect(done.line == 2);
 
-  // The new body, whole, and the old one untouched — append-only.
   expect(getVersion(database, before.id, 2).body == "alpha\ndelta\ngamma\n");
   expect(getVersion(database, before.id, 1).body == "alpha\nbeta\ngamma\n");
 
-  // The rotate-bug regression: only current_version and updated_at move. An
-  // edit has no opinion about metadata, and a full-row persist is exactly how
-  // a pointer once got rewound (api.ts:1351).
   let after = getArtifact(database, "t1", "/notes.md");
   expect(after.currentVersion == 2);
   expect(after.updatedAt == "2000");
@@ -118,8 +101,6 @@ test("a note the model did send is stored as sent", () => {
   expect(getVersion(database, row.id, 2).note == "fixed the figure");
 });
 
-// --- refusals ---------------------------------------------------------------------
-
 test("zero matches refuses, with no version written", () => {
   seeded("alpha\nbeta\n");
   let done = editArtifact(database, edit("zeta", "eta"));
@@ -138,11 +119,6 @@ test("the zero-match refusal names a whitespace near miss when one exists", () =
 });
 
 test("a miss that is only backslash escaping is named as exactly that, in both directions", () => {
-  // The body holds a Windows path as JSON does: two characters per
-  // backslash. A model that unescapes once sends one, and one that escapes
-  // once more sends four — the live loop that reverted a user's path was a
-  // model alternating between those two guesses, told only "matches
-  // nothing" each time.
   seeded("{\n  \"UserConfigId\": \"D:\\\\Fo2pdf\\\\config\\\\USERCONFIG.XML\"\n}\n");
   let unescaped = editArtifact(database, edit("\"D:\\Fo2pdf\\config\\USERCONFIG.XML\"", "\"c:/fop/userconfig.xml\""));
   expect(!unescaped.ok);
@@ -154,10 +130,8 @@ test("a miss that is only backslash escaping is named as exactly that, in both d
   expect(!overescaped.ok);
   expect(overescaped.problem.indexOf("FEWER backslashes") >= 0);
 
-  // And nothing was written by either refusal.
   expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
 
-  // The exact text lands first try.
   let right = editArtifact(database, edit("\"D:\\\\Fo2pdf\\\\config\\\\USERCONFIG.XML\"", "\"c:/fop/userconfig.xml\""));
   expect(right.ok);
 });
@@ -184,8 +158,6 @@ test("more than one match refuses with numbered hits, lines and snippets", () =>
 });
 
 test("overlapping occurrences are ambiguous, not unique", () => {
-  // "aa" in "aaa" — counted non-overlapping this would be one match and a
-  // silent wrong-region splice. The refusal is the design decision.
   seeded("aaa\n");
   let done = editArtifact(database, edit("aa", "b"));
   expect(!done.ok);
@@ -245,8 +217,6 @@ test("a splice past the artifact byte cap refuses in putArtifact's words", () =>
 
 test("a splice past the thread byte cap refuses, naming the cap", () => {
   seeded("alpha\nbeta\n");
-  // A sibling whose stored byte count already fills the thread budget — the
-  // cap reads SUM(bytes), so the claim is enough and the test stays cheap.
   let put = putArtifact(database, {
     threadId: "t1", path: "/big.md", title: "", content: "tiny",
     note: "", origin: "generated", mustCreate: false,
@@ -262,15 +232,7 @@ test("a splice past the thread byte cap refuses, naming the cap", () => {
   expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
 });
 
-// --- the race: the concurrency section, executable --------------------------------
-
 test("a concurrent append elsewhere in the file merges cleanly on top", () => {
-  // The winner landed version 2 (line 1 changed) and the pointer has not
-  // caught up — exactly the window between the edit's read and its INSERT.
-  // The unique index fails the first INSERT, and the retry re-reads the
-  // winner's body: the edited region is untouched, so the edit lands at
-  // version 3 with both changes, and the winner's version was a parent, not
-  // a casualty.
   seeded("alpha\nbeta\ngamma\n");
   outOfBand("t1:/notes.md", 2, "ALPHA\nbeta\ngamma\n");
   let done = editArtifact(database, edit("beta", "delta"));
@@ -279,7 +241,6 @@ test("a concurrent append elsewhere in the file merges cleanly on top", () => {
   let row = getArtifact(database, "t1", "/notes.md");
   expect(row.currentVersion == 3);
   expect(getVersion(database, row.id, 3).body == "ALPHA\ndelta\ngamma\n");
-  // Nothing was replaced: the winner's body is still on the log, whole.
   expect(getVersion(database, row.id, 2).body == "ALPHA\nbeta\ngamma\n");
 });
 
@@ -289,7 +250,6 @@ test("a concurrent change inside the edited region refuses as changed-underneath
   let done = editArtifact(database, edit("beta", "delta"));
   expect(!done.ok);
   expect(done.problem.indexOf("changed while you were editing") >= 0);
-  // Refused, never silently overwritten: no version 3 exists.
   let row = getArtifact(database, "t1", "/notes.md");
   expect(getVersion(database, row.id, 3).id == "");
 });

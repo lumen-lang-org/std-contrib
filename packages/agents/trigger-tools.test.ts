@@ -1,8 +1,3 @@
-// The bot verbs, without a bot: naming, gating, the window's arithmetic, and
-// the sentence a person gets back. The live half is a phone.
-//
-//   cd packages/agents && lumen test trigger-tools.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, dropTable, persist } from "../plume/plume.ts";
@@ -22,13 +17,9 @@ function db(): Db {
     forgetMigrations(database);
     dropTable(database, workflowsMapping());
     dropTable(database, triggerBotsMapping());
-    // Every table the plan creates: a file-backed db remembers, and a CREATE
-    // that hits a survivor aborts the plan half-done.
     dropTable(database, triggerInboxMapping());
     dropTable(database, triggerOutboxMapping());
     dropTable(database, triggerPendingMapping());
-    // One plan, the api.ts way: plume refuses a second plan whose numbers
-    // sort below history the first one wrote.
     let plan: Migration[] = [];
     let a = workflowsPlan(database);
     let i: int = 0;
@@ -111,8 +102,6 @@ test("somebody else's bots are invisible, and nobody's are refused", () => {
   let strangers = call("o2", "list_bots", "{}");
   expect(strangers.ok);
   expect(strangers.text.includes("No bots yet"));
-  // The shared gate's own rule: guests are refused; a bare "" is only
-  // refused where the proxy is trusted, which a test box is not.
   let guest = call("guest:abc", "list_bots", "{}");
   expect(!guest.ok);
 });

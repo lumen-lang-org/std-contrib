@@ -3,14 +3,6 @@ import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, ok } from "../../../rest/server.ts";
 import { pendingJobs } from "../../indexing.ts";
 
-// The /jobs routes.
-
-// The folder tree, as the documents describe it.
-//
-// Derived, not stored: there is no folder table to keep in step with the rows,
-// so a folder exists exactly as long as something is in it.
-// What the indexer is doing, across every folder. The console polls this
-// while anything is in flight.
 @controller("/jobs")
 export class JobApi {
   db: Db;

@@ -8,12 +8,6 @@ import { backendOr, knownBackend } from "../../payload.ts";
 import { TraceConfigRow, traceConfigMapping } from "../../trace.ts";
 import { TraceSecret } from "./types.ts";
 
-// The /tracing routes.
-
-// Whether the collector may be moved, given the secret stored for it.
-//
-// `PUT /tracing` sets `endpoint` freely and the langfuse backend sends
-// `Authorization: Basic <public>:<secret>` to it.
 export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
   let held = findById(db, traceConfigMapping(), "default");
   let was = "";
@@ -29,10 +23,6 @@ export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
   return destinationProblem(move);
 }
 
-// Where traces go, configured like everything else.
-//
-// Off unless a row says otherwise, and off is not an error: a deployment with
-// no collector runs exactly as it did before this existed.
 @controller("/tracing")
 export class TraceApi {
   db: Db;
@@ -43,9 +33,6 @@ export class TraceApi {
     this.master = master;
   }
 
-  // What is configured, and whether it would actually send. The secret is
-  // never in this answer -- only whether one is stored, which is the only
-  // thing a caller needs to know.
   @get("/")
   status(req: Request): Reply {
     let document = findById(this.db, traceConfigMapping(), "default");
@@ -54,9 +41,6 @@ export class TraceApi {
     }
     let row: TraceConfigRow = JSON.parse<TraceConfigRow>(document);
     let hasSecret = credentialFor(this.db, "tracing", this.master) != "";
-    // `active` is the question that matters: enabled, addressed and keyed.
-    // Three ways to be configured and still silent, so it is answered rather
-    // than left to be inferred from the other fields.
     return ok("{\"configured\":true,\"active\":" + `${tracing(tracerFor(this.db, this.master))}`
       + ",\"backend\":" + JSON.stringify(backendOr(row.backend))
       + ",\"endpoint\":" + JSON.stringify(row.endpoint)
@@ -67,9 +51,6 @@ export class TraceApi {
       + ",\"secretStored\":" + `${hasSecret}` + "}");
   }
 
-  // The collector's address and labels. Written whole rather than field by
-  // field: there is one row, and a partial update of a connection is how you
-  // get a deployment pointing half at one collector and half at another.
   @put("/")
   configure(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required"); }
@@ -96,8 +77,6 @@ export class TraceApi {
     return this.status(req);
   }
 
-  // The secret half, through the same encrypted store as a provider's key --
-  // and, like those, it can be written and never read back.
   @put("/key")
   setKey(req: Request): Reply {
     let problem = masterKeyProblem(this.master);
@@ -109,10 +88,6 @@ export class TraceApi {
     return this.status(req);
   }
 
-  // Clearing the secret is how the collector's address is moved: writing a
-  // key is what authorises an address, so changing the address means writing
-  // the key again. Destructive on purpose — whoever moves the collector has to
-  // be able to supply the secret a second time.
   @del("/key")
   clearKey(req: Request): Reply {
     if (!forgetCredential(this.db, "tracing")) {

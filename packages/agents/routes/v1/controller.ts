@@ -5,13 +5,6 @@ import { forwardProduct, stamp } from "../../api-core.ts";
 import { hasScope, touchApiKey, verifyApiKey } from "../../api-keys.ts";
 import { presentedKey } from "../../search-gateway.ts";
 
-// The /v1 routes.
-
-// The public product API, reached with an API key. Its own front-door
-// exemption (publicPath) lets a jl_ key past the internal token and the proxy
-// identity check, because this door authenticates the key itself and nothing
-// else. Scopes gate which product a key may call; a use is stamped after a
-// forward so the key list can say a key is alive.
 @controller("/v1")
 export class V1Api {
   db: Db;

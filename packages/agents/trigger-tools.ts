@@ -1,20 +1,3 @@
-// The bot, managed by a sentence.
-//
-// "Pause my bot", "point it at Linear over Telegram", "test the draft for
-// five minutes" — the verbs a person reaches for about the thing that
-// answers their chat. Everything the trigger panel can do EXCEPT the token:
-// a credential typed into a conversation would sit in the transcript
-// forever, so connecting a new bot stays in the console, and these tools say
-// so instead of accepting one.
-//
-// The shape is task-tools' and workflow-tools': fixed names, refused for a
-// caller with no owner, one sentence back that a model can repeat. And
-// because the Telegram bot's own conversations mount the same tools, these
-// verbs work FROM the chat they govern — texting your bot "pause yourself"
-// does exactly that, which is the whole reason this file is worth its size.
-//
-//   cd packages/agents && lumen test trigger-tools.test.ts
-
 import { Db } from "../plume/driver.ts";
 import { findById, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
@@ -80,7 +63,6 @@ export type TriggerToolCall = {
   nowMs: number,
 };
 
-/** One bot said by name or id, or an empty row. Owner-scoped like everything. */
 function botSaid(db: Db, owner: string, said: string): TriggerBotRow {
   let rows = JSON.parse<TriggerBotRow[]>(botsOf(db, owner));
   let i: int = 0;
@@ -111,7 +93,6 @@ function emptyish(): TriggerBotRow {
   return none;
 }
 
-/** A workflow said by name or id, owner's own. */
 function workflowSaid(db: Db, owner: string, said: string): WorkflowRow {
   let doc = findById(db, workflowsMapping(), said);
   if (doc != "") {
@@ -134,7 +115,6 @@ function workflowSaid(db: Db, owner: string, said: string): WorkflowRow {
   return none;
 }
 
-/** One bot, described the way the panel would. */
 export function describeBot(db: Db, bot: TriggerBotRow, nowMs: number): string {
   let flowDoc = findById(db, workflowsMapping(), bot.workflowId);
   let flowName = flowDoc == "" ? bot.workflowId : jsonText(flowDoc, "name");
@@ -153,8 +133,6 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
   if (call.name != "list_bots" && call.name != "change_bot" && call.name != "test_bot_draft") {
     return not();
   }
-  // The workflow-tools gate, for the workflow-tools reason: a bot is a
-  // standing instruction with a bill attached and has to belong to somebody.
   if (!maySchedule(call.owner)) {
     return no("signing in is what makes a bot theirs to keep — say so.");
   }
@@ -186,7 +164,6 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
       let flow = workflowSaid(db, call.owner, flowSaid);
       if (flow.id == "") { return no("no workflow called \"" + flowSaid + "\" — list_workflows shows them."); }
       workflowId = flow.id;
-      // The graph must be able to answer a chat, the save-time rule.
       if ((flow.publishedGraph ?? "") == "" && flow.graph == "") {
         return no("\"" + flow.name + "\" has nothing to run yet.");
       }
@@ -212,7 +189,6 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
     return yes(word + note + "\n\n" + describeBot(db, edited, call.nowMs));
   }
 
-  // test_bot_draft.
   let minutes = parseInt(jsonRaw(call.args, "minutes").trim(), 10) ?? 5;
   if (minutes < 0) { minutes = 0; }
   if (minutes > 30) { minutes = 30; }

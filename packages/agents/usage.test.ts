@@ -1,11 +1,3 @@
-// What a tenant has used, and whose numbers it is.
-//
-// The route this backs is the one a control plane bills from, so the two
-// things asked here are the two that would cost real money to get wrong: a
-// sum must not include somebody else's rows, and it must not wrap.
-//
-//   cd packages/agents && lumen test usage.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/plume.ts";
@@ -35,11 +27,7 @@ function fresh(): void {
   execute(database, "DROP TABLE IF EXISTS threads");
   execute(database, "DROP TABLE IF EXISTS run_steps");
   execute(database, "DROP TABLE IF EXISTS runs");
-  // 103 ALTERs projects: left standing, the second run of this fixture meets
-  // a duplicate files_thread_id and the plan stops there.
   execute(database, "DROP TABLE IF EXISTS projects");
-  // Three plans, not sorted between them — `migrate` orders a plan itself, the
-  // same way api.ts hands it eleven of these end to end.
   let plan = threadPlan(database);
   let results = artifactPlan(database);
   let r: int = 0;
@@ -47,8 +35,6 @@ function fresh(): void {
   let runs = runLogPlan(database);
   let n: int = 0;
   while (n < runs.length) { plan.push(runs[n]); n = n + 1; }
-  // The threads mapping carries project_id, whose ALTER rides projectsPlan —
-  // without it every openThread below is a column short.
   let grouped = projectsPlan(database);
   let g: int = 0;
   while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
@@ -73,8 +59,6 @@ function spentRun(input: int, output: int): AgentRun {
   return r;
 }
 
-// A conversation with one artifact of `bytes` bytes and one run that spent
-// `input`/`output` tokens. Returns the thread id.
 function spent(owner: string, word: string, bytes: int, input: int, output: int): string {
   let id = openThread(database, { agentId: "a1", owner: owner, now: "1700000000000" });
   let body = "";
@@ -105,8 +89,6 @@ test("one owner's bytes and tokens are that owner's, and nobody else's", () => {
 test("every version counts, because every version is still on disk", () => {
   fresh();
   let id = spent("u-alice", "lyon", 100, 10, 1);
-  // A second write of the same path appends a version; the first body does not
-  // go anywhere, so the tenant is still holding it.
   putArtifact(database, {
     threadId: id, path: "/lyon.md", title: "lyon", content: "second draft",
     note: "", origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE, now: "1700000000001",
@@ -121,8 +103,6 @@ test("a tenant with nothing is zeros rather than nothing", () => {
   expect(stranger.bytes == "0");
   expect(stranger.inputTokens == "0");
   expect(stranger.outputTokens == "0");
-  // "" is a real tag — every row written before the gateway existed carries
-  // it — and it is asked about the same way.
   expect(ownerUsage(database, "").bytes == "0");
 });
 
@@ -136,9 +116,6 @@ test("the pre-gateway rows are their own tenant, not everybody's", () => {
 
 test("a sum wider than an i32 comes back whole", () => {
   fresh();
-  // Two billion tokens is a month for one busy tenant. Parsed into an int the
-  // total would wrap and the bill would be wrong in the direction nobody
-  // notices, so the digits are carried as text from the database to the JSON.
   spent("u-alice", "lyon", 10, 2000000000, 2000000000);
   spent("u-alice", "paris", 10, 2000000000, 2000000000);
   let hers = ownerUsage(database, "u-alice");
@@ -156,8 +133,6 @@ test("the reply carries numbers a client can add up without unquoting them", () 
   expect(out.indexOf("\"outputTokens\":7") >= 0);
 });
 
-// A run's created_at is written as `Date.now()` millis text; the window tests
-// need rows at chosen moments, so they are moved there after the fact.
 function backdate(question: string, createdAt: string): void {
   executeWith(database, "UPDATE runs SET created_at = " + placeholderAt(database, 1)
     + " WHERE question = " + placeholderAt(database, 2), [createdAt, question]);
@@ -169,40 +144,29 @@ test("runsSince counts one owner's runs after the cutoff, failed ones included",
   spent("guest:aa", "two", 10, 1, 1);
   spent("guest:aa", "old", 10, 1, 1);
   spent("guest:bb", "other", 10, 1, 1);
-  // The moments: the cutoff is 2024-02-01T00:00:00Z as millis text, "old" is
-  // the millisecond before it, the rest fall inside the day.
   backdate("about old", "1706745599999");
   backdate("about one", "1706745600000");
   backdate("about two", "1706795999999");
   backdate("about other", "1706795999999");
-  // A failed run spent a provider call too, so it counts the same.
   executeWith(database, "UPDATE runs SET ok = 0 WHERE question = " + placeholderAt(database, 1), ["about two"]);
 
   expect(runsSince(database, "guest:aa", "1706745600000") == 2);
   expect(runsSince(database, "guest:bb", "1706745600000") == 1);
   expect(runsSince(database, "guest:cc", "1706745600000") == 0);
-  // The cutoff a caller inside that day would compute lands on the same edge.
   expect(utcDayStartText(1706795999999) == "1706745600000");
   expect(runsSince(database, "guest:aa", utcDayStartText(1706795999999)) == 2);
 });
 
 test("the guest day starts at UTC midnight and says when the next one is", () => {
-  // 2024-02-01T13:59:59.999Z: the day started at 00:00 and resets at the
-  // 2nd's midnight — a leap-year February, so the calendar math is exercised.
   expect(utcDayStartText(1706795999999) == "1706745600000");
   expect(nextUtcMidnightIso(1706795999999) == "2024-02-02T00:00:00Z");
-  // 36000001ms to midnight: Retry-After rounds up, never down.
   expect(secondsToUtcMidnight(1706795999999) == 36001);
-  // A year boundary, and the zero-padding both fields need in January.
   expect(nextUtcMidnightIso(1735689500000) == "2025-01-01T00:00:00Z");
 });
 
 test("a database that answers nonsense reports zero rather than broken JSON", () => {
   fresh();
   let id = spent("u-alice", "lyon", 100, 30, 7);
-  // There is no way to make SUM answer this through the API, which is the
-  // point: the guard is against the column type changing under the query, and
-  // what it must never do is interpolate whatever it found into a reply.
   executeWith(database, "UPDATE runs SET input_tokens = " + placeholderAt(database, 1) + " WHERE thread_id = " + placeholderAt(database, 2),
     ["not a number", id]);
   expect(ownerUsage(database, "u-alice").inputTokens == "0");
