@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { View, view, render } from "../../../press/template.ts";
 import { placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, header, notFound, param, queryParam, reply } from "../../../rest/server.ts";
+import { Reply, Request, header, notFound, param, reply } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { ArtifactRow, findByToken, getArtifact, getVersion, imageMediaType } from "../../artifacts.ts";
 import { officeRender, officeRenderExt } from "../../office-render.ts";
@@ -159,10 +159,10 @@ export class PreviewApi {
   }
 
   @get("/:token")
-  preview(req: Request): Reply {
-    let artifact = findByToken(this.db, param(req, "token"));
+  preview(req: Request, @PathVariable("token") token: string,
+          @RequestParam("v", "") asked: int): Reply {
+    let artifact = findByToken(this.db, token);
     if (artifact.id == "") { return notFound("artifact"); }
-    let asked = parseInt(queryParam(req, "v", "")) ?? 0;
     if (asked < 1) {
       let newest = nextVersion(this.db, artifact.id) - 1;
       let current = getVersion(this.db, artifact.id, newest);
@@ -181,16 +181,17 @@ export class PreviewApi {
   }
 
   @get("/:token/*path")
-  sibling(req: Request): Reply {
-    let artifact = findByToken(this.db, param(req, "token"));
+  sibling(req: Request, @PathVariable("token") token: string,
+          @PathVariable("path") path: string): Reply {
+    let artifact = findByToken(this.db, token);
     if (artifact.id == "") { return notFound("artifact"); }
-    if (param(req, "path") == "__version") {
+    if (path == "__version") {
       let stamp = reply(200, previewStamp(this.db, artifact.threadId), "text/plain; charset=utf-8");
       stamp.headers.set("access-control-allow-origin", "*");
       stamp.headers.set("cache-control", "no-store");
       return stamp;
     }
-    let found = getArtifact(this.db, artifact.threadId, param(req, "path"));
+    let found = getArtifact(this.db, artifact.threadId, path);
     if (found.id == "") { return notFound("artifact"); }
     let row = getVersion(this.db, found.id, found.currentVersion);
     if (row.id == "") { return notFound("artifact"); }

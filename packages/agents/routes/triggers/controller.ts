@@ -74,16 +74,16 @@ export class TriggerApi {
   }
 
   @get("/:id")
-  one(req: Request): Reply {
+  one(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("bot " + param(req, "id")); }
+    if (mine.id == "") { return notFound("bot " + id); }
     return ok(JSON.stringify(mine));
   }
 
   @put("/:id")
-  update(req: Request): Reply {
+  update(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("bot " + param(req, "id")); }
+    if (mine.id == "") { return notFound("bot " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
     let ask: TriggerChangeAsk = JSON.parse<TriggerChangeAsk>(req.body);
     let workflowId = ask.workflowId ?? "";
@@ -108,9 +108,9 @@ export class TriggerApi {
   }
 
   @post("/:id/test")
-  test(req: Request): Reply {
+  test(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("bot " + param(req, "id")); }
+    if (mine.id == "") { return notFound("bot " + id); }
     let minutes: int = 5;
     if (req.body != "") {
       let ask: TriggerTestAsk = JSON.parse<TriggerTestAsk>(req.body);
@@ -128,16 +128,16 @@ export class TriggerApi {
   }
 
   @get("/:id/queue")
-  queue(req: Request): Reply {
+  queue(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("bot " + param(req, "id")); }
+    if (mine.id == "") { return notFound("bot " + id); }
     return ok(queuedFor(this.db, mine.id));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
+  remove(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("bot " + param(req, "id")); }
+    if (mine.id == "") { return notFound("bot " + id); }
     forgetCredential(this.db, mine.credentialRef);
     executeWith(this.db, "DELETE FROM trigger_inbox WHERE bot_id = " + this.db.placeholder, [mine.id]);
     let gone = deleteById(this.db, triggerBotsMapping(), mine.id);

@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "../../office-render.ts";
 import { createProblem, jsonId } from "../../payload.ts";
@@ -17,9 +17,8 @@ export class TemplateApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
+  list(@RequestParam("kind", "") kind: string): Reply {
     let keys: DbOrder[] = [asc("featured_rank"), asc("label")];
-    let kind = queryParam(req, "kind", "");
     if (kind != "") {
       return ok(listOrdered(this.db, templatesMapping(),
         "visibility = 'public' AND kind = " + placeholderAt(this.db, 1), [kind], keys));
@@ -28,9 +27,9 @@ export class TemplateApi {
   }
 
   @get("/:id")
-  find(req: Request): Reply {
-    let held = findById(this.db, templatesMapping(), param(req, "id"));
-    if (held == "") { return notFound("template " + param(req, "id")); }
+  find(@PathVariable("id") id: string): Reply {
+    let held = findById(this.db, templatesMapping(), id);
+    if (held == "") { return notFound("template " + id); }
     return ok(held);
   }
 
@@ -44,37 +43,37 @@ export class TemplateApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, templatesMapping(), param(req, "id"))) {
-      return notFound("template " + param(req, "id"));
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, templatesMapping(), id)) {
+      return notFound("template " + id);
     }
     let written = persist(this.db, templatesMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, templatesMapping(), param(req, "id")));
+    return ok(findById(this.db, templatesMapping(), id));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, templatesMapping(), param(req, "id"))) {
-      return notFound("template " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, templatesMapping(), id)) {
+      return notFound("template " + id);
     }
     deleteWhere(this.db, templateFilesMapping(), "template_id = " + placeholderAt(this.db, 1),
-      [param(req, "id")]);
-    deleteById(this.db, templatesMapping(), param(req, "id"));
+      [id]);
+    deleteById(this.db, templatesMapping(), id);
     return noContent();
   }
 
   @get("/:id/files")
-  files(req: Request): Reply {
+  files(@PathVariable("id") id: string): Reply {
     let keys: DbOrder[] = [asc("path")];
     return ok(listOrdered(this.db, templateFilesMapping(),
-      "template_id = " + placeholderAt(this.db, 1), [param(req, "id")], keys));
+      "template_id = " + placeholderAt(this.db, 1), [id], keys));
   }
 
   @post("/:id/files")
-  addFile(req: Request): Reply {
-    if (!existsById(this.db, templatesMapping(), param(req, "id"))) {
-      return notFound("template " + param(req, "id"));
+  addFile(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, templatesMapping(), id)) {
+      return notFound("template " + id);
     }
     let written = persist(this.db, templateFilesMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
@@ -82,33 +81,33 @@ export class TemplateApi {
   }
 
   @put("/:id/files/:fileId")
-  putFile(req: Request): Reply {
-    if (!existsById(this.db, templateFilesMapping(), param(req, "fileId"))) {
-      return notFound("template file " + param(req, "fileId"));
+  putFile(req: Request, @PathVariable("fileId") fileId: string): Reply {
+    if (!existsById(this.db, templateFilesMapping(), fileId)) {
+      return notFound("template file " + fileId);
     }
     let written = persist(this.db, templateFilesMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, templateFilesMapping(), param(req, "fileId")));
+    return ok(findById(this.db, templateFilesMapping(), fileId));
   }
 
   @del("/:id/files/:fileId")
-  removeFile(req: Request): Reply {
-    if (!existsById(this.db, templateFilesMapping(), param(req, "fileId"))) {
-      return notFound("template file " + param(req, "fileId"));
+  removeFile(@PathVariable("fileId") fileId: string): Reply {
+    if (!existsById(this.db, templateFilesMapping(), fileId)) {
+      return notFound("template file " + fileId);
     }
-    deleteById(this.db, templateFilesMapping(), param(req, "fileId"));
+    deleteById(this.db, templateFilesMapping(), fileId);
     return noContent();
   }
 
   @get("/:id/pdf")
-  pdf(req: Request): Reply {
-    let held = findById(this.db, templatesMapping(), param(req, "id"));
-    if (held == "") { return notFound("template " + param(req, "id")); }
+  pdf(@PathVariable("id") id: string): Reply {
+    let held = findById(this.db, templatesMapping(), id);
+    if (held == "") { return notFound("template " + id); }
     let tpl: TemplateRow = JSON.parse<TemplateRow>(held);
-    if (tpl.visibility != "public") { return notFound("template " + param(req, "id")); }
+    if (tpl.visibility != "public") { return notFound("template " + id); }
 
     let listed = listWhere(this.db, templateFilesMapping(),
-      "template_id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+      "template_id = " + placeholderAt(this.db, 1), [id]);
     let files: TemplateFileRow[] = listed == "" ? [] : JSON.parse<TemplateFileRow[]>(listed);
     let i: int = 0;
     while (i < files.length && officeRenderExt(files[i].path) == "") { i = i + 1; }

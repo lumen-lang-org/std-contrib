@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, desc, existsById, findById, listOrdered, pageOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, ok, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, ok } from "../../../rest/server.ts";
 import { PromptRow, promptsMapping } from "../../schema.ts";
 
 function maxVersion(db: Db, name: string): int {
@@ -19,8 +19,7 @@ export class PromptApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
-  list(req: Request): Reply {
-    let name = queryParam(req, "name", "");
+  list(@RequestParam("name", "") name: string): Reply {
     if (name == "") {
       let keys: DbOrder[] = [asc("prompt_name"), asc("version")];
       return ok(listOrdered(this.db, promptsMapping(), "", [], keys));

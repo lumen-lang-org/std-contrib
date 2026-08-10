@@ -81,16 +81,16 @@ export class WorkflowApi {
   }
 
   @get("/:id")
-  one(req: Request): Reply {
+  one(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (mine.id == "") { return notFound("workflow " + id); }
     return ok(JSON.stringify(mine));
   }
 
   @put("/:id")
-  update(req: Request): Reply {
+  update(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (mine.id == "") { return notFound("workflow " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
     let sentGraph = jsonRaw(req.body, "graph");
     let bare = req.body;
@@ -169,9 +169,9 @@ export class WorkflowApi {
   }
 
   @post("/:id/publish")
-  publish(req: Request): Reply {
+  publish(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (mine.id == "") { return notFound("workflow " + id); }
     let parsed = parseGraph(mine.graph);
     if (!parsed.ok) { return badRequest(parsed.error); }
     let wrong = refuseWorkflow(mine);
@@ -188,9 +188,9 @@ export class WorkflowApi {
   }
 
   @post("/:id/run-now")
-  runNow(req: Request): Reply {
+  runNow(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (mine.id == "") { return notFound("workflow " + id); }
     let now = stamp();
     executeWith(this.db,
       "UPDATE workflows SET next_at = " + this.db.placeholder
@@ -201,16 +201,16 @@ export class WorkflowApi {
   }
 
   @get("/:id/runs")
-  runs(req: Request): Reply {
+  runs(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (mine.id == "") { return notFound("workflow " + id); }
     return ok(workflowRunsOf(this.db, mine.id, mine.owner));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
+  remove(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + param(req, "id")); }
+    if (mine.id == "") { return notFound("workflow " + id); }
     executeWith(this.db, "DELETE FROM workflow_runs WHERE workflow_id = " + this.db.placeholder, [mine.id]);
     let gone = deleteById(this.db, workflowsMapping(), mine.id);
     if (!gone.ok) { return badRequest(gone.error); }

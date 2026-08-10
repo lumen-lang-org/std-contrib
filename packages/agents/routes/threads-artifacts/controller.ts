@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { ArtifactRow, TURN_SEQ_NONE, TurnArtifact, artifactsByTurn, artifactsForTurn, artifactsMapping, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
 import { normalScope } from "../../knowledge.ts";
@@ -55,11 +55,11 @@ export class ArtifactApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  list(req: Request, @PathVariable("id") id: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let rows = listArtifacts(this.db, param(req, "id"));
+    let rows = listArtifacts(this.db, id);
     let out: ArtifactView[] = [];
     let i: int = 0;
     while (i < rows.length) {
@@ -70,16 +70,16 @@ export class ArtifactApi {
   }
 
   @post("/")
-  create(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  create(req: Request, @PathVariable("id") id: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
     if (req.body == "") {
       return badRequest("a body is required: {\"path\":\"/report.html\",\"title\":\"Q3\",\"content\":\"...\",\"note\":\"\"}");
     }
     let body: ArtifactPost = JSON.parse<ArtifactPost>(req.body);
     let written = putArtifact(this.db, {
-      threadId: param(req, "id"), path: body.path, title: body.title,
+      threadId: id, path: body.path, title: body.title,
       content: body.content, note: body.note, origin: "uploaded",
       mustCreate: false,
       turnSeq: TURN_SEQ_NONE, now: stamp(),
@@ -95,9 +95,9 @@ export class ArtifactApi {
   }
 
   @post("/from-template")
-  fromTemplate(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  fromTemplate(req: Request, @PathVariable("id") id: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
     if (req.body == "") { return badRequest(TEMPLATE_BODY_HELP); }
     let asked: TemplatePost = JSON.parse<TemplatePost>(req.body);
@@ -116,7 +116,7 @@ export class ArtifactApi {
     let i: int = 0;
     while (i < files.length) {
       let put = putArtifact(this.db, {
-        threadId: param(req, "id"), path: files[i].path, title: files[i].title,
+        threadId: id, path: files[i].path, title: files[i].title,
         content: files[i].body, note: "started from template " + tpl.label,
         origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE, now: stamp(),
       });
@@ -137,16 +137,17 @@ export class ArtifactApi {
   }
 
   @get("/by-turn")
-  byTurn(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  byTurn(req: Request,
+         @PathVariable("id") id: string,
+         @RequestParam("turn", "") turn: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let turn = queryParam(req, "turn", "");
     let rows: TurnArtifact[] = [];
     if (turn == "") {
-      rows = artifactsByTurn(this.db, param(req, "id"));
+      rows = artifactsByTurn(this.db, id);
     } else {
-      rows = artifactsForTurn(this.db, param(req, "id"), parseInt(turn) ?? TURN_SEQ_NONE);
+      rows = artifactsForTurn(this.db, id, parseInt(turn) ?? TURN_SEQ_NONE);
     }
     let out: TurnArtifactView[] = [];
     let i: int = 0;
@@ -166,25 +167,30 @@ export class ArtifactApi {
   }
 
   @get("/:slot")
-  find(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  find(req: Request,
+       @PathVariable("id") id: string,
+       @PathVariable("slot") slot: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+    let artifact = artifactAtSlot(this.db, id, slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + slot); }
     let v: ArtifactView = artifactView(artifact);
     return okJson(v);
   }
 
   @get("/:slot/versions/:n")
-  version(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  version(req: Request,
+          @PathVariable("id") id: string,
+          @PathVariable("slot") slot: string,
+          @PathVariable("n") n: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
-    let row = getVersion(this.db, artifact.id, parseInt(param(req, "n")) ?? 0);
-    if (row.id == "") { return notFound("version " + param(req, "n")); }
+    let artifact = artifactAtSlot(this.db, id, slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + slot); }
+    let row = getVersion(this.db, artifact.id, parseInt(n) ?? 0);
+    if (row.id == "") { return notFound("version " + n); }
     let v: ArtifactVersionView = {
       slot: artifact.slot,
       path: artifact.path,
@@ -200,13 +206,15 @@ export class ArtifactApi {
   }
 
   @get("/:slot/pdf")
-  pdf(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  pdf(req: Request,
+      @PathVariable("id") id: string,
+      @PathVariable("slot") slot: string,
+      @RequestParam("v", "") asked: int): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
-    let asked = parseInt(queryParam(req, "v", "")) ?? 0;
+    let artifact = artifactAtSlot(this.db, id, slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + slot); }
     let version = asked > 0 ? asked : artifact.currentVersion;
     let row = getVersion(this.db, artifact.id, version);
     if (row.id == "") { return notFound("version " + `${version}`); }
@@ -232,16 +240,18 @@ export class ArtifactApi {
   }
 
   @post("/:slot/rotate")
-  rotate(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  rotate(req: Request,
+         @PathVariable("id") id: string,
+         @PathVariable("slot") slot: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
+    let artifact = artifactAtSlot(this.db, id, slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + slot); }
 
     let now = stamp();
     let mine = jsonList(listWhere(this.db, artifactsMapping(),
-      "thread_id = " + placeholderAt(this.db, 1), [param(req, "id")]));
+      "thread_id = " + placeholderAt(this.db, 1), [id]));
     let fresh = "";
     let i: int = 0;
     while (i < mine.length) {
@@ -265,13 +275,15 @@ export class ArtifactApi {
   }
 
   @del("/:slot")
-  remove(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  remove(req: Request,
+         @PathVariable("id") id: string,
+         @PathVariable("slot") slot: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let artifact = artifactAtSlot(this.db, param(req, "id"), slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + param(req, "slot")); }
-    let problem = deleteArtifact(this.db, param(req, "id"), artifact.path);
+    let artifact = artifactAtSlot(this.db, id, slotParam(req));
+    if (artifact.id == "") { return notFound("artifact " + slot); }
+    let problem = deleteArtifact(this.db, id, artifact.path);
     if (problem != "") { return badRequest(problem); }
     return noContent();
   }

@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { EnvKeyRow, envKeysOf, forgetEnvKey } from "../../env-keys.ts";
 import { envTemplateById } from "../../env-templates.ts";
@@ -90,10 +90,9 @@ export class EnvironmentApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
+  remove(req: Request, @PathVariable("id") id: string): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    let id = param(req, "id");
     if (!forgetUserEnv(this.db, id, owner)) {
       return notFound("environment " + id);
     }
@@ -112,14 +111,15 @@ export class EnvironmentApi {
   }
 
   @del("/mine/:threadId/:name")
-  drop(req: Request): Reply {
+  drop(req: Request,
+       @PathVariable("threadId") threadId: string,
+       @PathVariable("name") name: string): Reply {
     let tags = callerTags(req);
-    let threadId = param(req, "threadId");
     if (!holdsOwner(tags, threadOwner(this.db, threadId))) {
-      return notFound("environment " + param(req, "name"));
+      return notFound("environment " + name);
     }
-    if (!envDrop(this.db, threadId, param(req, "name"))) {
-      return notFound("environment " + param(req, "name"));
+    if (!envDrop(this.db, threadId, name)) {
+      return notFound("environment " + name);
     }
     return noContent();
   }

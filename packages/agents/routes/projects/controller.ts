@@ -48,9 +48,9 @@ export class ProjectApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
+  update(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("project " + param(req, "id")); }
+    if (mine.id == "") { return notFound("project " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
     let name = jsonText(req.body, "name");
     let edited: ProjectRow = {
@@ -66,9 +66,9 @@ export class ProjectApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
+  remove(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("project " + param(req, "id")); }
+    if (mine.id == "") { return notFound("project " + id); }
     releaseThreads(this.db, mine.id);
     let gone = deleteById(this.db, projectsMapping(), mine.id);
     if (!gone.ok) { return badRequest(gone.error); }
@@ -76,22 +76,22 @@ export class ProjectApi {
   }
 
   @post("/:id/files-thread")
-  filesThread(req: Request): Reply {
+  filesThread(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("project " + param(req, "id")); }
+    if (mine.id == "") { return notFound("project " + id); }
     if (mine.filesThreadId != "") {
       if (existsById(this.db, threadsMapping(), mine.filesThreadId)) {
         let held: FilesThreadView = { threadId: mine.filesThreadId };
         return okJson(held);
       }
     }
-    let id = openThread(this.db, { agentId: PROJECT_FILES_KEY, owner: mine.owner, now: stamp() });
-    if (id == "") { return badRequest("the files thread could not be opened"); }
-    let stamped = rememberRouteKey(this.db, id, PROJECT_FILES_KEY);
+    let opened = openThread(this.db, { agentId: PROJECT_FILES_KEY, owner: mine.owner, now: stamp() });
+    if (opened == "") { return badRequest("the files thread could not be opened"); }
+    let stamped = rememberRouteKey(this.db, opened, PROJECT_FILES_KEY);
     if (stamped != "") { return badRequest(stamped); }
-    let noted = rememberFilesThread(this.db, mine.id, id);
+    let noted = rememberFilesThread(this.db, mine.id, opened);
     if (noted != "") { return badRequest(noted); }
-    let v: FilesThreadView = { threadId: id };
+    let v: FilesThreadView = { threadId: opened };
     return okJson(v);
   }
 
