@@ -17,7 +17,7 @@ export function mcpRosterMapping(): DbRepository {
     field("tools", "tools", "text"),
     field("listedAt", "listed_at", "text"),
   ];
-  return repository("mcp_tool_roster", "id", "id", fs);
+  return repository({ table: "mcp_tool_roster", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function mcpRosterPlan(db: Db): Migration[] {
@@ -33,7 +33,7 @@ function createTableSqlV1(db: Db): string {
     field("tools", "tools", "text"),
     field("listedAt", "listed_at", "text"),
   ];
-  return createTableSql(db, repository("mcp_tool_roster", "id", "id", fs));
+  return createTableSql(db, repository({ table: "mcp_tool_roster", idField: "id", idColumn: "id", fields: fs }));
 }
 
 export type Roster = {

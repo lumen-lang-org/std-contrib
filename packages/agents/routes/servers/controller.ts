@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
@@ -41,8 +41,8 @@ export class ServerApi {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("server_name")];
-    return ok(listOrdered(this.db, mcpServersMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "server_name" }];
+    return ok(listOrdered(this.db, mcpServersMapping(), { order: keys }));
   }
 
   @get("/:id/tools")
@@ -233,8 +233,8 @@ export class ServerApi {
   @get("/connections")
   connections(req: Request): Reply {
     let owner = owningTag(callerTags(req));
-    let keys: DbOrder[] = [asc("server_name")];
-    let rows = JSON.parse<McpServerRow[]>(listOrdered(this.db, mcpServersMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "server_name" }];
+    let rows = JSON.parse<McpServerRow[]>(listOrdered(this.db, mcpServersMapping(), { order: keys }));
     let views: ConnectionView[] = [];
     let i: int = 0;
     while (i < rows.length) {

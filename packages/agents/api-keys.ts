@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export const MAX_KEYS_PER_OWNER: int = 20;
@@ -29,7 +29,7 @@ export function apiKeysMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
-  return repository("api_keys", "id", "id", fs);
+  return repository({ table: "api_keys", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function apiKeysPlan(db: Db): Migration[] {
@@ -115,8 +115,8 @@ export function hasScope(granted: string[], required: string): bool {
 }
 
 export function apiKeysOf(db: Db, owner: string): string {
-  let keys: DbOrder[] = [asc("created_at")];
-  let listed = listOrdered(db, apiKeysMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "created_at" }];
+  let listed = listOrdered(db, apiKeysMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
   if (listed == "" || listed == "[]") { return "[]"; }
   let rows = JSON.parse<ApiKeyRow[]>(listed);
   let views: ApiKeyView[] = [];
@@ -126,7 +126,7 @@ export function apiKeysOf(db: Db, owner: string): string {
 }
 
 function keysOwnedCount(db: Db, owner: string): int {
-  let listed = listOrdered(db, apiKeysMapping(), "owner = " + db.placeholder, [owner], []);
+  let listed = listOrdered(db, apiKeysMapping(), { where: "owner = " + db.placeholder, args: [owner] });
   if (listed == "" || listed == "[]") { return 0; }
   return JSON.parse<ApiKeyRow[]>(listed).length;
 }

@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export const JOB_QUEUED: string = "queued";
@@ -33,7 +33,7 @@ export function indexJobsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("index_jobs", "id", "id", fs);
+  return repository({ table: "index_jobs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function indexingPlan(db: Db): Migration[] {

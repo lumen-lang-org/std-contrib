@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
@@ -24,8 +24,8 @@ export class AuthProviderApi {
 
   @get("/")
   list(): Reply {
-    let keys: DbOrder[] = [asc("label")];
-    let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "label" }];
+    let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), { order: keys }));
     let views: AuthProviderView[] = [];
     let i: int = 0;
     while (i < rows.length) {

@@ -368,7 +368,7 @@ function agentServerLink(): DbRepository {
     field("agentId", "agent_id", "text"),
     field("serverId", "server_id", "text"),
   ];
-  return repository("agent_mcp_servers", "agentId", "agent_id", fs);
+  return repository({ table: "agent_mcp_servers", idField: "agentId", idColumn: "agent_id", fields: fs });
 }
 
 function enable(db: Db, serverId: string): void {

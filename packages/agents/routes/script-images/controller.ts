@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
 import { createProblem, jsonId } from "../../payload.ts";
@@ -29,8 +29,8 @@ export class ScriptImageApi {
 
   @get("/")
   list(): Reply {
-    let keys: DbOrder[] = [asc("label")];
-    return ok(listOrdered(this.db, scriptImagesMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "label" }];
+    return ok(listOrdered(this.db, scriptImagesMapping(), { order: keys }));
   }
 
   @post("/")

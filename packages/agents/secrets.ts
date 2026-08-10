@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, secretIds } from "../workflow/workflow.ts";
 import { destinationOf, storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
@@ -30,7 +30,7 @@ export function secretsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
-  return repository("secrets", "id", "id", fs);
+  return repository({ table: "secrets", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function secretsPlan(db: Db): Migration[] {
@@ -60,7 +60,7 @@ function createTableSqlV1(db: Db): string {
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
-  return createTableSql(db, repository("secrets", "id", "id", fs));
+  return createTableSql(db, repository({ table: "secrets", idField: "id", idColumn: "id", fields: fs }));
 }
 
 function refOf(id: string): string {
@@ -82,8 +82,8 @@ export function refuseSecret(row: SecretRow): string {
 }
 
 export function secretsOf(db: Db, owner: string): string {
-  let keys: DbOrder[] = [asc("name")];
-  return listOrdered(db, secretsMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "name" }];
+  return listOrdered(db, secretsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
 }
 
 export function secretById(db: Db, id: string, owner: string): SecretRow {

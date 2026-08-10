@@ -77,26 +77,55 @@ export function field(name: string, column: string, sqlType: string): DbField {
   return f;
 }
 
-export function repository(table: string, idField: string, idColumn: string, fields: DbField[]): DbRepository {
+// A mapping is asked for with a record, for the reason `hasManyThrough` below
+// is: `repository("agents", "id", "id", fields)` is three strings whose every
+// ordering compiles, and the middle two are the same word often enough that a
+// transposition reads correct. `relations` is optional, which is what the
+// second `repositoryWith` function used to be for.
+export type Mapping = {
+  table: string,
+  // The record's field, then the table's column, for the key.
+  idField: string,
+  idColumn: string,
+  fields: DbField[],
+  relations?: DbRelation[],
+};
+
+export function repository(m: Mapping): DbRepository {
   let none: DbRelation[] = [];
-  let r: DbRepository = { table: table, idField: idField, idColumn: idColumn, fields: fields, relations: none };
+  let r: DbRepository = {
+    table: m.table, idField: m.idField, idColumn: m.idColumn,
+    fields: m.fields, relations: m.relations ?? none,
+  };
   return r;
 }
 
-// The same, carrying relations. A mapping with none behaves exactly as it did
-// before relations existed — the reads below add nothing to the statement.
-export function repositoryWith(table: string, idField: string, idColumn: string, fields: DbField[], relations: DbRelation[]): DbRepository {
-  let r: DbRepository = { table: table, idField: idField, idColumn: idColumn, fields: fields, relations: relations };
+// A to-one or to-many relation, without a link table.
+//
+//   hasOne({ field: "team", table: "teams", localColumn: "team_id",
+//            foreignColumn: "id", columns: "id, team_name AS \"teamName\"" })
+//
+// A record for `hasManyThrough`'s reason, at four strings rather than eight:
+// `localColumn` against `foreignColumn` is the pair that matters, both are safe
+// identifiers either way round, so a transposition passes `relationValid` and
+// returns rows — the wrong ones.
+export type Related = {
+  // The record field the rows land on.
+  field: string,
+  // The far table, and this row's column matched against its column.
+  table: string,
+  localColumn: string,
+  foreignColumn: string,
+  columns: string,
+};
+
+export function hasOne(rel: Related): DbRelation {
+  let r: DbRelation = { field: rel.field, kind: "one", table: rel.table, localColumn: rel.localColumn, foreignColumn: rel.foreignColumn, columns: rel.columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
   return r;
 }
 
-export function hasOne(fieldName: string, table: string, localColumn: string, foreignColumn: string, columns: string): DbRelation {
-  let r: DbRelation = { field: fieldName, kind: "one", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
-  return r;
-}
-
-export function hasMany(fieldName: string, table: string, localColumn: string, foreignColumn: string, columns: string): DbRelation {
-  let r: DbRelation = { field: fieldName, kind: "many", table: table, localColumn: localColumn, foreignColumn: foreignColumn, columns: columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
+export function hasMany(rel: Related): DbRelation {
+  let r: DbRelation = { field: rel.field, kind: "many", table: rel.table, localColumn: rel.localColumn, foreignColumn: rel.foreignColumn, columns: rel.columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
   return r;
 }
 
@@ -1074,26 +1103,29 @@ export function listProjected(db: Db, repo: DbRepository, columns: string, where
 // `asc` and `desc` are what every SQL builder calls these, so they are what
 // these are called.
 //
-//   listOrdered(db, agents, "", [], [desc("max_steps"), asc("agent_name")])
+//   listOrdered(db, agents, { order: [{ column: "max_steps", direction: "desc" }] })
 //
 // A column name cannot be bound as a parameter — SQL has no placeholder for
 // one — so it is checked rather than trusted, and a key that is not a plain
 // name refuses the whole query.
 
+// A key is a record, written as one:
+//
+//   { order: [{ column: "max_steps", direction: "desc" }, { column: "agent_name" }] }
+//
+// There were `asc(column)` and `desc(column)` constructors for this. A
+// constructor whose whole body is a record literal is a second way to spell the
+// value and a name to import, and it hides which field it set: `desc("x")` reads
+// as a direction, `{ column: "x", direction: "desc" }` reads as the row it is.
+//
+// `direction` is a string-literal union rather than a `descending: bool`,
+// because a boolean only reads correctly beside the name of the function that
+// set it — `{ column: "agent_name", descending: false }` says "not descending"
+// where SQL, and every caller, says ascending. Omitted is "asc", as in SQL.
 export type DbOrder = {
   column: string,
-  descending: bool,
+  direction?: "asc" | "desc",
 };
-
-export function asc(column: string): DbOrder {
-  let o: DbOrder = { column: column, descending: false };
-  return o;
-}
-
-export function desc(column: string): DbOrder {
-  let o: DbOrder = { column: column, descending: true };
-  return o;
-}
 
 // `ORDER BY a DESC, b`, or an empty string when there is nothing to order by.
 // Returns "!" for a key that is not a plain identifier, which the callers
@@ -1107,43 +1139,87 @@ export function orderClause(keys: DbOrder[]): string {
     if (!safeIdentifier(keys[i].column)) { return "!"; }
     if (i > 0) { out = out + ", "; }
     out = out + keys[i].column;
-    if (keys[i].descending) { out = out + " DESC"; }
+    if ((keys[i].direction ?? "asc") == "desc") { out = out + " DESC"; }
     i = i + 1;
   }
   return " ORDER BY " + out;
 }
 
+// What to read, past the mapping: a filter, its bound values, an order, and a
+// window. Every field is optional, so `{}` is every row in no stated order —
+// which `listWhere` already was.
+//
+//   listOrdered(db, agents, { order: [{ column: "max_steps", direction: "desc" }] })
+//   pageOrdered(db, agents, { order: [{ column: "id" }], limit: 20, offset: 40 })
+//
+// A record because the tail was `where, args, keys, limit, offset`: two bare
+// numbers at the end that read as each other, and a caller who passed the
+// offset as the limit got a page the database was happy to return.
+//
+// `order` names its keys; `orderBy` is one column, checked the same way. A
+// query may state either — `orderBy` wins where both appear, since it is the
+// narrower statement.
+export type DbQuery = {
+  where?: string,
+  args?: string[],
+  order?: DbOrder[],
+  orderBy?: string,
+  limit?: int,
+  offset?: int,
+};
+
+// The ORDER BY a query asks for, "" for none and "!" for one to refuse.
+function queryOrder(q: DbQuery): string {
+  let by = q.orderBy ?? "";
+  if (by != "") {
+    if (!safeIdentifier(by)) { return "!"; }
+    return " ORDER BY " + by;
+  }
+  let none: DbOrder[] = [];
+  return orderClause(q.order ?? none);
+}
+
+function queryArgs(q: DbQuery): string[] {
+  let none: string[] = [];
+  return q.args ?? none;
+}
+
 // A list in an order you name. `listWhere` is this with no keys.
-export function listOrdered(db: Db, repo: DbRepository, where: string, args: string[], keys: DbOrder[]): string {
+export function listOrdered(db: Db, repo: DbRepository, q: DbQuery): string {
   if (!repositoryValid(repo)) { return "[]"; }
-  let order = orderClause(keys);
+  let order = queryOrder(q);
   if (order == "!") { return "[]"; }
-  let sql = listSql(db, repo, where, order);
+  let sql = listSql(db, repo, q.where ?? "", order);
   if (sql == "") { return "[]"; }
-  if (!db.query(sql, args)) { return "[]"; }
+  if (!db.query(sql, queryArgs(q))) { return "[]"; }
   return rowsAsArray(db);
 }
 
 // A page in an order you name, over several keys rather than one column.
-export function pageOrdered(db: Db, repo: DbRepository, where: string, args: string[], keys: DbOrder[], limit: int, offset: int): string {
+export function pageOrdered(db: Db, repo: DbRepository, q: DbQuery): string {
   if (!repositoryValid(repo)) { return "[]"; }
-  let order = orderClause(keys);
+  let order = queryOrder(q);
   if (order == "!") { return "[]"; }
   // A page without an order is a page in whatever order the database felt
   // like, which is not a page at all — two requests can overlap or skip rows.
   if (order == "") { return "[]"; }
-  let sql = listSql(db, repo, where, order + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`);
+  let window = " LIMIT " + `${q.limit ?? 0}` + " OFFSET " + `${q.offset ?? 0}`;
+  let sql = listSql(db, repo, q.where ?? "", order + window);
   if (sql == "") { return "[]"; }
-  if (!db.query(sql, args)) { return "[]"; }
+  if (!db.query(sql, queryArgs(q))) { return "[]"; }
   return rowsAsArray(db);
 }
 
 // A page, ordered by a column you name.
-export function pageWhere(db: Db, repo: DbRepository, where: string, args: string[], orderBy: string, limit: int, offset: int): string {
-  if (!repositoryValid(repo) || !safeIdentifier(orderBy)) { return "[]"; }
-  let sql = listSql(db, repo, where, " ORDER BY " + orderBy + " LIMIT " + `${limit}` + " OFFSET " + `${offset}`);
+export function pageWhere(db: Db, repo: DbRepository, q: DbQuery): string {
+  if (!repositoryValid(repo)) { return "[]"; }
+  let order = queryOrder(q);
+  // An unordered page is not a page, the same as above.
+  if (order == "!" || order == "") { return "[]"; }
+  let window = " LIMIT " + `${q.limit ?? 0}` + " OFFSET " + `${q.offset ?? 0}`;
+  let sql = listSql(db, repo, q.where ?? "", order + window);
   if (sql == "") { return "[]"; }
-  if (!db.query(sql, args)) { return "[]"; }
+  if (!db.query(sql, queryArgs(q))) { return "[]"; }
   return rowsAsArray(db);
 }
 

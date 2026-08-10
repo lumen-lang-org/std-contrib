@@ -71,6 +71,7 @@ This is recorded as an open bug rather than a design decision, because a
 plausible-sounding rationale for a workaround is worse than no rationale: it
 stops the next person looking.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -81,3 +82,4 @@ lumen run events-demo.ts &
 curl -sN http://127.0.0.1:9010/events    # the raw frames
 python3 /tmp/ssecheck.py                 # a real browser's EventSource
 ```
+<!-- /website:skip -->

@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { artifactBytesMax, threadBytesMax } from "./caps.ts";
 import { normalScope } from "./knowledge.ts";
@@ -58,7 +58,7 @@ export function artifactsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("artifacts", "id", "id", fs);
+  return repository({ table: "artifacts", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function artifactVersionsMapping(): DbRepository {
@@ -73,7 +73,7 @@ export function artifactVersionsMapping(): DbRepository {
     field("note", "note", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("artifact_versions", "id", "id", fs);
+  return repository({ table: "artifact_versions", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function artifactPlan(db: Db): Migration[] {
@@ -433,8 +433,8 @@ export function getArtifact(db: Db, threadId: string, path: string): ArtifactRow
 export const BRIEFING_LINES: int = 50;
 
 export function artifactBriefing(db: Db, threadId: string): string {
-  let keys: DbOrder[] = [desc("updated_at"), desc("slot")];
-  let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }, { column: "slot", direction: "desc" }];
+  let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return ""; }
   let rows = JSON.parse<ArtifactRow[]>(listed);
   if (rows.length == 0) { return ""; }
@@ -459,8 +459,8 @@ export function artifactBriefing(db: Db, threadId: string): string {
 
 export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let none: ArtifactRow[] = [];
-  let keys: DbOrder[] = [asc("slot")];
-  let listed = listOrdered(db, artifactsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let keys: DbOrder[] = [{ column: "slot" }];
+  let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<ArtifactRow[]>(listed);
 }
@@ -492,8 +492,8 @@ export function libraryFor(db: Db, tags: string[], cap: int): ArtifactCard[] {
   }
   where = where + ")";
 
-  let keys: DbOrder[] = [desc("updated_at")];
-  let listed = listOrdered(db, artifactsMapping(), where, args, keys);
+  let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }];
+  let listed = listOrdered(db, artifactsMapping(), { where: where, args: args, order: keys });
   if (listed == "" || listed == "[]") { return none; }
   let rows = JSON.parse<ArtifactRow[]>(listed);
 

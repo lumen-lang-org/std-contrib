@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
@@ -18,12 +18,11 @@ export class TemplateApi {
 
   @get("/")
   list(@RequestParam("kind", "") kind: string): Reply {
-    let keys: DbOrder[] = [asc("featured_rank"), asc("label")];
+    let keys: DbOrder[] = [{ column: "featured_rank" }, { column: "label" }];
     if (kind != "") {
-      return ok(listOrdered(this.db, templatesMapping(),
-        "visibility = 'public' AND kind = " + placeholderAt(this.db, 1), [kind], keys));
+      return ok(listOrdered(this.db, templatesMapping(), { where: "visibility = 'public' AND kind = " + placeholderAt(this.db, 1), args: [kind], order: keys }));
     }
-    return ok(listOrdered(this.db, templatesMapping(), "visibility = 'public'", [], keys));
+    return ok(listOrdered(this.db, templatesMapping(), { where: "visibility = 'public'", order: keys }));
   }
 
   @get("/:id")
@@ -65,9 +64,8 @@ export class TemplateApi {
 
   @get("/:id/files")
   files(@PathVariable("id") id: string): Reply {
-    let keys: DbOrder[] = [asc("path")];
-    return ok(listOrdered(this.db, templateFilesMapping(),
-      "template_id = " + placeholderAt(this.db, 1), [id], keys));
+    let keys: DbOrder[] = [{ column: "path" }];
+    return ok(listOrdered(this.db, templateFilesMapping(), { where: "template_id = " + placeholderAt(this.db, 1), args: [id], order: keys }));
   }
 
   @post("/:id/files")

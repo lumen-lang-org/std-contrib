@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { asc, deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
+import { deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, notFound, ok } from "../../../rest/server.ts";
 import { stamp, toolCardProblem } from "../../api-core.ts";
@@ -24,7 +24,7 @@ export class CardPluginApi {
 
   @get("/")
   list(req: Request): Reply {
-    return ok(listOrdered(this.db, cardPluginsMapping(), "", [], [asc("plugin_name")]));
+    return ok(listOrdered(this.db, cardPluginsMapping(), { order: [{ column: "plugin_name" }] }));
   }
 
   @post("/")

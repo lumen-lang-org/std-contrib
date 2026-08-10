@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbOrder, asc, desc, executeWith, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../plume/plume.ts";
+import { DbOrder, executeWith, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
@@ -85,7 +85,7 @@ export type AgentToolCall = {
 function agentSaid(db: Db, said: string): AgentRow {
   let doc = findById(db, agentsMapping(), said);
   if (doc != "") { return JSON.parse<AgentRow>(doc); }
-  let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), "", [], noOrder()));
+  let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: noOrder() }));
   let found: int = -1;
   let i: int = 0;
   while (i < rows.length) {
@@ -100,7 +100,7 @@ function agentSaid(db: Db, said: string): AgentRow {
 }
 
 function noOrder(): DbOrder[] {
-  let keys: DbOrder[] = [asc("agent_name")];
+  let keys: DbOrder[] = [{ column: "agent_name" }];
   return keys;
 }
 
@@ -115,7 +115,7 @@ function emptyAgent(): AgentRow {
 function configSaid(db: Db, said: string): ModelConfigRow {
   let doc = findById(db, modelConfigRows(db), said);
   if (doc != "") { return JSON.parse<ModelConfigRow>(doc); }
-  let rows = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), "", [], labelOrder()));
+  let rows = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), { order: labelOrder() }));
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].label.toLowerCase() == said.toLowerCase()) { return rows[i]; }
@@ -129,18 +129,18 @@ function configSaid(db: Db, said: string): ModelConfigRow {
 }
 
 function labelOrder(): DbOrder[] {
-  let keys: DbOrder[] = [asc("label")];
+  let keys: DbOrder[] = [{ column: "label" }];
   return keys;
 }
 
 function defaultConfig(db: Db): string {
-  let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), "", [], noOrder()));
+  let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: noOrder() }));
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].isDefault) { return rows[i].modelConfigId; }
     i = i + 1;
   }
-  let configs = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), "", [], labelOrder()));
+  let configs = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), { order: labelOrder() }));
   i = 0;
   while (i < configs.length) {
     if (configs[i].selectable) { return configs[i].id; }
@@ -157,8 +157,8 @@ function promptOf(db: Db, promptId: string): PromptRow {
 }
 
 function writePromptVersion(db: Db, promptName: string, body: string, nowMs: number): string {
-  let newest: DbOrder[] = [desc("version")];
-  let page = pageOrdered(db, promptsMapping(), "prompt_name = " + db.placeholder, [promptName], newest, 1, 0);
+  let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
+  let page = pageOrdered(db, promptsMapping(), { where: "prompt_name = " + db.placeholder, args: [promptName], order: newest, limit: 1, offset: 0 });
   let at = 0;
   if (page != "" && page != "[]") {
     let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);
@@ -218,7 +218,7 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   }
 
   if (call.name == "list_agents") {
-    let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), "", [], noOrder()));
+    let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: noOrder() }));
     let out = `${rows.length}` + " agent(s):\n";
     let i: int = 0;
     while (i < rows.length) {

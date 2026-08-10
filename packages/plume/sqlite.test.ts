@@ -44,7 +44,7 @@ function agentRepo(): DbRepository {
     field("maxSteps", "max_steps", "int"),
     field("temperature", "temperature", "float8"),
   ];
-  return repository("plume_test_agents", "id", "id", fields);
+  return repository({ table: "plume_test_agents", idField: "id", idColumn: "id", fields: fields });
 }
 
 function agentJson(id: string, name: string, steps: int, temp: number): string {
@@ -88,11 +88,11 @@ test("a type may carry spaces and parentheses", () => {
 
 test("a mapping must name its key field", () => {
   let good: DbField[] = [field("id", "id", "text"), field("n", "n", "text")];
-  expect(repositoryValid(repository("t", "id", "id", good)));
+  expect(repositoryValid(repository({ table: "t", idField: "id", idColumn: "id", fields: good })));
   // idField names a field the mapping does not declare.
-  expect(!repositoryValid(repository("t", "missing", "id", good)));
+  expect(!repositoryValid(repository({ table: "t", idField: "missing", idColumn: "id", fields: good })));
   let empty: DbField[] = [];
-  expect(!repositoryValid(repository("t", "id", "id", empty)));
+  expect(!repositoryValid(repository({ table: "t", idField: "id", idColumn: "id", fields: empty })));
 });
 
 test("the select list renames columns to fields", () => {
@@ -223,8 +223,8 @@ test("counting honours the filter", () => {
 
 test("a page is ordered and bounded", () => {
   let repo = seeded();
-  let first = pageWhere(database, repo, "", [], "max_steps", 1, 0);
-  let second = pageWhere(database, repo, "", [], "max_steps", 1, 1);
+  let first = pageWhere(database, repo, { orderBy: "max_steps", limit: 1, offset: 0 });
+  let second = pageWhere(database, repo, { orderBy: "max_steps", limit: 1, offset: 1 });
   // Ordered by max_steps: critic 8 is last, writer 3 first.
   expect(first.indexOf("writer") >= 0);
   expect(second.indexOf("researcher") >= 0);
@@ -233,7 +233,7 @@ test("a page is ordered and bounded", () => {
 
 test("an unsafe order column is refused", () => {
   let repo = seeded();
-  expect(pageWhere(database, repo, "", [], "x; DROP TABLE plume_test_agents", 10, 0) == "[]");
+  expect(pageWhere(database, repo, { orderBy: "x; DROP TABLE plume_test_agents", limit: 10, offset: 0 }) == "[]");
   expect(countWhere(database, repo, "", []) == 3);
 });
 

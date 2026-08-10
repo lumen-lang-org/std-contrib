@@ -8,7 +8,7 @@
 
 import { Db, DbConfig } from "./driver.ts";
 import { mysql } from "./mysql.ts";
-import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, connectDatabase, createTable, createTableSql, createTableSqlWithKeys, foreignKeys, foreignKeyName, dropTable, execute, persist, countWhere } from "./plume.ts";
+import { DbField, DbRelation, DbRepository, field, repository, hasOne, hasMany, connectDatabase, createTable, createTableSql, createTableSqlWithKeys, foreignKeys, foreignKeyName, dropTable, execute, persist, countWhere } from "./plume.ts";
 import { Migration, migration, migrate, forgetMigrations } from "./migrate.ts";
 
 let database: Db = mysql();
@@ -28,7 +28,7 @@ function connectionConfig(): DbConfig {
 
 function teamsRepo(): DbRepository {
   let fs: DbField[] = [ field("id", "id", "text"), field("teamName", "team_name", "text") ];
-  return repository("fk_teams", "id", "id", fs);
+  return repository({ table: "fk_teams", idField: "id", idColumn: "id", fields: fs });
 }
 
 function agentsRepo(): DbRepository {
@@ -38,10 +38,10 @@ function agentsRepo(): DbRepository {
     field("teamId", "team_id", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne("team", "fk_teams", "team_id", "id", "id, team_name AS \"teamName\""),
-    hasMany("tasks", "fk_tasks", "id", "agent_id", "id, title"),
+    hasOne({ field: "team", table: "fk_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" }),
+    hasMany({ field: "tasks", table: "fk_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, title" }),
   ];
-  return repositoryWith("fk_agents", "id", "id", fs, rs);
+  return repository({ table: "fk_agents", idField: "id", idColumn: "id", fields: fs, relations: rs });
 }
 
 function clean(): void {
@@ -84,8 +84,8 @@ test("the constraint is named for the table and column it constrains", () => {
 });
 
 test("an invalid relation produces no statement rather than a broken one", () => {
-  let bad: DbRelation[] = [ hasOne("team", "x; DROP TABLE y", "team_id", "id", "id") ];
-  let broken = repositoryWith("fk_agents", "id", "id", teamsRepo().fields, bad);
+  let bad: DbRelation[] = [ hasOne({ field: "team", table: "x; DROP TABLE y", localColumn: "team_id", foreignColumn: "id", columns: "id" }) ];
+  let broken = repository({ table: "fk_agents", idField: "id", idColumn: "id", fields: teamsRepo().fields, relations: bad });
   expect(createTableSqlWithKeys(database, broken) == "");
   expect(foreignKeys(database, broken).length == 0);
 });

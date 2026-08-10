@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, desc, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { stampMs } from "./tasks.ts";
@@ -68,7 +68,7 @@ function triggerBotsMappingV1(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("trigger_bots", "id", "id", fs);
+  return repository({ table: "trigger_bots", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function triggerBotsMapping(): DbRepository {
@@ -91,7 +91,7 @@ export function triggerBotsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("trigger_bots", "id", "id", fs);
+  return repository({ table: "trigger_bots", idField: "id", idColumn: "id", fields: fs });
 }
 
 function triggerInboxMappingV1(): DbRepository {
@@ -110,7 +110,7 @@ function triggerInboxMappingV1(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("trigger_inbox", "id", "id", fs);
+  return repository({ table: "trigger_inbox", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function triggerInboxMapping(): DbRepository {
@@ -133,7 +133,7 @@ export function triggerInboxMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("trigger_inbox", "id", "id", fs);
+  return repository({ table: "trigger_inbox", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type TriggerOutboxRow = {
@@ -161,7 +161,7 @@ function triggerOutboxMappingV1(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("trigger_outbox", "id", "id", fs);
+  return repository({ table: "trigger_outbox", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function triggerOutboxMapping(): DbRepository {
@@ -178,7 +178,7 @@ export function triggerOutboxMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("trigger_outbox", "id", "id", fs);
+  return repository({ table: "trigger_outbox", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type TriggerPendingRow = {
@@ -211,7 +211,7 @@ export function triggerPendingMapping(): DbRepository {
     field("expiresAt", "expires_at", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("trigger_pending", "id", "id", fs);
+  return repository({ table: "trigger_pending", idField: "id", idColumn: "id", fields: fs });
 }
 
 export const TRIGGER_ASK_TTL_MS: int = 1800000;
@@ -359,8 +359,8 @@ export function emptyBot(): TriggerBotRow {
 }
 
 export function botsOf(db: Db, owner: string): string {
-  let keys: DbOrder[] = [asc("name")];
-  return listOrdered(db, triggerBotsMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "name" }];
+  return listOrdered(db, triggerBotsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
 }
 
 export function alreadyHave(db: Db, botId: string, updateId: string): bool {
@@ -379,17 +379,13 @@ export function recentRuns(db: Db, botId: string, nowMs: number): int {
 }
 
 export function queuedFor(db: Db, botId: string): string {
-  let keys: DbOrder[] = [asc("created_at")];
-  return listOrdered(db, triggerInboxMapping(),
-    "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
-    [botId, "queued"], keys);
+  let keys: DbOrder[] = [{ column: "created_at" }];
+  return listOrdered(db, triggerInboxMapping(), { where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2), args: [botId, "queued"], order: keys });
 }
 
 export function unsentFor(db: Db, botId: string): string {
-  let keys: DbOrder[] = [asc("updated_at")];
-  return listOrdered(db, triggerInboxMapping(),
-    "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
-    [botId, "done"], keys);
+  let keys: DbOrder[] = [{ column: "updated_at" }];
+  return listOrdered(db, triggerInboxMapping(), { where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2), args: [botId, "done"], order: keys });
 }
 
 export function botById(db: Db, id: string): TriggerBotRow {
@@ -549,10 +545,8 @@ export function replyKeyboard(options: string): string {
 }
 
 export function unsentOutbound(db: Db, botId: string): string {
-  let keys: DbOrder[] = [asc("created_at")];
-  return listOrdered(db, triggerOutboxMapping(),
-    "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
-    [botId, "queued"], keys);
+  let keys: DbOrder[] = [{ column: "created_at" }];
+  return listOrdered(db, triggerOutboxMapping(), { where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2), args: [botId, "queued"], order: keys });
 }
 
 export function testingDraft(bot: TriggerBotRow, nowMs: number): bool {

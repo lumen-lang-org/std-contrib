@@ -108,8 +108,10 @@ lumen compile --release-fast packages/code-index/examples/cidx.ts
 Pairs with [`token-gate`](../token-gate): `cidx` answers "where is X" in one
 50-token call; `tkg` compresses everything else.
 
+<!-- website:skip -->
 ## Tests
 
 ```sh
 lumen test packages/code-index/code-index.ts
 ```
+<!-- /website:skip -->

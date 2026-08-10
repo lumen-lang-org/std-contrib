@@ -4,7 +4,7 @@
 
 import { Db, DbConfig } from "./driver.ts";
 import { postgres } from "./postgres.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, orderClause, listOrdered, pageOrdered, connectDatabase, createTable, dropTable, persist, countWhere } from "./plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, orderClause, listOrdered, pageOrdered, connectDatabase, createTable, dropTable, persist, countWhere } from "./plume.ts";
 
 let database: Db = postgres();
 
@@ -16,7 +16,7 @@ function agentsRepo(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("ord_agents", "id", "id", fs);
+  return repository({ table: "ord_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 function row(id: string, agentName: string, maxSteps: int): string {
@@ -60,9 +60,9 @@ function firstId(document: string): string {
 // --- the clause, offline -----------------------------------------------------
 
 test("a key list becomes an ORDER BY", () => {
-  let one: DbOrder[] = [asc("max_steps")];
+  let one: DbOrder[] = [{ column: "max_steps" }];
   expect(orderClause(one) == " ORDER BY max_steps");
-  let two: DbOrder[] = [desc("max_steps"), asc("agent_name")];
+  let two: DbOrder[] = [{ column: "max_steps", direction: "desc" }, { column: "agent_name" }];
   expect(orderClause(two) == " ORDER BY max_steps DESC, agent_name");
 });
 
@@ -72,10 +72,10 @@ test("no keys is no clause, which is not the same as a refusal", () => {
 });
 
 test("a key that is not a plain name refuses the whole clause", () => {
-  let bad: DbOrder[] = [asc("max_steps; DROP TABLE ord_agents")];
+  let bad: DbOrder[] = [{ column: "max_steps; DROP TABLE ord_agents" }];
   expect(orderClause(bad) == "!");
   // And one bad key among good ones refuses too.
-  let mixed: DbOrder[] = [asc("agent_name"), desc("x) --")];
+  let mixed: DbOrder[] = [{ column: "agent_name" }, { column: "x) --", direction: "desc" }];
   expect(orderClause(mixed) == "!");
 });
 
@@ -83,27 +83,27 @@ test("a key that is not a plain name refuses the whole clause", () => {
 
 test("a list comes back in the order asked for", () => {
   let repo = seeded();
-  let keys: DbOrder[] = [asc("max_steps")];
-  expect(firstId(listOrdered(database, repo, "", [], keys)) == "a2");
-  let down: DbOrder[] = [desc("max_steps")];
-  expect(firstId(listOrdered(database, repo, "", [], down)) == "a4");
+  let keys: DbOrder[] = [{ column: "max_steps" }];
+  expect(firstId(listOrdered(database, repo, { order: keys })) == "a2");
+  let down: DbOrder[] = [{ column: "max_steps", direction: "desc" }];
+  expect(firstId(listOrdered(database, repo, { order: down })) == "a4");
 });
 
 test("a second key settles a tie", () => {
   let repo = seeded();
   // a1 and a3 both have 5 steps; the name decides.
-  let keys: DbOrder[] = [asc("max_steps"), asc("agent_name")];
-  let json = listOrdered(database, repo, "", [], keys);
+  let keys: DbOrder[] = [{ column: "max_steps" }, { column: "agent_name" }];
+  let json = listOrdered(database, repo, { order: keys });
   expect(json.indexOf("critic") < json.indexOf("researcher"));
-  let other: DbOrder[] = [asc("max_steps"), desc("agent_name")];
-  let flipped = listOrdered(database, repo, "", [], other);
+  let other: DbOrder[] = [{ column: "max_steps" }, { column: "agent_name", direction: "desc" }];
+  let flipped = listOrdered(database, repo, { order: other });
   expect(flipped.indexOf("researcher") < flipped.indexOf("critic"));
 });
 
 test("ordering composes with a filter and its parameters", () => {
   let repo = seeded();
-  let keys: DbOrder[] = [desc("max_steps")];
-  let json = listOrdered(database, repo, "max_steps >= " + database.placeholder, ["5"], keys);
+  let keys: DbOrder[] = [{ column: "max_steps", direction: "desc" }];
+  let json = listOrdered(database, repo, { where: "max_steps >= " + database.placeholder, args: ["5"], order: keys });
   expect(firstId(json) == "a4");
   expect(json.indexOf("writer") < 0);
 });
@@ -111,13 +111,13 @@ test("ordering composes with a filter and its parameters", () => {
 test("no keys lists everything, as listWhere does", () => {
   let repo = seeded();
   let none: DbOrder[] = [];
-  expect(listOrdered(database, repo, "", [], none).indexOf("researcher") >= 0);
+  expect(listOrdered(database, repo, { order: none }).indexOf("researcher") >= 0);
 });
 
 test("an unsafe key refuses the read and leaves the table alone", () => {
   let repo = seeded();
-  let bad: DbOrder[] = [asc("x); DROP TABLE ord_agents; --")];
-  expect(listOrdered(database, repo, "", [], bad) == "[]");
+  let bad: DbOrder[] = [{ column: "x); DROP TABLE ord_agents; --" }];
+  expect(listOrdered(database, repo, { order: bad }) == "[]");
   expect(countWhere(database, repo, "", []) == 4);
 });
 
@@ -125,10 +125,10 @@ test("an unsafe key refuses the read and leaves the table alone", () => {
 
 test("a page is ordered and bounded", () => {
   let repo = seeded();
-  let keys: DbOrder[] = [asc("max_steps"), asc("id")];
-  expect(firstId(pageOrdered(database, repo, "", [], keys, 1, 0)) == "a2");
-  expect(firstId(pageOrdered(database, repo, "", [], keys, 1, 1)) == "a1");
-  expect(firstId(pageOrdered(database, repo, "", [], keys, 1, 2)) == "a3");
+  let keys: DbOrder[] = [{ column: "max_steps" }, { column: "id" }];
+  expect(firstId(pageOrdered(database, repo, { order: keys, limit: 1, offset: 0 })) == "a2");
+  expect(firstId(pageOrdered(database, repo, { order: keys, limit: 1, offset: 1 })) == "a1");
+  expect(firstId(pageOrdered(database, repo, { order: keys, limit: 1, offset: 2 })) == "a3");
 });
 
 test("a page with no order is refused, because it is not a page", () => {
@@ -137,7 +137,7 @@ test("a page with no order is refused, because it is not a page", () => {
   // database is free to return them in any order. Refusing beats a paginator
   // that loses records.
   let none: DbOrder[] = [];
-  expect(pageOrdered(database, repo, "", [], none, 2, 0) == "[]");
+  expect(pageOrdered(database, repo, { order: none, limit: 2, offset: 0 }) == "[]");
 });
 
 test("the suite leaves nothing behind", () => {

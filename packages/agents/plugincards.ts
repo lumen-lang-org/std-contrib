@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbRepository, asc, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
+import { DbField, DbRepository, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export type CardPluginRow = {
@@ -33,7 +33,7 @@ export function cardPluginsMapping(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("installedAt", "installed_at", "text"),
   ];
-  return repository("card_plugins", "id", "id", fs);
+  return repository({ table: "card_plugins", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function cardCasesMapping(): DbRepository {
@@ -43,7 +43,7 @@ export function cardCasesMapping(): DbRepository {
     field("when", "when_asked", "text"),
     field("then", "then_do", "text"),
   ];
-  return repository("card_cases", "id", "id", fs);
+  return repository({ table: "card_cases", idField: "id", idColumn: "id", fields: fs });
 }
 
 function cardPluginsMappingAsCreated(): DbRepository {
@@ -56,7 +56,7 @@ function cardPluginsMappingAsCreated(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("installedAt", "installed_at", "text"),
   ];
-  return repository("card_plugins", "id", "id", fs);
+  return repository({ table: "card_plugins", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function cardPluginsPlan(db: Db): Migration[] {
@@ -74,7 +74,7 @@ export function cardPluginsPlan(db: Db): Migration[] {
 
 export function allCardPlugins(db: Db): CardPluginRow[] {
   return JSON.parse<CardPluginRow[]>(
-    listOrdered(db, cardPluginsMapping(), "", [], [asc("plugin_name")]));
+    listOrdered(db, cardPluginsMapping(), { order: [{ column: "plugin_name" }] }));
 }
 
 export function pluginOn(db: Db, pluginId: string): bool {

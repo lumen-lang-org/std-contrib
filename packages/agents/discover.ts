@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, desc, createTableSql, field, findById, listOrdered, listWhere, deleteWhere, persist, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOrdered, listWhere, deleteWhere, persist, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, modelsMapping } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
@@ -74,7 +74,7 @@ export function discoverFeedsMapping(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("digestedAt", "digested_at", "text"),
   ];
-  return repository("discover_feeds", "id", "id", fs);
+  return repository({ table: "discover_feeds", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function discoverStoriesMapping(): DbRepository {
@@ -94,7 +94,7 @@ export function discoverStoriesMapping(): DbRepository {
     field("image", "image", "text"),
     field("readMinutes", "read_minutes", "int"),
   ];
-  return repository("discover_stories", "id", "id", fs);
+  return repository({ table: "discover_stories", idField: "id", idColumn: "id", fields: fs });
 }
 
 function storiesAsCreated(): DbRepository {
@@ -109,7 +109,7 @@ function storiesAsCreated(): DbRepository {
     field("why", "why", "text"),
     field("madeAt", "made_at", "text"),
   ];
-  return repository("discover_stories", "id", "id", fs);
+  return repository({ table: "discover_stories", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function discoverTextMapping(): DbRepository {
@@ -118,7 +118,7 @@ export function discoverTextMapping(): DbRepository {
     field("value", "value", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("discover_text", "id", "id", fs);
+  return repository({ table: "discover_text", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function discoverText(db: Db, name: string): string {
@@ -170,9 +170,9 @@ export function geoCode(said: string): string {
 }
 
 export function allFeeds(db: Db): DiscoverFeed[] {
-  let keys: DbOrder[] = [asc("topic")];
+  let keys: DbOrder[] = [{ column: "topic" }];
   return JSON.parse<DiscoverFeed[]>(
-    listOrdered(db, discoverFeedsMapping(), "", [], keys));
+    listOrdered(db, discoverFeedsMapping(), { order: keys }));
 }
 
 export function ensureGeoFeed(db: Db, country: string): void {
@@ -196,9 +196,9 @@ export function ensureGeoFeed(db: Db, country: string): void {
 }
 
 export function storiesFor(db: Db, feedId: string): DiscoverRow[] {
-  let keys: DbOrder[] = [asc("rank")];
+  let keys: DbOrder[] = [{ column: "rank" }];
   return JSON.parse<DiscoverRow[]>(
-    listOrdered(db, discoverStoriesMapping(), "feed_id = " + db.placeholder, [feedId], keys));
+    listOrdered(db, discoverStoriesMapping(), { where: "feed_id = " + db.placeholder, args: [feedId], order: keys }));
 }
 
 export function storyById(db: Db, id: string): DiscoverRow {
@@ -814,9 +814,8 @@ export function carriedOver(kept: Map<string, string>, id: string, body: string)
 }
 
 export function unreadableStories(db: Db, limit: int): DiscoverRow[] {
-  let keys: DbOrder[] = [asc("made_at")];
-  let rows = JSON.parse<DiscoverRow[]>(listOrdered(db, discoverStoriesMapping(),
-    "body <> '' AND body_md = ''", [], keys));
+  let keys: DbOrder[] = [{ column: "made_at" }];
+  let rows = JSON.parse<DiscoverRow[]>(listOrdered(db, discoverStoriesMapping(), { where: "body <> '' AND body_md = ''", order: keys }));
   if (rows.length <= limit) { return rows; }
   let some: DiscoverRow[] = [];
   let i: int = 0;

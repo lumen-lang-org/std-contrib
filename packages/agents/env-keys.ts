@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
 
@@ -28,7 +28,7 @@ export function envKeysMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
-  return repository("env_keys", "id", "id", fs);
+  return repository({ table: "env_keys", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function envKeysPlan(db: Db): Migration[] {
@@ -103,15 +103,13 @@ export function refuseEnvKey(row: EnvKeyRow, value: string): string {
 }
 
 export function envKeysOf(db: Db, owner: string, imageId: string): string {
-  let keys: DbOrder[] = [asc("name")];
-  return listOrdered(db, envKeysMapping(),
-    "owner = " + db.placeholder + " AND image_id = " + placeholderAt(db, 2),
-    [owner, imageId], keys);
+  let keys: DbOrder[] = [{ column: "name" }];
+  return listOrdered(db, envKeysMapping(), { where: "owner = " + db.placeholder + " AND image_id = " + placeholderAt(db, 2), args: [owner, imageId], order: keys });
 }
 
 export function envKeysOwnedBy(db: Db, owner: string): string {
-  let keys: DbOrder[] = [asc("image_id"), asc("name")];
-  return listOrdered(db, envKeysMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "image_id" }, { column: "name" }];
+  return listOrdered(db, envKeysMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
 }
 
 export function envKeyById(db: Db, id: string, owner: string): EnvKeyRow {

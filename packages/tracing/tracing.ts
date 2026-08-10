@@ -127,13 +127,10 @@ export function jsonString(s: string): string {
   return out + "\"";
 }
 
-function hexDigit(v: int): string {
-  const digits = "0123456789abcdef";
-  return digits.charAt(v);
-}
-
+// Two hex digits, zero-padded: the caller writes `\u00` in front of this, and a
+// byte under 16 rendering as one digit would leave a five-character escape.
 function hexByte(v: int): string {
-  return hexDigit(v / 16) + hexDigit(v % 16);
+  return v.toString(16).padStart(2, "0");
 }
 
 // --- base64 -----------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { asc, deleteById, listOrdered, persist } from "../../../plume/plume.ts";
+import { deleteById, listOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
@@ -112,7 +112,7 @@ export class DiscoverApi {
 
   @get("/feeds")
   feeds(req: Request): Reply {
-    return ok(listOrdered(this.db, discoverFeedsMapping(), "", [], [asc("topic")]));
+    return ok(listOrdered(this.db, discoverFeedsMapping(), { order: [{ column: "topic" }] }));
   }
 
   @get("/places")

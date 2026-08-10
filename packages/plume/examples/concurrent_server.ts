@@ -20,7 +20,7 @@
 
 import { Db, DbConfig } from "../driver.ts";
 import { sqlite } from "../sqlite.ts";
-import { DbField, DbRepository, DbOrder, field, repository, connectDatabase, asc } from "../plume.ts";
+import { DbField, DbRepository, DbOrder, field, repository, connectDatabase } from "../plume.ts";
 import { Store, store } from "../store.ts";
 
 function agentsRepo(): DbRepository {
@@ -29,7 +29,7 @@ function agentsRepo(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("conc_agents", "id", "id", fs);
+  return repository({ table: "conc_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 function openDatabase(): Db {
@@ -68,9 +68,9 @@ function main(): void {
       return reply(201, req.body);
     }
     if (id == "") {
-      let keys: DbOrder[] = [asc("id")];
+      let keys: DbOrder[] = [{ column: "id" }];
       let empty: string[] = [];
-      return reply(200, agents.listOrdered("", empty, keys));
+      return reply(200, agents.listOrdered({ args: empty, order: keys }));
     }
     let document = agents.findById(id);
     if (document == "") { return reply(404, "{\"error\":\"no agent " + id + "\"}"); }

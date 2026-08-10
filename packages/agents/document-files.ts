@@ -29,7 +29,7 @@ export function documentFilesMapping(): DbRepository {
     field("size", "size", "int"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("document_files", "id", "id", fs);
+  return repository({ table: "document_files", idField: "id", idColumn: "id", fields: fs });
 }
 
 function documentFilesMappingV1(): DbRepository {
@@ -43,7 +43,7 @@ function documentFilesMappingV1(): DbRepository {
     field("size", "size", "int"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("document_files", "id", "id", fs);
+  return repository({ table: "document_files", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function documentFilesPlan(db: Db): Migration[] {
