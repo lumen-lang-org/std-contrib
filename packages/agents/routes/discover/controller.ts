@@ -5,7 +5,7 @@ import { Reply, Request, badRequest, notFound, ok, okJson } from "../../../rest/
 import { stamp } from "../../api-core.ts";
 import { DiscoverFeed, allFeeds, discoverFeedsMapping, discoverStoriesMapping, discoverText, discoverTextMapping, ensureGeoFeed, feedById, geoCode, setDiscoverText, storiesFor, storyById } from "../../discover.ts";
 import { jsonText } from "../../scan.ts";
-import { DeletedView, DiscoverFeedView, DiscoverStoryView, PlaceView, PromptView, StoryDetailView } from "./types.ts";
+import { DeletedView, DiscoverFeedView, DiscoverStoryView, FeedAsk, PlaceView, PromptView, StoryDetailView } from "./types.ts";
 
 const PROMPT_CHARS_MAX: int = 20000;
 
@@ -133,12 +133,16 @@ export class DiscoverApi {
   }
 
   @post("/feeds")
-  addFeed(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
-    let row: DiscoverFeed = JSON.parse<DiscoverFeed>(req.body);
-    if (row.id == "" || row.topic == "" || row.query == "") {
-      return badRequest("a feed needs an id, a topic and a query");
-    }
+  addFeed(@Valid @RequestBody ask: FeedAsk): Reply {
+    let row: DiscoverFeed = {
+      id: ask.id,
+      topic: ask.topic,
+      query: ask.query,
+      lang: ask.lang,
+      country: ask.country,
+      enabled: ask.enabled,
+      digestedAt: ask.digestedAt,
+    };
     persist(this.db, discoverFeedsMapping(), JSON.stringify(row));
     return okJson(row);
   }

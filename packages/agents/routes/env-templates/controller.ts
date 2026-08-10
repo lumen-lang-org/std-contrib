@@ -1,10 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, noContent, notFound, ok, param } from "../../../rest/server.ts";
-import { bodyInt, callerTags, stamp } from "../../api-core.ts";
+import { callerTags, stamp } from "../../api-core.ts";
 import { EnvTemplateWrite, envTemplatesAll, forgetEnvTemplate, saveEnvTemplate } from "../../env-templates.ts";
 import { owningTag } from "../../owner.ts";
-import { jsonText } from "../../scan.ts";
+import { EnvTemplateAsk } from "./types.ts";
 
 @controller("/env-templates")
 export class EnvTemplateApi {
@@ -20,17 +20,15 @@ export class EnvTemplateApi {
   }
 
   @post("/")
-  save(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required: {\"name\":\"...\",\"summary\":\"...\",\"image\":\"...\"} or a dockerfile instead of image"); }
-    let rank = bodyInt(req.body, "featuredRank", 0);
+  save(@Valid @RequestBody ask: EnvTemplateAsk): Reply {
     let t: EnvTemplateWrite = {
-      id: jsonText(req.body, "id"),
-      name: jsonText(req.body, "name"),
-      summary: jsonText(req.body, "summary"),
-      tags: jsonText(req.body, "tags"),
-      image: jsonText(req.body, "image"),
-      dockerfile: jsonText(req.body, "dockerfile"),
-      featuredRank: rank,
+      id: ask.id,
+      name: ask.name,
+      summary: ask.summary,
+      tags: ask.tags,
+      image: ask.image,
+      dockerfile: ask.dockerfile,
+      featuredRank: ask.featuredRank,
       now: stamp(),
     };
     let problem = saveEnvTemplate(this.db, t);

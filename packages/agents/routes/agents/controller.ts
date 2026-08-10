@@ -21,6 +21,18 @@ function agentNameProblem(name: string): string {
   return "";
 }
 
+function scopesReply(db: Db, agentId: string): Reply {
+  let granted = agentScopes(db, agentId);
+  let out = "[";
+  let i: int = 0;
+  while (i < granted.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + JSON.stringify(granted[i]);
+    i = i + 1;
+  }
+  return ok(out + "]");
+}
+
 export function forgetAgent(db: Db, agentId: string): void {
   executeWith(db, "DELETE FROM agent_sub_agents WHERE parent_id = " + db.placeholder, [agentId]);
   executeWith(db, "DELETE FROM agent_sub_agents WHERE child_id = " + db.placeholder, [agentId]);
@@ -185,28 +197,17 @@ export class AgentApi {
     if (!existsById(this.db, this.flat, param(req, "id"))) {
       return notFound("agent " + param(req, "id"));
     }
-    let granted = agentScopes(this.db, param(req, "id"));
-    let out = "[";
-    let i: int = 0;
-    while (i < granted.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + JSON.stringify(granted[i]);
-      i = i + 1;
-    }
-    return ok(out + "]");
+    return scopesReply(this.db, param(req, "id"));
   }
 
   @post("/:id/scopes")
-  grant(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  grant(@PathVariable("id") id: string, @Valid @RequestBody body: ScopeGrant): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    if (req.body == "") { return badRequest("a body is required: {\"scope\":\"/specs\"}"); }
-    let body: ScopeGrant = JSON.parse<ScopeGrant>(req.body);
-    if (body.scope == "") { return badRequest("a scope is required"); }
-    let problem = grantScope(this.db, param(req, "id"), body.scope);
+    let problem = grantScope(this.db, id, body.scope);
     if (problem != "") { return badRequest(problem); }
-    return this.scopes(req);
+    return scopesReply(this.db, id);
   }
 
   @del("/:id/scopes/:scope")
@@ -220,18 +221,15 @@ export class AgentApi {
   }
 
   @put("/:id/retrieval")
-  setRetrieval(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  setRetrieval(@PathVariable("id") id: string, @Valid @RequestBody body: RetrievalSetup): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    if (req.body == "") { return badRequest("a body is required"); }
-    let body: RetrievalSetup = JSON.parse<RetrievalSetup>(req.body);
     if (embeddingModel(this.db, body.embeddingModelId).id == "") {
       return badRequest("no usable embedding model " + body.embeddingModelId);
     }
-    if (body.topK <= 0 || body.topK > 100) { return badRequest("topK must be between 1 and 100"); }
     let row: AgentRetrievalRow = {
-      agentId: param(req, "id"),
+      agentId: id,
       embeddingModelId: body.embeddingModelId,
       topK: body.topK,
       maxDistance: body.maxDistance,
@@ -239,7 +237,7 @@ export class AgentApi {
     };
     let written = persist(this.db, agentRetrievalMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, agentRetrievalMapping(), param(req, "id")));
+    return ok(findById(this.db, agentRetrievalMapping(), id));
   }
 
   @get("/:id/web-rag")

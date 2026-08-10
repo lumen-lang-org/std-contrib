@@ -29,14 +29,12 @@ export class ProviderApi {
   }
 
   @put("/:provider/key")
-  setKey(req: Request): Reply {
+  setKey(@PathVariable("provider") provider: string, @Valid @RequestBody body: KeyBody): Reply {
     let problem = masterKeyProblem(this.master);
     if (problem != "") { return badRequest(problem); }
-    if (req.body == "") { return badRequest("a body is required"); }
-    let body: KeyBody = JSON.parse<KeyBody>(req.body);
-    let stored = storeCredential(this.db, { provider: param(req, "provider"), apiKey: body.apiKey, masterKey: this.master, now: stamp() });
+    let stored = storeCredential(this.db, { provider: provider, apiKey: body.apiKey, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
-    let v: ProviderStatus = { provider: param(req, "provider"), configured: true };
+    let v: ProviderStatus = { provider: provider, configured: true };
     return okJson(v);
   }
 

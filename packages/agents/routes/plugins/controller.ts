@@ -5,15 +5,7 @@ import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, p
 import { stamp } from "../../api-core.ts";
 import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
 import { McpServerRow, SkillRow, mcpServersMapping, pluginsMapping, skillsMapping } from "../../schema.ts";
-import { ManifestConnectorView, ManifestSkillView, ManifestView, PluginItemView } from "./types.ts";
-
-type PluginSource = { sourceUrl?: string };
-
-function sourceUrlOf(body: string): string {
-  if (body.trim() == "") { return ""; }
-  let ask: PluginSource = JSON.parse<PluginSource>(body);
-  return ask.sourceUrl ?? "";
-}
+import { ManifestConnectorView, ManifestSkillView, ManifestView, PluginAsk, PluginItemView } from "./types.ts";
 
 function manifestView(m: Manifest, clash: string): ManifestView {
   let skills: ManifestSkillView[] = [];
@@ -90,10 +82,8 @@ export class PluginApi {
   }
 
   @post("/inspect")
-  inspect(req: Request): Reply {
-    let url = sourceUrlOf(req.body);
-    if (url.trim() == "") { return badRequest("a plugin is installed from a manifest URL"); }
-    let got = fetchManifest(url);
+  inspect(@Valid @RequestBody ask: PluginAsk): Reply {
+    let got = fetchManifest(ask.sourceUrl);
     if (got.problem != "") { return badRequest(got.problem); }
     let m = manifestFrom(got.body);
     if (m.problem != "") { return badRequest(m.problem); }
@@ -102,16 +92,14 @@ export class PluginApi {
   }
 
   @post("/install")
-  add(req: Request): Reply {
-    let url = sourceUrlOf(req.body);
-    if (url.trim() == "") { return badRequest("a plugin is installed from a manifest URL"); }
-    let got = fetchManifest(url);
+  add(@Valid @RequestBody ask: PluginAsk): Reply {
+    let got = fetchManifest(ask.sourceUrl);
     if (got.problem != "") { return badRequest(got.problem); }
     let m = manifestFrom(got.body);
     if (m.problem != "") { return badRequest(m.problem); }
     let clash = installProblem(this.db, m);
     if (clash != "") { return badRequest(clash); }
-    let made = install(this.db, m, manifestUrl(url), stamp());
+    let made = install(this.db, m, manifestUrl(ask.sourceUrl), stamp());
     return created(findById(this.db, pluginsMapping(), made.id));
   }
 

@@ -1,3 +1,5 @@
+import { validated, Rule } from "../../../validation/validation.ts";
+
 export type ManifestSkillView = {
   name: string,
   description: string,
@@ -24,3 +26,13 @@ export type PluginItemView = {
   itemId: string,
   name: string,
 };
+
+@validated
+export class PluginAsk {
+  @required("a plugin is installed from a manifest URL")
+  sourceUrl: string;
+
+  constructor(sourceUrl: string) {
+    this.sourceUrl = sourceUrl;
+  }
+}
