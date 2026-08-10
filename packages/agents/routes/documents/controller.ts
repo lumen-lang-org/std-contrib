@@ -7,8 +7,7 @@ import { credentialFor } from "../../credentials.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "../../document-files.ts";
 import { JOB_QUEUED, enqueue, pendingJobs } from "../../indexing.ts";
 import { createDocuments, embeddingModel, listSources, normalScope } from "../../knowledge.ts";
-import { jsonText } from "../../scan.ts";
-import { DocumentFileView, DocumentQueued, DocumentStored, DocumentSummary, DocumentUpload } from "./types.ts";
+import { DocumentFileUpload, DocumentFileView, DocumentQueued, DocumentStored, DocumentSummary, DocumentUpload } from "./types.ts";
 
 function sourceProblem(source: string, body: string): string {
   if (source.trim() == "") { return "a document needs a source to be filed under"; }
@@ -133,11 +132,12 @@ export class DocumentApi {
     if (req.body == "") {
       return badRequest("a body is required: {\"source\":\"...\",\"scope\":\"...\",\"filename\":\"...\",\"mime\":\"...\",\"contentBase64\":\"...\"}");
     }
-    let source = jsonText(req.body, "source").trim();
+    let ask: DocumentFileUpload = JSON.parse<DocumentFileUpload>(req.body);
+    let source = (ask.source ?? "").trim();
     if (source == "") { return badRequest("a document needs a source to be filed under"); }
-    let scope = jsonText(req.body, "scope").trim();
+    let scope = (ask.scope ?? "").trim();
     if (scope == "") { return badRequest("a document needs a scope: \"/specs/plume\""); }
-    let content = jsonText(req.body, "contentBase64");
+    let content = ask.contentBase64 ?? "";
     if (content == "") { return badRequest("there are no bytes to keep"); }
     if (content.length > FILE_BASE64_MAX) {
       return badRequest("that file is too large to keep");
@@ -147,8 +147,8 @@ export class DocumentApi {
       id: documentFileId(filed, source),
       source: source,
       scope: filed,
-      filename: firstText(jsonText(req.body, "filename"), source),
-      mime: firstText(jsonText(req.body, "mime"), "application/octet-stream"),
+      filename: firstText(ask.filename ?? "", source),
+      mime: firstText(ask.mime ?? "", "application/octet-stream"),
       bytes: content,
       size: decodedSize(content),
       createdAt: stamp(),

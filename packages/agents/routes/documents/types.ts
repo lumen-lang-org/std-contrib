@@ -1,5 +1,13 @@
 export type DocumentUpload = { source: string, scope: string, body: string };
 
+export type DocumentFileUpload = {
+  source?: string,
+  scope?: string,
+  filename?: string,
+  mime?: string,
+  contentBase64?: string,
+};
+
 export type DocumentSummary = {
   source: string,
   scope: string,

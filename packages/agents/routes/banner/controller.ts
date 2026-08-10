@@ -2,8 +2,9 @@ import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, ok } from "../../../rest/server.ts";
 import { readSetting, writeSetting } from "../../schema.ts";
-import { jsonText } from "../../scan.ts";
 import { utf8Length } from "../../artifacts.ts";
+
+export type BannerAsk = { text: string };
 
 export const BANNER_MAX: int = 500;
 
@@ -24,7 +25,8 @@ export function bannerShow(db: Db): Reply {
 
 export function bannerChange(db: Db, body: string): Reply {
   if (body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
-  let text = jsonText(body, "text");
+  let ask: BannerAsk = JSON.parse<BannerAsk>(body);
+  let text = ask.text;
   let refused = bannerProblem(text);
   if (refused != "") { return badRequest(refused); }
   let problem = writeSetting(db, "banner", text);

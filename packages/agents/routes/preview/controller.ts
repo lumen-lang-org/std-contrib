@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
+import { View, view, render } from "../../../press/template.ts";
 import { placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, header, notFound, ok, param, problem, queryParam, reply } from "../../../rest/server.ts";
+import { Reply, Request, header, notFound, param, queryParam, reply } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { ArtifactRow, findByToken, getArtifact, getVersion, imageMediaType } from "../../artifacts.ts";
 import { officeRender, officeRenderExt } from "../../office-render.ts";
@@ -82,11 +83,17 @@ function previewIsHtml(mime: string): bool {
   return mime.startsWith("text/html");
 }
 
+const PREVIEW_IMAGE_PAGE: string = "<!doctype html><html><head><title><%= path %></title></head>"
+  + "<body style=\"margin:0;display:grid;place-items:center;min-height:100vh;background:#181a1d\">"
+  + "<img alt=\"<%= path %>\" style=\"max-width:100%;max-height:100vh\""
+  + " src=\"data:<%= mime %>;base64,<%- data %>\"></body></html>";
+
 function previewImagePage(artifact: ArtifactRow, b64: string): string {
-  return "<!doctype html><html><head><title>" + artifact.path + "</title></head>"
-    + "<body style=\"margin:0;display:grid;place-items:center;min-height:100vh;background:#181a1d\">"
-    + "<img alt=\"" + artifact.path + "\" style=\"max-width:100%;max-height:100vh\""
-    + " src=\"data:" + imageMediaType(artifact.path) + ";base64," + b64 + "\"></body></html>";
+  let v: View = view();
+  v.text.set("path", artifact.path);
+  v.text.set("mime", imageMediaType(artifact.path));
+  v.text.set("data", b64);
+  return render(PREVIEW_IMAGE_PAGE, v);
 }
 
 function previewPresentable(req: Request, artifact: ArtifactRow, body: string): ArtifactRow {

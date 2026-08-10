@@ -3,11 +3,26 @@ import { deleteById, executeWith, existsById, findById, persist, placeholderAt }
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
-import { forgetCredential, masterKey, storeCredential } from "../../credentials.ts";
+import { forgetCredential, storeCredential } from "../../credentials.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
-import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
 import { TriggerBotRow, botsOf, emptyBot, queuedFor, triggerBotsMapping } from "../../triggers.ts";
 import { workflowsMapping } from "../../workflow-store.ts";
+
+export type TriggerCreateAsk = {
+  name?: string,
+  workflowId?: string,
+  token?: string,
+};
+
+export type TriggerChangeAsk = {
+  name?: string,
+  workflowId?: string,
+  enabled?: bool,
+};
+
+export type TriggerTestAsk = {
+  minutes?: int,
+};
 
 @controller("/triggers")
 export class TriggerApi {
@@ -33,9 +48,10 @@ export class TriggerApi {
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"workflowId\":\"...\",\"token\":\"...\"}");
     }
-    let workflowId = jsonText(req.body, "workflowId");
+    let ask: TriggerCreateAsk = JSON.parse<TriggerCreateAsk>(req.body);
+    let workflowId = ask.workflowId ?? "";
     if (!existsById(this.db, workflowsMapping(), workflowId)) { return badRequest("no workflow " + workflowId); }
-    let token = jsonText(req.body, "token");
+    let token = ask.token ?? "";
     if (token.trim() == "") { return badRequest("a bot needs its token from BotFather"); }
 
     let id = crypto.randomUUID();
@@ -46,7 +62,7 @@ export class TriggerApi {
     let now = stamp();
     let row: TriggerBotRow = {
       id: id, owner: owner, kind: "telegram",
-      name: jsonText(req.body, "name"), workflowId: workflowId,
+      name: ask.name ?? "", workflowId: workflowId,
       credentialRef: ref, offset: "0", leaseBy: "", leaseUntil: "",
       enabled: false,
       runsToday: 0, dayStartedAt: now, lastAt: "", lastError: "",
@@ -69,18 +85,19 @@ export class TriggerApi {
     let mine = this.owned(req);
     if (mine.id == "") { return notFound("bot " + param(req, "id")); }
     if (req.body == "") { return badRequest("a body is required"); }
-    let workflowId = jsonText(req.body, "workflowId");
+    let ask: TriggerChangeAsk = JSON.parse<TriggerChangeAsk>(req.body);
+    let workflowId = ask.workflowId ?? "";
     if (workflowId != "" && !existsById(this.db, workflowsMapping(), workflowId)) {
       return badRequest("no workflow " + workflowId);
     }
-    let name = jsonText(req.body, "name");
+    let name = ask.name ?? "";
     let edited: TriggerBotRow = {
       id: mine.id, owner: mine.owner, kind: mine.kind,
       name: name == "" ? mine.name : name,
       workflowId: workflowId == "" ? mine.workflowId : workflowId,
       credentialRef: mine.credentialRef, offset: mine.offset,
       leaseBy: mine.leaseBy, leaseUntil: mine.leaseUntil,
-      enabled: jsonFlag(req.body, "enabled", mine.enabled),
+      enabled: ask.enabled ?? mine.enabled,
       runsToday: mine.runsToday, dayStartedAt: mine.dayStartedAt,
       lastAt: mine.lastAt, lastError: mine.lastError,
       draftUntil: mine.draftUntil ?? "", createdAt: mine.createdAt, updatedAt: stamp(),
@@ -94,7 +111,11 @@ export class TriggerApi {
   test(req: Request): Reply {
     let mine = this.owned(req);
     if (mine.id == "") { return notFound("bot " + param(req, "id")); }
-    let minutes = parseInt(jsonRaw(req.body, "minutes").trim(), 10) ?? 5;
+    let minutes: int = 5;
+    if (req.body != "") {
+      let ask: TriggerTestAsk = JSON.parse<TriggerTestAsk>(req.body);
+      minutes = ask.minutes ?? 5;
+    }
     if (minutes < 0) { minutes = 0; }
     if (minutes > 30) { minutes = 30; }
     let until = minutes == 0 ? "" : `${(Date.now() as i64) + (minutes as i64) * 60000}`;

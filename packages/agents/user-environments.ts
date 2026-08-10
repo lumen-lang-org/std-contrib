@@ -20,16 +20,7 @@ export function uenvGlobalCeiling(): int { return uenvGlobalChosen; }
 export function userEnvCountAll(db: Db): int {
   if (!db.query("SELECT count(*) FROM user_environments", [])) { return 0; }
   if (db.rows() == 0) { return 0; }
-  let s = db.value(0, 0);
-  let n: int = 0;
-  let i: int = 0;
-  while (i < s.length) {
-    let c = s.charCodeAt(i);
-    if (c < 48 || c > 57) { return n; }
-    n = n * 10 + (c - 48);
-    i = i + 1;
-  }
-  return n;
+  return parseInt(db.value(0, 0).trim(), 10) ?? 0;
 }
 export const MAX_USER_ENV_NAME: int = 40;
 export const MAX_DOCKERFILE: int = 16384;

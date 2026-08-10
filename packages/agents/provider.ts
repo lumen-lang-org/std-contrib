@@ -84,6 +84,24 @@ export function wireKey(provider: string, apiKey: string): WireKey {
 }
 
 
+type EmbedInstance = {
+  content: string,
+};
+
+type EmbedParameters = {
+  outputDimensionality: int,
+};
+
+type PredictAsk = {
+  instances: EmbedInstance[],
+  parameters: EmbedParameters,
+};
+
+type EmbedAsk = {
+  model: string,
+  input: string[],
+};
+
 export function embedText(model: ModelRow, text: string, apiKey: string): Embedding {
   let endpoint = endpointFor(model, "embeddings");
   if (endpoint == "") {
@@ -111,9 +129,11 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
           + "https://<region>-aiplatform.googleapis.com/v1/projects/<project>/locations/<region>/publishers/google/models/<model>:predict" };
       return misaimed;
     }
-    let ask = "{\"instances\":[{\"content\":" + JSON.stringify(text) + "}]"
-      + ",\"parameters\":{\"outputDimensionality\":" + `${model.dimensions}` + "}}";
-    let answered = http.request(model.baseUrl, "POST", ask, authHeaders(model.provider, carried.key));
+    let instance: EmbedInstance = { content: text };
+    let instances: EmbedInstance[] = [instance];
+    let parameters: EmbedParameters = { outputDimensionality: model.dimensions };
+    let predict: PredictAsk = { instances: instances, parameters: parameters };
+    let answered = http.request(model.baseUrl, "POST", JSON.stringify(predict), authHeaders(model.provider, carried.key));
     if (!answered.ok) {
       let dead: Embedding = { ok: false, vector: "", dimensions: 0, error: "no answer from " + model.baseUrl };
       return dead;
@@ -125,9 +145,9 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
     return vertexVectorFrom(answered.body);
   }
 
-  let body = "{\"model\":" + JSON.stringify(model.apiName)
-    + ",\"input\":[" + JSON.stringify(text) + "]}";
-  let res = http.request(endpoint, "POST", body, authHeaders(model.provider, carried.key));
+  let input: string[] = [text];
+  let ask: EmbedAsk = { model: model.apiName, input: input };
+  let res = http.request(endpoint, "POST", JSON.stringify(ask), authHeaders(model.provider, carried.key));
   if (!res.ok) {
     let dead: Embedding = { ok: false, vector: "", dimensions: 0, error: "no answer from " + endpoint };
     return dead;
@@ -329,6 +349,40 @@ export function toolTurn(callId: string, toolName: string, text: string): Turn {
   return t;
 }
 
+type FunctionCall = {
+  name: string,
+  arguments: string,
+};
+
+type ToolCallEntry = {
+  id: string,
+  type: string,
+  function: FunctionCall,
+};
+
+type ChatMessage = {
+  role: string,
+  content: string,
+};
+
+type ToolMessage = {
+  role: string,
+  tool_call_id: string,
+  name: string,
+  content: string,
+};
+
+type TextBlock = {
+  type: string,
+  text: string,
+};
+
+type ToolResultBlock = {
+  type: string,
+  tool_use_id: string,
+  content: string,
+};
+
 function openAiAssistant(turn: Turn): string {
   let out = "{\"role\":\"assistant\",\"content\":";
   if (turn.text == "") { out = out + "null"; } else { out = out + JSON.stringify(turn.text); }
@@ -337,9 +391,9 @@ function openAiAssistant(turn: Turn): string {
   let i: int = 0;
   while (i < turn.calls.length) {
     if (i > 0) { out = out + ","; }
-    out = out + "{\"id\":" + JSON.stringify(turn.calls[i].id)
-      + ",\"type\":\"function\",\"function\":{\"name\":" + JSON.stringify(turn.calls[i].name)
-      + ",\"arguments\":" + JSON.stringify(turn.calls[i].args) + "}}";
+    let fn: FunctionCall = { name: turn.calls[i].name, arguments: turn.calls[i].args };
+    let entry: ToolCallEntry = { id: turn.calls[i].id, type: "function", function: fn };
+    out = out + JSON.stringify(entry);
     i = i + 1;
   }
   return out + "]}";
@@ -349,7 +403,8 @@ function anthropicAssistant(turn: Turn): string {
   let out = "{\"role\":\"assistant\",\"content\":[";
   let written: int = 0;
   if (turn.text != "") {
-    out = out + "{\"type\":\"text\",\"text\":" + JSON.stringify(turn.text) + "}";
+    let block: TextBlock = { type: "text", text: turn.text };
+    out = out + JSON.stringify(block);
     written = written + 1;
   }
   let i: int = 0;
@@ -370,7 +425,8 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
   let out = "[";
   let written: int = 0;
   if (provider != "anthropic" && systemPrompt != "") {
-    out = out + "{\"role\":\"system\",\"content\":" + JSON.stringify(systemPrompt) + "}";
+    let system: ChatMessage = { role: "system", content: systemPrompt };
+    out = out + JSON.stringify(system);
     written = written + 1;
   }
 
@@ -393,8 +449,8 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
         let first: bool = true;
         while (i < turns.length && turns[i].role == "tool") {
           if (!first) { out = out + ","; }
-          out = out + "{\"type\":\"tool_result\",\"tool_use_id\":" + JSON.stringify(turns[i].callId)
-            + ",\"content\":" + JSON.stringify(turns[i].text) + "}";
+          let result: ToolResultBlock = { type: "tool_result", tool_use_id: turns[i].callId, content: turns[i].text };
+          out = out + JSON.stringify(result);
           first = false;
           i = i + 1;
         }
@@ -402,15 +458,15 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
         written = written + 1;
         continue;
       }
-      out = out + "{\"role\":\"tool\",\"tool_call_id\":" + JSON.stringify(turn.callId)
-        + ",\"name\":" + JSON.stringify(turn.toolName)
-        + ",\"content\":" + JSON.stringify(turn.text) + "}";
+      let answered: ToolMessage = { role: "tool", tool_call_id: turn.callId, name: turn.toolName, content: turn.text };
+      out = out + JSON.stringify(answered);
       written = written + 1;
       i = i + 1;
       continue;
     }
 
-    out = out + "{\"role\":\"user\",\"content\":" + JSON.stringify(turn.text) + "}";
+    let spoken: ChatMessage = { role: "user", content: turn.text };
+    out = out + JSON.stringify(spoken);
     written = written + 1;
     i = i + 1;
   }

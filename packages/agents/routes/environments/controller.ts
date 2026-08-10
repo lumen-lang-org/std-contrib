@@ -1,17 +1,16 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { EnvKeyRow, envKeysOf, forgetEnvKey } from "../../env-keys.ts";
 import { envTemplateById } from "../../env-templates.ts";
 import { envDrop, envOwned } from "../../environments.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
-import { jsonText } from "../../scan.ts";
 import { ScriptImageRow, scriptImagesMapping } from "../../schema.ts";
 import { threadOwner } from "../../threads.ts";
 import { createUserEnv, forgetUserEnv, userEnvsMapping, userEnvsOf } from "../../user-environments.ts";
-import { EnvCatalogItem } from "./types.ts";
+import { EnvCatalogItem, EnvCreateAsk } from "./types.ts";
 
 @controller("/environments")
 export class EnvironmentApi {
@@ -71,10 +70,11 @@ export class EnvironmentApi {
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"image\":\"...\"}, {\"name\":\"...\",\"dockerfile\":\"FROM ...\"}, or {\"name\":\"...\",\"templateId\":\"...\"}");
     }
-    let image = jsonText(req.body, "image");
-    let dockerfile = jsonText(req.body, "dockerfile");
-    let name = jsonText(req.body, "name");
-    let templateId = jsonText(req.body, "templateId");
+    let ask: EnvCreateAsk = JSON.parse<EnvCreateAsk>(req.body);
+    let image = ask.image ?? "";
+    let dockerfile = ask.dockerfile ?? "";
+    let name = ask.name ?? "";
+    let templateId = ask.templateId ?? "";
     if (templateId != "") {
       let t = envTemplateById(this.db, templateId);
       if (t.id == "") { return badRequest("no template has the id \"" + templateId + "\" — the catalog says which exist"); }
@@ -107,7 +107,8 @@ export class EnvironmentApi {
   mine(req: Request): Reply {
     let tags = callerTags(req);
     if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
-    return ok(JSON.stringify(envOwned(this.db, owningTag(tags))));
+    let rows = envOwned(this.db, owningTag(tags));
+    return okJson(rows);
   }
 
   @del("/mine/:threadId/:name")

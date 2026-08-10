@@ -20,3 +20,5 @@ export type AuthProviderResolvedView = {
 };
 
 export type AuthProviderSecretStored = { configured: bool };
+
+export type AuthProviderSecretAsk = { clientSecret?: string };

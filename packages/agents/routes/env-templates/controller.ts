@@ -1,10 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
-import { callerTags, stamp } from "../../api-core.ts";
+import { Reply, Request, badRequest, noContent, notFound, ok, param } from "../../../rest/server.ts";
+import { bodyInt, callerTags, stamp } from "../../api-core.ts";
 import { EnvTemplateWrite, envTemplatesAll, forgetEnvTemplate, saveEnvTemplate } from "../../env-templates.ts";
 import { owningTag } from "../../owner.ts";
-import { jsonRaw, jsonText } from "../../scan.ts";
+import { jsonText } from "../../scan.ts";
 
 @controller("/env-templates")
 export class EnvTemplateApi {
@@ -22,15 +22,7 @@ export class EnvTemplateApi {
   @post("/")
   save(req: Request): Reply {
     if (req.body == "") { return badRequest("a body is required: {\"name\":\"...\",\"summary\":\"...\",\"image\":\"...\"} or a dockerfile instead of image"); }
-    let rankRaw = jsonRaw(req.body, "featuredRank");
-    let rank: int = 0;
-    let ri: int = 0;
-    while (ri < rankRaw.length) {
-      let c = rankRaw.charCodeAt(ri);
-      if (c < 48 || c > 57) { rank = 0; break; }
-      rank = rank * 10 + (c - 48);
-      ri = ri + 1;
-    }
+    let rank = bodyInt(req.body, "featuredRank", 0);
     let t: EnvTemplateWrite = {
       id: jsonText(req.body, "id"),
       name: jsonText(req.body, "name"),
