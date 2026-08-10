@@ -75,8 +75,8 @@ function pass(db: Db, botId: string, who: string, master: string): void {
   let body = getUpdates(token, bot.offset);
   let said = updatesIn(body);
   if (said.length == 0) {
-    let problem = jsonText(body, "description");
-    noteBotPass(db, bot.id, bot.offset, problem, Date.now() as number);
+    let fault = jsonText(body, "description");
+    noteBotPass(db, bot.id, bot.offset, fault, Date.now() as number);
     return;
   }
 

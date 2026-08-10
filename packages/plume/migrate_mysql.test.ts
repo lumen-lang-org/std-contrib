@@ -366,7 +366,7 @@ test("baseline marks history without running anything", () => {
   execute(database, "DROP TABLE IF EXISTS mig_c");
 });
 
-test("validation reports the first problem and nothing else", () => {
+test("validation reports the first fault and nothing else", () => {
   clean();
   expect(validateMigrations(database, basePlan()) == "");
   expect(migrate(database, basePlan()).ok);

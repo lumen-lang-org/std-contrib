@@ -3,7 +3,7 @@ import { postgres } from "../../plume/postgres.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
 import { migrate, forgetMigrations } from "../../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "../schema.ts";
-import { masterKey, masterKeyProblem, storeCredential, credentialFor } from "../credentials.ts";
+import { masterKey, masterKeyFault, storeCredential, credentialFor } from "../credentials.ts";
 import { Embedding, embedText } from "../provider.ts";
 import { Retrieved, Retrieval, embeddingModel, createDocuments, indexDocument, retrieve, asContext } from "../knowledge.ts";
 import { AgentRun, runAgent } from "../run.ts";
@@ -11,8 +11,8 @@ import { AgentRun, runAgent } from "../run.ts";
 
 function main(): void {
   let master = masterKey();
-  if (masterKeyProblem(master) != "") {
-    console.error(masterKeyProblem(master));
+  if (masterKeyFault(master) != "") {
+    console.error(masterKeyFault(master));
     return;
   }
 
@@ -50,9 +50,9 @@ function main(): void {
     return;
   }
   console.log("embedding with " + embedder.label + " at " + `${embedder.dimensions}` + " dimensions");
-  let problem = createDocuments(db, embedder);
-  if (problem != "") {
-    console.error(problem);
+  let fault = createDocuments(db, embedder);
+  if (fault != "") {
+    console.error(fault);
     return;
   }
 

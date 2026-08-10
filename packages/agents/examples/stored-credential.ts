@@ -3,7 +3,7 @@ import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, findById, execute, dropTable } from "../../plume/plume.ts";
 import { migrate, forgetMigrations } from "../../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, CredentialRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "../schema.ts";
-import { masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials } from "../credentials.ts";
+import { masterKey, masterKeyFault, storeCredential, credentialFor, providersWithCredentials } from "../credentials.ts";
 import { Completion, complete } from "../provider.ts";
 
 type ModelView = { id: string, label: string, apiName: string, provider: string, kind: string, dimensions: int, baseUrl: string, enabled: bool };
@@ -15,9 +15,9 @@ type ConfigView = {
 
 function main(): void {
   let master = masterKey();
-  let problem = masterKeyProblem(master);
-  if (problem != "") {
-    console.error(problem);
+  let fault = masterKeyFault(master);
+  if (fault != "") {
+    console.error(fault);
     return;
   }
 

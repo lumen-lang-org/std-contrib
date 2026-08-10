@@ -61,7 +61,7 @@ function envDocker(args: string[]): EnvDockerReply {
   return reply;
 }
 
-function envDockerProblem(doing: string, reply: EnvDockerReply): string {
+function envDockerFault(doing: string, reply: EnvDockerReply): string {
   let detail = envFirstLine(reply.stderr);
   if (detail == "") {
     detail = envFirstLine(reply.stdout);
@@ -149,11 +149,11 @@ export type EnvEnsured = {
   container: string,
   created: bool,
   warmed: bool,
-  problem: string,
+  fault: string,
 };
 
-function envRefused(problem: string): EnvEnsured {
-  let r: EnvEnsured = { ok: false, container: "", created: false, warmed: false, problem: problem };
+function envRefused(fault: string): EnvEnsured {
+  let r: EnvEnsured = { ok: false, container: "", created: false, warmed: false, fault: fault };
   return r;
 }
 
@@ -171,7 +171,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     }
     let made = envDocker(envRunArgs(container, e.threadId, e.image, e.network));
     if (made.status != 0) {
-      return envRefused(envDockerProblem("create the environment", made));
+      return envRefused(envDockerFault("create the environment", made));
     }
     envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
     envSave(db, e.threadId, name, e.image, e.network, "running", e.now, e.now);
@@ -180,7 +180,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       container: container,
       created: true,
       warmed: false,
-      problem: "",
+      fault: "",
     };
     return fresh;
   }
@@ -196,7 +196,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       envDocker(["rm", "-f", container]);
       let remade = envDocker(envRunArgs(container, e.threadId, row.image, row.network != 0));
       if (remade.status != 0) {
-        return envRefused(envDockerProblem("start the environment", remade));
+        return envRefused(envDockerFault("start the environment", remade));
       }
       envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
       created = true;
@@ -208,7 +208,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     container: container,
     created: created,
     warmed: warmed,
-    problem: "",
+    fault: "",
   };
   return back;
 }

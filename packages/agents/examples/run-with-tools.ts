@@ -107,8 +107,8 @@ function main(): void {
     t = t + 1;
   }
   let p: int = 0;
-  while (p < mounted.problems.length) {
-    console.log("  ! " + mounted.problems[p]);
+  while (p < mounted.faults.length) {
+    console.log("  ! " + mounted.faults[p]);
     p = p + 1;
   }
 

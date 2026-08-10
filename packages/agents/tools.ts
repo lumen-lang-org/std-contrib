@@ -24,7 +24,7 @@ export type Mounted = {
   tools: MountedTool[],
   servers: McpServerRow[],
   tokens: string[],
-  problems: string[],
+  faults: string[],
   deferred: MountedTool[],
 };
 
@@ -124,7 +124,7 @@ export function findTools(mounted: Mounted, query: string, cap: int): FoundTools
 
   let out: Mounted = {
     tools: grown, servers: mounted.servers, tokens: mounted.tokens,
-    problems: mounted.problems, deferred: mounted.deferred,
+    faults: mounted.faults, deferred: mounted.deferred,
   };
   let answer: FoundTools = { mounted: out, found: found };
   return answer;
@@ -220,7 +220,7 @@ export function delegateSchema(): string {
 export function mountTools(db: Db, agentId: string, master: string, owner: string): Mounted {
   let tools: MountedTool[] = [];
   let deferred: MountedTool[] = [];
-  let problems: string[] = [];
+  let faults: string[] = [];
   let tokens: string[] = [];
   let servers = agentServers(db, agentId);
 
@@ -235,25 +235,25 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
   while (s < servers.length) {
     let server = servers[s];
     if (!server.enabled) {
-      problems.push(server.serverName + " is disabled");
+      faults.push(server.serverName + " is disabled");
       s = s + 1;
       continue;
     }
     if (server.transport != "http") {
-      problems.push(server.serverName + " speaks " + server.transport + ", which needs a subprocess this cannot spawn");
+      faults.push(server.serverName + " speaks " + server.transport + ", which needs a subprocess this cannot spawn");
       s = s + 1;
       continue;
     }
 
     let token = tokens[s];
     if (server.authKind != "" && server.authKind != "none" && token == "") {
-      problems.push(server.serverName + " needs a token and none is stored for it");
+      faults.push(server.serverName + " needs a token and none is stored for it");
       s = s + 1;
       continue;
     }
     let offered = listTools(server, token);
     if (offered.length == 0) {
-      problems.push(server.serverName + " listed no tools");
+      faults.push(server.serverName + " listed no tools");
       s = s + 1;
       continue;
     }
@@ -267,7 +267,7 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
         continue;
       }
       if (mountedIndex(tools, offered[i].name) >= 0) {
-        problems.push(server.serverName + " also offers \"" + offered[i].name + "\", which is already mounted");
+        faults.push(server.serverName + " also offers \"" + offered[i].name + "\", which is already mounted");
       } else {
         let t: MountedTool = {
           name: offered[i].name,
@@ -290,7 +290,7 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
     tools: tools,
     servers: servers,
     tokens: tokens,
-    problems: problems,
+    faults: faults,
     deferred: deferred,
   };
   return out;
@@ -483,7 +483,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       let refused: FileToolResult = {
         handled: true,
         ok: false,
-        text: written.problem,
+        text: written.fault,
         line: 0,
         changed: "",
       };
@@ -540,7 +540,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       let refused: FileToolResult = {
         handled: true,
         ok: false,
-        text: found.problem,
+        text: found.fault,
         line: 0,
         changed: "",
       };
@@ -600,7 +600,7 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       let refused: FileToolResult = {
         handled: true,
         ok: false,
-        text: wireView(edited.problem).text,
+        text: wireView(edited.fault).text,
         line: 0,
         changed: "",
       };
@@ -829,8 +829,8 @@ function scriptRunAnswer(ran: ScriptRan, envName: string): string {
   let out = "";
   if (ran.ok) {
     out = "The script ran in environment \"" + envName + "\".";
-  } else if (ran.problem != "") {
-    out = ran.problem;
+  } else if (ran.fault != "") {
+    out = ran.fault;
   } else {
     out = "The script did not complete: it was stopped by " + ran.stopped + ".";
   }
@@ -862,7 +862,7 @@ function scriptRunAnswer(ran: ScriptRan, envName: string): string {
   }
   let r: int = 0;
   while (r < ran.refused.length) {
-    out = out + "\nrefused: " + ran.refused[r].path + " — " + ran.refused[r].problem;
+    out = out + "\nrefused: " + ran.refused[r].path + " — " + ran.refused[r].fault;
     r = r + 1;
   }
   if (!ran.ok && ran.stopped != "") {

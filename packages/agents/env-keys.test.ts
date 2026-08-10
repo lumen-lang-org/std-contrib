@@ -68,7 +68,7 @@ test("keys are per environment, so one name can exist in two of them", () => {
     master: testKey(), now: "t2",
   });
   expect(again.id == "");
-  expect(again.problem.indexOf("already a key called") >= 0);
+  expect(again.fault.indexOf("already a key called") >= 0);
   expect(stored("API_KEY", "o1", "img-office", "three") != "");
   expect(envKeyFileBody(database, "o1", "img-runtime", testKey()) == "API_KEY=one\n");
   expect(envKeyFileBody(database, "o1", "img-office", testKey()) == "API_KEY=three\n");
@@ -82,7 +82,7 @@ test("a name the container reads before the script is refused", () => {
     master: testKey(), now: "t1",
   });
   expect(path.id == "");
-  expect(path.problem.indexOf("before your script") >= 0);
+  expect(path.fault.indexOf("before your script") >= 0);
   let preload = createEnvKey(database, {
     owner: "o1", imageId: "i", name: "LD_PRELOAD", value: "/tmp/evil.so",
     master: testKey(), now: "t1",
@@ -101,7 +101,7 @@ test("a name that is not a variable name is refused", () => {
     owner: "o1", imageId: "i", name: "MY-KEY", value: "v", master: testKey(), now: "t1",
   });
   expect(dashed.id == "");
-  expect(dashed.problem.indexOf("not a variable name") >= 0);
+  expect(dashed.fault.indexOf("not a variable name") >= 0);
   let leading = createEnvKey(database, {
     owner: "o1", imageId: "i", name: "1KEY", value: "v", master: testKey(), now: "t1",
   });
@@ -119,7 +119,7 @@ test("a line break in a value is refused, because the file format has no escape"
     master: testKey(), now: "t1",
   });
   expect(broken.id == "");
-  expect(broken.problem.indexOf("line break") >= 0);
+  expect(broken.fault.indexOf("line break") >= 0);
   expect(envKeyFileBody(database, "o1", "i", testKey()) == "");
 });
 
@@ -172,5 +172,5 @@ test("an environment holds a bounded number of keys", () => {
     owner: "o1", imageId: "i", name: "ONE_MORE", value: "v", master: testKey(), now: "t1",
   });
   expect(over.id == "");
-  expect(over.problem.indexOf("delete one before adding another") >= 0);
+  expect(over.fault.indexOf("delete one before adding another") >= 0);
 });

@@ -8,7 +8,7 @@ export type BannerAsk = { text: string };
 
 export const BANNER_MAX: int = 500;
 
-export function bannerProblem(text: string): string {
+export function bannerFault(text: string): string {
   if (utf8Length(text) > BANNER_MAX) {
     return "a banner is at most 500 bytes — it is a sentence, not a page";
   }
@@ -29,13 +29,13 @@ export function bannerChange(db: Db, body: string): Reply {
   }
   let ask: BannerAsk = JSON.parse<BannerAsk>(body);
   let text = ask.text;
-  let refused = bannerProblem(text);
+  let refused = bannerFault(text);
   if (refused != "") {
     return BadRequest(refused);
   }
-  let problem = writeSetting(db, "banner", text);
-  if (problem != "") {
-    return BadRequest(problem);
+  let fault = writeSetting(db, "banner", text);
+  if (fault != "") {
+    return BadRequest(fault);
   }
   return Ok(bannerJson(text));
 }

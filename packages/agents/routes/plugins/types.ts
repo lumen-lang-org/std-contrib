@@ -16,7 +16,7 @@ export type ManifestView = {
   name: string,
   description: string,
   version: string,
-  problem: string,
+  fault: string,
   skills: ManifestSkillView[],
   connectors: ManifestConnectorView[],
 };

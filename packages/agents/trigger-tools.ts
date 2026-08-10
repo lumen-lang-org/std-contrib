@@ -134,7 +134,7 @@ export function describeBot(db: Db, bot: TriggerBotRow, nowMs: number): string {
     line = line + "\n  TESTING THE DRAFT — every message walks unpublished edits until the window ends";
   }
   if (bot.lastError != "") {
-    line = line + "\n  last problem: " + bot.lastError;
+    line = line + "\n  last fault: " + bot.lastError;
   }
   return line;
 }

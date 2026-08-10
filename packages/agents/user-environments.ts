@@ -160,7 +160,7 @@ export type UserEnvWrite = {
 
 export type UserEnvMade = {
   id: string,
-  problem: string,
+  fault: string,
 };
 
 export function refuseUserEnv(db: Db, ask: UserEnvWrite): string {
@@ -207,7 +207,7 @@ export function refuseUserEnv(db: Db, ask: UserEnvWrite): string {
 export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
   let wrong = refuseUserEnv(db, ask);
   if (wrong != "") {
-    return { id: "", problem: wrong };
+    return { id: "", fault: wrong };
   }
   let id = crypto.randomUUID();
   let name = ask.name.trim();
@@ -226,7 +226,7 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
       staged = "the build could not be staged";
     }
     if (staged != "") {
-      return { id: "", problem: staged };
+      return { id: "", fault: staged };
     }
     let built = uenvDocker(["build", "-t", image, stage]);
     try {
@@ -235,7 +235,7 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
     if (built.status != 0) {
       return {
         id: "",
-        problem: "the build failed:\n" + uenvTail(built.stderr == "" ? built.stdout : built.stderr),
+        fault: "the build failed:\n" + uenvTail(built.stderr == "" ? built.stdout : built.stderr),
       };
     }
   } else {
@@ -243,7 +243,7 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
     if (pulled.status != 0) {
       return {
         id: "",
-        problem: "the image could not be pulled:\n" + uenvTail(pulled.stderr == "" ? pulled.stdout : pulled.stderr),
+        fault: "the image could not be pulled:\n" + uenvTail(pulled.stderr == "" ? pulled.stdout : pulled.stderr),
       };
     }
   }
@@ -254,9 +254,9 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
   };
   let written = persist(db, userEnvsMapping(), JSON.stringify(row));
   if (!written.ok) {
-    return { id: "", problem: written.error };
+    return { id: "", fault: written.error };
   }
-  return { id: id, problem: "" };
+  return { id: id, fault: "" };
 }
 
 export function forgetUserEnv(db: Db, id: string, owner: string): bool {

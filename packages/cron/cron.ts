@@ -38,7 +38,7 @@ export type Fire = {
 // complaint — which names the offending field. Check this at the point a
 // person types an expression, not at the point it should fire: a schedule that
 // fails to parse in the runner is a task that silently never runs.
-export function problem(expr: string): string {
+export function fault(expr: string): string {
   return cron_error(expr);
 }
 

@@ -34,9 +34,9 @@ export class EnvTemplateApi {
       featuredRank: ask.featuredRank,
       now: stamp(),
     };
-    let problem = saveEnvTemplate(this.db, t);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = saveEnvTemplate(this.db, t);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     return Ok(JSON.stringify(envTemplatesAll(this.db)));
   }

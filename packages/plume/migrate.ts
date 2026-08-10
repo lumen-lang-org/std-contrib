@@ -530,7 +530,7 @@ export function migrationInfo(db: Db, plan: Migration[]): MigrationState[] {
 }
 
 // Every step the history knows about that the plan no longer contains. A
-// migration deleted from the plan after it ran is a real problem — the next
+// migration deleted from the plan after it ran is a real fault — the next
 // database built from that plan will differ from this one.
 export function missingMigrations(db: Db, plan: Migration[]): string[] {
   let out: string[] = [];
@@ -566,7 +566,7 @@ export function missingMigrations(db: Db, plan: Migration[]): string[] {
 }
 
 // The checks `migrate` makes before it runs anything, on their own. Returns
-// the first problem, or an empty string.
+// the first fault, or an empty string.
 export function validateMigrations(db: Db, plan: Migration[]): string {
   let planned = planValid(plan);
   if (planned != "") {

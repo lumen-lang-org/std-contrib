@@ -1,5 +1,5 @@
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem, streamProblem, streamDetail, assistantThinking, replyText } from "./provider.ts";
+import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationFault, streamFault, streamDetail, assistantThinking, replyText } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
   let m: ModelRow = {
@@ -99,20 +99,20 @@ test("without a base url every provider keeps its own address", () => {
 
 test("a reply that stopped on length is a truncated reply", () => {
   let openai = "{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":null}}]}";
-  expect(truncationProblem("openai", openai, 512) != "");
+  expect(truncationFault("openai", openai, 512) != "");
   let mistral = "{\"choices\":[{\"finish_reason\":\"model_length\",\"message\":{\"content\":\"\"}}]}";
-  expect(truncationProblem("mistral", mistral, 512) != "");
+  expect(truncationFault("mistral", mistral, 512) != "");
   let anthropic = "{\"stop_reason\":\"max_tokens\",\"content\":[{\"type\":\"text\",\"text\":\"half a sen\"}]}";
-  expect(truncationProblem("anthropic", anthropic, 512) != "");
-  expect(truncationProblem("openai", openai, 512).indexOf("512") >= 0);
+  expect(truncationFault("anthropic", anthropic, 512) != "");
+  expect(truncationFault("openai", openai, 512).indexOf("512") >= 0);
 });
 
 test("a reply that finished is not called truncated", () => {
-  expect(truncationProblem("openai", "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"42\"}}]}", 512) == "");
-  expect(truncationProblem("mistral", "{\"choices\":[{\"finish_reason\":\"tool_calls\"}]}", 512) == "");
-  expect(truncationProblem("anthropic", "{\"stop_reason\":\"end_turn\"}", 512) == "");
-  expect(truncationProblem("anthropic", "{\"stop_reason\":\"tool_use\"}", 512) == "");
-  expect(truncationProblem("openai", "{\"choices\":[{\"message\":{\"content\":\"42\"}}]}", 512) == "");
+  expect(truncationFault("openai", "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"42\"}}]}", 512) == "");
+  expect(truncationFault("mistral", "{\"choices\":[{\"finish_reason\":\"tool_calls\"}]}", 512) == "");
+  expect(truncationFault("anthropic", "{\"stop_reason\":\"end_turn\"}", 512) == "");
+  expect(truncationFault("anthropic", "{\"stop_reason\":\"tool_use\"}", 512) == "");
+  expect(truncationFault("openai", "{\"choices\":[{\"message\":{\"content\":\"42\"}}]}", 512) == "");
 });
 
 test("each provider's own word for stopping is read, not the other's", () => {
@@ -139,20 +139,20 @@ test("a refusal tells the reader what to do and leaks nothing about the deployme
   let m: ModelRow = { id: "m1", label: "Qwen local", apiName: "qwen2.5-7b", provider: "vllm",
     kind: "chat", dimensions: 0, baseUrl: "http://10.0.0.9:8000/v1", enabled: true, contextTokens: 0 };
 
-  let dead = streamProblem(m, -1, "");
+  let dead = streamFault(m, -1, "");
   expect(dead.indexOf("Qwen local") >= 0);
   expect(dead.indexOf("10.0.0.9") < 0);
   expect(dead.indexOf("qwen2.5-7b") < 0);
 
-  let long = streamProblem(m, 400, "context length exceeded");
+  let long = streamFault(m, 400, "context length exceeded");
   expect(long.indexOf("longer than the model can hold") >= 0);
   expect(long.indexOf("context length exceeded") < 0);
 
-  let auth = streamProblem(m, 401, "");
+  let auth = streamFault(m, 401, "");
   expect(auth.indexOf("not configured correctly") >= 0);
   expect(auth.indexOf("vllm") < 0);
 
-  let theirs = streamProblem(m, 503, "");
+  let theirs = streamFault(m, 503, "");
   expect(theirs.indexOf("its own side") >= 0);
 
   let detail = streamDetail(m, 404, "no such model");

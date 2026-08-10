@@ -4,7 +4,7 @@ import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok, OkJson, Refused } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "../../office-render.ts";
-import { createProblem, jsonId } from "../../payload.ts";
+import { createFault, jsonId } from "../../payload.ts";
 import { putFile } from "../../workspace.ts";
 import { TemplatePdfView } from "./types.ts";
 
@@ -44,9 +44,9 @@ export class TemplateApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, templatesMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, templatesMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let written = persist(this.db, templatesMapping(), req.body);
     if (!written.ok) {
@@ -149,7 +149,7 @@ export class TemplateApi {
     };
     let made = officeRender(this.db, ask);
     if (!made.ok) {
-      return BadRequest(made.problem);
+      return BadRequest(made.fault);
     }
     let v: TemplatePdfView = { template: tpl.id, path: files[i].path,
       cached: made.cached, pdf: made.body };

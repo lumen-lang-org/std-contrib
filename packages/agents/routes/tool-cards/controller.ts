@@ -3,7 +3,7 @@ import { deleteById, findById, listOrdered, persist } from "../../../plume/plume
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, BadRequest, NotFound, Ok, OkJson, Refused } from "../../../rest/server.ts";
-import { toolCardProblem } from "../../api-core.ts";
+import { toolCardFault } from "../../api-core.ts";
 import { ToolCardRow, toolCardsMapping } from "../../toolcards.ts";
 import { ToolCardDeleted } from "./types.ts";
 
@@ -27,9 +27,9 @@ export class ToolCardApi {
       return BadRequest("a body is required");
     }
     let row: ToolCardRow = JSON.parse<ToolCardRow>(req.body);
-    let problem = toolCardProblem(row);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = toolCardFault(row);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     if (findById(this.db, toolCardsMapping(), row.id) != "") {
       return BadRequest("tool card " + row.id + " already exists; PUT it to change it");
@@ -45,9 +45,9 @@ export class ToolCardApi {
       return NotFound("no tool card " + id);
     }
     let row: ToolCardRow = JSON.parse<ToolCardRow>(req.body);
-    let problem = toolCardProblem(row);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = toolCardFault(row);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     if (row.id != id) {
       return BadRequest("the body's id must match the path");

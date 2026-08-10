@@ -121,7 +121,7 @@ test("a document that does not carry every key of the shape says which is missin
   expect(violation.includes("enabled"));
 });
 
-test("a document carrying every key of the shape has no problem to report", () => {
+test("a document carrying every key of the shape has no fault to report", () => {
   let p = dto(agentEdit());
   expect(documentViolation(p, "{\"id\":\"a1\",\"agentName\":\"S\",\"enabled\":true}") == "");
   // Keys the shape does not declare are narrowing's business, not this one's.
@@ -268,6 +268,6 @@ test("a field declared twice is refused", () => {
   expect(shapeViolation(describe("Twice", fields)).includes("twice"));
 });
 
-test("a usable description has no problem to report", () => {
+test("a usable description has no fault to report", () => {
   expect(shapeViolation(agentEdit()) == "");
 });

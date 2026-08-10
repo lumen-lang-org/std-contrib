@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, BadRequest, NoContent, NotFound, OkJson, Refused } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { credentialFor, forgetCredential, masterKey, masterKeyProblem, providersWithCredentials, storeCredential } from "../../credentials.ts";
+import { credentialFor, forgetCredential, masterKey, masterKeyFault, providersWithCredentials, storeCredential } from "../../credentials.ts";
 import { KeyBody, ProviderStatus } from "./types.ts";
 
 @controller("/providers")
@@ -31,9 +31,9 @@ export class ProviderApi {
 
   @Put("/:provider/key")
   setKey(@PathVariable("provider") provider: string, @Valid @RequestBody body: KeyBody): Reply {
-    let problem = masterKeyProblem(this.master);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = masterKeyFault(this.master);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let stored = storeCredential(this.db, {
       provider: provider,

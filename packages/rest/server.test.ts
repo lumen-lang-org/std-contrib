@@ -7,7 +7,7 @@
 //   cd packages/rest && lumen test server.test.ts
 
 import { Route, route, routes } from "./router.ts";
-import { Request, Reply, Handler, dispatch, dispatched, bindingProblem, Ok, Created, NoContent, Json, Refused, NotFound, BadRequest, param, queryParam, header, bearerToken } from "./server.ts";
+import { Request, Reply, Handler, dispatch, dispatched, bindingFault, Ok, Created, NoContent, Json, Refused, NotFound, BadRequest, param, queryParam, header, bearerToken } from "./server.ts";
 
 // A record with a required field, to make a parse throw.
 type ThrowTarget = {
@@ -110,14 +110,14 @@ test("a table whose handler nothing bound is refused before listening", () => {
   hs.set("list", (req: Request) => {
     return Ok("[]");
   });
-  let problemText = bindingProblem(agentRoutes(), hs);
+  let problemText = bindingFault(agentRoutes(), hs);
   // It names the route and the handler, so the fix is obvious.
   expect(problemText.indexOf("create") >= 0);
   expect(problemText.indexOf("POST /agents") >= 0);
 });
 
-test("a fully bound table reports no problem", () => {
-  expect(bindingProblem(agentRoutes(), boundHandlers()) == "");
+test("a fully bound table reports no fault", () => {
+  expect(bindingFault(agentRoutes(), boundHandlers()) == "");
 });
 
 test("a structurally broken table is caught by the same check", () => {
@@ -125,11 +125,11 @@ test("a structurally broken table is caught by the same check", () => {
   hs.set("h", (req: Request) => {
     return Ok("[]");
   });
-  expect(bindingProblem(routes([route("GET", "agents", "h")]), hs).indexOf("does not start with /") >= 0);
+  expect(bindingFault(routes([route("GET", "agents", "h")]), hs).indexOf("does not start with /") >= 0);
 });
 
 test("an unbound handler at dispatch time is 500, not a crash", () => {
-  // bindingProblem should have caught this at startup; if it somehow did not,
+  // bindingFault should have caught this at startup; if it somehow did not,
   // one bad route must not take the server down.
   let hs = new Map<string, Handler>();
   hs.set("list", (req: Request) => {

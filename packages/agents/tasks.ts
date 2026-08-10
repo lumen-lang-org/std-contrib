@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { next as nextFiring, problem as cronProblem, civil, knownZone } from "../cron/cron.ts";
+import { next as nextFiring, fault as cronFault, civil, knownZone } from "../cron/cron.ts";
 
 export type TaskRow = {
   id: string,
@@ -311,7 +311,7 @@ export function refuse(row: TaskRow): string {
   if (row.cronExpr == "") {
     return "a repeating task needs a schedule";
   }
-  let complaint = cronProblem(row.cronExpr);
+  let complaint = cronFault(row.cronExpr);
   if (complaint != "") {
     return complaint;
   }

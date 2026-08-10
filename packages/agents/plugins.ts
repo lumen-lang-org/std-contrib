@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { persist, listWhere, deleteById, countWhere, placeholderAt } from "../plume/plume.ts";
 import { PluginRow, PluginItemRow, SkillRow, SkillFileRow, McpServerRow, pluginsMapping, pluginItemsMapping, skillsMapping, skillFilesMapping, mcpServersMapping } from "./schema.ts";
 import { jsonRaw, jsonText, jsonList } from "./scan.ts";
-import { scriptEnvNameProblem } from "./run-script.ts";
+import { scriptEnvNameFault } from "./run-script.ts";
 
 export type SeedFile = {
   path: string,
@@ -25,7 +25,7 @@ export type ConnectorSeed = {
 };
 
 export type Manifest = {
-  problem: string,
+  fault: string,
   pluginName: string,
   description: string,
   version: string,
@@ -34,7 +34,7 @@ export type Manifest = {
 };
 
 function failedManifest(why: string): Manifest {
-  let bad: Manifest = { problem: why, pluginName: "", description: "", version: "",
+  let bad: Manifest = { fault: why, pluginName: "", description: "", version: "",
     skills: [], connectors: [] };
   return bad;
 }
@@ -65,7 +65,7 @@ export function manifestFrom(document: string): Manifest {
   if (name.trim() == "") {
     return failedManifest("a manifest needs a \"name\"");
   }
-  let named = scriptEnvNameProblem(name);
+  let named = scriptEnvNameFault(name);
   if (named != "") {
     return failedManifest("\"" + name + "\" cannot be a plugin name: " + named);
   }
@@ -100,7 +100,7 @@ export function manifestFrom(document: string): Manifest {
     if (seed.skillName.trim() == "") {
       return failedManifest("every skill in a manifest needs a \"name\"");
     }
-    let ok = scriptEnvNameProblem(seed.skillName);
+    let ok = scriptEnvNameFault(seed.skillName);
     if (ok != "") {
       return failedManifest("skill \"" + seed.skillName + "\": " + ok);
     }
@@ -147,7 +147,7 @@ export function manifestFrom(document: string): Manifest {
     return failedManifest("that manifest installs nothing — no skills and no connectors");
   }
   let read: Manifest = {
-    problem: "",
+    fault: "",
     pluginName: name,
     description: jsonText(head, "description"),
     version: jsonText(head, "version"),
@@ -167,32 +167,32 @@ export function manifestUrl(url: string): string {
 }
 
 export type Fetched = {
-  problem: string,
+  fault: string,
   body: string,
 };
 
 export function fetchManifest(url: string): Fetched {
   let where = manifestUrl(url);
   if (!where.startsWith("http://") && !where.startsWith("https://")) {
-    let bad: Fetched = { problem: "a plugin is installed from an http(s) URL", body: "" };
+    let bad: Fetched = { fault: "a plugin is installed from an http(s) URL", body: "" };
     return bad;
   }
   let headers = new Map<string, string>();
   headers.set("accept", "application/json");
   let res = http.request(where, "GET", "", headers);
   if (!res.ok) {
-    let dead: Fetched = { problem: "could not reach " + where, body: "" };
+    let dead: Fetched = { fault: "could not reach " + where, body: "" };
     return dead;
   }
   if (res.status != 200) {
-    let refused: Fetched = { problem: where + " answered HTTP " + `${res.status}`, body: "" };
+    let refused: Fetched = { fault: where + " answered HTTP " + `${res.status}`, body: "" };
     return refused;
   }
-  let got: Fetched = { problem: "", body: res.body };
+  let got: Fetched = { fault: "", body: res.body };
   return got;
 }
 
-export function installProblem(db: Db, m: Manifest): string {
+export function installFault(db: Db, m: Manifest): string {
   if (countWhere(db, pluginsMapping(), "plugin_name = " + placeholderAt(db, 1), [m.pluginName]) > 0) {
     return "\"" + m.pluginName + "\" is already installed — remove it first to install it again";
   }

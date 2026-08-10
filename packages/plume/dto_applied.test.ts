@@ -29,7 +29,7 @@
 // `Projection` in scope. So the constraint is one-sided: entity.ts is the
 // module that has to stay decorator-only.
 //
-// This is a compiler problem, not a naming problem — see the header of dto.ts.
+// This is a compiler fault, not a naming fault — see the header of dto.ts.
 // The claim tested below is therefore the narrow one: these two coexist *as
 // imported here*. Nothing here shows, or could show, that they coexist for an
 // arbitrary pair of imports, because a duplicate-binding error is a compile

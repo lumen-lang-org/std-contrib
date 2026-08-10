@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping, cancelAsked } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
-import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationProblem, userTurn, assistantTurn, toolTurn } from "./provider.ts";
+import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationFault, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
@@ -312,8 +312,8 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   let notes: string[] = [];
   let n: int = 0;
-  while (n < mounted.problems.length) {
-    notes.push(mounted.problems[n]);
+  while (n < mounted.faults.length) {
+    notes.push(mounted.faults[n]);
     n = n + 1;
   }
 
@@ -533,7 +533,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     inputTokens = inputTokens + last.inputTokens;
     outputTokens = outputTokens + last.outputTokens;
 
-    let cut = truncationProblem(model.provider, last.text, configRow.maxTokens);
+    let cut = truncationFault(model.provider, last.text, configRow.maxTokens);
     if (cut != "") {
       if (on) {
         trace = endSpanFailed(trace, agentSpan, { input: userText, message: cut });

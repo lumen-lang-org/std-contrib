@@ -70,7 +70,7 @@ test("a name that is not a migration says why", () => {
   expect(!parseMigrationName("Vabc__nope.sql").valid);
   expect(parseMigrationName("Vabc__nope.sql").violation.indexOf("neither a version number") >= 0);
 
-  // The problem names the file, so a directory listing points at the culprit.
+  // The fault names the file, so a directory listing points at the culprit.
   expect(parseMigrationName("README.md").violation.indexOf("README.md") >= 0);
 });
 
@@ -123,11 +123,11 @@ test("a file that is not a migration is reported, not ignored", () => {
   expect(migrationNameViolation(files).indexOf("notes.txt") >= 0);
 });
 
-test("a directory that describes a good plan reports no problem", () => {
+test("a directory that describes a good plan reports no fault", () => {
   expect(migrationNameViolation(directory()) == "");
 });
 
-test("an empty directory is a problem, since a plan was expected", () => {
+test("an empty directory is a fault, since a plan was expected", () => {
   let none: SqlFile[] = [];
   expect(migrationNameViolation(none).indexOf("no files") >= 0);
 });

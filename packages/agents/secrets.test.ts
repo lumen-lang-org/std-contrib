@@ -4,7 +4,7 @@ import { connectDatabase, execute, dropTable, findById } from "../plume/plume.ts
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { agentsMapping, credentialsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping, promptsMapping, schemaPlan } from "./schema.ts";
 import { hasCredential } from "./credentials.ts";
-import { SecretRow, createSecret, forgetSecret, graphSecretProblem, secretById, secretByName, secretValue, secretsMapping, secretsOf, secretsPlan, touchSecret, MAX_SECRETS_PER_OWNER } from "./secrets.ts";
+import { SecretRow, createSecret, forgetSecret, graphSecretFault, secretById, secretByName, secretValue, secretsMapping, secretsOf, secretsPlan, touchSecret, MAX_SECRETS_PER_OWNER } from "./secrets.ts";
 import { WfEdge, WfGraph, WfNode, emptyGraph, emptyNode, secretIds } from "../workflow/workflow.ts";
 
 let database: Db = sqlite();
@@ -107,16 +107,16 @@ test("deleting a secret takes its envelope with it", () => {
 test("what a secret refuses at the door", () => {
   fresh();
   expect(createSecret(database, { owner: "o1", name: "", value: "v",
-    destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" }).problem != "");
+    destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" }).fault != "");
   expect(createSecret(database, { owner: "o1", name: "k", value: "v",
-    destination: "not a url", header: "", category: "", master: testKey(), now: "t" }).problem != "");
+    destination: "not a url", header: "", category: "", master: testKey(), now: "t" }).fault != "");
   expect(createSecret(database, { owner: "o1", name: "k", value: "v",
-    destination: "https://a.example", header: "X: y", category: "", master: testKey(), now: "t" }).problem != "");
+    destination: "https://a.example", header: "X: y", category: "", master: testKey(), now: "t" }).fault != "");
   expect(createSecret(database, { owner: "o1", name: "k", value: "",
-    destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" }).problem != "");
+    destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" }).fault != "");
   stored("stripe key", "o1");
   expect(createSecret(database, { owner: "o1", name: "Stripe Key", value: "v",
-    destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" }).problem.indexOf("already") >= 0);
+    destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" }).fault.indexOf("already") >= 0);
 });
 
 test("the per-owner bound refuses the twenty-first", () => {
@@ -128,20 +128,20 @@ test("the per-owner bound refuses the twenty-first", () => {
   }
   let over = createSecret(database, { owner: "o1", name: "one more", value: "v",
     destination: "https://a.example", header: "", category: "", master: testKey(), now: "t" });
-  expect(over.problem.indexOf(`${MAX_SECRETS_PER_OWNER}`) >= 0);
+  expect(over.fault.indexOf(`${MAX_SECRETS_PER_OWNER}`) >= 0);
 });
 
 test("a graph may only aim a secret at the address it was stored for", () => {
   fresh();
   let id = stored("stripe key", "o1");
-  expect(graphSecretProblem(database, graphWith(httpNode("https://api.example.com/v2/charges", id)), "o1") == "");
-  let moved = graphSecretProblem(database, graphWith(httpNode("https://evil.example/steal", id)), "o1");
+  expect(graphSecretFault(database, graphWith(httpNode("https://api.example.com/v2/charges", id)), "o1") == "");
+  let moved = graphSecretFault(database, graphWith(httpNode("https://evil.example/steal", id)), "o1");
   expect(moved.indexOf("https://evil.example") >= 0);
   expect(moved.indexOf("https://api.example.com") >= 0);
   expect(moved.indexOf("Delete the secret") >= 0);
-  expect(graphSecretProblem(database, graphWith(httpNode("https://{{prev}}/x", id)), "o1") != "");
-  expect(graphSecretProblem(database, graphWith(httpNode("https://api.example.com/v2", id)), "o2") != "");
-  expect(graphSecretProblem(database, graphWith(httpNode("https://anywhere.example/x", "")), "o1") == "");
+  expect(graphSecretFault(database, graphWith(httpNode("https://{{prev}}/x", id)), "o1") != "");
+  expect(graphSecretFault(database, graphWith(httpNode("https://api.example.com/v2", id)), "o2") != "");
+  expect(graphSecretFault(database, graphWith(httpNode("https://anywhere.example/x", "")), "o1") == "");
 });
 
 test("a use is stamped, so the list can say what is alive", () => {
@@ -160,11 +160,11 @@ test("a step may carry several secrets, and the spelling it used to carry still 
   let two = made.id;
 
   let both = httpNode("https://api.example.com/v2", one + "," + two);
-  expect(graphSecretProblem(database, graphWith(both), "o1") == "");
+  expect(graphSecretFault(database, graphWith(both), "o1") == "");
   expect(secretIds(both).length == 2);
 
   let away = httpNode("https://elsewhere.example/v2", one + "," + two);
-  expect(graphSecretProblem(database, graphWith(away), "o1") != "");
+  expect(graphSecretFault(database, graphWith(away), "o1") != "");
 
   let base = emptyNode();
   let old: WfNode = {
@@ -176,7 +176,7 @@ test("a step may carry several secrets, and the spelling it used to carry still 
   };
   expect(secretIds(old).length == 1);
   expect(secretIds(old)[0] == one);
-  expect(graphSecretProblem(database, graphWith(old), "o1") == "");
+  expect(graphSecretFault(database, graphWith(old), "o1") == "");
 
   let elsewhere: WfNode = {
     id: "a1", type: "AGENT", name: "Ask", x: 0.0, y: 0.0,
@@ -185,5 +185,5 @@ test("a step may carry several secrets, and the spelling it used to carry still 
     test: "", needle: "", subject: base.subject, schedule: "", source: "",
     secrets: one,
   };
-  expect(graphSecretProblem(database, graphWith(elsewhere), "o1") == "");
+  expect(graphSecretFault(database, graphWith(elsewhere), "o1") == "");
 });

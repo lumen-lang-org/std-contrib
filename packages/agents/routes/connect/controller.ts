@@ -42,8 +42,8 @@ export class ConnectApi {
     }
     let server: McpServerRow = JSON.parse<McpServerRow>(document);
     let began = beginConnect(this.db, server, owningTag(callerTags(req)), this.master, callbackUri());
-    if (began.problem != "") {
-      return BadRequest(began.problem);
+    if (began.fault != "") {
+      return BadRequest(began.fault);
     }
     let v: ConnectStarted = { url: began.url };
     return OkJson(v);
@@ -58,8 +58,8 @@ export class ConnectApi {
     }
     let done = completeConnect(this.db, this.master,
       req.query.get("state") ?? "", req.query.get("code") ?? "");
-    if (done.problem != "") {
-      return connectPage(false, done.problem);
+    if (done.fault != "") {
+      return connectPage(false, done.fault);
     }
     return connectPage(true, done.serverName);
   }

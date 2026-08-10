@@ -36,8 +36,8 @@ export class ApiKeyApi {
       jsonText(req.body, "name"),
       jsonText(req.body, "scopes"),
       stamp());
-    if (made.problem != "") {
-      return BadRequest(made.problem);
+    if (made.fault != "") {
+      return BadRequest(made.fault);
     }
     let minted: MintedKey = { id: made.id, secret: made.secret, keyPrefix: made.prefix };
     return Created(JSON.stringify(minted));

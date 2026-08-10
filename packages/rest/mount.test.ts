@@ -8,7 +8,7 @@
 
 import { controller } from "./controller.ts";
 import { Route } from "./router.ts";
-import { Request, Reply, Mount, mount, mountedRoutes, mountProblem, dispatchMounted, Ok, param } from "./server.ts";
+import { Request, Reply, Mount, mount, mountedRoutes, mountFault, dispatchMounted, Ok, param } from "./server.ts";
 
 // A record with a required field, so a parse of a partial body throws the way
 // a real handler's does.
@@ -115,7 +115,7 @@ test("a hand-built Mount still works", () => {
   let r = dispatchMounted(mountedByHand(), "GET", "/agents", "", noHeaders());
   expect(r.status == 200);
   expect(r.body == "[\"lead\"]");
-  expect(mountProblem(mountedByHand()) == "");
+  expect(mountFault(mountedByHand()) == "");
 });
 
 test("an unknown path is 404", () => {
@@ -127,13 +127,13 @@ test("a known path with the wrong method is 405", () => {
   expect(r.status == 405);
 });
 
-test("well-formed mounts report no problem", () => {
-  expect(mountProblem(mounted()) == "");
+test("well-formed mounts report no fault", () => {
+  expect(mountFault(mounted()) == "");
 });
 
 test("two controllers claiming one path is a startup failure", () => {
   let twice: Mount[] = [new ModelApi(), new ModelApi()];
-  expect(mountProblem(twice).indexOf("both serve GET /models") >= 0);
+  expect(mountFault(twice).indexOf("both serve GET /models") >= 0);
 });
 
 // The tracing regression: GET / and PUT / on one controller share the bare

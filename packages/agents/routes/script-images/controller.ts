@@ -2,10 +2,10 @@ import { Db } from "../../../plume/driver.ts";
 import { DbOrder, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok, Refused } from "../../../rest/server.ts";
-import { createProblem, jsonId } from "../../payload.ts";
+import { createFault, jsonId } from "../../payload.ts";
 import { ScriptImageRow, scriptImagesMapping } from "../../schema.ts";
 
-export function scriptImageProblem(row: ScriptImageRow): string {
+export function scriptImageFault(row: ScriptImageRow): string {
   if (row.label.trim() == "") {
     return "an image needs a label to pick it by";
   }
@@ -40,12 +40,12 @@ export class ScriptImageApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, scriptImagesMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, scriptImagesMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let row: ScriptImageRow = JSON.parse<ScriptImageRow>(req.body);
-    let named = scriptImageProblem(row);
+    let named = scriptImageFault(row);
     if (named != "") {
       return BadRequest(named);
     }
@@ -65,7 +65,7 @@ export class ScriptImageApi {
     if (row.id != id) {
       return BadRequest("the id in the body must match the path");
     }
-    let named = scriptImageProblem(row);
+    let named = scriptImageFault(row);
     if (named != "") {
       return BadRequest(named);
     }

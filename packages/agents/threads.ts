@@ -427,8 +427,8 @@ export function appendTurns(db: Db, threadId: string, turns: Turn[], from: int):
   return "";
 }
 
-export function roundIsStored(runOk: bool, appendProblem: string): bool {
-  return runOk && appendProblem == "";
+export function roundIsStored(runOk: bool, appendFault: string): bool {
+  return runOk && appendFault == "";
 }
 
 const THREAD_BUDGET_CHARS: int = 100000;
@@ -656,11 +656,11 @@ export type RemixAsk = {
 export type Remixed = {
   threadId: string,
   files: int,
-  problem: string,
+  fault: string,
 };
 
 function refusedRemix(why: string): Remixed {
-  let no: Remixed = { threadId: "", files: 0, problem: why };
+  let no: Remixed = { threadId: "", files: 0, fault: why };
   return no;
 }
 
@@ -697,7 +697,7 @@ export function remixThread(db: Db, ask: RemixAsk): Remixed {
     i = i + 1;
   }
 
-  let made: Remixed = { threadId: fresh, files: files, problem: "" };
+  let made: Remixed = { threadId: fresh, files: files, fault: "" };
   return made;
 }
 
@@ -788,9 +788,9 @@ export function routeChoice(db: Db, run: RouteRun): ChosenModel {
   }
 
   let pair = configAndModel(db, router.routerConfigId);
-  if (pair.problem != "") {
+  if (pair.fault != "") {
     let broken: ChosenModel = { choiceId: chosen.choiceId, configId: router.fallbackConfigId,
-      note: "fell back: the router cannot run (" + pair.problem + ")" };
+      note: "fell back: the router cannot run (" + pair.fault + ")" };
     return broken;
   }
   let apiKey = credentialFor(db, pair.model.provider, run.master);
@@ -1113,7 +1113,7 @@ export function nameThread(db: Db, threadId: string, said: string): string {
 
 export function titlingConfigId(db: Db): string {
   let named = process.env("AGENTS_TITLE_CONFIG_ID") ?? "";
-  if (named != "" && configAndModel(db, named).problem == "") {
+  if (named != "" && configAndModel(db, named).fault == "") {
     return named;
   }
 
@@ -1156,8 +1156,8 @@ export function titleThread(db: Db, run: TitleRun): string {
     return "";
   }
   let pair = configAndModel(db, configId);
-  if (pair.problem != "") {
-    return noName(pair.problem).note;
+  if (pair.fault != "") {
+    return noName(pair.fault).note;
   }
   let apiKey = credentialFor(db, pair.model.provider, run.master);
   let named = nameTurn(pair.model, pair.config, run.userText, apiKey);
@@ -1273,7 +1273,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
   forgetThoughts(db, threadId, held.length);
   let forRound = configAndModel(db, chosen.configId == "" ? agentOwnConfig(db, agentId) : chosen.configId);
   let replayed = held;
-  if (forRound.problem == "") {
+  if (forRound.fault == "") {
     let key = credentialFor(db, forRound.model.provider, master);
     let ask: CompactAsk = {
       threadId: threadId, turns: held, budget: budgetFor(forRound.model, forRound.config),

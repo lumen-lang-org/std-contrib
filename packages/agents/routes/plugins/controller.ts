@@ -3,7 +3,7 @@ import { DbOrder, existsById, findById, listOrdered } from "../../../plume/plume
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
+import { Manifest, fetchManifest, install, installFault, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
 import { McpServerRow, SkillRow, mcpServersMapping, pluginsMapping, skillsMapping } from "../../schema.ts";
 import { ManifestConnectorView, ManifestSkillView, ManifestView, PluginAsk, PluginItemView } from "./types.ts";
 
@@ -34,7 +34,7 @@ function manifestView(m: Manifest, clash: string): ManifestView {
     name: m.pluginName,
     description: m.description,
     version: m.version,
-    problem: clash,
+    fault: clash,
     skills: skills,
     connectors: connectors,
   };
@@ -91,28 +91,28 @@ export class PluginApi {
   @Post("/inspect")
   inspect(@Valid @RequestBody ask: PluginAsk): Reply {
     let got = fetchManifest(ask.sourceUrl);
-    if (got.problem != "") {
-      return BadRequest(got.problem);
+    if (got.fault != "") {
+      return BadRequest(got.fault);
     }
     let m = manifestFrom(got.body);
-    if (m.problem != "") {
-      return BadRequest(m.problem);
+    if (m.fault != "") {
+      return BadRequest(m.fault);
     }
-    let v: ManifestView = manifestView(m, installProblem(this.db, m));
+    let v: ManifestView = manifestView(m, installFault(this.db, m));
     return OkJson(v);
   }
 
   @Post("/install")
   add(@Valid @RequestBody ask: PluginAsk): Reply {
     let got = fetchManifest(ask.sourceUrl);
-    if (got.problem != "") {
-      return BadRequest(got.problem);
+    if (got.fault != "") {
+      return BadRequest(got.fault);
     }
     let m = manifestFrom(got.body);
-    if (m.problem != "") {
-      return BadRequest(m.problem);
+    if (m.fault != "") {
+      return BadRequest(m.fault);
     }
-    let clash = installProblem(this.db, m);
+    let clash = installFault(this.db, m);
     if (clash != "") {
       return BadRequest(clash);
     }

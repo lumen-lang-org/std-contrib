@@ -26,7 +26,7 @@ export function jsonId(document: string): string {
   return value.substring(0, close);
 }
 
-export function createProblem(db: Db, repo: DbRepository, document: string): string {
+export function createFault(db: Db, repo: DbRepository, document: string): string {
   if (document == "") {
     return "a body is required";
   }

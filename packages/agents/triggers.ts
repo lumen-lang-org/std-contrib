@@ -431,14 +431,14 @@ export function claimBot(db: Db, botId: string, who: string, nowMs: number): boo
   return db.rows() > 0;
 }
 
-export function noteBotPass(db: Db, botId: string, offset: string, problem: string, nowMs: number): void {
+export function noteBotPass(db: Db, botId: string, offset: string, fault: string, nowMs: number): void {
   let sql = "UPDATE trigger_bots SET cursor_offset = " + db.placeholder
     + ", last_at = " + placeholderAt(db, 2)
     + ", last_error = " + placeholderAt(db, 3)
     + ", updated_at = " + placeholderAt(db, 4)
     + " WHERE id = " + placeholderAt(db, 5);
   let now = `${nowMs}`;
-  db.query(sql, [offset, now, problem, now, botId]);
+  db.query(sql, [offset, now, fault, now, botId]);
 }
 
 export function saveBot(db: Db, bot: TriggerBotRow): void {
@@ -516,14 +516,14 @@ export function emptyMessage(): TriggerInboxRow {
   return none;
 }
 
-export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runId: string, answer: string, problem: string, nowMs: number): void {
+export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runId: string, answer: string, fault: string, nowMs: number): void {
   let sql = "UPDATE trigger_inbox SET status = " + db.placeholder
     + ", run_id = " + placeholderAt(db, 2)
     + ", answer = " + placeholderAt(db, 3)
     + ", error = " + placeholderAt(db, 4)
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
-  db.query(sql, [status, runId, answer, problem, `${nowMs}`, row.id]);
+  db.query(sql, [status, runId, answer, fault, `${nowMs}`, row.id]);
 }
 
 export function parkFile(db: Db, rowId: string, fileName: string, fileBody: string): void {

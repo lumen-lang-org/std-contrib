@@ -2,8 +2,8 @@ import { Db } from "../../../plume/driver.ts";
 import { DbOrder, countWhere, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
-import { DestinationMove, credentialFor, destinationOf, destinationProblem, hasCredential } from "../../credentials.ts";
-import { createProblem } from "../../payload.ts";
+import { DestinationMove, credentialFor, destinationOf, destinationFault, hasCredential } from "../../credentials.ts";
+import { createFault } from "../../payload.ts";
 import { complete, embedText, embeddingEndpoint, endpointFor, replyText } from "../../provider.ts";
 import { ModelChoiceRow, ModelConfigRow, ModelRow, enabledChoices, modelConfigsMapping, modelsMapping } from "../../schema.ts";
 import { ChatProbe, EmbeddingProbe, ModelAsk, ModelTestFailed } from "./types.ts";
@@ -33,7 +33,7 @@ export function modelRowOf(ask: ModelAsk): ModelRow {
   return m;
 }
 
-export function modelProblem(m: ModelRow): string {
+export function modelFault(m: ModelRow): string {
   if (m.provider == "vertex" && m.baseUrl.trim() == "") {
     return "a vertex model needs its base URL — https://<region>-aiplatform.googleapis.com/v1/projects/<project>/locations/<region>/endpoints/openapi";
   }
@@ -59,7 +59,7 @@ function modelDestination(m: ModelRow): string {
   return endpointFor(m, "chat/completions");
 }
 
-export function modelDestinationProblem(db: Db, row: ModelRow): string {
+export function modelDestinationFault(db: Db, row: ModelRow): string {
   let held = findById(db, modelsMapping(), row.id);
   let authorised: ModelRow = {
     id: row.id, label: row.label, apiName: row.apiName, provider: row.provider,
@@ -75,7 +75,7 @@ export function modelDestinationProblem(db: Db, row: ModelRow): string {
     now: modelDestination(row),
     secretStored: hasCredential(db, row.provider),
   };
-  return destinationProblem(move);
+  return destinationFault(move);
 }
 
 @controller("/models")
@@ -102,16 +102,16 @@ export class ModelApi {
   @Post("/")
   create(@Valid @RequestBody ask: ModelAsk): Reply {
     let document = JSON.stringify(ask);
-    let problem = createProblem(this.db, modelsMapping(), document);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, modelsMapping(), document);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let m = modelRowOf(ask);
-    let wrong = modelProblem(m);
+    let wrong = modelFault(m);
     if (wrong != "") {
       return BadRequest(wrong);
     }
-    let moved = modelDestinationProblem(this.db, m);
+    let moved = modelDestinationFault(this.db, m);
     if (moved != "") {
       return BadRequest(moved);
     }
@@ -191,11 +191,11 @@ export class ModelApi {
     if (row.id != id) {
       return BadRequest("the id in the body must match the path");
     }
-    let wrong = modelProblem(row);
+    let wrong = modelFault(row);
     if (wrong != "") {
       return BadRequest(wrong);
     }
-    let moved = modelDestinationProblem(this.db, row);
+    let moved = modelDestinationFault(this.db, row);
     if (moved != "") {
       return BadRequest(moved);
     }

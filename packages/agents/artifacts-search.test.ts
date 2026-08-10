@@ -292,7 +292,7 @@ test("the length refusal counts bytes and says so", () => {
   let arabic = copies("ل", 101);
   let refused = searchArtifacts(database, "t1", arabic);
   expect(!refused.ok);
-  expect(refused.problem.includes("bytes of UTF-8"));
-  expect(refused.problem.includes("202"));
+  expect(refused.fault.includes("bytes of UTF-8"));
+  expect(refused.fault.includes("202"));
   expect(searchArtifacts(database, "t1", "ل").ok);
 });

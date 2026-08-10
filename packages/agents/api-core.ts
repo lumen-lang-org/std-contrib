@@ -115,7 +115,7 @@ export function askedChoice(body: string): string {
   return jsonText(body, "modelChoiceId");
 }
 
-export function choiceProblem(db: Db, choiceId: string): string {
+export function choiceFault(db: Db, choiceId: string): string {
   if (choiceId == "") {
     return "";
   }
@@ -174,7 +174,7 @@ export function forwardProduct(req: Request, product: string): Reply {
   return Respond(res.status, res.body, "application/json");
 }
 
-export function toolCardProblem(row: ToolCardRow): string {
+export function toolCardFault(row: ToolCardRow): string {
   if (row.id.trim() == "") {
     return "a tool card needs an id";
   }

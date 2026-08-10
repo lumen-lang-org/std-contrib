@@ -160,12 +160,12 @@ export type Discovery = {
   tokenUrl: string,
   registerUrl: string,
   scopesSupported: string,
-  problem: string,
+  fault: string,
 };
 
 function noDiscovery(why: string): Discovery {
   return { issuer: "", authorizeUrl: "", tokenUrl: "", registerUrl: "",
-           scopesSupported: "", problem: why };
+           scopesSupported: "", fault: why };
 }
 
 function fetchJson(url: string): string {
@@ -253,7 +253,7 @@ export function discover(endpoint: string): Discovery {
           tokenUrl: token,
           registerUrl: jsonText(document, "registration_endpoint"),
           scopesSupported: scopes,
-          problem: "",
+          fault: "",
         };
         return found;
       }
@@ -266,13 +266,13 @@ export function discover(endpoint: string): Discovery {
 export type RegisteredClient = {
   clientId: string,
   clientSecret: string,
-  problem: string,
+  fault: string,
 };
 
 export function registerClient(registerUrl: string, redirectUri: string, clientName: string): RegisteredClient {
   if (registerUrl == "") {
     return { clientId: "", clientSecret: "",
-             problem: "this connector does not register clients automatically, so it needs an app created by hand" };
+             fault: "this connector does not register clients automatically, so it needs an app created by hand" };
   }
   let body = "{\"client_name\":" + JSON.stringify(clientName)
     + ",\"redirect_uris\":[" + JSON.stringify(redirectUri) + "]"
@@ -284,21 +284,21 @@ export function registerClient(registerUrl: string, redirectUri: string, clientN
   headers.set("accept", "application/json");
   let res = http.request(registerUrl, "POST", body, headers);
   if (!res.ok) {
-    return { clientId: "", clientSecret: "", problem: "no answer from " + registerUrl };
+    return { clientId: "", clientSecret: "", fault: "no answer from " + registerUrl };
   }
   if (res.status != 200 && res.status != 201) {
     return { clientId: "", clientSecret: "",
-             problem: registerUrl + " refused to register this client: HTTP " + `${res.status}` };
+             fault: registerUrl + " refused to register this client: HTTP " + `${res.status}` };
   }
   let id = jsonText(res.body, "client_id");
   if (id == "") {
     return {
       clientId: "",
       clientSecret: "",
-      problem: registerUrl + " answered without a client_id",
+      fault: registerUrl + " answered without a client_id",
     };
   }
-  return { clientId: id, clientSecret: jsonText(res.body, "client_secret"), problem: "" };
+  return { clientId: id, clientSecret: jsonText(res.body, "client_secret"), fault: "" };
 }
 
 export type Consent = {
@@ -329,11 +329,11 @@ export type Grant = {
   accessToken: string,
   refreshToken: string,
   expiresIn: int,
-  problem: string,
+  fault: string,
 };
 
 function noGrant(why: string): Grant {
-  return { accessToken: "", refreshToken: "", expiresIn: 0, problem: why };
+  return { accessToken: "", refreshToken: "", expiresIn: 0, fault: why };
 }
 
 function tokenCall(tokenUrl: string, fields: Map<string, string>): Grant {
@@ -361,7 +361,7 @@ function tokenCall(tokenUrl: string, fields: Map<string, string>): Grant {
   }
   let seconds: int = parseInt(jsonRaw(res.body, "expires_in").trim()) ?? 0;
   return { accessToken: access, refreshToken: jsonText(res.body, "refresh_token"),
-           expiresIn: seconds, problem: "" };
+           expiresIn: seconds, fault: "" };
 }
 
 export type Exchange = {

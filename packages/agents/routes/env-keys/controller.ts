@@ -50,8 +50,8 @@ export class EnvKeyApi {
       master: this.master,
       now: stamp(),
     });
-    if (made.problem != "") {
-      return BadRequest(made.problem);
+    if (made.fault != "") {
+      return BadRequest(made.fault);
     }
     return Created(findById(this.db, envKeysMapping(), made.id));
   }

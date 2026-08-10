@@ -138,7 +138,7 @@ export type SecretWrite = {
 
 export type SecretMade = {
   id: string,
-  problem: string,
+  fault: string,
 };
 
 export function createSecret(db: Db, ask: SecretWrite): SecretMade {
@@ -154,39 +154,39 @@ export function createSecret(db: Db, ask: SecretWrite): SecretMade {
   };
   let wrong = refuseSecret(row);
   if (wrong != "") {
-    return { id: "", problem: wrong };
+    return { id: "", fault: wrong };
   }
   if (ask.value.length > MAX_SECRET_VALUE) {
     return {
       id: "",
-      problem: "that value is " + `${ask.value.length}` + " characters — the most a secret may hold is " + `${MAX_SECRET_VALUE}`,
+      fault: "that value is " + `${ask.value.length}` + " characters — the most a secret may hold is " + `${MAX_SECRET_VALUE}`,
     };
   }
   if (secretByName(db, row.name, ask.owner).id != "") {
     return {
       id: "",
-      problem: "there is already a secret called \"" + row.name + "\" — delete it first, or pick another name",
+      fault: "there is already a secret called \"" + row.name + "\" — delete it first, or pick another name",
     };
   }
   let rows = JSON.parse<SecretRow[]>(secretsOf(db, ask.owner));
   if (rows.length >= MAX_SECRETS_PER_OWNER) {
     return {
       id: "",
-      problem: "that is " + `${MAX_SECRETS_PER_OWNER}` + " secrets already — delete one before adding another",
+      fault: "that is " + `${MAX_SECRETS_PER_OWNER}` + " secrets already — delete one before adding another",
     };
   }
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,
   });
   if (stored != "") {
-    return { id: "", problem: stored };
+    return { id: "", fault: stored };
   }
   let written = persistRow(db, row);
   if (written != "") {
     forgetCredential(db, refOf(row.id));
-    return { id: "", problem: written };
+    return { id: "", fault: written };
   }
-  let made: SecretMade = { id: row.id, problem: "" };
+  let made: SecretMade = { id: row.id, fault: "" };
   return made;
 }
 
@@ -217,7 +217,7 @@ export function touchSecret(db: Db, id: string, now: string): void {
     + " WHERE id = " + placeholderAt(db, 2), [now, id]);
 }
 
-export function graphSecretProblem(db: Db, graph: WfGraph, owner: string): string {
+export function graphSecretFault(db: Db, graph: WfGraph, owner: string): string {
   let i: int = 0;
   while (i < graph.nodes.length) {
     let node = graph.nodes[i];

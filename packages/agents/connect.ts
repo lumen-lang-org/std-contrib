@@ -111,7 +111,7 @@ function renew(db: Db, server: McpServerRow, key: string, master: string): strin
 
   let got = refreshGrant(client.tokenUrl, refresh,
     client.clientId, credentialFor(db, clientSecretKey(server.id), master), server.endpoint);
-  if (got.problem != "") {
+  if (got.fault != "") {
     markUnrefreshable(db, key);
     return "";
   }
@@ -221,13 +221,13 @@ function writeGrant(db: Db, key: string, serverId: string, owner: string, got: G
 
 type ClientLookup = {
   row: McpOauthRow,
-  problem: string,
+  fault: string,
 };
 
 function noClient(why: string): ClientLookup {
   let empty: McpOauthRow = { id: "", issuer: "", authorizeUrl: "", tokenUrl: "",
                              clientId: "", scope: "", redirectUri: "", registeredAt: "" };
-  return { row: empty, problem: why };
+  return { row: empty, fault: why };
 }
 
 function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: string): ClientLookup {
@@ -238,27 +238,27 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
     let row: McpOauthRow = JSON.parse<McpOauthRow>(had);
     let sameClient = supplied == "" || row.clientId == supplied;
     if (row.redirectUri == redirectUri && row.clientId != "" && sameClient) {
-      return { row: row, problem: "" };
+      return { row: row, fault: "" };
     }
     deleteById(db, mcpOauthMapping(), server.id);
   }
 
   let found: Discovery = discover(server.endpoint);
-  if (found.problem != "") {
-    return noClient(found.problem);
+  if (found.fault != "") {
+    return noClient(found.fault);
   }
 
   let clientId = supplied;
   if (supplied == "") {
     let made = registerClient(found.registerUrl, redirectUri, "Joule");
-    if (made.problem != "") {
+    if (made.fault != "") {
       if (found.registerUrl == "") {
         return noClient(server.serverName + " does not hand out OAuth clients automatically,"
           + " so it needs an app created in the vendor's own developer console."
           + " Give this connector that app's client id and secret, and set its redirect URL to "
           + redirectUri);
       }
-      return noClient(made.problem);
+      return noClient(made.fault);
     }
     clientId = made.clientId;
     if (made.clientSecret != "") {
@@ -286,16 +286,16 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
   if (!wrote.ok) {
     return noClient(wrote.error);
   }
-  return { row: row, problem: "" };
+  return { row: row, fault: "" };
 }
 
 export type Started = {
   url: string,
-  problem: string,
+  fault: string,
 };
 
 function notStarted(why: string): Started {
-  let out: Started = { url: "", problem: why };
+  let out: Started = { url: "", fault: why };
   return out;
 }
 
@@ -307,8 +307,8 @@ export function beginConnect(db: Db, server: McpServerRow, owner: string, master
     return notStarted("this deployment does not know its own public address, so it cannot be redirected back to; set AGENTS_PUBLIC_ORIGIN");
   }
   let client: ClientLookup = clientFor(db, server, master, redirectUri);
-  if (client.problem != "") {
-    return notStarted(client.problem);
+  if (client.fault != "") {
+    return notStarted(client.fault);
   }
 
   let verifier = newVerifier();
@@ -331,7 +331,7 @@ export function beginConnect(db: Db, server: McpServerRow, owner: string, master
     scope: client.row.scope,
     resource: server.endpoint,
   });
-  let out: Started = { url: url, problem: "" };
+  let out: Started = { url: url, fault: "" };
   return out;
 }
 
@@ -339,21 +339,21 @@ export function beginConnect(db: Db, server: McpServerRow, owner: string, master
 export type Completed = {
   serverId: string,
   serverName: string,
-  problem: string,
+  fault: string,
 };
 
 const PENDING_MS = 600000.0;
 
 export function completeConnect(db: Db, master: string, state: string, code: string): Completed {
   if (state == "" || code == "") {
-    return { serverId: "", serverName: "", problem: "that sign-in came back without a code" };
+    return { serverId: "", serverName: "", fault: "that sign-in came back without a code" };
   }
   let pendingDoc = findById(db, mcpPendingMapping(), state);
   if (pendingDoc == "") {
     return {
       serverId: "",
       serverName: "",
-      problem: "that sign-in has expired; press Connect again",
+      fault: "that sign-in has expired; press Connect again",
     };
   }
   let pending: McpPendingRow = JSON.parse<McpPendingRow>(pendingDoc);
@@ -364,19 +364,19 @@ export function completeConnect(db: Db, master: string, state: string, code: str
     return {
       serverId: "",
       serverName: "",
-      problem: "that sign-in has expired; press Connect again",
+      fault: "that sign-in has expired; press Connect again",
     };
   }
 
   let serverDoc = findById(db, mcpServersMapping(), pending.serverId);
   if (serverDoc == "") {
-    return { serverId: "", serverName: "", problem: "that connector has been removed" };
+    return { serverId: "", serverName: "", fault: "that connector has been removed" };
   }
   let server: McpServerRow = JSON.parse<McpServerRow>(serverDoc);
   let clientDoc = findById(db, mcpOauthMapping(), server.id);
   if (clientDoc == "") {
     return { serverId: server.id, serverName: server.serverName,
-             problem: "this deployment is no longer registered with " + server.serverName };
+             fault: "this deployment is no longer registered with " + server.serverName };
   }
   let client: McpOauthRow = JSON.parse<McpOauthRow>(clientDoc);
 
@@ -389,15 +389,15 @@ export function completeConnect(db: Db, master: string, state: string, code: str
     verifier: pending.verifier,
     resource: server.endpoint,
   });
-  if (got.problem != "") {
-    return { serverId: server.id, serverName: server.serverName, problem: got.problem };
+  if (got.fault != "") {
+    return { serverId: server.id, serverName: server.serverName, fault: got.fault };
   }
 
   let key = pending.owner == "" ? sharedTokenKey(server.id) : userTokenKey(server.id, pending.owner);
   let stored = storeCredential(db, { provider: key, apiKey: got.accessToken,
     masterKey: master, now: stamp() });
   if (stored != "") {
-    return { serverId: server.id, serverName: server.serverName, problem: stored };
+    return { serverId: server.id, serverName: server.serverName, fault: stored };
   }
   if (got.refreshToken != "") {
     storeCredential(db, { provider: refreshKey(key), apiKey: got.refreshToken,
@@ -409,7 +409,7 @@ export function completeConnect(db: Db, master: string, state: string, code: str
 
   enable(db, server.id);
   attachToDefault(db, server.id);
-  return { serverId: server.id, serverName: server.serverName, problem: "" };
+  return { serverId: server.id, serverName: server.serverName, fault: "" };
 }
 
 function attachToDefault(db: Db, serverId: string): void {

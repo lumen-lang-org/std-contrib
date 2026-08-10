@@ -3,7 +3,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, findById, execute, dropTable, countWhere } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { CredentialRow, credentialsMapping, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan } from "./schema.ts";
-import { DestinationMove, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationOf, destinationProblem } from "./credentials.ts";
+import { DestinationMove, masterKey, masterKeyFault, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationOf, destinationFault } from "./credentials.ts";
 
 let database: Db = sqlite();
 
@@ -28,10 +28,10 @@ function fresh(): void {
 }
 
 test("a missing or wrong-length master key is refused, saying which", () => {
-  expect(masterKeyProblem("").indexOf("not set") >= 0);
-  expect(masterKeyProblem("short").indexOf("32") >= 0);
-  expect(masterKeyProblem("short").indexOf("5 bytes") >= 0);
-  expect(masterKeyProblem(testKey()) == "");
+  expect(masterKeyFault("").indexOf("not set") >= 0);
+  expect(masterKeyFault("short").indexOf("32") >= 0);
+  expect(masterKeyFault("short").indexOf("5 bytes") >= 0);
+  expect(masterKeyFault(testKey()) == "");
 });
 
 test("a stored credential comes back", () => {
@@ -244,24 +244,24 @@ function move(was: string, now: string, stored: bool): DestinationMove {
 }
 
 test("a stored secret cannot be pointed at another host", () => {
-  let refused = destinationProblem(move("https://api.mistral.ai/v1", "http://attacker.example/v1", true));
+  let refused = destinationFault(move("https://api.mistral.ai/v1", "http://attacker.example/v1", true));
   expect(refused != "");
   expect(refused.indexOf("attacker.example") >= 0);
   expect(refused.indexOf("DELETE /providers/mistral/key") >= 0);
 });
 
 test("the same host by another path is not a move", () => {
-  expect(destinationProblem(move("https://api.mistral.ai/v1", "https://api.mistral.ai/v2/chat", true)) == "");
+  expect(destinationFault(move("https://api.mistral.ai/v1", "https://api.mistral.ai/v2/chat", true)) == "");
 });
 
 test("with nothing stored there is nothing to refuse", () => {
-  expect(destinationProblem(move("https://api.mistral.ai/v1", "http://attacker.example/v1", false)) == "");
+  expect(destinationFault(move("https://api.mistral.ai/v1", "http://attacker.example/v1", false)) == "");
 });
 
 test("an unreadable address on either side refuses rather than passes", () => {
-  expect(destinationProblem(move("https://api.mistral.ai/v1", "notaurl", true)) != "");
-  expect(destinationProblem(move("", "https://api.mistral.ai/v1", true)) != "");
-  expect(destinationProblem(move("", "", true)) != "");
+  expect(destinationFault(move("https://api.mistral.ai/v1", "notaurl", true)) != "");
+  expect(destinationFault(move("", "https://api.mistral.ai/v1", true)) != "");
+  expect(destinationFault(move("", "", true)) != "");
 });
 
 test("the suite leaves nothing behind", () => {

@@ -6,7 +6,7 @@ export function masterKey(): string {
   return process.env("LUMEN_MASTER_KEY") ?? "";
 }
 
-export function masterKeyProblem(key: string): string {
+export function masterKeyFault(key: string): string {
   if (key == "") {
     return "LUMEN_MASTER_KEY is not set — generate one with crypto.randomKey()";
   }
@@ -32,9 +32,9 @@ export function storeCredential(db: Db, write: CredentialWrite): string {
   let apiKey = write.apiKey;
   let key = write.masterKey;
   let now = write.now;
-  let problem = masterKeyProblem(key);
-  if (problem != "") {
-    return problem;
+  let fault = masterKeyFault(key);
+  if (fault != "") {
+    return fault;
   }
   if (apiKey == "") {
     return "an empty key is not a credential";
@@ -57,7 +57,7 @@ export function storeCredential(db: Db, write: CredentialWrite): string {
 }
 
 export function credentialFor(db: Db, provider: string, key: string): string {
-  if (masterKeyProblem(key) != "") {
+  if (masterKeyFault(key) != "") {
     return "";
   }
   let document = findById(db, credentialsMapping(), credentialId(provider));
@@ -130,7 +130,7 @@ function namedDestination(origin: string): string {
   return origin;
 }
 
-export function destinationProblem(move: DestinationMove): string {
+export function destinationFault(move: DestinationMove): string {
   if (!move.secretStored) {
     return "";
   }

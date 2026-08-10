@@ -2,9 +2,9 @@
 //
 //   cd packages/rest && lumen test controller.test.ts
 
-import { Description, ControllerMethod, ControllerParam, ControllerField, ControllerDecoratorUse, controller, controllerProblem, joinPaths, httpMethodOf, methodArg, bindings } from "./controller.ts";
+import { Description, ControllerMethod, ControllerParam, ControllerField, ControllerDecoratorUse, controller, controllerFault, joinPaths, httpMethodOf, methodArg, bindings } from "./controller.ts";
 import { Bound } from "./plan.ts";
-import { Route, match, tableProblem } from "./router.ts";
+import { Route, match, tableFault } from "./router.ts";
 
 function on(name: string, args: string[]): ControllerDecoratorUse {
   let u: ControllerDecoratorUse = { name: name, args: args };
@@ -96,7 +96,7 @@ test("paths join without doubling or dropping a slash", () => {
 
 test("the generated table is one the router accepts and matches", () => {
   let table = controller(agentController());
-  expect(tableProblem(table) == "");
+  expect(tableFault(table) == "");
   let m = match(table, "GET", "/agents/a1");
   expect(m.found);
   expect(m.handler == "find");
@@ -107,8 +107,8 @@ test("the generated table is one the router accepts and matches", () => {
 
 // --- what it refuses ---------------------------------------------------------
 
-test("a well-formed controller reports no problem", () => {
-  expect(controllerProblem(agentController()) == "");
+test("a well-formed controller reports no fault", () => {
+  expect(controllerFault(agentController()) == "");
 });
 
 test("a protocol it does not know is refused", () => {
@@ -117,7 +117,7 @@ test("a protocol it does not know is refused", () => {
     protocol: 2, kind: d.kind, name: d.name, args: d.args,
     file: d.file, line: d.line, fields: d.fields, methods: d.methods,
   };
-  expect(controllerProblem(future).indexOf("protocol 1") >= 0);
+  expect(controllerFault(future).indexOf("protocol 1") >= 0);
 });
 
 test("a missing or relative path is refused", () => {
@@ -127,14 +127,14 @@ test("a missing or relative path is refused", () => {
     protocol: d.protocol, kind: d.kind, name: d.name, args: empty,
     file: d.file, line: d.line, fields: d.fields, methods: d.methods,
   };
-  expect(controllerProblem(noPath).indexOf("needs a path") >= 0);
+  expect(controllerFault(noPath).indexOf("needs a path") >= 0);
 
   let relative: string[] = ["agents"];
   let bad: Description = {
     protocol: d.protocol, kind: d.kind, name: d.name, args: relative,
     file: d.file, line: d.line, fields: d.fields, methods: d.methods,
   };
-  expect(controllerProblem(bad).indexOf("does not start with /") >= 0);
+  expect(controllerFault(bad).indexOf("does not start with /") >= 0);
 });
 
 test("a method carrying two verbs is refused, naming it", () => {
@@ -144,9 +144,9 @@ test("a method carrying two verbs is refused, naming it", () => {
     protocol: d.protocol, kind: d.kind, name: "AgentController", args: d.args,
     file: d.file, line: d.line, fields: d.fields, methods: methods,
   };
-  let problem = controllerProblem(two);
-  expect(problem.indexOf("AgentController.both") >= 0);
-  expect(problem.indexOf("2 route decorators") >= 0);
+  let fault = controllerFault(two);
+  expect(fault.indexOf("AgentController.both") >= 0);
+  expect(fault.indexOf("2 route decorators") >= 0);
 });
 
 test("a class serving nothing is refused", () => {
@@ -157,7 +157,7 @@ test("a class serving nothing is refused", () => {
     protocol: d.protocol, kind: d.kind, name: "AgentController", args: d.args,
     file: d.file, line: d.line, fields: d.fields, methods: methods,
   };
-  expect(controllerProblem(bare).indexOf("serves nothing") >= 0);
+  expect(controllerFault(bare).indexOf("serves nothing") >= 0);
 });
 
 test("two controllers can share a prefix without colliding", () => {
@@ -180,7 +180,7 @@ test("two controllers can share a prefix without colliding", () => {
     both.push(b[j]);
     j = j + 1;
   }
-  expect(tableProblem(both) == "");
+  expect(tableFault(both) == "");
   expect(match(both, "GET", "/teams").handler == "list");
   expect(match(both, "GET", "/agents").handler == "list");
 });

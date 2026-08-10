@@ -3,12 +3,12 @@ import { findById, persist } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, BadRequest, NotFound, OkJson, Refused } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { DestinationMove, credentialFor, destinationProblem, forgetCredential, hasCredential, masterKey, masterKeyProblem, storeCredential } from "../../credentials.ts";
+import { DestinationMove, credentialFor, destinationFault, forgetCredential, hasCredential, masterKey, masterKeyFault, storeCredential } from "../../credentials.ts";
 import { backendOr, knownBackend } from "../../payload.ts";
 import { TraceConfigRow, traceConfigMapping } from "../../trace.ts";
 import { TraceSecret, TraceStatus, TraceStatusOff } from "./types.ts";
 
-export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
+export function traceDestinationFault(db: Db, row: TraceConfigRow): string {
   let held = findById(db, traceConfigMapping(), "default");
   let was = "";
   if (held != "") {
@@ -22,7 +22,7 @@ export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
     now: row.endpoint,
     secretStored: hasCredential(db, "tracing"),
   };
-  return destinationProblem(move);
+  return destinationFault(move);
 }
 
 @controller("/tracing")
@@ -71,7 +71,7 @@ export class TraceApi {
     if (!knownBackend(backendOr(body.backend))) {
       return BadRequest("unknown backend \"" + body.backend + "\"; this understands langfuse, otlp, phoenix, braintrust, langsmith and arize");
     }
-    let moved = traceDestinationProblem(this.db, body);
+    let moved = traceDestinationFault(this.db, body);
     if (moved != "") {
       return BadRequest(moved);
     }
@@ -93,9 +93,9 @@ export class TraceApi {
 
   @Put("/key")
   setKey(req: Request): Reply {
-    let problem = masterKeyProblem(this.master);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = masterKeyFault(this.master);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     if (req.body == "") {
       return BadRequest("a body is required");

@@ -53,7 +53,7 @@ test("a failed pull refuses the row, carrying the puller's own words", () => {
     owner: "o1", name: "ghost", image: "nosuch:v9", dockerfile: "", now: "t1",
   });
   expect(made.id == "");
-  expect(made.problem.indexOf("manifest unknown") >= 0);
+  expect(made.fault.indexOf("manifest unknown") >= 0);
   expect(userEnvsOf(database, "o1").length == 0);
 });
 
@@ -80,7 +80,7 @@ test("a failed build refuses the row with the build's last lines", () => {
     owner: "o1", name: "broken", image: "", dockerfile: "FROM x\nRUN nonsense", now: "t1",
   });
   expect(made.id == "");
-  expect(made.problem.indexOf("not found") >= 0);
+  expect(made.fault.indexOf("not found") >= 0);
 });
 
 test("the shapes an environment refuses before docker is asked", () => {
@@ -93,7 +93,7 @@ test("the shapes an environment refuses before docker is asked", () => {
     dockerfile: "FROM a",
     now: "t1",
   });
-  expect(both.problem.indexOf("not both") >= 0);
+  expect(both.fault.indexOf("not both") >= 0);
   let neither = createUserEnv(database, {
     owner: "o1",
     name: "x",
@@ -101,7 +101,7 @@ test("the shapes an environment refuses before docker is asked", () => {
     dockerfile: "",
     now: "t1",
   });
-  expect(neither.problem.indexOf("one of the two") >= 0);
+  expect(neither.fault.indexOf("one of the two") >= 0);
   let reserved = createUserEnv(database, {
     owner: "o1",
     name: "main",
@@ -109,7 +109,7 @@ test("the shapes an environment refuses before docker is asked", () => {
     dockerfile: "",
     now: "t1",
   });
-  expect(reserved.problem.indexOf("already means something") >= 0);
+  expect(reserved.fault.indexOf("already means something") >= 0);
   let fromless = createUserEnv(database, {
     owner: "o1",
     name: "x",
@@ -117,7 +117,7 @@ test("the shapes an environment refuses before docker is asked", () => {
     dockerfile: "RUN echo hi",
     now: "t1",
   });
-  expect(fromless.problem.indexOf("FROM") >= 0);
+  expect(fromless.fault.indexOf("FROM") >= 0);
   expect(fs.readFileSync(FAKE_LOG) == "");
 });
 
@@ -170,5 +170,5 @@ test("environments per owner are bounded", () => {
     now: "t1",
   });
   expect(over.id == "");
-  expect(over.problem.indexOf("delete one") >= 0);
+  expect(over.fault.indexOf("delete one") >= 0);
 });

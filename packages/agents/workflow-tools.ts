@@ -7,7 +7,7 @@ import { maySchedule } from "./task-tools.ts";
 import { civil, knownZone } from "./../cron/cron.ts";
 import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGraph, secretIds, startOf } from "../workflow/workflow.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
-import { SecretRow, graphSecretProblem, secretByName, secretsOf } from "./secrets.ts";
+import { SecretRow, graphSecretFault, secretByName, secretsOf } from "./secrets.ts";
 import { stampMs } from "./tasks.ts";
 
 const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\\\" (one model call, no tools), "
@@ -605,7 +605,7 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     let bad: Stored = { ok: false, row: row, error: wrong };
     return bad;
   }
-  let secretWrong = graphSecretProblem(db, graph, row.owner);
+  let secretWrong = graphSecretFault(db, graph, row.owner);
   if (secretWrong != "") {
     let bad: Stored = { ok: false, row: row, error: secretWrong };
     return bad;

@@ -25,7 +25,7 @@
 //   // GET /files/b1/css/main.css  ->  box = b1, path = "css/main.css"
 //
 // A `*name` anywhere but last is a programming error, since nothing after a
-// catch-all could ever be reached; `tableProblem` refuses such a table at
+// catch-all could ever be reached; `tableFault` refuses such a table at
 // startup rather than letting the route quietly mean something else.
 //
 // A catch-all is also always the last resort. Any route that matches without
@@ -178,7 +178,7 @@ function noMatch(pathMatched: bool): Match {
 //
 // Only the last segment counts. A `*name` written anywhere else is a
 // programming error — everything after a catch-all is unreachable, so the
-// pattern does not mean what it looks like it means — and `tableProblem`
+// pattern does not mean what it looks like it means — and `tableFault`
 // refuses such a table at startup. Until that check has run, the honest answer
 // is that this router does not match a wildcard there, and this says so by
 // looking at one position only.
@@ -289,7 +289,7 @@ function matchSegments(patternParts: string[], pathParts: string[], into: Map<st
 // every request that misses.
 //
 // Among catch-alls themselves the ordinary rule still holds: the first one
-// written wins, and `tableProblem` refuses a table where an earlier catch-all
+// written wins, and `tableFault` refuses a table where an earlier catch-all
 // makes a later one unreachable.
 //
 // `target` is the request target — the path, optionally with a query string.
@@ -366,7 +366,7 @@ export function allowedMethods(table: Route[], target: string): string[] {
 // Why a table would not behave. Called once at startup rather than per
 // request: a route that can never match is a mistake worth failing on, not one
 // to discover from a 404 in production.
-export function tableProblem(table: Route[]): string {
+export function tableFault(table: Route[]): string {
   if (table.length == 0) {
     return "the route table is empty";
   }

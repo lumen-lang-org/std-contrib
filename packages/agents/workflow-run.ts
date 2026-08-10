@@ -90,8 +90,8 @@ function route(node: WfNode, ctx: WalkCtx): StepResult {
 
 function askModel(db: Db, agent: AgentRow, master: string, prompt: string): StepResult {
   let held = configAndModel(db, agent.modelConfigId);
-  if (held.problem != "") {
-    return stepFailed(agent.agentName + ": " + held.problem);
+  if (held.fault != "") {
+    return stepFailed(agent.agentName + ": " + held.fault);
   }
   let config = held.config;
   let model = held.model;

@@ -106,7 +106,7 @@ test("a path that is not an artifact of this thread is refused by name, and no f
   expect(got.length == 2);
   expect(got[0].ok);
   expect(!got[1].ok);
-  expect(got[1].problem.indexOf("/ghost.md") >= 0);
+  expect(got[1].fault.indexOf("/ghost.md") >= 0);
   expect(!fs.existsSync(dir + "/ghost.md"));
   expect(fs.existsSync(dir + "/notes.md"));
 });
@@ -120,7 +120,7 @@ test("another thread's artifact is not this thread's", () => {
   let dir = runDir();
   let got = scriptMaterialise(database, "t1", ["/theirs.md"], dir);
   expect(!got[0].ok);
-  expect(got[0].problem.indexOf("/theirs.md") >= 0);
+  expect(got[0].fault.indexOf("/theirs.md") >= 0);
   expect(!fs.existsSync(dir + "/theirs.md"));
 });
 
@@ -258,7 +258,7 @@ test("a new file without mayCreate is refused and dropped, not saved", () => {
   expect(done.created.length == 0);
   expect(done.refused.length == 1);
   expect(done.refused[0].path == "/extra.md");
-  expect(done.refused[0].problem.indexOf("mayCreate") >= 0);
+  expect(done.refused[0].fault.indexOf("mayCreate") >= 0);
   expect(getArtifact(database, "t1", "/extra.md").id == "");
 });
 
@@ -291,7 +291,7 @@ test("a new file at the path of an unmaterialised artifact never blindly appends
   expect(done.created.length == 0);
   expect(done.refused.length == 1);
   expect(done.refused[0].path == "/other.md");
-  expect(done.refused[0].problem.indexOf("paths") >= 0);
+  expect(done.refused[0].fault.indexOf("paths") >= 0);
   let row = getArtifact(database, "t1", "/other.md");
   expect(row.currentVersion == 1);
   expect(getVersion(database, row.id, 1).body == "kept\n");
@@ -310,8 +310,8 @@ test("a moved version refuses just that path, naming both versions, and the rest
   expect(done.ok);
   expect(done.refused.length == 1);
   expect(done.refused[0].path == "/notes.md");
-  expect(done.refused[0].problem.indexOf("1") >= 0);
-  expect(done.refused[0].problem.indexOf("2") >= 0);
+  expect(done.refused[0].fault.indexOf("1") >= 0);
+  expect(done.refused[0].fault.indexOf("2") >= 0);
   expect(getVersion(database, "t1:/notes.md", 2).body == "alpha\nconcurrent\n");
   expect(getVersion(database, "t1:/notes.md", 3).id == "");
   expect(done.changed.length == 1);
@@ -344,7 +344,7 @@ test("a file grown past ARTIFACT_MAX is refused by name while others land", () =
   expect(done.ok);
   expect(done.refused.length == 1);
   expect(done.refused[0].path == "/notes.md");
-  expect(done.refused[0].problem.indexOf("at most " + `${ARTIFACT_MAX}` + " bytes") >= 0);
+  expect(done.refused[0].fault.indexOf("at most " + `${ARTIFACT_MAX}` + " bytes") >= 0);
   expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
   expect(done.changed.length == 1);
   expect(done.changed[0].path == "/small.md");
@@ -364,7 +364,7 @@ test("a change past the thread byte budget refuses, naming the cap", () => {
   let done = scriptReconcile(database, landing(dir, snapshot, false));
   expect(done.ok);
   expect(done.refused.length == 1);
-  expect(done.refused[0].problem.indexOf("a thread's artifacts hold at most") >= 0);
+  expect(done.refused[0].fault.indexOf("a thread's artifacts hold at most") >= 0);
   expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
 });
 
@@ -379,7 +379,7 @@ test("a symbolic link in the run directory is refused, never read", () => {
   expect(done.ok);
   expect(done.refused.length == 1);
   expect(done.refused[0].path == "/notes.md");
-  expect(done.refused[0].problem.indexOf("link") >= 0);
+  expect(done.refused[0].fault.indexOf("link") >= 0);
   expect(done.missing.length == 0);
   expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
   expect(getVersion(database, "t1:/notes.md", 1).body == "alpha\n");
@@ -393,7 +393,7 @@ test("a run directory that is gone reconciles nothing rather than reporting ever
   fs.rmSync(dir, true);
   let done = scriptReconcile(database, landing(dir, snapshot, false));
   expect(!done.ok);
-  expect(done.problem != "");
+  expect(done.fault != "");
   expect(done.missing.length == 0);
   expect(getArtifact(database, "t1", "/notes.md").currentVersion == 1);
 });
@@ -510,7 +510,7 @@ test("a script runs in its environment and its changed file lands as the next ve
   seeded("/notes.md", "alpha\n");
   let ran = running("sh", "printf 'alpha\\nbeta\\n' > notes.md\necho did-it", ["/notes.md"], false, "1700000000000");
   expect(ran.ok);
-  expect(ran.problem == "");
+  expect(ran.fault == "");
   expect(ran.stopped == "");
   expect(ran.stdout.indexOf("did-it") >= 0);
   expect(ran.changed.length == 1);
@@ -568,9 +568,9 @@ test("an unknown language is refused naming what is available, before any contai
   seeded("/notes.md", "alpha\n");
   let ran = running("ruby", "puts 1", ["/notes.md"], false, "1700000000000");
   expect(!ran.ok);
-  expect(ran.problem.indexOf("python") >= 0);
-  expect(ran.problem.indexOf("node") >= 0);
-  expect(ran.problem.indexOf("sh") >= 0);
+  expect(ran.fault.indexOf("python") >= 0);
+  expect(ran.fault.indexOf("node") >= 0);
+  expect(ran.fault.indexOf("sh") >= 0);
   expect(argvLines().length == 0);
   expect(envList(database, "t1").length == 0);
 });
@@ -592,7 +592,7 @@ test("a path that is not an artifact refuses the whole call and mints no contain
   seeded("/notes.md", "alpha\n");
   let ran = running("sh", "true", ["/notes.md", "/ghost.md"], false, "1700000000000");
   expect(!ran.ok);
-  expect(ran.problem.indexOf("/ghost.md") >= 0);
+  expect(ran.fault.indexOf("/ghost.md") >= 0);
   expect(argvLines().length == 0);
   expect(envList(database, "t1").length == 0);
   expect(scriptRunningCount() == 0);
@@ -647,8 +647,8 @@ test("one script at a time per environment: a second is refused, naming the run 
   clearLog();
   let ran = running("sh", "true", ["/notes.md"], false, "1700000000500");
   expect(!ran.ok);
-  expect(ran.problem.indexOf("already running a script") >= 0);
-  expect(ran.problem.indexOf("main") >= 0);
+  expect(ran.fault.indexOf("already running a script") >= 0);
+  expect(ran.fault.indexOf("main") >= 0);
   expect(argvLines().length == 0);
   scriptRelease(container);
   let again = running("sh", "true", ["/notes.md"], false, "1700000001000");
@@ -664,8 +664,8 @@ test("the deployment ceiling refuses another script, naming the count", () => {
   expect(scriptAcquire("agents-env-b-main", "main", "2") == "");
   let ran = running("sh", "true", ["/notes.md"], false, "1700000000000");
   expect(!ran.ok);
-  expect(ran.problem.indexOf("2 scripts") >= 0);
-  expect(ran.problem.indexOf("refused rather than queued") >= 0);
+  expect(ran.fault.indexOf("2 scripts") >= 0);
+  expect(ran.fault.indexOf("refused rather than queued") >= 0);
   expect(argvLines().length == 0);
   scriptRelease("agents-env-a-main");
   scriptRelease("agents-env-b-main");
@@ -713,15 +713,15 @@ test("an environment name is refused before anything exists: bytes counted as by
     mayCreate: false, environment: wide, agentId: "", turnSeq: -1, now: "1785200000000",
   });
   expect(!long.ok);
-  expect(long.problem.includes("bytes of UTF-8"));
-  expect(long.problem.includes("120"));
+  expect(long.fault.includes("bytes of UTF-8"));
+  expect(long.fault.includes("120"));
 
   let odd = scriptRun(database, {
     threadId: "t1", language: "sh", source: "true", paths: ["/a.md"],
     mayCreate: false, environment: "prod env", agentId: "", turnSeq: -1, now: "1785200000000",
   });
   expect(!odd.ok);
-  expect(odd.problem.includes("letters, digits, dot, dash and underscore"));
+  expect(odd.fault.includes("letters, digits, dot, dash and underscore"));
 
   expect(envList(database, "t1").length == 0);
   expect(argvLines().length == 0);
@@ -734,7 +734,7 @@ test("a source that is the run_script(...) call itself is refused before the she
     "run_script(environment=\"search\", language=\"sh\", source='python /skills/x.py \"q\"')",
     [], false, "1785200000000");
   expect(!ran.ok);
-  expect(ran.problem.includes("run_script(...) call itself"));
+  expect(ran.fault.includes("run_script(...) call itself"));
   expect(envList(database, "t1").length == 0);
   expect(argvLines().length == 0);
 });

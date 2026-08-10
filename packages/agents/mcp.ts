@@ -181,23 +181,23 @@ export function initialize(server: McpServerRow, token: string): McpCall {
 
 export type ToolListing = {
   tools: McpTool[],
-  problem: string,
+  fault: string,
 };
 
 export function toolListing(server: McpServerRow, token: string): ToolListing {
   let out: McpTool[] = [];
   if (!server.enabled) {
-    return { tools: out, problem: "this server is switched off" };
+    return { tools: out, fault: "this server is switched off" };
   }
   if (server.transport != "http") {
     return {
       tools: out,
-      problem: "this speaks http; \"" + server.transport + "\" needs a subprocess it cannot spawn",
+      fault: "this speaks http; \"" + server.transport + "\" needs a subprocess it cannot spawn",
     };
   }
   let listed = rpcWith(server.endpoint, authHeaders(server, token), 2, "tools/list", "");
   if (!listed.ok) {
-    return { tools: out, problem: "could not reach " + server.endpoint + ": " + listed.error };
+    return { tools: out, fault: "could not reach " + server.endpoint + ": " + listed.error };
   }
 
   let items = jsonList(jsonRaw(listed.text, "tools"));
@@ -218,7 +218,7 @@ export function toolListing(server: McpServerRow, token: string): ToolListing {
     }
     i = i + 1;
   }
-  return { tools: out, problem: "" };
+  return { tools: out, fault: "" };
 }
 
 export function listTools(server: McpServerRow, token: string): McpTool[] {

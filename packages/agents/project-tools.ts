@@ -148,9 +148,9 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
   if (project.id == "") {
     return no("no project by that name or id — list_projects shows them.");
   }
-  let problem = assignProject(db, call.threadId, project.id);
-  if (problem != "") {
-    return no(problem);
+  let fault = assignProject(db, call.threadId, project.id);
+  if (fault != "") {
+    return no(fault);
   }
   return yes("Moved. From the next message on, this conversation carries \"" + project.name + "\""
     + (project.instructions == "" ? "." : "\" and its instructions."));

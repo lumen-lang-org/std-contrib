@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, Accepted, BadRequest, Created, NoContent, NotFound, Ok, param } from "../../../rest/server.ts";
-import { callerTags, choiceProblem, guestTag, stamp } from "../../api-core.ts";
+import { callerTags, choiceFault, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
 import { agentsMapping } from "../../schema.ts";
 import { MAX_PER_OWNER, TaskRow, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, withNextAt } from "../../tasks.ts";
@@ -59,7 +59,7 @@ export class TaskApi {
       return BadRequest("no agent " + agentId);
     }
     let chosen = ask.modelChoiceId ?? "";
-    let refusedChoice = choiceProblem(this.db, chosen);
+    let refusedChoice = choiceFault(this.db, chosen);
     if (refusedChoice != "") {
       return BadRequest(refusedChoice);
     }

@@ -28,7 +28,7 @@
 // is the right answer only for a table that was not derived from a class, since
 // there is then no class for `Class.*` to know anything about.
 
-import { Route, Match, match, route, allowedMethods, tableProblem } from "./router.ts";
+import { Route, Match, match, route, allowedMethods, tableFault } from "./router.ts";
 import { Rule, faults, faultsJson } from "../validation/validation.ts";
 
 // What a handler is given. The path parameters and query are already parsed;
@@ -210,7 +210,7 @@ function emptyRequest(): Request {
 
 // --- dispatch ----------------------------------------------------------------
 
-// Stands in for a binding that is not there. Unreachable once bindingProblem
+// Stands in for a binding that is not there. Unreachable once bindingFault
 // has passed, but a Map lookup has to have something to fall back to.
 function unboundHandler(req: Request): Reply {
   return Refused(500, "no handler bound");
@@ -219,8 +219,8 @@ function unboundHandler(req: Request): Reply {
 // Why a table and its bindings do not agree. Called before listening: a route
 // naming a handler nobody bound is a mistake to fail on, not one to discover
 // from a 500 in production.
-export function bindingProblem(table: Route[], handlers: Map<string, Handler>): string {
-  let structural = tableProblem(table);
+export function bindingFault(table: Route[], handlers: Map<string, Handler>): string {
+  let structural = tableFault(table);
   if (structural != "") {
     return structural;
   }
@@ -250,7 +250,7 @@ export function dispatch(table: Route[], handlers: Map<string, Handler>, method:
     return NotFound(target);
   }
   if (!handlers.has(m.handler)) {
-    // bindingProblem should have caught this before listening; answering 500
+    // bindingFault should have caught this before listening; answering 500
     // rather than crashing keeps one bad route from taking the server down.
     return Refused(500, "no handler bound for \"" + m.handler + "\"");
   }
@@ -303,7 +303,7 @@ export function dispatched(table: Route[], handlers: Map<string, Handler>, metho
 // Serve the table on `port`. Returns a description of what went wrong, or an
 // empty string if it never returns at all.
 export function serve(port: int, table: Route[], handlers: Map<string, Handler>): string {
-  let problemText = bindingProblem(table, handlers);
+  let problemText = bindingFault(table, handlers);
   if (problemText != "") {
     return problemText;
   }
@@ -363,7 +363,7 @@ export function mount<T>(c: T): Mount {
 
 // Every route, with its handler qualified by the controller it came from —
 // `AgentApi.list`, never a prefix a program chose. For logging and for the
-// message `mountProblem` gives; dispatch never uses it, because each mount is
+// message `mountFault` gives; dispatch never uses it, because each mount is
 // matched against its own routes and there is no shared keyspace to collide in.
 export function mountedRoutes(mounts: Mount[]): Route[] {
   let out: Route[] = [];
@@ -386,10 +386,10 @@ export function mountedRoutes(mounts: Mount[]): Route[] {
 // cannot disagree. What is left is a table that is malformed on its own terms,
 // and two controllers claiming one path — which is silent otherwise, since the
 // first mount would simply win.
-export function mountProblem(mounts: Mount[]): string {
+export function mountFault(mounts: Mount[]): string {
   let i: int = 0;
   while (i < mounts.length) {
-    let structural = tableProblem(mounts[i].routes);
+    let structural = tableFault(mounts[i].routes);
     if (structural != "") {
       return mounts[i].controller + ": " + structural;
     }
@@ -470,7 +470,7 @@ export function dispatchedMounted(mounts: Mount[], method: string, target: strin
 // Serve the mounted controllers on `port`. Returns a description of what went
 // wrong, or an empty string if it never returns at all.
 export function listen(port: int, mounts: Mount[]): string {
-  let problemText = mountProblem(mounts);
+  let problemText = mountFault(mounts);
   if (problemText != "") {
     return problemText;
   }

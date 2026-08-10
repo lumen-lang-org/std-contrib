@@ -3,13 +3,13 @@ import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
 import { migrate, forgetMigrations } from "../../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "../schema.ts";
-import { masterKey, masterKeyProblem, storeCredential } from "../credentials.ts";
+import { masterKey, masterKeyFault, storeCredential } from "../credentials.ts";
 import { AgentRun, runAgent } from "../run.ts";
 
 function main(): void {
   let master = masterKey();
-  if (masterKeyProblem(master) != "") {
-    console.error(masterKeyProblem(master));
+  if (masterKeyFault(master) != "") {
+    console.error(masterKeyFault(master));
     return;
   }
 

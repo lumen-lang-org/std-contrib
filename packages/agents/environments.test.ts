@@ -97,7 +97,7 @@ test("first use creates the container and the row, named main by default", () =>
   expect(made.created);
   expect(!made.warmed);
   expect(made.container == "agents-env-t1-main");
-  expect(made.problem == "");
+  expect(made.fault == "");
 
   let asked = argvLines();
   expect(asked.length == 2);
@@ -236,16 +236,16 @@ test("container names are docker-legal whatever the thread id holds", () => {
   expect(asked[0] == "run -d --name agents-env-t-1-x-main -v agents-ws-t-1-x:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
 });
 
-test("a docker failure is a problem sentence, not a thrown error and not a row", () => {
+test("a docker failure is a fault sentence, not a thrown error and not a row", () => {
   fresh();
   dockerBroken();
   let made = ensure("t1", "main", "python:3.12-slim", "1700000000000");
 
   expect(!made.ok);
   expect(made.created == false);
-  expect(made.problem != "");
-  expect(made.problem.includes("docker"));
-  expect(made.problem.includes("Cannot connect to the Docker daemon"));
+  expect(made.fault != "");
+  expect(made.fault.includes("docker"));
+  expect(made.fault.includes("Cannot connect to the Docker daemon"));
 
   expect(envList(database, "t1").length == 0);
 });
@@ -279,11 +279,11 @@ test("an environment needs a conversation and, on first use, an image", () => {
 
   let unowned = ensure("", "main", "python:3.12-slim", "1700000000000");
   expect(!unowned.ok);
-  expect(unowned.problem != "");
+  expect(unowned.fault != "");
 
   let imageless = ensure("t1", "main", "", "1700000000000");
   expect(!imageless.ok);
-  expect(imageless.problem != "");
+  expect(imageless.fault != "");
 
   expect(argvLines().length == 0);
   expect(envList(database, "t1").length == 0);

@@ -240,8 +240,8 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
         turnSeq: TURN_SEQ_NONE, now: `${Date.now() as number}`,
       });
       if (!filed.ok) {
-        finishMessage(db, msg, "failed", "", "", filed.problem, Date.now() as number);
-        queueOutbound(db, msg.botId, msg.chatId, "", "I could not keep that file: " + filed.problem, Date.now() as number);
+        finishMessage(db, msg, "failed", "", "", filed.fault, Date.now() as number);
+        queueOutbound(db, msg.botId, msg.chatId, "", "I could not keep that file: " + filed.fault, Date.now() as number);
         return;
       }
       ask = { owner: ask.owner, input: msg.input == "" ? "the file " + (msg.fileName ?? "") : msg.input,

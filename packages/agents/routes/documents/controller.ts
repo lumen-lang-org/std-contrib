@@ -10,7 +10,7 @@ import { JOB_QUEUED, enqueue, pendingJobs } from "../../indexing.ts";
 import { createDocuments, embeddingModel, listSources, normalScope } from "../../knowledge.ts";
 import { DocumentFileUpload, DocumentFileView, DocumentQueued, DocumentStored, DocumentSummary, DocumentUpload } from "./types.ts";
 
-function sourceProblem(source: string, body: string): string {
+function sourceFault(source: string, body: string): string {
   if (source.trim() == "") {
     return "a document needs a source to be filed under";
   }
@@ -126,7 +126,7 @@ export class DocumentApi {
       return BadRequest("no credential for " + embedder.provider);
     }
 
-    let badName = sourceProblem(body.source, body.body);
+    let badName = sourceFault(body.source, body.body);
     if (badName != "") {
       return BadRequest(badName);
     }

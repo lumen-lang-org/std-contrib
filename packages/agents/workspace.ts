@@ -292,7 +292,7 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
   }
 
   if (name == "write_file") {
-    let problem = putFile(db, {
+    let fault = putFile(db, {
       threadId: threadId,
       fileName: argsName,
       mime: mimeOf(argsName),
@@ -301,11 +301,11 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
       documentId: "",
       now: now,
     });
-    if (problem != "") {
+    if (fault != "") {
       let refused: FileToolResult = {
         handled: true,
         ok: false,
-        text: problem,
+        text: fault,
         line: 0,
         changed: "",
       };

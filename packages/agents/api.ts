@@ -1,20 +1,20 @@
 import { apiKeysPlan } from "./api-keys.ts";
 import { bindings, controller } from "../rest/controller.ts";
-import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, Respond, Ok, Created, OkJson, CreatedJson, NoContent, NotFound, BadRequest, Refused } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, mountFault, dispatchedMounted, Respond, Ok, Created, OkJson, CreatedJson, NoContent, NotFound, BadRequest, Refused } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
 import { DbOrder, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel } from "./schema.ts";
-import { masterKey, masterKeyProblem } from "./credentials.ts";
+import { masterKey, masterKeyFault } from "./credentials.ts";
 import { AgentRun } from "./run.ts";
 import { userTurn } from "./provider.ts";
 import { runLogPlan, recordRun } from "./runlog.ts";
 import { tracePlan, tracerFor } from "./trace.ts";
-import { jsonId, createProblem } from "./payload.ts";
+import { jsonId, createFault } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonRaw } from "./scan.ts";
-import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceProblem } from "./api-core.ts";
+import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceFault } from "./api-core.ts";
 import { HealthApi } from "./routes/healthz/controller.ts";
 import { CardPluginApi } from "./routes/card-plugins/controller.ts";
 import { ToolCardApi } from "./routes/tool-cards/controller.ts";
@@ -54,7 +54,7 @@ import { ScopeApi } from "./routes/scopes/controller.ts";
 import { QuotaApi } from "./routes/quota/controller.ts";
 import { LibraryApi } from "./routes/library/controller.ts";
 import { RunApi } from "./routes/runs/run.controller.ts";
-import { UsageApi } from "./routes/usage/controller.ts";
+import { UsageApi } from "./routes/usage/usage.controller.ts";
 import { BannerApi } from "./routes/banner/controller.ts";
 import { mcpRosterPlan } from "./mcp-roster.ts";
 import { ModelPick, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread } from "./threads.ts";
@@ -104,12 +104,12 @@ class ConfigApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, modelConfigsMapping(this.db), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, modelConfigsMapping(this.db), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let body: ModelConfigRow = JSON.parse<ModelConfigRow>(req.body);
-    let wrong = configProblem(this.db, body);
+    let wrong = configFault(this.db, body);
     if (wrong != "") {
       return BadRequest(wrong);
     }
@@ -133,7 +133,7 @@ class ConfigApi {
       return BadRequest("the id in the body must match the path");
     }
     let row = mergedConfig(JSON.parse<ModelConfigRow>(stored), req.body);
-    let wrong = configProblem(this.db, row);
+    let wrong = configFault(this.db, row);
     if (wrong != "") {
       return BadRequest(wrong);
     }
@@ -175,7 +175,7 @@ export function mergedConfig(stored: ModelConfigRow, body: string): ModelConfigR
   return out;
 }
 
-export function configProblem(db: Db, row: ModelConfigRow): string {
+export function configFault(db: Db, row: ModelConfigRow): string {
   if (row.modelId == "") {
     return "a modelId is required";
   }
@@ -191,13 +191,13 @@ export function configProblem(db: Db, row: ModelConfigRow): string {
   return "";
 }
 
-export function chatConfigProblem(db: Db, configId: string, role: string): string {
+export function chatConfigFault(db: Db, configId: string, role: string): string {
   if (configId == "") {
     return role + " is required";
   }
   let pair = configAndModel(db, configId);
-  if (pair.problem != "") {
-    return role + ": " + pair.problem;
+  if (pair.fault != "") {
+    return role + ": " + pair.fault;
   }
   if (pair.model.kind != "chat") {
     return role + ": model config " + configId + " runs on a \"" + pair.model.kind
@@ -229,7 +229,7 @@ export function mergedChoice(stored: ModelChoiceRow, body: string): ModelChoiceR
   return out;
 }
 
-export function choiceRowProblem(db: Db, row: ModelChoiceRow): string {
+export function choiceRowFault(db: Db, row: ModelChoiceRow): string {
   if (row.label == "") {
     return "a choice needs a label; it is the word in the menu";
   }
@@ -243,7 +243,7 @@ export function choiceRowProblem(db: Db, row: ModelChoiceRow): string {
     if (row.routerId != "") {
       return "a \"config\" choice carries no routerId; clear it, or set kind to \"router\"";
     }
-    return chatConfigProblem(db, row.configId, "configId");
+    return chatConfigFault(db, row.configId, "configId");
   }
   if (row.kind == "router") {
     if (row.configId != "") {
@@ -285,12 +285,12 @@ class ChoiceApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, modelChoicesMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, modelChoicesMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let row = mergedChoice(blankChoice(jsonId(req.body)), req.body);
-    let wrong = choiceRowProblem(this.db, row);
+    let wrong = choiceRowFault(this.db, row);
     if (wrong != "") {
       return BadRequest(wrong);
     }
@@ -314,7 +314,7 @@ class ChoiceApi {
       return BadRequest("the id in the body must match the path");
     }
     let row = mergedChoice(JSON.parse<ModelChoiceRow>(stored), req.body);
-    let wrong = choiceRowProblem(this.db, row);
+    let wrong = choiceRowFault(this.db, row);
     if (wrong != "") {
       return BadRequest(wrong);
     }
@@ -377,7 +377,7 @@ export function mergedRouter(stored: ModelRouterRow, body: string): ModelRouterR
   return out;
 }
 
-export function candidatesProblem(db: Db, candidatesJson: string): string {
+export function candidatesFault(db: Db, candidatesJson: string): string {
   let text = candidatesJson.trim();
   if (text == "" || !text.startsWith("[")) {
     return "\"candidates\" must be a JSON array of {key, configId, when}";
@@ -414,7 +414,7 @@ export function candidatesProblem(db: Db, candidatesJson: string): string {
       return named + " has no \"when\"; a candidate with no description is a "
         + "candidate the routing model cannot choose on purpose";
     }
-    let unusable = chatConfigProblem(db, jsonText(item, "configId").trim(), named + " configId");
+    let unusable = chatConfigFault(db, jsonText(item, "configId").trim(), named + " configId");
     if (unusable != "") {
       return unusable;
     }
@@ -423,25 +423,25 @@ export function candidatesProblem(db: Db, candidatesJson: string): string {
   return "";
 }
 
-export function routerRowProblem(db: Db, row: ModelRouterRow): string {
+export function routerRowFault(db: Db, row: ModelRouterRow): string {
   if (row.label == "") {
     return "a router needs a label";
   }
   if (row.routeEvery != "turn" && row.routeEvery != "thread") {
     return "routeEvery is \"turn\" or \"thread\", not \"" + row.routeEvery + "\"";
   }
-  let routing = chatConfigProblem(db, row.routerConfigId, "routerConfigId");
+  let routing = chatConfigFault(db, row.routerConfigId, "routerConfigId");
   if (routing != "") {
     return routing;
   }
-  let landing = chatConfigProblem(db, row.fallbackConfigId, "fallbackConfigId");
+  let landing = chatConfigFault(db, row.fallbackConfigId, "fallbackConfigId");
   if (landing != "") {
     return landing;
   }
   if (!row.enabled) {
     return "";
   }
-  return candidatesProblem(db, row.candidatesJson);
+  return candidatesFault(db, row.candidatesJson);
 }
 
 type CandidateView = {
@@ -543,16 +543,16 @@ class RouterApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, modelRoutersMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, modelRoutersMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let blob = preEncodedCandidates(req.body);
     if (blob != "") {
       return BadRequest(blob);
     }
     let row = mergedRouter(blankRouter(jsonId(req.body)), req.body);
-    let wrong = routerRowProblem(this.db, row);
+    let wrong = routerRowFault(this.db, row);
     if (wrong != "") {
       return BadRequest(wrong);
     }
@@ -580,7 +580,7 @@ class RouterApi {
       return BadRequest(blob);
     }
     let row = mergedRouter(JSON.parse<ModelRouterRow>(stored), req.body);
-    let wrong = routerRowProblem(this.db, row);
+    let wrong = routerRowFault(this.db, row);
     if (wrong != "") {
       return BadRequest(wrong);
     }
@@ -818,7 +818,7 @@ class ThreadApi {
     let made = remixThread(this.db, { sourceId: id,
       owner: owningTag(callerTags(req)), now: stamp() });
     if (made.threadId == "") {
-      return NotFound(made.problem);
+      return NotFound(made.fault);
     }
     let v: RemixedView = { id: made.threadId, files: made.files };
     return CreatedJson(v);
@@ -877,7 +877,7 @@ class ThreadApi {
     }
 
     let chosen = askedChoice(req.body);
-    if (chosen != "" && choiceProblem(this.db, chosen) == "") {
+    if (chosen != "" && choiceFault(this.db, chosen) == "") {
       if (rememberChoice(this.db, id, chosen) != "") {
         chosen = "";
       }
@@ -913,7 +913,7 @@ class ThreadApi {
       return BadRequest("no agent " + agentId);
     }
     let chosen = askedChoice(req.body);
-    let refused = choiceProblem(this.db, chosen);
+    let refused = choiceFault(this.db, chosen);
     if (refused != "") {
       return BadRequest(refused);
     }
@@ -985,9 +985,9 @@ class ThreadApi {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
       return NotFound("thread " + id);
     }
-    let problem = askCancel(this.db, id);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = askCancel(this.db, id);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let v: CancelAskedView = { asked: true };
     return OkJson(v);
@@ -1010,7 +1010,7 @@ class ThreadApi {
     }
 
     let pick = askedPick(req.body);
-    let noSuchChoice = choiceProblem(this.db, pick.choiceId);
+    let noSuchChoice = choiceFault(this.db, pick.choiceId);
     if (noSuchChoice != "") {
       return BadRequest(noSuchChoice);
     }
@@ -1300,9 +1300,9 @@ function digestLoop(master: string, everyMs: int): int {
       let i: int = 0;
       while (i < feeds.length) {
         if (feeds[i].enabled) {
-          let problem = refreshFeed(db, feeds[i], master);
-          if (problem != "") {
-            console.error("discover: " + feeds[i].id + ": " + problem);
+          let fault = refreshFeed(db, feeds[i], master);
+          if (fault != "") {
+            console.error("discover: " + feeds[i].id + ": " + fault);
           }
         }
         i = i + 1;
@@ -1381,7 +1381,7 @@ function openDatabase(): Db {
   return db;
 }
 
-export function migrationProblem(db: Db): string {
+export function migrationFault(db: Db): string {
   let plan = schemaPlan(db);
   let extra = runLogPlan(db);
   let e: int = 0;
@@ -1751,7 +1751,7 @@ export function publishMenu(db: Db): string {
 
 function main(): void {
   let db = openDatabase();
-  let schema = migrationProblem(db);
+  let schema = migrationFault(db);
   if (schema != "") {
     console.error(schema);
     return;
@@ -1762,9 +1762,9 @@ function main(): void {
     console.error(menu);
   }
   let master = masterKey();
-  let keyProblem = masterKeyProblem(master);
-  if (keyProblem != "") {
-    console.error(keyProblem);
+  let keyFault = masterKeyFault(master);
+  if (keyFault != "") {
+    console.error(keyFault);
     return;
   }
 
@@ -1838,16 +1838,16 @@ function main(): void {
   if (token != "") {
     console.log("bearer token required on every route but /healthz");
   }
-  let problem = listenLocked(8100, mounts, token);
-  if (problem != "") {
-    console.error(problem);
+  let fault = listenLocked(8100, mounts, token);
+  if (fault != "") {
+    console.error(fault);
   }
 }
 
 function listenLocked(port: int, mounts: Mount[], token: string): string {
-  let problemText = mountProblem(mounts);
-  if (problemText != "") {
-    return problemText;
+  let faultText = mountFault(mounts);
+  if (faultText != "") {
+    return faultText;
   }
 
   http.createServer(port, (req): HttpResponse => {

@@ -1,6 +1,6 @@
 import { Db } from "../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
-import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelProblem, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
+import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelFault, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
 import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { masterKey } from "./credentials.ts";
 import { envKeyFileBody, touchEnvKeys } from "./env-keys.ts";
@@ -12,7 +12,7 @@ export type ScriptFile = {
   path: string,
   version: int,
   ok: bool,
-  problem: string,
+  fault: string,
 };
 
 export type ScriptReconcile = {
@@ -32,7 +32,7 @@ export type ScriptVersioned = {
 
 export type ScriptRefusal = {
   path: string,
-  problem: string,
+  fault: string,
 };
 
 export type ScriptReconciled = {
@@ -42,7 +42,7 @@ export type ScriptReconciled = {
   unchanged: ScriptVersioned[],
   missing: string[],
   refused: ScriptRefusal[],
-  problem: string,
+  fault: string,
 };
 
 export function scriptMaterialise(db: Db, threadId: string, paths: string[], dir: string): ScriptFile[] {
@@ -56,7 +56,7 @@ export function scriptMaterialise(db: Db, threadId: string, paths: string[], dir
 }
 
 function fileRefusal(path: string, why: string): ScriptFile {
-  let out: ScriptFile = { path: path, version: 0, ok: false, problem: why };
+  let out: ScriptFile = { path: path, version: 0, ok: false, fault: why };
   return out;
 }
 
@@ -78,7 +78,7 @@ function materialiseOne(db: Db, threadId: string, raw: string, dir: string): Scr
   if (placed != "") {
     return fileRefusal(path, placed);
   }
-  let out: ScriptFile = { path: path, version: artifact.currentVersion, ok: true, problem: "" };
+  let out: ScriptFile = { path: path, version: artifact.currentVersion, ok: true, fault: "" };
   return out;
 }
 
@@ -106,7 +106,7 @@ function placeFile(dir: string, path: string, body: string): string {
 type ScriptWalk = {
   files: string[],
   links: string[],
-  problem: string,
+  fault: string,
 };
 
 function walkFailed(): ScriptWalk {
@@ -114,7 +114,7 @@ function walkFailed(): ScriptWalk {
   let links: string[] = [];
   let out: ScriptWalk = {
     files: files, links: links,
-    problem: "the run directory could not be read; nothing was reconciled",
+    fault: "the run directory could not be read; nothing was reconciled",
   };
   return out;
 }
@@ -139,7 +139,7 @@ function walkRun(base: string, rel: string): ScriptWalk {
       links.push(path);
     } else if (entry == "dir") {
       let sub = walkRun(base, path);
-      if (sub.problem != "") {
+      if (sub.fault != "") {
         return sub;
       }
       let f: int = 0;
@@ -157,7 +157,7 @@ function walkRun(base: string, rel: string): ScriptWalk {
     }
     i = i + 1;
   }
-  let out: ScriptWalk = { files: files, links: links, problem: "" };
+  let out: ScriptWalk = { files: files, links: links, fault: "" };
   return out;
 }
 
@@ -183,20 +183,20 @@ type ScriptOutcome = {
   kind: string,
   path: string,
   version: int,
-  problem: string,
+  fault: string,
 };
 
 function outcomeLanded(kind: string, path: string, version: int): ScriptOutcome {
-  let out: ScriptOutcome = { kind: kind, path: path, version: version, problem: "" };
+  let out: ScriptOutcome = { kind: kind, path: path, version: version, fault: "" };
   return out;
 }
 
 function outcomeRefused(path: string, why: string): ScriptOutcome {
-  let out: ScriptOutcome = { kind: "refused", path: path, version: 0, problem: why };
+  let out: ScriptOutcome = { kind: "refused", path: path, version: 0, fault: why };
   return out;
 }
 
-function reconcileProblem(why: string): ScriptReconciled {
+function reconcileFault(why: string): ScriptReconciled {
   let changed: ScriptVersioned[] = [];
   let created: ScriptVersioned[] = [];
   let unchanged: ScriptVersioned[] = [];
@@ -204,26 +204,26 @@ function reconcileProblem(why: string): ScriptReconciled {
   let refused: ScriptRefusal[] = [];
   let out: ScriptReconciled = {
     ok: false, changed: changed, created: created, unchanged: unchanged,
-    missing: missing, refused: refused, problem: why,
+    missing: missing, refused: refused, fault: why,
   };
   return out;
 }
 
 export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled {
   if (run.threadId == "") {
-    return reconcileProblem("an artifact belongs to a thread");
+    return reconcileFault("an artifact belongs to a thread");
   }
-  let badNote = labelProblem("note", run.note, ARTIFACT_NOTE_MAX);
+  let badNote = labelFault("note", run.note, ARTIFACT_NOTE_MAX);
   if (badNote != "") {
-    return reconcileProblem(badNote);
+    return reconcileFault(badNote);
   }
   if (!fs.existsSync(run.dir)) {
-    return reconcileProblem("the run directory is gone; nothing was reconciled");
+    return reconcileFault("the run directory is gone; nothing was reconciled");
   }
 
   let walked = walkRun(run.dir, "");
-  if (walked.problem != "") {
-    return reconcileProblem(walked.problem);
+  if (walked.fault != "") {
+    return reconcileFault(walked.fault);
   }
   let files = walked.files;
   let links = walked.links;
@@ -251,7 +251,7 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
       let same: ScriptVersioned = { path: outcome.path, version: outcome.version };
       unchanged.push(same);
     } else {
-      let no: ScriptRefusal = { path: outcome.path, problem: outcome.problem };
+      let no: ScriptRefusal = { path: outcome.path, fault: outcome.fault };
       refused.push(no);
     }
     i = i + 1;
@@ -261,7 +261,7 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
   while (ln < links.length) {
     let linked: ScriptRefusal = {
       path: links[ln],
-      problem: links[ln] + " is a symbolic link, and a run may only save regular files",
+      fault: links[ln] + " is a symbolic link, and a run may only save regular files",
     };
     refused.push(linked);
     ln = ln + 1;
@@ -279,7 +279,7 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
 
   let out: ScriptReconciled = {
     ok: true, changed: changed, created: created, unchanged: unchanged,
-    missing: missing, refused: refused, problem: "",
+    missing: missing, refused: refused, fault: "",
   };
   return out;
 }
@@ -353,11 +353,11 @@ type ScriptAppend = {
 type ScriptAppended = {
   ok: bool,
   version: int,
-  problem: string,
+  fault: string,
 };
 
 function appendRefusal(why: string): ScriptAppended {
-  let out: ScriptAppended = { ok: false, version: 0, problem: why };
+  let out: ScriptAppended = { ok: false, version: 0, fault: why };
   return out;
 }
 
@@ -435,7 +435,7 @@ function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
     rollbackTransaction(db);
     return appendRefusal("the change to " + append.path + " could not be saved; try again");
   }
-  let out: ScriptAppended = { ok: true, version: version, problem: "" };
+  let out: ScriptAppended = { ok: true, version: version, fault: "" };
   return out;
 }
 
@@ -463,7 +463,7 @@ function reconcileKnown(db: Db, run: ScriptReconcile, snap: ScriptFile): ScriptO
     baseVersion: snap.version, note: run.note, turnSeq: run.turnSeq, now: run.now,
   });
   if (!landed.ok) {
-    return outcomeRefused(snap.path, landed.problem);
+    return outcomeRefused(snap.path, landed.fault);
   }
   return outcomeLanded("changed", snap.path, landed.version);
 }
@@ -493,7 +493,7 @@ function reconcileNew(db: Db, run: ScriptReconcile, path: string): ScriptOutcome
     turnSeq: run.turnSeq, now: run.now,
   });
   if (!put.ok) {
-    return outcomeRefused(path, put.problem);
+    return outcomeRefused(path, put.fault);
   }
   return outcomeLanded("created", path, put.version);
 }
@@ -748,10 +748,10 @@ export type ScriptRan = {
   refused: ScriptRefusal[],
   stopped: string,
   recreated: bool,
-  problem: string,
+  fault: string,
 };
 
-function scriptRanFlat(ok: bool, stdout: string, stderr: string, stopped: string, recreated: bool, problem: string): ScriptRan {
+function scriptRanFlat(ok: bool, stdout: string, stderr: string, stopped: string, recreated: bool, fault: string): ScriptRan {
   let changed: ScriptVersioned[] = [];
   let created: ScriptVersioned[] = [];
   let unchanged: ScriptVersioned[] = [];
@@ -760,7 +760,7 @@ function scriptRanFlat(ok: bool, stdout: string, stderr: string, stopped: string
   let out: ScriptRan = {
     ok: ok, stdout: stdout, stderr: stderr, changed: changed, created: created,
     unchanged: unchanged, missing: missing, refused: refused,
-    stopped: stopped, recreated: recreated, problem: problem,
+    stopped: stopped, recreated: recreated, fault: fault,
   };
   return out;
 }
@@ -786,7 +786,7 @@ let scriptRunSeq: int = 0;
 
 export const SCRIPT_ENV_NAME_MAX: int = 40;
 
-export function scriptEnvNameProblem(name: string): string {
+export function scriptEnvNameFault(name: string): string {
   if (name.length > SCRIPT_ENV_NAME_MAX) {
     return "an environment name is at most " + `${SCRIPT_ENV_NAME_MAX}`
       + " bytes of UTF-8; this one is " + `${name.length}`;
@@ -825,7 +825,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     return scriptRefused("source is the run_script(...) call itself, not a script: pass only the command to run — e.g. source=\"python skill.py 'query'\", not source=\"run_script(...)\"");
   }
   let envName = run.environment == "" ? "main" : run.environment;
-  let named = scriptEnvNameProblem(envName);
+  let named = scriptEnvNameFault(envName);
   if (named != "") {
     return scriptRefused(named);
   }
@@ -848,7 +848,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   let sn: int = 0;
   while (sn < snapshot.length) {
     if (!snapshot[sn].ok) {
-      return scriptBail(container, stage, snapshot[sn].problem + " The script did not run.");
+      return scriptBail(container, stage, snapshot[sn].fault + " The script did not run.");
     }
     sn = sn + 1;
   }
@@ -896,7 +896,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   };
   let ensured = envEnsure(db, ensure);
   if (!ensured.ok) {
-    return scriptBail(container, stage, ensured.problem);
+    return scriptBail(container, stage, ensured.fault);
   }
   let recreated = known && ensured.created;
 
@@ -1000,7 +1000,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     ok: landed.ok, stdout: sout, stderr: serr,
     changed: landed.changed, created: landed.created, unchanged: landed.unchanged,
     missing: landed.missing, refused: landed.refused,
-    stopped: "", recreated: recreated, problem: landed.problem,
+    stopped: "", recreated: recreated, fault: landed.fault,
   };
   return scriptDone(container, stage, runDir, jobAt, out);
 }

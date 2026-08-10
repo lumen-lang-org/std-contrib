@@ -90,7 +90,7 @@ export class ArtifactApi {
       turnSeq: TURN_SEQ_NONE, now: stamp(),
     });
     if (!written.ok) {
-      return BadRequest(written.problem);
+      return BadRequest(written.fault);
     }
     let v: ArtifactCreated = {
       slot: written.slot,
@@ -138,7 +138,7 @@ export class ArtifactApi {
       if (put.ok) {
         wrote.push(normalScope(files[i].path));
       } else {
-        refused.push(files[i].path + ": " + put.problem);
+        refused.push(files[i].path + ": " + put.fault);
       }
       i = i + 1;
     }
@@ -250,7 +250,7 @@ export class ArtifactApi {
     };
     let made = officeRender(this.db, ask);
     if (!made.ok) {
-      return BadRequest(made.problem);
+      return BadRequest(made.fault);
     }
     let v: ArtifactPdfView = {
       slot: artifact.slot,
@@ -318,9 +318,9 @@ export class ArtifactApi {
     if (artifact.id == "") {
       return NotFound("artifact " + slot);
     }
-    let problem = deleteArtifact(this.db, id, artifact.path);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = deleteArtifact(this.db, id, artifact.path);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     return NoContent();
   }

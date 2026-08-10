@@ -286,7 +286,7 @@ export function modelConfigRows(db: Db): DbRepository {
 export type ConfigAndModel = {
   config: ModelConfigRow,
   model: ModelRow,
-  problem: string,
+  fault: string,
 };
 
 function noConfigAndModel(why: string): ConfigAndModel {
@@ -297,7 +297,7 @@ function noConfigAndModel(why: string): ConfigAndModel {
   let model: ModelRow = {
     id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0,
     baseUrl: "", enabled: false, contextTokens: 0 };
-  let out: ConfigAndModel = { config: config, model: model, problem: why };
+  let out: ConfigAndModel = { config: config, model: model, fault: why };
   return out;
 }
 
@@ -315,7 +315,7 @@ export function configAndModel(db: Db, configId: string): ConfigAndModel {
     return noConfigAndModel("no model " + config.modelId);
   }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
-  let out: ConfigAndModel = { config: config, model: model, problem: "" };
+  let out: ConfigAndModel = { config: config, model: model, fault: "" };
   return out;
 }
 
@@ -918,7 +918,7 @@ export function schemaPlan(db: Db): Migration[] {
       + leaveExisting(db, "id")),
     migration("87.9", "Thinking is on the menu",
       "INSERT INTO model_choices (id, label, description, kind, config_id, router_id, tier, enabled, menu_rank) "
-      + "SELECT 'ch-thinking', 'Thinking', 'Slower, for a problem that needs working through', 'config', c.id, '', '', true, 4 "
+      + "SELECT 'ch-thinking', 'Thinking', 'Slower, for a fault that needs working through', 'config', c.id, '', '', true, 4 "
       + "FROM model_configs c WHERE c.id = 'c-gemini-pro-think'"
       + leaveExisting(db, "id")),
     migration("87.10", "the router answers in one word, on a config of its own",

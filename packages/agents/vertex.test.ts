@@ -42,7 +42,7 @@ test("a service-account JSON that is not one is refused in words an operator can
   expect(hollow.error.indexOf("missing") >= 0);
 });
 
-test("a key that cannot sign is named as the problem, with openssl's own words", () => {
+test("a key that cannot sign is named as the fault, with openssl's own words", () => {
   vertexForget();
   let sa = account("-----BEGIN PRIVATE KEY-----\nnot a key\n-----END PRIVATE KEY-----\n", "http://127.0.0.1:1/token");
   let refused = vertexBearer(sa, 1000);

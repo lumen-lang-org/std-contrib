@@ -17,7 +17,7 @@ function fresh(): void {
 test("mint returns a secret shown once, and stores only its prefix — never the secret", () => {
   fresh();
   let made = mintApiKey(database, "alice", "prod", "search,retrieve", "t1");
-  expect(made.problem == "");
+  expect(made.fault == "");
   expect(made.secret.slice(0, 3) == "jl_");
   expect(made.secret.indexOf(made.prefix) == 0);
   let views = JSON.parse<ApiKeyView[]>(apiKeysOf(database, "alice"));
@@ -59,7 +59,7 @@ test("scopes are normalised: unknown tokens dropped, wildcard collapses, blank r
   expect(cleanScopes("Search, RETRIEVE ,nope") == "search,retrieve");
   expect(cleanScopes("search,*,retrieve") == "*");
   let bad = mintApiKey(database, "dave", "x", "nope,unknown", "t1");
-  expect(bad.problem.indexOf("scope") >= 0);
+  expect(bad.fault.indexOf("scope") >= 0);
   expect(bad.secret == "");
   expect(hasScope(scopeList("*"), "retrieve"));
   expect(hasScope(scopeList("search,suggest"), "suggest"));
@@ -71,11 +71,11 @@ test("per-owner cap holds", () => {
   let i: int = 0;
   while (i < 20) {
     let m = mintApiKey(database, "eve", "k" + `${i}`, "search", "t1");
-    expect(m.problem == "");
+    expect(m.fault == "");
     i = i + 1;
   }
   let over = mintApiKey(database, "eve", "one-too-many", "search", "t1");
-  expect(over.problem.indexOf("revoke one") >= 0);
+  expect(over.fault.indexOf("revoke one") >= 0);
   expect(over.secret == "");
-  expect(mintApiKey(database, "frank", "fine", "search", "t1").problem == "");
+  expect(mintApiKey(database, "frank", "fine", "search", "t1").fault == "");
 });

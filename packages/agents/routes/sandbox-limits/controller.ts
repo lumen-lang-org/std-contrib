@@ -25,9 +25,9 @@ export class SandboxLimitsApi {
       return BadRequest("a body is required: the seven limits, 0 for any that should keep the default");
     }
     let l: SandboxLimits = JSON.parse<SandboxLimits>(req.body);
-    let problem = saveSandboxLimits(this.db, l);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = saveSandboxLimits(this.db, l);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     return this.show(req);
   }

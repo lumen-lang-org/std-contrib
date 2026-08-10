@@ -97,10 +97,10 @@ export function artifactPlan(db: Db): Migration[] {
 }
 
 export function artifactPathOk(path: string): bool {
-  return pathProblem(path) == "";
+  return pathFault(path) == "";
 }
 
-function pathProblem(path: string): string {
+function pathFault(path: string): string {
   let normal = normalScope(path);
   if (normal.length > ARTIFACT_MAX_PATH) {
     return "an artifact path is at most " + `${ARTIFACT_MAX_PATH}` + " characters; \"" + normal + "\" is " + `${normal.length}`;
@@ -141,7 +141,7 @@ function segmentCharsOk(seg: string): bool {
   return true;
 }
 
-export function labelProblem(what: string, text: string, cap: int): string {
+export function labelFault(what: string, text: string, cap: int): string {
   if (text.length > cap) {
     return "a " + what + " is at most " + `${cap}` + " bytes of UTF-8; this one is " + `${text.length}`;
   }
@@ -279,12 +279,12 @@ export type ArtifactWritten = {
   slot: int,
   version: int,
   previewToken: string,
-  problem: string,
+  fault: string,
 };
 
 function refusal(why: string): ArtifactWritten {
   let out: ArtifactWritten = {
-    ok: false, id: "", slot: -1, version: 0, previewToken: "", problem: why,
+    ok: false, id: "", slot: -1, version: 0, previewToken: "", fault: why,
   };
   return out;
 }
@@ -296,7 +296,7 @@ export function putArtifact(db: Db, write: ArtifactWrite): ArtifactWritten {
 }
 
 
-function binaryBodyProblem(path: string, content: string): string {
+function binaryBodyFault(path: string, content: string): string {
   let kind = kindOf(path);
   if (kind != "office" && kind != "pdf") {
     return "";
@@ -320,22 +320,22 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
   if (write.threadId == "") {
     return refusal("an artifact belongs to a thread");
   }
-  let problem = pathProblem(write.path);
-  if (problem != "") {
-    return refusal(problem);
+  let fault = pathFault(write.path);
+  if (fault != "") {
+    return refusal(fault);
   }
   if (write.origin != "uploaded" && write.origin != "generated") {
     return refusal("origin must be uploaded or generated");
   }
-  let badTitle = labelProblem("title", write.title, ARTIFACT_TITLE_MAX);
+  let badTitle = labelFault("title", write.title, ARTIFACT_TITLE_MAX);
   if (badTitle != "") {
     return refusal(badTitle);
   }
-  let badNote = labelProblem("note", write.note, ARTIFACT_NOTE_MAX);
+  let badNote = labelFault("note", write.note, ARTIFACT_NOTE_MAX);
   if (badNote != "") {
     return refusal(badNote);
   }
-  let badBinary = binaryBodyProblem(write.path, write.content);
+  let badBinary = binaryBodyFault(write.path, write.content);
   if (badBinary != "") {
     return refusal(badBinary);
   }
@@ -456,7 +456,7 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
     return refusal("the artifact could not be saved; try again");
   }
   let out: ArtifactWritten = {
-    ok: true, id: id, slot: slot, version: version, previewToken: token, problem: "",
+    ok: true, id: id, slot: slot, version: version, previewToken: token, fault: "",
   };
   return out;
 }

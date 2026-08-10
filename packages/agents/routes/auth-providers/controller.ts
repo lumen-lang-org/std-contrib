@@ -4,11 +4,11 @@ import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
-import { createProblem } from "../../payload.ts";
+import { createFault } from "../../payload.ts";
 import { AuthProviderRow, authProvidersMapping } from "../../schema.ts";
 import { AuthProviderAsk, AuthProviderResolvedView, AuthProviderSecretAsk, AuthProviderSecretStored, AuthProviderView } from "./types.ts";
 
-export function authProviderProblem(ask: AuthProviderAsk): string {
+export function authProviderFault(ask: AuthProviderAsk): string {
   let kind = ask.kind == "" ? "oidc" : ask.kind;
   if (kind == "oidc" && !ask.issuer.startsWith("https://")) {
     return "the issuer is an https address whose /.well-known/openid-configuration describes the provider";
@@ -78,11 +78,11 @@ export class AuthProviderApi {
 
   @Post("/")
   create(@Valid @RequestBody ask: AuthProviderAsk, @RequestBody document: string): Reply {
-    let problem = createProblem(this.db, authProvidersMapping(), document);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, authProvidersMapping(), document);
+    if (fault != "") {
+      return BadRequest(fault);
     }
-    let bad = authProviderProblem(ask);
+    let bad = authProviderFault(ask);
     if (bad != "") {
       return BadRequest(bad);
     }
@@ -102,7 +102,7 @@ export class AuthProviderApi {
     if (ask.id != id) {
       return BadRequest("the id in the body must match the path");
     }
-    let bad = authProviderProblem(ask);
+    let bad = authProviderFault(ask);
     if (bad != "") {
       return BadRequest(bad);
     }

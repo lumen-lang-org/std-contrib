@@ -91,8 +91,8 @@ export class EnvironmentApi {
     let made = createUserEnv(this.db, {
       owner: owner, name: name, image: image, dockerfile: dockerfile, now: stamp(),
     });
-    if (made.problem != "") {
-      return BadRequest(made.problem);
+    if (made.fault != "") {
+      return BadRequest(made.fault);
     }
     return Created(findById(this.db, userEnvsMapping(), made.id));
   }

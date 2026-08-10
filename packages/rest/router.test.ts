@@ -3,7 +3,7 @@
 //
 //   cd packages/rest && lumen test router.test.ts
 
-import { Route, Match, route, routes, match, allowedMethods, tableProblem, segments, splitQuery, parseQuery, decodeComponent } from "./router.ts";
+import { Route, Match, route, routes, match, allowedMethods, tableFault, segments, splitQuery, parseQuery, decodeComponent } from "./router.ts";
 
 function agentRoutes(): Route[] {
   return routes([
@@ -212,7 +212,7 @@ test("among wildcards the first one written still wins", () => {
     route("GET", "/files/public/*path", "readPublic"),
     route("GET", "/files/:box/*path", "readFile"),
   ]);
-  expect(tableProblem(table) == "");
+  expect(tableFault(table) == "");
   expect(match(table, "GET", "/files/public/x.css").handler == "readPublic");
   expect(match(table, "GET", "/files/b1/x.css").handler == "readFile");
 });
@@ -230,29 +230,29 @@ test("a wildcard does not match a path that stops short of its prefix", () => {
 
 // --- checking the table ------------------------------------------------------
 
-test("a well-formed table reports no problem", () => {
-  expect(tableProblem(agentRoutes()) == "");
+test("a well-formed table reports no fault", () => {
+  expect(tableFault(agentRoutes()) == "");
 });
 
-test("an empty table is a problem, since a server with no routes is a mistake", () => {
+test("an empty table is a fault, since a server with no routes is a mistake", () => {
   let none: Route[] = [];
-  expect(tableProblem(none).indexOf("empty") >= 0);
+  expect(tableFault(none).indexOf("empty") >= 0);
 });
 
 test("a route naming no handler is refused", () => {
-  expect(tableProblem(routes([route("GET", "/a", "")])).indexOf("names no handler") >= 0);
+  expect(tableFault(routes([route("GET", "/a", "")])).indexOf("names no handler") >= 0);
 });
 
 test("a pattern that does not start with / is refused", () => {
-  expect(tableProblem(routes([route("GET", "agents", "h")])).indexOf("does not start with /") >= 0);
+  expect(tableFault(routes([route("GET", "agents", "h")])).indexOf("does not start with /") >= 0);
 });
 
 test("a pattern naming the same parameter twice is refused", () => {
-  expect(tableProblem(routes([route("GET", "/a/:id/b/:id", "h")])).indexOf("twice") >= 0);
+  expect(tableFault(routes([route("GET", "/a/:id/b/:id", "h")])).indexOf("twice") >= 0);
 });
 
 test("a : with no name after it is refused", () => {
-  expect(tableProblem(routes([route("GET", "/a/:", "h")])).indexOf("no name after it") >= 0);
+  expect(tableFault(routes([route("GET", "/a/:", "h")])).indexOf("no name after it") >= 0);
 });
 
 test("a route that can never match is refused at startup, not discovered in production", () => {
@@ -260,10 +260,10 @@ test("a route that can never match is refused at startup, not discovered in prod
     route("GET", "/agents/:id", "findAgent"),
     route("GET", "/agents/new", "newAgentForm"),
   ]);
-  let problem = tableProblem(shadowed);
+  let fault = tableFault(shadowed);
   // `/agents/:id` comes first and matches every path `/agents/new` would.
-  expect(problem.indexOf("can never match") >= 0);
-  expect(problem.indexOf("newAgentForm") < 0 || problem.indexOf("/agents/new") >= 0);
+  expect(fault.indexOf("can never match") >= 0);
+  expect(fault.indexOf("newAgentForm") < 0 || fault.indexOf("/agents/new") >= 0);
 });
 
 test("two routes differing only in parameter name are the same route", () => {
@@ -271,54 +271,54 @@ test("two routes differing only in parameter name are the same route", () => {
     route("GET", "/agents/:id", "a"),
     route("GET", "/agents/:key", "b"),
   ]);
-  expect(tableProblem(twice).indexOf("can never match") >= 0);
+  expect(tableFault(twice).indexOf("can never match") >= 0);
 });
 
-test("a table mixing exact routes and a wildcard reports no problem", () => {
-  expect(tableProblem(fileRoutes()) == "");
+test("a table mixing exact routes and a wildcard reports no fault", () => {
+  expect(tableFault(fileRoutes()) == "");
 });
 
 test("a wildcard before its last segment is refused, since nothing can follow it", () => {
-  let problem = tableProblem(routes([route("GET", "/a/*rest/b", "h")]));
-  expect(problem.indexOf("nothing can follow it") >= 0);
+  let fault = tableFault(routes([route("GET", "/a/*rest/b", "h")]));
+  expect(fault.indexOf("nothing can follow it") >= 0);
 });
 
 test("a * with no name after it is refused", () => {
-  expect(tableProblem(routes([route("GET", "/a/*", "h")])).indexOf("no name after it") >= 0);
+  expect(tableFault(routes([route("GET", "/a/*", "h")])).indexOf("no name after it") >= 0);
 });
 
 test("a wildcard and a parameter share one namespace, since a handler reads names", () => {
-  expect(tableProblem(routes([route("GET", "/a/:x/*x", "h")])).indexOf("twice") >= 0);
+  expect(tableFault(routes([route("GET", "/a/:x/*x", "h")])).indexOf("twice") >= 0);
 });
 
 test("a wildcard written first does not make a later exact route dead", () => {
   // It would under a first-match-wins rule; `match` prefers the exact route
   // whatever the order, so refusing this table at startup would be wrong.
-  expect(tableProblem(routes([
+  expect(tableFault(routes([
     route("GET", "/files/:box/*path", "readFile"),
     route("GET", "/files/:box/v/:n", "readVersion"),
   ])) == "");
 });
 
 test("a wildcard that covers a later wildcard is refused", () => {
-  let problem = tableProblem(routes([
+  let fault = tableFault(routes([
     route("GET", "/files/:box/*path", "readFile"),
     route("GET", "/files/b1/*rest", "readBox1"),
   ]));
-  expect(problem.indexOf("can never match") >= 0);
+  expect(fault.indexOf("can never match") >= 0);
 });
 
 test("a wildcard reaching further back does not shadow one nested deeper", () => {
   // `/files/:box/logs/*rest` matches paths `/files/*path` also matches, so it
   // is the earlier, wider one that must come second.
-  expect(tableProblem(routes([
+  expect(tableFault(routes([
     route("GET", "/files/:box/logs/*rest", "readLogs"),
     route("GET", "/files/*path", "readFile"),
   ])) == "");
 });
 
 test("the same path under different methods is not a conflict", () => {
-  expect(tableProblem(routes([
+  expect(tableFault(routes([
     route("GET", "/agents/:id", "find"),
     route("PUT", "/agents/:id", "replace"),
   ])) == "");

@@ -173,7 +173,7 @@ export type EnvKeyWrite = {
 
 export type EnvKeyMade = {
   id: string,
-  problem: string,
+  fault: string,
 };
 
 export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
@@ -187,33 +187,33 @@ export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
   };
   let wrong = refuseEnvKey(row, ask.value);
   if (wrong != "") {
-    return { id: "", problem: wrong };
+    return { id: "", fault: wrong };
   }
   if (envKeyByName(db, row.name, row.owner, row.imageId).id != "") {
     return {
       id: "",
-      problem: "there is already a key called \"" + row.name + "\" in this environment — delete it first, or pick another name",
+      fault: "there is already a key called \"" + row.name + "\" in this environment — delete it first, or pick another name",
     };
   }
   let held = JSON.parse<EnvKeyRow[]>(envKeysOf(db, row.owner, row.imageId));
   if (held.length >= envKeyPerEnv()) {
     return {
       id: "",
-      problem: "that is " + `${envKeyPerEnv()}` + " keys in this environment already — delete one before adding another",
+      fault: "that is " + `${envKeyPerEnv()}` + " keys in this environment already — delete one before adding another",
     };
   }
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,
   });
   if (stored != "") {
-    return { id: "", problem: stored };
+    return { id: "", fault: stored };
   }
   let written = persist(db, envKeysMapping(), JSON.stringify(row));
   if (!written.ok) {
     forgetCredential(db, refOf(row.id));
-    return { id: "", problem: written.error };
+    return { id: "", fault: written.error };
   }
-  return { id: row.id, problem: "" };
+  return { id: row.id, fault: "" };
 }
 
 export function forgetEnvKey(db: Db, id: string, owner: string): bool {

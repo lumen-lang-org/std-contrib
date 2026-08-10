@@ -87,7 +87,7 @@ test("an agent with no servers has no tools and nothing to report", () => {
   let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
   expect(mounted.servers.length == 0);
-  expect(mounted.problems.length == 0);
+  expect(mounted.faults.length == 0);
 });
 
 test("only the servers linked to this agent are read", () => {
@@ -106,9 +106,9 @@ test("a disabled server is named, not silently skipped", () => {
   link("a1", "s1");
   let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
-  expect(mounted.problems.length == 1);
-  expect(mounted.problems[0].indexOf("filesystem") >= 0);
-  expect(mounted.problems[0].indexOf("disabled") >= 0);
+  expect(mounted.faults.length == 1);
+  expect(mounted.faults[0].indexOf("filesystem") >= 0);
+  expect(mounted.faults[0].indexOf("disabled") >= 0);
 });
 
 test("a stdio server says what is missing, rather than failing to connect", () => {
@@ -117,7 +117,7 @@ test("a stdio server says what is missing, rather than failing to connect", () =
   link("a1", "s1");
   let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
-  expect(mounted.problems[0].indexOf("subprocess") >= 0);
+  expect(mounted.faults[0].indexOf("subprocess") >= 0);
 });
 
 test("an unreachable server leaves the agent short a tool, and says so", () => {
@@ -126,8 +126,8 @@ test("an unreachable server leaves the agent short a tool, and says so", () => {
   link("a1", "s1");
   let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   expect(mounted.tools.length == 0);
-  expect(mounted.problems.length == 1);
-  expect(mounted.problems[0].indexOf("github") >= 0);
+  expect(mounted.faults.length == 1);
+  expect(mounted.faults[0].indexOf("github") >= 0);
 });
 
 test("a tool the model invented is refused in words it can act on", () => {
@@ -754,7 +754,7 @@ function waiting(names: string[]): Mounted {
     authHeader: "",
     enabled: true,
   }];
-  let m: Mounted = { tools: [], servers: servers, tokens: [""], problems: [], deferred: deferred };
+  let m: Mounted = { tools: [], servers: servers, tokens: [""], faults: [], deferred: deferred };
   return m;
 }
 

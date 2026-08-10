@@ -466,7 +466,7 @@ test("a secret is attached by name, never created, and never leaves its address"
 
   let made = createSecret(database, { owner: "o1", name: "api key", value: "Bearer sk-t-1",
     destination: "https://api.example.com", header: "", category: "", master: "0123456789abcdef0123456789abcdef", now: "t" });
-  expect(made.problem == "");
+  expect(made.fault == "");
   let drafted = call("o1", "draft_workflow",
     "{\"name\":\"Fetch\",\"steps\":[{\"kind\":\"http\",\"text\":\"https://api.example.com/v1\",\"title\":\"Fetch\"}]}");
   expect(drafted.ok);

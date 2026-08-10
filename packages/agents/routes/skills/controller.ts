@@ -3,15 +3,15 @@ import { DbOrder, countWhere, deleteWhere, executeWith, existsById, findById, li
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok } from "../../../rest/server.ts";
 import { utf8Length } from "../../artifacts.ts";
-import { createProblem, jsonId } from "../../payload.ts";
-import { scriptEnvNameProblem } from "../../run-script.ts";
+import { createFault, jsonId } from "../../payload.ts";
+import { scriptEnvNameFault } from "../../run-script.ts";
 import { SkillFileRow, SkillRow, skillFilesMapping, skillsMapping } from "../../schema.ts";
 
 export const SKILL_DESCRIPTION_MAX: int = 200;
 
 export const SKILL_MAX: int = 16384;
 
-export function skillProblem(row: SkillRow): string {
+export function skillFault(row: SkillRow): string {
   if (row.skillName.trim() == "") {
     return "a skill needs a name — it is what use_skill is called with";
   }
@@ -33,7 +33,7 @@ export function skillProblem(row: SkillRow): string {
   if (row.source == "local" && row.sourceUrl.trim() != "") {
     return "a local skill has no sourceUrl — set source to 'repo' if it came from one";
   }
-  let named = scriptEnvNameProblem(row.skillName);
+  let named = scriptEnvNameFault(row.skillName);
   if (named != "") {
     return "a skill name becomes a container path: " + named;
   }
@@ -55,7 +55,7 @@ export function skillProblem(row: SkillRow): string {
   return "";
 }
 
-export function skillFileProblem(row: SkillFileRow): string {
+export function skillFileFault(row: SkillFileRow): string {
   if (row.path.trim() == "") {
     return "a skill file needs a name, such as enums.py";
   }
@@ -104,12 +104,12 @@ export class SkillApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, skillsMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, skillsMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let row: SkillRow = JSON.parse<SkillRow>(req.body);
-    let named = skillProblem(row);
+    let named = skillFault(row);
     if (named != "") {
       return BadRequest(named);
     }
@@ -134,7 +134,7 @@ export class SkillApi {
       return BadRequest("this skill comes from " + before.sourceUrl
         + " and is edited there; copy it to a local skill to change it here");
     }
-    let named = skillProblem(row);
+    let named = skillFault(row);
     if (named != "") {
       return BadRequest(named);
     }
@@ -227,15 +227,15 @@ export class SkillApi {
     if (!existsById(this.db, skillsMapping(), id)) {
       return NotFound("skill " + id);
     }
-    let problem = createProblem(this.db, skillFilesMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, skillFilesMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let row: SkillFileRow = JSON.parse<SkillFileRow>(req.body);
     if (row.skillId != id) {
       return BadRequest("the skillId in the body must match the path");
     }
-    let named = skillFileProblem(row);
+    let named = skillFileFault(row);
     if (named != "") {
       return BadRequest(named);
     }
@@ -260,7 +260,7 @@ export class SkillApi {
     if (row.skillId != id) {
       return BadRequest("the skillId in the body must match the path");
     }
-    let named = skillFileProblem(row);
+    let named = skillFileFault(row);
     if (named != "") {
       return BadRequest(named);
     }

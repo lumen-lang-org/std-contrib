@@ -30,9 +30,9 @@ export class DiscoverApi {
     if (asked.length > PROMPT_CHARS_MAX) {
       return BadRequest("a prompt over " + `${PROMPT_CHARS_MAX}` + " characters is refused");
     }
-    let problem = setDiscoverText(this.db, "digest-prompt", asked, stamp());
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = setDiscoverText(this.db, "digest-prompt", asked, stamp());
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let v: PromptView = { prompt: asked, usingDefault: false };
     return OkJson(v);

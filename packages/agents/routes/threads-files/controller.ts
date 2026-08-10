@@ -57,7 +57,7 @@ export class WorkspaceApi {
       return BadRequest("a body is required: {\"name\":\"notes.md\",\"content\":\"...\"}");
     }
     let body: FileUpload = JSON.parse<FileUpload>(req.body);
-    let problem = putFile(this.db, {
+    let fault = putFile(this.db, {
       threadId: id,
       fileName: body.name,
       mime: mimeOf(body.name),
@@ -66,8 +66,8 @@ export class WorkspaceApi {
       documentId: "",
       now: stamp(),
     });
-    if (problem != "") {
-      return BadRequest(problem);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let v: FileUploaded = { name: body.name, bytes: body.content.length };
     return CreatedJson(v);
@@ -119,7 +119,7 @@ export class WorkspaceApi {
       return BadRequest("no document " + body.documentId);
     }
     let content = jsonText(document, "body");
-    let problem = putFile(this.db, {
+    let fault = putFile(this.db, {
       threadId: id,
       fileName: body.name,
       mime: mimeOf(body.name),
@@ -128,8 +128,8 @@ export class WorkspaceApi {
       documentId: body.documentId,
       now: stamp(),
     });
-    if (problem != "") {
-      return BadRequest(problem);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let v: FilePulled = { name: body.name, documentId: body.documentId };
     return CreatedJson(v);

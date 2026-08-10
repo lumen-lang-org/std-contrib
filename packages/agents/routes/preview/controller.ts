@@ -160,7 +160,7 @@ function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: str
       if (made.ok) {
         return previewBytes(req, crypto.base64Decode(made.body), "application/pdf", cache);
       }
-      return previewBytes(req, made.problem, "text/plain; charset=utf-8", cache);
+      return previewBytes(req, made.fault, "text/plain; charset=utf-8", cache);
     }
   }
   let row = previewPresentable(req, artifact, body);

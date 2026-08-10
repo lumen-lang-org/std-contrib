@@ -1,6 +1,6 @@
 import { Db } from "../plume/driver.ts";
 import { executeWith, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
-import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, getArtifact, getVersion, labelProblem, nextVersion, threadBytes, utf8Length } from "./artifacts.ts";
+import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, getArtifact, getVersion, labelFault, nextVersion, threadBytes, utf8Length } from "./artifacts.ts";
 import { ArtifactHit, editHits, editLineAt, editLoose, editContext, searchSnippet } from "./artifacts-search.ts";
 import { normalScope } from "./knowledge.ts";
 
@@ -26,14 +26,14 @@ export type ArtifactEdited = {
   bytes: int,
   context: string,
   hits: ArtifactHit[],
-  problem: string,
+  fault: string,
 };
 
 function editRefusal(why: string): ArtifactEdited {
   let none: ArtifactHit[] = [];
   let out: ArtifactEdited = {
     ok: false, slot: -1, version: 0, line: 0, bytes: 0,
-    context: "", hits: none, problem: why,
+    context: "", hits: none, fault: why,
   };
   return out;
 }
@@ -49,7 +49,7 @@ function editAmbiguous(path: string, version: int, found: ArtifactHit[], tooMany
   }
   let out: ArtifactEdited = {
     ok: false, slot: -1, version: 0, line: 0, bytes: 0,
-    context: "", hits: found, problem: why,
+    context: "", hits: found, fault: why,
   };
   return out;
 }
@@ -64,7 +64,7 @@ export function editArtifact(db: Db, edit: ArtifactEdit): ArtifactEdited {
   if (edit.oldText == edit.newText) {
     return editRefusal("old and new are identical; nothing would change, and a version that changes nothing is not saved");
   }
-  let badNote = labelProblem("note", edit.note, ARTIFACT_NOTE_MAX);
+  let badNote = labelFault("note", edit.note, ARTIFACT_NOTE_MAX);
   if (badNote != "") {
     return editRefusal(badNote);
   }
@@ -152,7 +152,7 @@ function editAttempt(db: Db, edit: ArtifactEdit, attempt: int): ArtifactEdited {
       let raced: ArtifactEdited = {
         ok: false, slot: -1, version: 0, line: 0, bytes: 0, context: "",
         hits: out.hits,
-        problem: "The artifact changed while you were editing, and " + out.problem
+        fault: "The artifact changed while you were editing, and " + out.fault
           + "\nRead or search it again before retrying.",
       };
       return raced;
@@ -220,7 +220,7 @@ function editAttempt(db: Db, edit: ArtifactEdit, attempt: int): ArtifactEdited {
   let out: ArtifactEdited = {
     ok: true, slot: artifact.slot, version: version, line: line, bytes: bytes,
     context: editContext(spliced, at, at + edit.newText.length),
-    hits: none, problem: "",
+    hits: none, fault: "",
   };
   return out;
 }

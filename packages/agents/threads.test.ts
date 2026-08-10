@@ -122,8 +122,8 @@ test("a round that cannot be stored whole is not stored at all", () => {
 
   let calls: ToolCall[] = [toolCall("c1", "warehouse_stock", "{}")];
   let half: Turn[] = [assistantTurn("", calls), toolTurn("c1", "warehouse_stock", "12 pallets")];
-  let problem = appendTurns(database, "t9", half, 0);
-  expect(problem != "");
+  let fault = appendTurns(database, "t9", half, 0);
+  expect(fault != "");
   expect(turnCount("t9") == 1);
 });
 
@@ -884,7 +884,7 @@ test("a remix copies the files, under the new owner, and leaves the source alone
   markReplayable(database, source, true);
 
   let made = remixThread(database, { sourceId: source, owner: "bob", now: "1000000000001" });
-  expect(made.problem == "");
+  expect(made.fault == "");
   expect(made.threadId != "" && made.threadId != source);
   expect(made.files == 1);
 
@@ -952,7 +952,7 @@ test("a conversation nobody offered cannot be remixed, however the id was found"
 
   let tried = remixThread(database, { sourceId: private_, owner: "bob", now: "1000000000001" });
   expect(tried.threadId == "");
-  expect(tried.problem.indexOf("not offered") >= 0);
+  expect(tried.fault.indexOf("not offered") >= 0);
 
   let missing = remixThread(database, {
     sourceId: "no-such-thread",
@@ -960,5 +960,5 @@ test("a conversation nobody offered cannot be remixed, however the id was found"
     now: "1000000000001",
   });
   expect(missing.threadId == "");
-  expect(missing.problem.indexOf("no conversation") >= 0);
+  expect(missing.fault.indexOf("no conversation") >= 0);
 });

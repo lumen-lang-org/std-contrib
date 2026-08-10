@@ -501,7 +501,7 @@ export function extractFiles(db: Db, threadId: string, baseSeq: int, text: strin
         now: now,
       });
       if (!saved.ok) {
-        notes.push("did not save " + path + ": " + saved.problem);
+        notes.push("did not save " + path + ": " + saved.fault);
       } else {
         out = out + text.slice(cursor, fence.open)
           + "[artifact:" + nonce + ":" + `${saved.slot}` + "@v" + `${saved.version}` + "] " + path;

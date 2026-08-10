@@ -14,7 +14,7 @@ export type ToolView = {
 
 export type ServerToolsView = {
   serverId: string,
-  problem: string,
+  fault: string,
   stale: bool,
   listedAt: string,
   tools: ToolView[],

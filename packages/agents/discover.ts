@@ -269,7 +269,7 @@ export type DiscoverTopic = {
   stories: WrittenStory[],
   read: int,
   fresh: int,
-  problem: string,
+  fault: string,
 };
 
 type Hit = {
@@ -755,7 +755,7 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   let said = (why: string) => {
     let r: DiscoverTopic = {
       topic: topic, stories: empty, read: hits.length, fresh: hits.length,
-      problem: why,
+      fault: why,
     };
     return r;
   };
@@ -851,7 +851,7 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
 
   let told: DiscoverTopic = {
     topic: topic, stories: wrote,
-    read: hits.length, fresh: hits.length, problem: "",
+    read: hits.length, fresh: hits.length, fault: "",
   };
   return told;
 }
@@ -1020,8 +1020,8 @@ function digestEveryMs(): int {
 export function refreshFeed(db: Db, feed: DiscoverFeed, master: string): string {
   let told = digest(db, feed.topic, feed.query, feed.lang, feed.country,
     digestModelId(), master);
-  if (told.problem != "") {
-    return told.problem;
+  if (told.fault != "") {
+    return told.fault;
   }
   if (told.stories.length == 0) {
     return "nothing worth a card";

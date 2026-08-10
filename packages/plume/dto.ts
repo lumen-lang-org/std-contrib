@@ -13,7 +13,7 @@
 //   }
 //
 //   let violation = writeViolation(dtoAgentEdit, agentsMapping(), req.body);
-//   if (violation != "") { return badRequest(problem); }
+//   if (violation != "") { return badRequest(fault); }
 //   persist(database, agentsMapping(), narrowTo(dtoAgentEdit, req.body));
 //
 // The check is not decoration and it is not optional on a write path. `persist`
@@ -90,7 +90,7 @@
 // compiler demands the name `Description` in a decorator's module, so the two
 // cannot be told apart by their names.
 //
-// This is a compiler problem and it is written up as one: per lumen/CLAUDE.md,
+// This is a compiler fault and it is written up as one: per lumen/CLAUDE.md,
 // "two packages that break each other by choosing ordinary names are not
 // misnamed — the namespace is wrong." A decorator's description type should be
 // scoped to its module, or provided by the compiler as one shared type (spec
@@ -147,8 +147,8 @@ function fieldHas(f: DtoFieldDescription, name: string): bool {
 }
 
 // A shape, as a list of keys. `name` is the record's, kept for the sentences
-// the checks below produce — a problem that cannot say which DTO it is about
-// is a problem someone has to go looking for.
+// the checks below produce — a fault that cannot say which DTO it is about
+// is a fault someone has to go looking for.
 export type Projection = {
   name: string,
   fields: string[],

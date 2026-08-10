@@ -12,7 +12,7 @@
 // anything here being wrong; the fix then is to update the expectation, not the
 // package.
 
-import { next, previous, civil, offsetMinutes, problem, knownZone } from "./cron.ts";
+import { next, previous, civil, offsetMinutes, fault, knownZone } from "./cron.ts";
 
 // Saturday 2026-03-28T12:00:00Z. Chosen because the weekend forces the
 // day-of-week arithmetic to skip Sunday, and because it sits two days before
@@ -76,14 +76,14 @@ test("the previous firing, for deciding what a restart missed", () => {
 });
 
 test("a schedule that cannot be read says so, and answers no time", () => {
-  expect(problem("0 0 8 * * 1-5") == "");
+  expect(fault("0 0 8 * * 1-5") == "");
 
   // Five fields is the everyday cron dialect and it is refused, deliberately:
   // read as six it would mean something entirely different and run every eight
   // seconds.
-  expect(problem("0 8 * * 1-5") != "");
-  expect(problem("") != "");
-  expect(problem("nonsense") != "");
+  expect(fault("0 8 * * 1-5") != "");
+  expect(fault("") != "");
+  expect(fault("nonsense") != "");
 
   let fire = next("UTC", "nonsense", SAT);
   expect(!fire.ok);

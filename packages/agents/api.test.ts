@@ -18,15 +18,15 @@ import { putFile, getFile, listFiles } from "./workspace.ts";
 import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
-import { migrationProblem, bearerRefused, askedPick, configInUse, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { migrationFault, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
 import { forgetAgent } from "./routes/agents/agent.service.ts";
 import { decodedSize } from "./routes/documents/controller.ts";
 import { healthJson } from "./routes/healthz/controller.ts";
-import { choicesJson, modelDestinationProblem, modelProblem } from "./routes/models/controller.ts";
-import { forgetServer, serverDestinationProblem } from "./routes/servers/controller.ts";
-import { skillFileProblem, skillProblem } from "./routes/skills/controller.ts";
-import { traceDestinationProblem } from "./routes/tracing/controller.ts";
-import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson, askedChoice, choiceProblem } from "./api-core.ts";
+import { choicesJson, modelDestinationFault, modelFault } from "./routes/models/controller.ts";
+import { forgetServer, serverDestinationFault } from "./routes/servers/controller.ts";
+import { skillFileFault, skillFault } from "./routes/skills/controller.ts";
+import { traceDestinationFault } from "./routes/tracing/controller.ts";
+import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson, askedChoice, choiceFault } from "./api-core.ts";
 
 let database: Db = sqlite();
 
@@ -94,11 +94,11 @@ function fresh(): string {
   dropTable(database, promptsMapping());
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
-  let problem = migrationProblem(database);
-  if (problem != "") {
-    console.error("[fixture] the plan did not run: " + problem);
+  let fault = migrationFault(database);
+  if (fault != "") {
+    console.error("[fixture] the plan did not run: " + fault);
   }
-  return problem;
+  return fault;
 }
 
 function modelRow(id: string, provider: string, kind: string, baseUrl: string): ModelRow {
@@ -135,7 +135,7 @@ test("a model's base URL cannot be moved while its provider's key is stored", ()
     now: "t",
   });
 
-  let moved = modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "http://attacker.example/v1"));
+  let moved = modelDestinationFault(database, modelRow("m1", "mistral", "chat", "http://attacker.example/v1"));
   expect(moved != "");
   expect(moved.indexOf("attacker.example") >= 0);
   expect(moved.indexOf("DELETE /providers/mistral/key") >= 0);
@@ -149,7 +149,7 @@ test("a model created against a foreign base URL is refused just as a moved one 
     masterKey: testKey(),
     now: "t",
   });
-  let created = modelDestinationProblem(database, modelRow("m9", "mistral", "chat", "http://attacker.example/v1"));
+  let created = modelDestinationFault(database, modelRow("m9", "mistral", "chat", "http://attacker.example/v1"));
   expect(created != "");
   expect(created.indexOf("attacker.example") >= 0);
 });
@@ -163,7 +163,7 @@ test("a model whose provider changes is refused, because that changes the key to
     masterKey: testKey(),
     now: "t",
   });
-  let switched = modelDestinationProblem(database, modelRow("m1", "openai", "chat", ""));
+  let switched = modelDestinationFault(database, modelRow("m1", "openai", "chat", ""));
   expect(switched != "");
 });
 
@@ -179,7 +179,7 @@ test("an edit that leaves the address alone is allowed", () => {
   let renamed: ModelRow = {
     id: "m1", label: "A better label", apiName: "mistral-small-latest", provider: "mistral",
     kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
-  expect(modelDestinationProblem(database, renamed) == "");
+  expect(modelDestinationFault(database, renamed) == "");
 });
 
 test("a path change on the same host is not a move", () => {
@@ -191,21 +191,21 @@ test("a path change on the same host is not a move", () => {
     masterKey: testKey(),
     now: "t",
   });
-  expect(modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "https://gw.internal/v2")) == "");
-  expect(modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "https://gw.attacker/v1")) != "");
+  expect(modelDestinationFault(database, modelRow("m1", "mistral", "chat", "https://gw.internal/v2")) == "");
+  expect(modelDestinationFault(database, modelRow("m1", "mistral", "chat", "https://gw.attacker/v1")) != "");
 });
 
 test("with no key stored there is nothing to protect and nothing is refused", () => {
   fresh();
   persist(database, modelsMapping(), JSON.stringify(modelRow("m1", "mistral", "chat", "")));
-  expect(modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "http://anywhere.example/v1")) == "");
+  expect(modelDestinationFault(database, modelRow("m1", "mistral", "chat", "http://anywhere.example/v1")) == "");
 });
 
 test("a base URL that is not an address is refused where it is written", () => {
-  expect(modelProblem(modelRow("m1", "mistral", "chat", "notaurl")).indexOf("base URL") >= 0);
-  expect(modelProblem(modelRow("m1", "mistral", "chat", "file:///etc/passwd")).indexOf("base URL") >= 0);
-  expect(modelProblem(modelRow("m1", "mistral", "chat", "")) == "");
-  expect(modelProblem(modelRow("m1", "mistral", "chat", "https://gw.internal/v1")) == "");
+  expect(modelFault(modelRow("m1", "mistral", "chat", "notaurl")).indexOf("base URL") >= 0);
+  expect(modelFault(modelRow("m1", "mistral", "chat", "file:///etc/passwd")).indexOf("base URL") >= 0);
+  expect(modelFault(modelRow("m1", "mistral", "chat", "")) == "");
+  expect(modelFault(modelRow("m1", "mistral", "chat", "https://gw.internal/v1")) == "");
 });
 
 test("an MCP server's endpoint cannot be moved while its token is stored", () => {
@@ -218,7 +218,7 @@ test("an MCP server's endpoint cannot be moved while its token is stored", () =>
     now: "t",
   });
 
-  let moved = serverDestinationProblem(database, mcpRow("s1", "http://attacker.example/mcp"));
+  let moved = serverDestinationFault(database, mcpRow("s1", "http://attacker.example/mcp"));
   expect(moved != "");
   expect(moved.indexOf("attacker.example") >= 0);
   expect(moved.indexOf("/servers/s1/auth") >= 0);
@@ -233,7 +233,7 @@ test("an MCP server keeping its endpoint is written without complaint", () => {
     masterKey: testKey(),
     now: "t",
   });
-  expect(serverDestinationProblem(database, mcpRow("s1", "https://mcp.example/mcp")) == "");
+  expect(serverDestinationFault(database, mcpRow("s1", "https://mcp.example/mcp")) == "");
 });
 
 test("the trace collector cannot be moved while its secret is stored", () => {
@@ -246,7 +246,7 @@ test("the trace collector cannot be moved while its secret is stored", () => {
     now: "t",
   });
 
-  let moved = traceDestinationProblem(database, traceRow("http://attacker.example"));
+  let moved = traceDestinationFault(database, traceRow("http://attacker.example"));
   expect(moved != "");
   expect(moved.indexOf("attacker.example") >= 0);
   expect(moved.indexOf("DELETE /tracing/key") >= 0);
@@ -261,7 +261,7 @@ test("an address that cannot be read is treated as somewhere else", () => {
     masterKey: testKey(),
     now: "t",
   });
-  expect(traceDestinationProblem(database, traceRow("cloud.langfuse.com")) != "");
+  expect(traceDestinationFault(database, traceRow("cloud.langfuse.com")) != "");
 });
 
 test("deleting an MCP server deletes its stored token", () => {
@@ -330,9 +330,9 @@ test("a migration that fails stops the server rather than being logged", () => {
   fresh();
   forgetMigrations(database);
   migrate(database, [migration("9999", "from a future build", "SELECT 1")]);
-  let problem = migrationProblem(database);
-  expect(problem != "");
-  expect(problem.indexOf("schema") >= 0);
+  let fault = migrationFault(database);
+  expect(fault != "");
+  expect(fault.indexOf("schema") >= 0);
 });
 
 test("a skill is refused at the door for each way of being unusable, by name", () => {
@@ -347,7 +347,7 @@ test("a skill is refused at the door for each way of being unusable, by name", (
     source: "local",
     sourceUrl: "",
   };
-  expect(skillProblem(good) == "");
+  expect(skillFault(good) == "");
 
   let unnamed: SkillRow = {
     id: "k1",
@@ -360,7 +360,7 @@ test("a skill is refused at the door for each way of being unusable, by name", (
     source: "local",
     sourceUrl: "",
   };
-  expect(skillProblem(unnamed).indexOf("needs a name") >= 0);
+  expect(skillFault(unnamed).indexOf("needs a name") >= 0);
   let pathy: SkillRow = {
     id: "k1",
     skillName: "a/b",
@@ -372,7 +372,7 @@ test("a skill is refused at the door for each way of being unusable, by name", (
     source: "local",
     sourceUrl: "",
   };
-  expect(skillProblem(pathy).indexOf("container path") >= 0);
+  expect(skillFault(pathy).indexOf("container path") >= 0);
   let mute: SkillRow = {
     id: "k1",
     skillName: "ok",
@@ -384,7 +384,7 @@ test("a skill is refused at the door for each way of being unusable, by name", (
     source: "local",
     sourceUrl: "",
   };
-  expect(skillProblem(mute).indexOf("cannot be chosen") >= 0);
+  expect(skillFault(mute).indexOf("cannot be chosen") >= 0);
   let tall: SkillRow = {
     id: "k1",
     skillName: "ok",
@@ -396,7 +396,7 @@ test("a skill is refused at the door for each way of being unusable, by name", (
     source: "local",
     sourceUrl: "",
   };
-  expect(skillProblem(tall).indexOf("one line") >= 0);
+  expect(skillFault(tall).indexOf("one line") >= 0);
   let empty: SkillRow = {
     id: "k1",
     skillName: "ok",
@@ -408,18 +408,18 @@ test("a skill is refused at the door for each way of being unusable, by name", (
     source: "local",
     sourceUrl: "",
   };
-  expect(skillProblem(empty).indexOf("not an instruction") >= 0);
+  expect(skillFault(empty).indexOf("not an instruction") >= 0);
 });
 
 test("a skill file is a plain name with a body, within the cap", () => {
   let good: SkillFileRow = { id: "f1", skillId: "k1", path: "enums.py", body: "print(1)" };
-  expect(skillFileProblem(good) == "");
+  expect(skillFileFault(good) == "");
   let nested: SkillFileRow = { id: "f1", skillId: "k1", path: "a/b.py", body: "x" };
-  expect(skillFileProblem(nested).indexOf("plain name") >= 0);
+  expect(skillFileFault(nested).indexOf("plain name") >= 0);
   let escaping: SkillFileRow = { id: "f1", skillId: "k1", path: "..py", body: "x" };
-  expect(skillFileProblem(escaping).indexOf("plain name") >= 0);
+  expect(skillFileFault(escaping).indexOf("plain name") >= 0);
   let hollow: SkillFileRow = { id: "f1", skillId: "k1", path: "x.py", body: "" };
-  expect(skillFileProblem(hollow).indexOf("nothing worth staging") >= 0);
+  expect(skillFileFault(hollow).indexOf("nothing worth staging") >= 0);
 });
 
 let unscoped: string[] = [];
@@ -757,21 +757,21 @@ test("\"Agent default\" is a choice a person makes, not the absence of one", () 
 test("a choice that names nothing is refused at the door, by name", () => {
   expect(fresh() == "");
   seedMenu();
-  expect(choiceProblem(database, "") == "");
-  expect(choiceProblem(database, "mc-fast") == "");
-  expect(choiceProblem(database, "mc-auto") == "");
-  expect(choiceProblem(database, "mc-think") == "");
+  expect(choiceFault(database, "") == "");
+  expect(choiceFault(database, "mc-fast") == "");
+  expect(choiceFault(database, "mc-auto") == "");
+  expect(choiceFault(database, "mc-think") == "");
 
-  expect(choiceProblem(database, "mc-nope").indexOf("mc-nope") >= 0);
-  expect(choiceProblem(database, "mc-gone").indexOf("not offered") >= 0);
-  expect(choiceProblem(database, "mc-gone").indexOf("no model choice") < 0);
-  expect(choiceProblem(database, "cfg-quick") != "");
+  expect(choiceFault(database, "mc-nope").indexOf("mc-nope") >= 0);
+  expect(choiceFault(database, "mc-gone").indexOf("not offered") >= 0);
+  expect(choiceFault(database, "mc-gone").indexOf("no model choice") < 0);
+  expect(choiceFault(database, "cfg-quick") != "");
 });
 
 test("retiring a row stops new picks without stopping the conversations holding it", () => {
   expect(fresh() == "");
   seedMenu();
-  expect(choiceProblem(database, "mc-gone") != "");
+  expect(choiceFault(database, "mc-gone") != "");
   expect(configForChoice(database, "mc-gone") == "");
   expect(configForChoice(database, "mc-fast") == "cfg-quick");
   expect(configForChoice(database, "mc-auto") == "");
@@ -814,7 +814,7 @@ test("a conversation can be opened already pointing at a choice", () => {
   expect(fresh() == "");
   seedMenu();
   let asked = askedChoice("{\"agentId\":\"a1\",\"modelChoiceId\":\"mc-think\"}");
-  expect(choiceProblem(database, asked) == "");
+  expect(choiceFault(database, asked) == "");
   let hers = openThread(database, { agentId: "a1", owner: "u-alice", now: "1700000000000" });
   let his = openThread(database, { agentId: "a1", owner: "u-bob", now: "1700000000000" });
 
@@ -885,7 +885,7 @@ test("a config PUT writes what the body names and leaves the rest of the row alo
   expect(merged.label == "Quick");
   expect(!merged.selectable);
   expect(merged.rank == 7);
-  expect(configProblem(database, merged) == "");
+  expect(configFault(database, merged) == "");
   expect(merged.id == "c-fast");
   expect(merged.modelId == "m-chat");
   expect(merged.maxTokens == 8192);
@@ -904,12 +904,12 @@ test("a config is refused for each way of being unwritable, by name", () => {
   expect(fresh() == "");
   seedConfigs();
   let stored = configRow("c-fast", "m-chat", "Fast");
-  expect(configProblem(database, mergedConfig(stored, "{\"modelId\":\"m-nope\"}")).indexOf("m-nope") >= 0);
-  expect(configProblem(database, mergedConfig(stored, "{\"modelId\":\"\"}")).indexOf("modelId") >= 0);
-  expect(configProblem(database, mergedConfig(stored, "{\"maxTokens\":0}")).indexOf("maxTokens") >= 0);
-  expect(configProblem(database, mergedConfig(stored, "{\"menuRank\":-1}")).indexOf("menuRank") >= 0);
+  expect(configFault(database, mergedConfig(stored, "{\"modelId\":\"m-nope\"}")).indexOf("m-nope") >= 0);
+  expect(configFault(database, mergedConfig(stored, "{\"modelId\":\"\"}")).indexOf("modelId") >= 0);
+  expect(configFault(database, mergedConfig(stored, "{\"maxTokens\":0}")).indexOf("maxTokens") >= 0);
+  expect(configFault(database, mergedConfig(stored, "{\"menuRank\":-1}")).indexOf("menuRank") >= 0);
 
-  expect(configProblem(database, mergedConfig(stored, "{\"label\":\"\",\"selectable\":true}")) == "");
+  expect(configFault(database, mergedConfig(stored, "{\"label\":\"\",\"selectable\":true}")) == "");
 });
 
 test("a menu row is created and edited over the API, unexpected fields and all", () => {
@@ -918,14 +918,14 @@ test("a menu row is created and edited over the API, unexpected fields and all",
   let created = mergedChoice(blankChoice("ch-fast"),
     "{\"id\":\"ch-fast\",\"label\":\"Fast\",\"description\":\"short answers, quickly\","
     + "\"kind\":\"config\",\"configId\":\"c-fast\",\"clientVersion\":\"3\"}");
-  expect(choiceRowProblem(database, created) == "");
+  expect(choiceRowFault(database, created) == "");
   expect(created.enabled);
   expect(created.tier == "");
   persist(database, modelChoicesMapping(), JSON.stringify(created));
 
   let stored: ModelChoiceRow = JSON.parse<ModelChoiceRow>(findById(database, modelChoicesMapping(), "ch-fast"));
   let edited = mergedChoice(stored, "{\"label\":\"Instant\",\"enabled\":false,\"menuRank\":4,\"tier\":\"premium\"}");
-  expect(choiceRowProblem(database, edited) == "");
+  expect(choiceRowFault(database, edited) == "");
   expect(edited.label == "Instant");
   expect(!edited.enabled);
   expect(edited.rank == 4);
@@ -937,45 +937,45 @@ test("a menu row is created and edited over the API, unexpected fields and all",
 test("a menu row is refused for each way of being a broken option, by name", () => {
   expect(fresh() == "");
   seedConfigs();
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"Fast\",\"kind\":\"config\",\"configId\":\"c-fast\"}")) == "");
 
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"kind\":\"config\",\"configId\":\"c-fast\"}")).indexOf("label") >= 0);
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"F\",\"kind\":\"config\",\"configId\":\"c-fast\",\"routerId\":\"rt-1\"}")).indexOf("routerId") >= 0);
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"F\",\"kind\":\"auto\",\"configId\":\"c-fast\"}")).indexOf("kind") >= 0);
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"F\",\"kind\":\"config\",\"configId\":\"c-gone\"}")).indexOf("c-gone") >= 0);
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"F\",\"kind\":\"config\",\"configId\":\"c-vec\"}")).indexOf("chat") >= 0);
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"F\",\"kind\":\"config\",\"configId\":\"c-fast\",\"tier\":\"gold\"}")).indexOf("premium") >= 0);
-  expect(choiceRowProblem(database, mergedChoice(blankChoice("ch-1"),
+  expect(choiceRowFault(database, mergedChoice(blankChoice("ch-1"),
     "{\"label\":\"Auto\",\"kind\":\"router\",\"routerId\":\"rt-nope\"}")).indexOf("rt-nope") >= 0);
 });
 
 test("a router's candidates are a list of pairs, and every way of breaking one is refused", () => {
   expect(fresh() == "");
   seedConfigs();
-  expect(candidatesProblem(database,
+  expect(candidatesFault(database,
     "[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"greetings and short questions\"},"
     + "{\"key\":\"deep\",\"configId\":\"c-deep\",\"when\":\"writing a document, multi-step analysis\"}]") == "");
 
-  expect(candidatesProblem(database, "{\"key\":\"fast\"}").indexOf("array") >= 0);
-  expect(candidatesProblem(database, "").indexOf("array") >= 0);
-  expect(candidatesProblem(database, "[]").indexOf("at least one") >= 0);
-  expect(candidatesProblem(database, "[{\"configId\":\"c-fast\",\"when\":\"x\"}]").indexOf("key") >= 0);
-  expect(candidatesProblem(database,
+  expect(candidatesFault(database, "{\"key\":\"fast\"}").indexOf("array") >= 0);
+  expect(candidatesFault(database, "").indexOf("array") >= 0);
+  expect(candidatesFault(database, "[]").indexOf("at least one") >= 0);
+  expect(candidatesFault(database, "[{\"configId\":\"c-fast\",\"when\":\"x\"}]").indexOf("key") >= 0);
+  expect(candidatesFault(database,
     "[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"x\"},"
     + "{\"key\":\"Fast\",\"configId\":\"c-deep\",\"when\":\"y\"}]").indexOf("repeats") >= 0);
-  let blank = candidatesProblem(database, "[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"  \"}]");
+  let blank = candidatesFault(database, "[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"  \"}]");
   expect(blank.indexOf("when") >= 0);
   expect(blank.indexOf("cannot choose on purpose") >= 0);
-  expect(candidatesProblem(database, "[{\"key\":\"fast\",\"configId\":\"c-gone\",\"when\":\"x\"}]").indexOf("c-gone") >= 0);
-  expect(candidatesProblem(database, "[{\"key\":\"fast\",\"configId\":\"c-vec\",\"when\":\"x\"}]").indexOf("chat") >= 0);
-  let second = candidatesProblem(database,
+  expect(candidatesFault(database, "[{\"key\":\"fast\",\"configId\":\"c-gone\",\"when\":\"x\"}]").indexOf("c-gone") >= 0);
+  expect(candidatesFault(database, "[{\"key\":\"fast\",\"configId\":\"c-vec\",\"when\":\"x\"}]").indexOf("chat") >= 0);
+  let second = candidatesFault(database,
     "[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"x\"},"
     + "{\"key\":\"deep\",\"configId\":\"c-gone\",\"when\":\"y\"}]");
   expect(second.indexOf("candidate 2") >= 0);
@@ -994,7 +994,7 @@ test("a router is written as a real array and comes back as one", () => {
   expect(preEncodedCandidates("{\"candidatesJson\":\"[]\"}").indexOf("candidates") >= 0);
 
   let row = mergedRouter(blankRouter("rt-1"), body);
-  expect(routerRowProblem(database, row) == "");
+  expect(routerRowFault(database, row) == "");
   let settled = withCanonicalCandidates(row);
   expect(settled.candidatesJson.indexOf("note") < 0);
   expect(settled.candidatesJson.indexOf("\"key\":\"fast\"") >= 0);
@@ -1011,7 +1011,7 @@ test("a router is written as a real array and comes back as one", () => {
   let stored: ModelRouterRow = JSON.parse<ModelRouterRow>(findById(database, modelRoutersMapping(), "rt-1"));
   let edited = mergedRouter(stored,
     "{\"candidates\":[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"greetings and edits\"}]}");
-  expect(routerRowProblem(database, edited) == "");
+  expect(routerRowFault(database, edited) == "");
   expect(edited.label == "Auto" && edited.routerConfigId == "c-fast");
   expect(edited.candidatesJson.indexOf("greetings and edits") >= 0);
   expect(mergedRouter(stored, "{\"enabled\":false}").candidatesJson == stored.candidatesJson);
@@ -1022,22 +1022,22 @@ test("a router is refused for each id it resolves and for how often it routes", 
   expect(fresh() == "");
   seedConfigs();
   let candidates = "\"candidates\":[{\"key\":\"fast\",\"configId\":\"c-fast\",\"when\":\"greetings\"}]";
-  expect(routerRowProblem(database, mergedRouter(blankRouter("rt-1"),
+  expect(routerRowFault(database, mergedRouter(blankRouter("rt-1"),
     "{\"label\":\"Auto\",\"routerConfigId\":\"c-fast\",\"fallbackConfigId\":\"c-deep\"," + candidates + "}")) == "");
 
-  expect(routerRowProblem(database, mergedRouter(blankRouter("rt-1"),
+  expect(routerRowFault(database, mergedRouter(blankRouter("rt-1"),
     "{\"routerConfigId\":\"c-fast\",\"fallbackConfigId\":\"c-deep\"," + candidates + "}")).indexOf("label") >= 0);
-  expect(routerRowProblem(database, mergedRouter(blankRouter("rt-1"),
+  expect(routerRowFault(database, mergedRouter(blankRouter("rt-1"),
     "{\"label\":\"Auto\",\"routeEvery\":\"sometimes\",\"routerConfigId\":\"c-fast\","
     + "\"fallbackConfigId\":\"c-deep\"," + candidates + "}")).indexOf("routeEvery") >= 0);
-  expect(routerRowProblem(database, mergedRouter(blankRouter("rt-1"),
+  expect(routerRowFault(database, mergedRouter(blankRouter("rt-1"),
     "{\"label\":\"Auto\",\"fallbackConfigId\":\"c-deep\"," + candidates + "}")).indexOf("routerConfigId") >= 0);
-  let landing = routerRowProblem(database, mergedRouter(blankRouter("rt-1"),
+  let landing = routerRowFault(database, mergedRouter(blankRouter("rt-1"),
     "{\"label\":\"Auto\",\"routerConfigId\":\"c-fast\",\"fallbackConfigId\":\"c-vec\"," + candidates + "}"));
   expect(landing.indexOf("fallbackConfigId") >= 0);
   expect(landing.indexOf("chat") >= 0);
-  expect(chatConfigProblem(database, "c-fast", "routerConfigId") == "");
-  expect(chatConfigProblem(database, "", "fallbackConfigId").indexOf("fallbackConfigId") >= 0);
+  expect(chatConfigFault(database, "c-fast", "routerConfigId") == "");
+  expect(chatConfigFault(database, "", "fallbackConfigId").indexOf("fallbackConfigId") >= 0);
 });
 
 test("the menu is published from what the database holds, at every start", () => {
@@ -1070,12 +1070,12 @@ test("a router can always be switched off, whatever its candidates say", () => {
   persist(database, modelRoutersMapping(), JSON.stringify(stale));
   let stored: ModelRouterRow = JSON.parse<ModelRouterRow>(findById(database, modelRoutersMapping(), "rt-1"));
 
-  expect(routerRowProblem(database, stored).indexOf("c-gone") >= 0);
+  expect(routerRowFault(database, stored).indexOf("c-gone") >= 0);
   let off = mergedRouter(stored, "{\"id\":\"rt-1\",\"enabled\":false}");
-  expect(routerRowProblem(database, off) == "");
+  expect(routerRowFault(database, off) == "");
   expect(off.candidatesJson == stored.candidatesJson);
-  expect(routerRowProblem(database, mergedRouter(off, "{\"id\":\"rt-1\",\"enabled\":true}")).indexOf("c-gone") >= 0);
-  expect(routerRowProblem(database, mergedRouter(off, "{\"id\":\"rt-1\",\"routerConfigId\":\"c-gone\"}")).indexOf("routerConfigId") >= 0);
+  expect(routerRowFault(database, mergedRouter(off, "{\"id\":\"rt-1\",\"enabled\":true}")).indexOf("c-gone") >= 0);
+  expect(routerRowFault(database, mergedRouter(off, "{\"id\":\"rt-1\",\"routerConfigId\":\"c-gone\"}")).indexOf("routerConfigId") >= 0);
 });
 
 test("neither a choice nor a router can be deleted out from under what points at it", () => {

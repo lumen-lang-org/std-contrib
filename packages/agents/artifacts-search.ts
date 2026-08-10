@@ -69,16 +69,16 @@ export type ArtifactSearch = {
   hits: ArtifactHit[],
   searched: int,
   capped: bool,
-  problem: string,
+  fault: string,
 };
 
 function searchRefusal(why: string): ArtifactSearch {
   let none: ArtifactHit[] = [];
-  let out: ArtifactSearch = { ok: false, hits: none, searched: 0, capped: false, problem: why };
+  let out: ArtifactSearch = { ok: false, hits: none, searched: 0, capped: false, fault: why };
   return out;
 }
 
-function searchQueryProblem(query: string): string {
+function searchQueryFault(query: string): string {
   if (query.length < SEARCH_QUERY_MIN || query.length > SEARCH_QUERY_MAX) {
     return "a search query is " + `${SEARCH_QUERY_MIN}` + " to " + `${SEARCH_QUERY_MAX}`
       + " bytes of UTF-8; this one is " + `${query.length}`;
@@ -121,7 +121,7 @@ function searchLineHas(line: string, query: string): bool {
 }
 
 export function searchArtifacts(db: Db, threadId: string, query: string): ArtifactSearch {
-  let bad = searchQueryProblem(query);
+  let bad = searchQueryFault(query);
   if (bad != "") {
     return searchRefusal(bad);
   }
@@ -238,7 +238,7 @@ export function searchArtifacts(db: Db, threadId: string, query: string): Artifa
     hits: hits,
     searched: searched,
     capped: capped,
-    problem: "",
+    fault: "",
   };
   return out;
 }

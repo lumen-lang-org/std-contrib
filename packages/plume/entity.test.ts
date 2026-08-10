@@ -123,7 +123,7 @@ test("a field's decorator arguments are read by name and position", () => {
 
 // --- what it refuses -------------------------------------------------------
 
-test("a description with no problem reports none", () => {
+test("a description with no fault reports none", () => {
   expect(entityViolation(agentDescription()) == "");
 });
 

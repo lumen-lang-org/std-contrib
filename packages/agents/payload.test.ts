@@ -4,7 +4,7 @@ import { connectDatabase, persist, execute, dropTable, createTableSql } from "..
 import { forgetMigrations } from "../plume/migrate.ts";
 import { AgentRow, agentsMapping } from "./schema.ts";
 import { ScopeNode } from "./knowledge.ts";
-import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
+import { jsonId, createFault, backendOr, knownBackend, scopesJson } from "./payload.ts";
 
 let database: Db = sqlite();
 
@@ -55,18 +55,18 @@ test("an unterminated id reads as none", () => {
 
 test("a create with no body is refused by name", () => {
   fresh();
-  expect(createProblem(database, agentsMapping(), "") == "a body is required");
+  expect(createFault(database, agentsMapping(), "") == "a body is required");
 });
 
 test("a create with no id is refused by name", () => {
   fresh();
-  let why = createProblem(database, agentsMapping(), "{\"name\":\"Support\"}");
+  let why = createFault(database, agentsMapping(), "{\"name\":\"Support\"}");
   expect(why.indexOf("\"id\"") >= 0);
 });
 
 test("a create on a free id goes ahead", () => {
   fresh();
-  expect(createProblem(database, agentsMapping(), "{\"id\":\"support\"}") == "");
+  expect(createFault(database, agentsMapping(), "{\"id\":\"support\"}") == "");
 });
 
 test("a create on a taken id is refused, and says what to use instead", () => {
@@ -77,7 +77,7 @@ test("a create on a taken id is refused, and says what to use instead", () => {
   };
   persist(database, agentsMapping(), JSON.stringify(row));
 
-  let why = createProblem(database, agentsMapping(), "{\"id\":\"support\",\"name\":\"Other\"}");
+  let why = createFault(database, agentsMapping(), "{\"id\":\"support\",\"name\":\"Other\"}");
   expect(why.indexOf("already exists") >= 0);
   expect(why.indexOf("PUT") >= 0);
 });

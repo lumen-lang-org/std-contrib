@@ -224,7 +224,7 @@ export function controller(d: Description): Route[] {
 
 // Why a class would not make a controller. A method with no route decorator is
 // not an error — a controller may have helpers — but everything else is.
-export function controllerProblem(d: Description): string {
+export function controllerFault(d: Description): string {
   if (d.protocol != 1) {
     return "this decorator understands description protocol 1, not " + `${d.protocol}`;
   }

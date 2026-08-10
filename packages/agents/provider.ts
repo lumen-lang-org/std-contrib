@@ -301,7 +301,7 @@ export function vectorFrom(body: string): Embedding {
   return out;
 }
 
-export function streamProblem(model: ModelRow, status: int, body: string): string {
+export function streamFault(model: ModelRow, status: int, body: string): string {
   let who = model.label == "" ? "This model" : model.label;
   if (status < 100) {
     return who + " is not responding. If it runs on your own machine, check it is"
@@ -667,7 +667,7 @@ export function wasTruncated(provider: string, body: string): bool {
   return reason == "length" || reason == "max_tokens" || reason == "model_length";
 }
 
-export function truncationProblem(provider: string, body: string, maxTokens: int): string {
+export function truncationFault(provider: string, body: string, maxTokens: int): string {
   let reason = stopReasonOf(provider, body);
   if (!wasTruncated(provider, body)) {
     return "";
@@ -934,7 +934,7 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       ok: false,
       text: drained,
       status: status,
-      error: streamProblem(model, status, drained),
+      error: streamFault(model, status, drained),
       inputTokens: 0,
       outputTokens: 0,
       counted: false,

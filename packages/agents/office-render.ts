@@ -40,11 +40,11 @@ export type OfficeRendered = {
   ok: bool,
   body: string,
   cached: bool,
-  problem: string,
+  fault: string,
 };
 
 function officeRenderRefused(why: string): OfficeRendered {
-  let out: OfficeRendered = { ok: false, body: "", cached: false, problem: why };
+  let out: OfficeRendered = { ok: false, body: "", cached: false, fault: why };
   return out;
 }
 
@@ -183,7 +183,7 @@ export function officeRender(db: Db, ask: OfficeRenderAsk): OfficeRendered {
 
   let held = officeRenderCached(db, ask.artifactId, ask.version);
   if (held != "") {
-    let hit: OfficeRendered = { ok: true, body: held, cached: true, problem: "" };
+    let hit: OfficeRendered = { ok: true, body: held, cached: true, fault: "" };
     return hit;
   }
 
@@ -240,6 +240,6 @@ function officeRenderConvert(db: Db, container: string, stage: string, ext: stri
       + `${OFFICE_RENDER_MAX / 1000000}` + "MB of PDF, which is too large to preview — download it instead");
   }
   officeRenderStore(db, ask.artifactId, ask.version, b64, ask.now);
-  let done: OfficeRendered = { ok: true, body: b64, cached: false, problem: "" };
+  let done: OfficeRendered = { ok: true, body: b64, cached: false, fault: "" };
   return done;
 }

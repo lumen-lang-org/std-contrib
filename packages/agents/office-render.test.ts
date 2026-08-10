@@ -111,7 +111,7 @@ test("a format that is not converted is refused before any container exists", ()
   let out = render("/notes.md", 1, SOME_BODY);
 
   expect(!out.ok);
-  expect(out.problem.indexOf(".docx") > 0);
+  expect(out.fault.indexOf(".docx") > 0);
   expect(argvLines().length == 0);
 });
 
@@ -214,7 +214,7 @@ test("a converter that will not start names the image, which is the actionable h
   let out = render("/a.docx", 1, SOME_BODY);
 
   expect(!out.ok);
-  expect(out.problem.indexOf("agents-office-render:test") > 0);
+  expect(out.fault.indexOf("agents-office-render:test") > 0);
   expect(out.body == "");
 });
 
@@ -224,7 +224,7 @@ test("a conversion that runs out of time says so, rather than blaming the docume
   let out = render("/a.docx", 1, SOME_BODY);
 
   expect(!out.ok);
-  expect(out.problem.indexOf("seconds") > 0);
+  expect(out.fault.indexOf("seconds") > 0);
 });
 
 test("a converter that exits 0 having written nothing is a failure, not an empty PDF", () => {
@@ -233,7 +233,7 @@ test("a converter that exits 0 having written nothing is a failure, not an empty
   let out = render("/a.docx", 1, SOME_BODY);
 
   expect(!out.ok);
-  expect(out.problem.indexOf("no PDF") > 0);
+  expect(out.fault.indexOf("no PDF") > 0);
 });
 
 test("a body that is not base64 is refused without starting a conversion", () => {
@@ -242,7 +242,7 @@ test("a body that is not base64 is refused without starting a conversion", () =>
   let out = render("/a.docx", 1, "not base64 at all !!!");
 
   expect(!out.ok);
-  expect(out.problem.indexOf("base64") > 0);
+  expect(out.fault.indexOf("base64") > 0);
   let asked = argvLines();
   expect(asked.length == 0 || asked[asked.length - 1].indexOf("rm -f") == 0);
 });
@@ -261,7 +261,7 @@ test("a conversion names an artifact, a version and a body", () => {
   };
   let empty = officeRender(database, noBody);
   expect(!empty.ok);
-  expect(empty.problem.indexOf("no body") > 0);
+  expect(empty.fault.indexOf("no body") > 0);
 
   expect(argvLines().length == 0);
 });

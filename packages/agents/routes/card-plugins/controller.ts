@@ -3,7 +3,7 @@ import { deleteById, findById, listOrdered, persist } from "../../../plume/plume
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, BadRequest, NotFound, Ok } from "../../../rest/server.ts";
-import { stamp, toolCardProblem } from "../../api-core.ts";
+import { stamp, toolCardFault } from "../../api-core.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping } from "../../plugincards.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
 import { ToolCardRow, toolCardsMapping } from "../../toolcards.ts";
@@ -66,9 +66,9 @@ export class CardPluginApi {
         toolName: cards[c].toolName, marker: cards[c].marker,
         payload: cards[c].payload, hint: cards[c].hint, enabled: true,
       };
-      let problem = toolCardProblem(card);
-      if (problem != "") {
-        return BadRequest(problem);
+      let fault = toolCardFault(card);
+      if (fault != "") {
+        return BadRequest(fault);
       }
       c = c + 1;
     }

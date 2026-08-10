@@ -7,7 +7,7 @@ import { holdsOwner, owningTag } from "../../owner.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
 import { agentsMapping } from "../../schema.ts";
 import { ensureBuilt } from "../../script-wasm.ts";
-import { graphSecretProblem } from "../../secrets.ts";
+import { graphSecretFault } from "../../secrets.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsOf, workflowsMapping, workflowsOf } from "../../workflow-store.ts";
 import { ScriptCheckFailed, ScriptCheckFresh } from "./types.ts";
 import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
@@ -81,7 +81,7 @@ export class WorkflowApi {
     if (wrong != "") {
       return BadRequest(wrong);
     }
-    let secretWrong = graphSecretProblem(this.db, parsed.graph, owner);
+    let secretWrong = graphSecretFault(this.db, parsed.graph, owner);
     if (secretWrong != "") {
       return BadRequest(secretWrong);
     }
@@ -168,7 +168,7 @@ export class WorkflowApi {
     if (wrong != "") {
       return BadRequest(wrong);
     }
-    let secretWrong = graphSecretProblem(this.db, parsed.graph, mine.owner);
+    let secretWrong = graphSecretFault(this.db, parsed.graph, mine.owner);
     if (secretWrong != "") {
       return BadRequest(secretWrong);
     }
@@ -224,7 +224,7 @@ export class WorkflowApi {
     if (wrong != "") {
       return BadRequest(wrong);
     }
-    let secretWrong = graphSecretProblem(this.db, parsed.graph, mine.owner);
+    let secretWrong = graphSecretFault(this.db, parsed.graph, mine.owner);
     if (secretWrong != "") {
       return BadRequest(secretWrong);
     }

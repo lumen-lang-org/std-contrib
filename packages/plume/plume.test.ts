@@ -391,7 +391,7 @@ test("an unquoted mixed-case alias is refused, because the databases disagree ab
   expect(!projectionValid("id AS \"id\", agent_name AS agentName"));
   expect(listProjected(database, repo, "id AS \"id\", agent_name AS agentName", "", []) == "[]");
   expect(findProjected(database, repo, "id AS \"id\", agent_name AS agentName", "a1") == "");
-  // An unaliased column carrying the same problem is refused for the same reason.
+  // An unaliased column carrying the same fault is refused for the same reason.
   expect(!projectionValid("id, agentName"));
   // Quoted, a mixed-case key means the same thing everywhere.
   expect(projectionValid("id AS \"id\", agent_name AS \"agentName\""));

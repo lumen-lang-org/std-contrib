@@ -178,7 +178,7 @@ export type ApiKeyMade = {
   id: string,
   secret: string,
   prefix: string,
-  problem: string,
+  fault: string,
 };
 
 export function mintApiKey(db: Db, owner: string, name: string, scopesRaw: string, now: string): ApiKeyMade {
@@ -186,7 +186,7 @@ export function mintApiKey(db: Db, owner: string, name: string, scopesRaw: strin
   let scopes = cleanScopes(scopesRaw);
   let wrong = refuseApiKey(db, owner, cleanName, scopes);
   if (wrong != "") {
-    let no: ApiKeyMade = { id: "", secret: "", prefix: "", problem: wrong };
+    let no: ApiKeyMade = { id: "", secret: "", prefix: "", fault: wrong };
     return no;
   }
   let prefix = "jl_" + crypto.randomBytes(4);
@@ -205,10 +205,10 @@ export function mintApiKey(db: Db, owner: string, name: string, scopesRaw: strin
   };
   let written = persist(db, apiKeysMapping(), JSON.stringify(row));
   if (!written.ok) {
-    let no: ApiKeyMade = { id: "", secret: "", prefix: "", problem: written.error };
+    let no: ApiKeyMade = { id: "", secret: "", prefix: "", fault: written.error };
     return no;
   }
-  let made: ApiKeyMade = { id: row.id, secret: secret, prefix: prefix, problem: "" };
+  let made: ApiKeyMade = { id: row.id, secret: secret, prefix: prefix, fault: "" };
   return made;
 }
 

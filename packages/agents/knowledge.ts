@@ -420,12 +420,12 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
       scope: scope,
       body: chunks[i],
     };
-    let problem = indexDocument(db, model, part, apiKey);
-    if (problem != "") {
+    let fault = indexDocument(db, model, part, apiKey);
+    if (fault != "") {
       let failed: Upload = {
         ok: false,
         chunks: written,
-        error: "chunk " + `${i}` + ": " + problem,
+        error: "chunk " + `${i}` + ": " + fault,
       };
       return failed;
     }

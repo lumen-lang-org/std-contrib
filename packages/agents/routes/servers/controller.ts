@@ -4,15 +4,15 @@ import { bindings, controller } from "../../../rest/controller.ts";
 import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { accessTokenFor, connectionOf, forgetConnector, setToolOn, suppliedClientId, toolsOff, userTokenKey } from "../../connect.ts";
-import { DestinationMove, destinationProblem, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
+import { DestinationMove, destinationFault, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
 import { forgetRoster, rememberRoster, rosterOf, rosterWithSwitches } from "../../mcp-roster.ts";
 import { toolListing } from "../../mcp.ts";
 import { owningTag } from "../../owner.ts";
-import { createProblem, jsonId } from "../../payload.ts";
+import { createFault, jsonId } from "../../payload.ts";
 import { McpServerRow, mcpServersMapping } from "../../schema.ts";
 import { ConnectionView, MineAsk, ServerAuth, ServerToolsView, StoredView, ToolSwitch, ToolView } from "./types.ts";
 
-export function serverDestinationProblem(db: Db, row: McpServerRow): string {
+export function serverDestinationFault(db: Db, row: McpServerRow): string {
   let held = findById(db, mcpServersMapping(), row.id);
   let was = "";
   if (held != "") {
@@ -26,7 +26,7 @@ export function serverDestinationProblem(db: Db, row: McpServerRow): string {
     now: row.endpoint,
     secretStored: hasCredential(db, "mcp:" + row.id),
   };
-  return destinationProblem(move);
+  return destinationFault(move);
 }
 
 export function forgetServer(db: Db, serverId: string): void {
@@ -61,13 +61,13 @@ export class ServerApi {
     let listed = toolListing(server, accessTokenFor(this.db, server, owningTag(callerTags(req)), this.master));
     let declined = toolsOff(this.db, server.id);
 
-    if (listed.problem == "") {
+    if (listed.fault == "") {
       rememberRoster(this.db, server.id, listed.tools, `${Date.now()}`);
     } else {
       let held = rosterOf(this.db, server.id);
       if (held.listedAt != "") {
         return Ok("{\"serverId\":" + JSON.stringify(server.id)
-          + ",\"problem\":" + JSON.stringify(listed.problem)
+          + ",\"fault\":" + JSON.stringify(listed.fault)
           + ",\"stale\":true,\"listedAt\":" + JSON.stringify(held.listedAt)
           + ",\"tools\":" + rosterWithSwitches(held.tools, declined) + "}");
       }
@@ -86,7 +86,7 @@ export class ServerApi {
     }
     let v: ServerToolsView = {
       serverId: server.id,
-      problem: listed.problem,
+      fault: listed.fault,
       stale: false,
       listedAt: "",
       tools: views,
@@ -96,15 +96,15 @@ export class ServerApi {
 
   @Post("/")
   create(req: Request): Reply {
-    let problem = createProblem(this.db, mcpServersMapping(), req.body);
-    if (problem != "") {
-      return BadRequest(problem);
+    let fault = createFault(this.db, mcpServersMapping(), req.body);
+    if (fault != "") {
+      return BadRequest(fault);
     }
     let body: McpServerRow = JSON.parse<McpServerRow>(req.body);
     if (body.transport != "http") {
       return BadRequest("this speaks http; \"" + body.transport + "\" needs a subprocess it cannot spawn");
     }
-    let moved = serverDestinationProblem(this.db, body);
+    let moved = serverDestinationFault(this.db, body);
     if (moved != "") {
       return BadRequest(moved);
     }
@@ -246,7 +246,7 @@ export class ServerApi {
     if (row.endpoint.trim() == "") {
       return BadRequest("a server needs an endpoint");
     }
-    let moved = serverDestinationProblem(this.db, row);
+    let moved = serverDestinationFault(this.db, row);
     if (moved != "") {
       return BadRequest(moved);
     }
