@@ -6,7 +6,7 @@ import { utf8Length } from "../../artifacts.ts";
 import { credentialFor, hasCredential, masterKey, storeCredential } from "../../credentials.ts";
 import { jsonFlag, jsonText } from "../../scan.ts";
 import { readSetting, writeSetting } from "../../schema.ts";
-import { CaptchaOff, CaptchaResolved, CaptchaSecretStored, CaptchaSetting, CaptchaView } from "./types.ts";
+import { CaptchaAsk, CaptchaOff, CaptchaResolved, CaptchaSecretStored, CaptchaSetting, CaptchaView } from "./types.ts";
 
 @controller("/captcha")
 export class CaptchaApi {
@@ -45,23 +45,17 @@ export class CaptchaApi {
   }
 
   @put("/")
-  change(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
-    let provider = jsonText(req.body, "provider");
-    if (provider == "") { provider = "turnstile"; }
-    if (provider != "turnstile" && provider != "hcaptcha" && provider != "recaptcha") {
-      return badRequest("provider must be turnstile, hcaptcha or recaptcha");
-    }
-    let siteKey = jsonText(req.body, "siteKey");
-    if (utf8Length(siteKey) > 200) { return badRequest("that is not a site key"); }
-    let enabled = jsonFlag(req.body, "enabled", false);
-    if (enabled && (siteKey == "" || !hasCredential(this.db, "captcha"))) {
+  change(@Valid @RequestBody ask: CaptchaAsk): Reply {
+    if (ask.enabled && (ask.siteKey == "" || !hasCredential(this.db, "captcha"))) {
       return badRequest("store a site key and a secret before turning the challenge on");
     }
-    let v: CaptchaSetting = { provider: provider, siteKey: siteKey,
-      enabled: enabled ? "true" : "false" };
-    let problem = writeSetting(this.db, "captcha", JSON.stringify(v));
-    if (problem != "") { return badRequest(problem); }
+    let v: CaptchaSetting = {
+      provider: ask.provider == "" ? "turnstile" : ask.provider,
+      siteKey: ask.siteKey,
+      enabled: ask.enabled ? "true" : "false",
+    };
+    let refused = writeSetting(this.db, "captcha", JSON.stringify(v));
+    if (refused != "") { return badRequest(refused); }
     return okJson(v);
   }
 
