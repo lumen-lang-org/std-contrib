@@ -70,6 +70,13 @@ export function json(status: int, body: string): Reply {
 export function ok(body: string): Reply { return json(200, body); }
 export function created(body: string): Reply { return json(201, body); }
 
+export function jsonOf<T>(status: int, value: T): Reply {
+  return reply(status, JSON.stringify(value), "application/json");
+}
+
+export function okJson<T>(value: T): Reply { return jsonOf(200, value); }
+export function createdJson<T>(value: T): Reply { return jsonOf(201, value); }
+
 // The work was taken but is not done — a queued job, not a finished one.
 // Answering 201 for something merely accepted tells a client the resource
 // exists when it does not yet.
