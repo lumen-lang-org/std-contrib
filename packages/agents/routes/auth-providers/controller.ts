@@ -4,19 +4,15 @@ import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
-import { createProblem, jsonId } from "../../payload.ts";
+import { createProblem } from "../../payload.ts";
 import { AuthProviderRow, authProvidersMapping } from "../../schema.ts";
-import { AuthProviderResolvedView, AuthProviderSecretAsk, AuthProviderSecretStored, AuthProviderView } from "./types.ts";
+import { AuthProviderAsk, AuthProviderResolvedView, AuthProviderSecretAsk, AuthProviderSecretStored, AuthProviderView } from "./types.ts";
 
-export function authProviderProblem(row: AuthProviderRow): string {
-  if (row.id.trim() == "") { return "a provider needs an id — it is what the callback URL carries"; }
-  if (row.label.trim() == "") { return "a provider needs a label — it is what the sign-in button says"; }
-  let kind = row.kind == "" ? "oidc" : row.kind;
-  if (kind != "oidc" && kind != "github") { return "kind is 'oidc' or 'github'"; }
-  if (kind == "oidc" && !row.issuer.startsWith("https://")) {
+export function authProviderProblem(ask: AuthProviderAsk): string {
+  let kind = ask.kind == "" ? "oidc" : ask.kind;
+  if (kind == "oidc" && !ask.issuer.startsWith("https://")) {
     return "the issuer is an https address whose /.well-known/openid-configuration describes the provider";
   }
-  if (row.clientId.trim() == "") { return "a client id is required"; }
   return "";
 }
 
@@ -75,42 +71,37 @@ export class AuthProviderApi {
   }
 
   @post("/")
-  create(req: Request): Reply {
-    let problem = createProblem(this.db, authProvidersMapping(), req.body);
+  create(@Valid @RequestBody ask: AuthProviderAsk, @RequestBody document: string): Reply {
+    let problem = createProblem(this.db, authProvidersMapping(), document);
     if (problem != "") { return badRequest(problem); }
-    let row: AuthProviderRow = JSON.parse<AuthProviderRow>(req.body);
-    let bad = authProviderProblem(row);
+    let bad = authProviderProblem(ask);
     if (bad != "") { return badRequest(bad); }
-    let written = persist(this.db, authProvidersMapping(), req.body);
+    let written = persist(this.db, authProvidersMapping(), document);
     if (!written.ok) { return badRequest(written.error); }
-    return created(findById(this.db, authProvidersMapping(), jsonId(req.body)));
+    return created(findById(this.db, authProvidersMapping(), ask.id));
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, authProvidersMapping(), param(req, "id"))) {
-      return notFound("auth provider " + param(req, "id"));
+  update(@PathVariable("id") id: string, @Valid @RequestBody ask: AuthProviderAsk,
+         @RequestBody document: string): Reply {
+    if (!existsById(this.db, authProvidersMapping(), id)) {
+      return notFound("auth provider " + id);
     }
-    let row: AuthProviderRow = JSON.parse<AuthProviderRow>(req.body);
-    if (row.id != param(req, "id")) { return badRequest("the id in the body must match the path"); }
-    let bad = authProviderProblem(row);
+    if (ask.id != id) { return badRequest("the id in the body must match the path"); }
+    let bad = authProviderProblem(ask);
     if (bad != "") { return badRequest(bad); }
-    let written = persist(this.db, authProvidersMapping(), req.body);
+    let written = persist(this.db, authProvidersMapping(), document);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, authProvidersMapping(), param(req, "id")));
+    return ok(findById(this.db, authProvidersMapping(), id));
   }
 
   @put("/:id/secret")
-  setSecret(req: Request): Reply {
-    if (!existsById(this.db, authProvidersMapping(), param(req, "id"))) {
-      return notFound("auth provider " + param(req, "id"));
+  setSecret(@PathVariable("id") id: string, @Valid @RequestBody ask: AuthProviderSecretAsk): Reply {
+    if (!existsById(this.db, authProvidersMapping(), id)) {
+      return notFound("auth provider " + id);
     }
-    if (req.body == "") { return badRequest("a client secret is required"); }
-    let ask: AuthProviderSecretAsk = JSON.parse<AuthProviderSecretAsk>(req.body);
-    let secret = ask.clientSecret ?? "";
-    if (secret == "") { return badRequest("a client secret is required"); }
-    let stored = storeCredential(this.db, { provider: "oauth:" + param(req, "id"),
-      apiKey: secret, masterKey: this.master, now: stamp() });
+    let stored = storeCredential(this.db, { provider: "oauth:" + id,
+      apiKey: ask.clientSecret, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
     let v: AuthProviderSecretStored = { configured: true };
     return okJson(v);

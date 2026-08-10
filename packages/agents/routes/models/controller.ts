@@ -3,10 +3,10 @@ import { DbOrder, asc, countWhere, deleteById, executeWith, existsById, findById
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { DestinationMove, credentialFor, destinationOf, destinationProblem, hasCredential } from "../../credentials.ts";
-import { createProblem, jsonId } from "../../payload.ts";
+import { createProblem } from "../../payload.ts";
 import { complete, embedText, embeddingEndpoint, endpointFor, replyText } from "../../provider.ts";
 import { ModelChoiceRow, ModelConfigRow, ModelRow, enabledChoices, modelConfigsMapping, modelsMapping } from "../../schema.ts";
-import { ChatProbe, EmbeddingProbe, ModelTestFailed } from "./types.ts";
+import { ChatProbe, EmbeddingProbe, ModelAsk, ModelTestFailed } from "./types.ts";
 
 export function choicesJson(rows: ModelChoiceRow[]): string {
   let out = "[";
@@ -23,12 +23,15 @@ export function choicesJson(rows: ModelChoiceRow[]): string {
   return out + "]";
 }
 
+export function modelRowOf(ask: ModelAsk): ModelRow {
+  let m: ModelRow = {
+    id: ask.id, label: ask.label, apiName: ask.apiName, provider: ask.provider,
+    kind: ask.kind, dimensions: ask.dimensions, baseUrl: ask.baseUrl,
+    enabled: ask.enabled, contextTokens: ask.contextTokens };
+  return m;
+}
+
 export function modelProblem(m: ModelRow): string {
-  if (m.label.trim() == "") { return "a model needs a label"; }
-  if (m.apiName.trim() == "") { return "a model needs the provider's own name for it"; }
-  if (m.kind != "chat" && m.kind != "embedding") {
-    return "a model is chat or embedding, not \"" + m.kind + "\"";
-  }
   if (m.provider == "vertex" && m.baseUrl.trim() == "") {
     return "a vertex model needs its base URL — https://<region>-aiplatform.googleapis.com/v1/projects/<project>/locations/<region>/endpoints/openapi";
   }
@@ -87,17 +90,18 @@ export class ModelApi {
   }
 
   @post("/")
-  create(req: Request): Reply {
-    let problem = createProblem(this.db, modelsMapping(), req.body);
+  create(@Valid @RequestBody ask: ModelAsk): Reply {
+    let document = JSON.stringify(ask);
+    let problem = createProblem(this.db, modelsMapping(), document);
     if (problem != "") { return badRequest(problem); }
-    let m: ModelRow = JSON.parse<ModelRow>(req.body);
+    let m = modelRowOf(ask);
     let wrong = modelProblem(m);
     if (wrong != "") { return badRequest(wrong); }
     let moved = modelDestinationProblem(this.db, m);
     if (moved != "") { return badRequest(moved); }
-    let written = persist(this.db, modelsMapping(), req.body);
+    let written = persist(this.db, modelsMapping(), document);
     if (!written.ok) { return badRequest(written.error); }
-    return created(findById(this.db, modelsMapping(), jsonId(req.body)));
+    return created(findById(this.db, modelsMapping(), m.id));
   }
 
   @post("/:id/test")
@@ -146,13 +150,12 @@ export class ModelApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, modelsMapping(), param(req, "id"))) {
-      return notFound("model " + param(req, "id"));
+  update(@PathVariable("id") id: string, @Valid @RequestBody ask: ModelAsk): Reply {
+    if (!existsById(this.db, modelsMapping(), id)) {
+      return notFound("model " + id);
     }
-    if (req.body == "") { return badRequest("a body is required"); }
-    let row: ModelRow = JSON.parse<ModelRow>(req.body);
-    if (row.id != param(req, "id")) {
+    let row = modelRowOf(ask);
+    if (row.id != id) {
       return badRequest("the id in the body must match the path");
     }
     let wrong = modelProblem(row);
@@ -163,11 +166,11 @@ export class ModelApi {
     if (row.enabled && row.kind == "embedding") {
       executeWith(this.db, "UPDATE models SET enabled = " + this.db.placeholder
         + " WHERE kind = " + placeholderAt(this.db, 2)
-        + " AND id <> " + placeholderAt(this.db, 3), ["0", "embedding", param(req, "id")]);
+        + " AND id <> " + placeholderAt(this.db, 3), ["0", "embedding", id]);
     }
-    let written = persist(this.db, modelsMapping(), req.body);
+    let written = persist(this.db, modelsMapping(), JSON.stringify(ask));
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, modelsMapping(), param(req, "id")));
+    return ok(findById(this.db, modelsMapping(), id));
   }
 
   @del("/:id")
