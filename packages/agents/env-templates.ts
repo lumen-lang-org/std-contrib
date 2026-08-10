@@ -1,20 +1,3 @@
-// The catalog of environment templates an operator curates.
-//
-// A template is a recipe, not a container: a name, a sentence of what it is
-// for, some tags to find it by, and either an image reference or a Dockerfile.
-// It runs nothing. When a person picks one, `/environments` builds THEIR own
-// environment from its image or Dockerfile — the template is the recipe, the
-// environment is the instance, and one template seeds many people's copies.
-//
-// Curated by the operator, exactly like script_images and for the same
-// reason: a Dockerfile is code that builds as root on the sandbox daemon, so
-// the person who writes the catalog's recipes is the operator, and everyone
-// else picks from what they wrote. (User-published templates are a larger
-// feature with a scan gate in front of it — deliberately not this.)
-//
-// Deployment-global: a template has no owner, because it is offered to
-// everyone. The environments it seeds are owned; the recipe is shared.
-
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, persist, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
@@ -22,25 +5,16 @@ import { Migration, migration } from "../plume/migrate.ts";
 export const MAX_TEMPLATE_NAME: int = 60;
 export const MAX_TEMPLATE_SUMMARY: int = 400;
 export const MAX_TEMPLATE_TAGS: int = 200;
-// The same ceiling a user Dockerfile has — a recipe is not a repository.
 export const MAX_TEMPLATE_DOCKERFILE: int = 16384;
 
 export type EnvTemplateRow = {
   id: string,
-  // What it is called where somebody browses the catalog.
   name: string,
-  // One line: what is inside and what it is for. Shown on the card and copied
-  // into the environment's summary when someone instantiates it.
   summary: string,
-  // Comma-separated, lowercased on the way in: "python,data,pandas". What the
-  // catalog filters and groups by.
   tags: string,
-  // "image" (pulled as given) or "dockerfile" (built when instantiated).
   source: string,
   image: string,
   dockerfile: string,
-  // 0 = an ordinary catalog entry; a positive number pins it to the front, in
-  // ascending order, the way a featured skill is pinned.
   featuredRank: int,
   createdAt: string,
 };
@@ -61,7 +35,6 @@ export function envTemplatesMapping(): DbRepository {
 }
 
 export function envTemplatesPlan(db: Db): Migration[] {
-  // 112: user-environments.ts owns 111.
   return [
     migration("112", "env templates: the operator's catalog of environment recipes",
       createTableSql(db, envTemplatesMapping())),
@@ -76,8 +49,6 @@ export function emptyEnvTemplate(): EnvTemplateRow {
   return none;
 }
 
-// Featured first (ascending rank), then everyone else by name. One order for
-// the whole catalog, so browse and pick agree on what "first" means.
 export function envTemplatesAll(db: Db): EnvTemplateRow[] {
   let keys: DbOrder[] = [asc("name")];
   let listed = listOrdered(db, envTemplatesMapping(), "", [], keys);
@@ -86,10 +57,6 @@ export function envTemplatesAll(db: Db): EnvTemplateRow[] {
     return none;
   }
   let rows = JSON.parse<EnvTemplateRow[]>(listed);
-  // Featured rows to the front, in rank order, keeping the name order among
-  // the rest. A stable partition rather than a second ORDER BY, because
-  // "featured then alphabetical" is two sorts SQL cannot express in one key
-  // without a computed column.
   let featured: EnvTemplateRow[] = [];
   let plain: EnvTemplateRow[] = [];
   let i: int = 0;
@@ -97,10 +64,6 @@ export function envTemplatesAll(db: Db): EnvTemplateRow[] {
     if (rows[i].featuredRank > 0) { featured.push(rows[i]); } else { plain.push(rows[i]); }
     i = i + 1;
   }
-  // Emit the featured in ascending rank without mutating an array — Lumen's
-  // are immutable, so no in-place sort. Ranks are a handful of small positive
-  // numbers, so walking rank 1..max and pushing every match is both correct
-  // and the clearest thing: ties keep the name order the SQL already gave.
   let maxRank: int = 0;
   let m: int = 0;
   while (m < featured.length) {
@@ -128,8 +91,6 @@ export function envTemplateById(db: Db, id: string): EnvTemplateRow {
   return JSON.parse<EnvTemplateRow>(doc);
 }
 
-// Lowercased, comma-separated, no empty tags — the shape the catalog filters
-// on, normalised once here rather than at every read.
 function cleanTags(raw: string): string {
   let parts = raw.split(",");
   let out = "";
@@ -153,9 +114,6 @@ export type EnvTemplateWrite = {
   now: string,
 };
 
-/** Why this template cannot be written, or "". The same image-XOR-Dockerfile
- *  rule a user environment has, because a template that could not be
- *  instantiated is a card that only ever errors. */
 export function refuseEnvTemplate(t: EnvTemplateWrite): string {
   let name = t.name.trim();
   if (name == "") { return "a template needs a name — it is what the catalog shows"; }
@@ -176,10 +134,6 @@ export function refuseEnvTemplate(t: EnvTemplateWrite): string {
   return "";
 }
 
-/** Write a template — create or update, keyed by id. The catalog is small and
- *  operator-owned, so there is no per-owner cap and no uniqueness beyond the
- *  id: two templates may share a name if an operator wants a "python (slim)"
- *  and a "python (full)". */
 export function saveEnvTemplate(db: Db, t: EnvTemplateWrite): string {
   let wrong = refuseEnvTemplate(t);
   if (wrong != "") { return wrong; }
@@ -203,8 +157,6 @@ export function saveEnvTemplate(db: Db, t: EnvTemplateWrite): string {
   return "";
 }
 
-/** Remove a template. The environments it already seeded are untouched — they
- *  are their owners' now, built from an image the template only pointed at. */
 export function forgetEnvTemplate(db: Db, id: string): bool {
   if (findById(db, envTemplatesMapping(), id) == "") { return false; }
   deleteById(db, envTemplatesMapping(), id);

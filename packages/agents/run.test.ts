@@ -1,10 +1,3 @@
-// Running an agent: every refusal, without a provider.
-//
-// The call itself is exercised by examples/run-agent.ts against a live model,
-// because a test needing a credential is a test that gets skipped.
-//
-//   cd packages/agents && lumen test run.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
@@ -25,11 +18,6 @@ function seeded(): void {
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
-  // The skills trio as well. `forgetMigrations` makes the whole plan pending
-  // again, so a table left standing means 77 and 78 re-add a column that is
-  // already there, SQLite refuses, and the plan STOPS — every migration after
-  // it silently never runs. That was survivable while the columns these rows
-  // are persisted with all arrived before 77; 82 and 86 arrive after it.
   execute(database, "DROP TABLE IF EXISTS agent_skills");
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
@@ -39,9 +27,6 @@ function seeded(): void {
   dropTable(database, promptsMapping());
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
-  // The tables later migrations ALTER, or a second run of this suite meets a
-  // duplicate column, the plan stops there, and every migration above it —
-  // including the ones this test needs — silently never runs.
   execute(database, "DROP TABLE IF EXISTS script_images");
   execute(database, "DROP TABLE IF EXISTS thread_summaries");
   execute(database, "DROP TABLE IF EXISTS plugins");
@@ -103,8 +88,6 @@ test("a disabled model stops the call, even with a credential", () => {
 
 test("the run reports which prompt version and model answered", () => {
   seeded();
-  // Even a refusal carries what it would have used, so a caller records what
-  // happened rather than what it assumed.
   let r = runAgent(database, "a1", "hi", testKey());
   expect(r.agentName == "calculator");
 });
@@ -119,8 +102,6 @@ test("no refusal carries the master key or a credential", () => {
   expect(r.body.indexOf("sk-should-never-appear") < 0);
 });
 
-// --- reading a reply ----------------------------------------------------------
-
 test("the assistant's text is pulled out of a provider's reply", () => {
   let mistral = "{\"usage\":{\"total_tokens\":9},\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"42\"}}]}";
   expect(replyText("mistral", mistral) == "42");
@@ -129,14 +110,12 @@ test("the assistant's text is pulled out of a provider's reply", () => {
 });
 
 test("escapes in the reply are unescaped", () => {
-  // The JSON holds the two characters backslash-n; the answer holds a newline.
   let withNewline = "{\"choices\":[{\"message\":{\"content\":\"one\\ntwo\"}}]}";
   let got = replyText("mistral", withNewline);
   expect(got.indexOf("one") >= 0);
   expect(got.indexOf("two") >= 0);
   expect(got.indexOf("\\n") < 0);
 
-  // A quote inside the answer arrives as a quote, not as backslash-quote.
   let withQuote = "{\"choices\":[{\"message\":{\"content\":\"say \\\"hi\\\"\"}}]}";
   expect(replyText("mistral", withQuote) == "say \"hi\"");
 });

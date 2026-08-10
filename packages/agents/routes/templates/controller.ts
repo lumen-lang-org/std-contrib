@@ -7,11 +7,6 @@ import { OfficeRenderAsk, officeRender, officeRenderExt } from "../../office-ren
 import { createProblem, jsonId } from "../../payload.ts";
 import { putFile } from "../../workspace.ts";
 
-// The /templates routes.
-
-// Templates: the cards a capability page shows. Read is open — a template is
-// a starting point, not a secret — and writes are the operator's, the same
-// posture as curated script images.
 @controller("/templates")
 export class TemplateApi {
   db: Db;
@@ -20,9 +15,6 @@ export class TemplateApi {
     this.db = db;
   }
 
-  // `?kind=doc` is what a capability page asks with; without it, everything
-  // public, ranked. Both orders are by rank then label so a page's cards do
-  // not reshuffle between visits.
   @get("/")
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("featured_rank"), asc("label")];
@@ -98,10 +90,6 @@ export class TemplateApi {
     return ok(findById(this.db, templateFilesMapping(), param(req, "fileId")));
   }
 
-  // A template's files are editable, so they are removable — a seed that
-  // replaces what a template ships needs to retire what it shipped before,
-  // and without this the old file rides along forever, laid down beside its
-  // replacement every time somebody starts from the template.
   @del("/:id/files/:fileId")
   removeFile(req: Request): Reply {
     if (!existsById(this.db, templateFilesMapping(), param(req, "fileId"))) {
@@ -111,22 +99,6 @@ export class TemplateApi {
     return noContent();
   }
 
-  // The template's document as a PDF, for the picker's thumbnail.
-  //
-  // A card that says "Status report" is a claim; the first page of the actual
-  // document is proof. Same converter and same cache as the artifact panel's
-  // PDF route — one LibreOffice pass per document, then immutable.
-  //
-  // The cache key needs a version and a template file has none, so the body's
-  // LENGTH stands in for one: `office_renders` is keyed artifactId:version,
-  // and a re-uploaded document that kept its byte count to the digit is the
-  // kind of collision worth accepting for not adding a column. Wrong at most
-  // until the next edit, and never wrong about WHICH template it shows.
-  //
-  // Open like every other template read — the menu shows these cards to
-  // whoever can start a conversation, so the thumbnail is as public as the
-  // label it sits under. Non-public templates 404 here exactly as they do on
-  // GET /templates/:id.
   @get("/:id/pdf")
   pdf(req: Request): Reply {
     let held = findById(this.db, templatesMapping(), param(req, "id"));
@@ -137,9 +109,6 @@ export class TemplateApi {
     let listed = listWhere(this.db, templateFilesMapping(),
       "template_id = " + placeholderAt(this.db, 1), [param(req, "id")]);
     let files: TemplateFileRow[] = listed == "" ? [] : JSON.parse<TemplateFileRow[]>(listed);
-    // The first convertible file is the template's face. Templates today ship
-    // exactly one office document; the loop is for the day one ships a
-    // reference file beside it.
     let i: int = 0;
     while (i < files.length && officeRenderExt(files[i].path) == "") { i = i + 1; }
     if (i >= files.length) {
@@ -156,8 +125,6 @@ export class TemplateApi {
       + ",\"path\":" + JSON.stringify(files[i].path)
       + ",\"cached\":" + (made.cached ? "true" : "false")
       + ",\"pdf\":" + JSON.stringify(made.body) + "}");
-    // An hour, not immutable: the underlying document is editable and the id
-    // in this URL does not change when it is.
     out.headers.set("cache-control", "public, max-age=3600");
     return out;
   }

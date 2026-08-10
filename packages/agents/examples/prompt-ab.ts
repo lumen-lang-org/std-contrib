@@ -1,17 +1,3 @@
-// The same agent, two prompt versions, one question — and the trace as the
-// evidence of which is better.
-//
-//   cd packages/agents && lumen run examples/prompt-ab.ts
-//
-// The lead was observed asking its sub-agent twice: once for stock and price,
-// then again to ask whether it could ship — a question the first answer had
-// already settled. Nothing about that is a defect; it is what the prompt asked
-// for. So this changes the prompt, which is a row, and re-runs.
-//
-// Between the two runs the only write is an INSERT of a prompt version and an
-// UPDATE of one column. No file changes, nothing restarts, and the previous
-// version is still there to roll back to.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, executeWith, dropTable, findById } from "../../plume/plume.ts";
@@ -25,12 +11,8 @@ import { jsonText } from "../scan.ts";
 
 const QUESTION = "Can we ship 40 units of A-114 from Rotterdam today, and what is the bill?";
 
-// v1: what was running when the lead asked twice.
 const LEAD_V1 = "You are a purchasing lead. You have no data of your own: for anything about stock or prices, ask the parts desk agent and use what it tells you. Answer in one short paragraph.";
 
-// v2: the same instruction, plus the one thing v1 never said. The desk cannot
-// see this conversation, so a question has to carry its own context — and an
-// answer already given is not worth asking for again.
 const LEAD_V2 = "You are a purchasing lead. You have no data of your own: for anything about stock or prices, ask the parts desk agent. Ask ONCE, in a single question carrying everything you need — the part, the warehouse, the quantity — and then reason from the answer yourself. Do not ask again for something you have already been told; if the desk says 37 units are in stock, you already know 40 cannot ship. Answer in one short paragraph.";
 
 function run(db: Db, master: string, label: string): void {
@@ -118,7 +100,6 @@ function main(): void {
   console.log("question  " + QUESTION);
   run(db, master, "prompt v1 (ask and use what it tells you)");
 
-  // The whole change: a new version, and one column repointed.
   let v2: PromptRow = { id: "lead-v2", promptName: "lead", version: 2, createdAt: "2026-07-26", body: LEAD_V2 };
   persist(db, promptsMapping(), JSON.stringify(v2));
   executeWith(db, "UPDATE agents SET prompt_id = " + db.placeholder + " WHERE id = 'a1'", ["lead-v2"]);

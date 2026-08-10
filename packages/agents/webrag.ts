@@ -1,26 +1,3 @@
-// The public web index, feeding a conversation.
-//
-// The deployment already has two kinds of grounding and this is deliberately a
-// third, not a merger: knowledge.ts retrieves from documents an operator
-// uploaded and embedded per agent; the search index (joule-crawl, reached at
-// JOULE_SEARCH_API) is a crawled web corpus with its own ranking, snippeting
-// and character budget, asked over HTTP. The index does everything inside —
-// this file sends a query string and receives passages, and knows nothing
-// about embeddings, tiers or scoring.
-//
-// Per agent, like agent_retrieval and for the same reason: the assistant
-// benefits from the open web, a docflow validator does not, and one global
-// switch would make that a fight. The row is absent until set, which is how an
-// agent that does not read the web is spelled.
-//
-// The query can be the user's message verbatim, or written by a model first
-// ("generated"): a designated chat model is asked to turn the message into a
-// short search query. A conversational message is a bad search string —
-// "well ok but what about the second one" retrieves nothing — and a model
-// call is the difference. It is a designated model rather than the round's
-// own so an operator can pin something fast and cheap for it while the
-// conversation runs on something slower.
-
 import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, field, repository, findById, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
@@ -33,14 +10,8 @@ import { urlEncode } from "./mcp-oauth.ts";
 export type AgentWebRagRow = {
   agentId: string,
   enabled: bool,
-  // How many passages to ask the index for. The index caps at 20.
   topK: int,
-  // The index's own character budget for the whole answer — it stops adding
-  // passages when this is spent, so it is the size of the injected block and
-  // therefore the knob that protects the model's context window.
   maxChars: int,
-  // "verbatim" sends the user's message as the query; "generated" asks
-  // queryModelId to write a search query from it first.
   queryMode: string,
   queryModelId: string,
 };
@@ -63,10 +34,6 @@ export function webRagPlan(db: Db): Migration[] {
   ];
 }
 
-/** The agent's web retrieval, or the row that means "none".
- *
- *  Same contract as retrievalFor: an absent row answers disabled with sane
- *  numbers, so no caller branches on existence. */
 export function webRagFor(db: Db, agentId: string): AgentWebRagRow {
   let held = findById(db, agentWebRagMapping(), agentId);
   if (held == "") {
@@ -76,10 +43,6 @@ export function webRagFor(db: Db, agentId: string): AgentWebRagRow {
   return JSON.parse<AgentWebRagRow>(held);
 }
 
-/** Where the index answers. The same address the console's search proxy uses,
- *  read from the same variable so the two cannot drift apart. It is a tailnet
- *  address with no auth on it, which is exactly why neither this process nor
- *  the console may ever hand it to a browser. */
 export function searchApiBase(): string {
   let set = process.env("JOULE_SEARCH_API") ?? "";
   if (set != "") { return set; }
@@ -99,17 +62,6 @@ export type WebFound = {
   error: string,
 };
 
-/** Ask a model to turn a message into a search query.
- *
- *  Everything that can go wrong falls back to the message verbatim, and the
- *  caller cannot tell — deliberately. A query generator that is down must
- *  degrade retrieval quality, never turn retrieval off; the note the run
- *  carries says which query was actually used, which is where the difference
- *  becomes visible.
- *
- *  The answer is clipped and de-quoted because models decorate: a query comes
- *  back wrapped in quotes, or with "Search query:" in front, and every one of
- *  those characters would be searched for literally. */
 export function generateQuery(db: Db, row: AgentWebRagRow, userText: string, master: string): string {
   if (row.queryMode != "generated" || row.queryModelId == "") { return userText; }
   let modelDoc = findById(db, modelsMapping(), row.queryModelId);
@@ -128,16 +80,7 @@ export function generateQuery(db: Db, row: AgentWebRagRow, userText: string, mas
     + "no quotes, no prefix, no explanation. Keep names, versions and error strings intact.",
     userText, key);
   if (!asked.ok) { return userText; }
-  /* The MESSAGE, not the envelope.
-   *
-   * `Completion.text` carries the provider's whole response body, and this
-   * read it as if it were the assistant's words: every generated query was a
-   * few hundred characters of `{"id":"chatcmpl-…","choices":[…]}`, which the
-   * length guard below then rejected — so "generated" query mode has been
-   * silently falling back to the user's own text since it was written. It
-   * never errored, which is why nobody saw it. */
   let q = replyText(model.provider, asked.text).trim();
-  // First line only, undecorated.
   let brk = q.indexOf("\n");
   if (brk >= 0) { q = q.slice(0, brk).trim(); }
   if (q.startsWith("\"") && q.endsWith("\"") && q.length > 1) { q = q.slice(1, q.length - 1); }
@@ -145,12 +88,6 @@ export function generateQuery(db: Db, row: AgentWebRagRow, userText: string, mas
   return q;
 }
 
-/** Passages for a query, from the index.
- *
- *  GET with the query in the URL, which is the index's own contract
- *  (joule-crawl src/server.ts): k caps at 20 there, max_chars at 100000, and
- *  the budget is spent on the index's side so what comes back is already
- *  sized. */
 export function retrieveWeb(query: string, topK: int, maxChars: int): WebFound {
   let url = searchApiBase() + "/retrieve?q=" + urlEncode(query)
     + "&k=" + `${topK}` + "&max_chars=" + `${maxChars}`;
@@ -179,14 +116,6 @@ export function retrieveWeb(query: string, topK: int, maxChars: int): WebFound {
   return answer;
 }
 
-/** The retrieved web as a context block.
- *
- *  Same guard rails as knowledge.ts::asContext, and they are not decoration —
- *  the incident that shaped that wording (an agent refusing its own tools
- *  because retrieved context "did not cover" the task) applies with more
- *  force here, because the open web resembles everything a little and the
- *  question exactly never. What this block adds is the citation ask: these
- *  passages have URLs, and an answer drawn from one should say which. */
 export function asWebContext(found: WebPassage[]): string {
   if (found.length == 0) { return ""; }
   let out = "Passages retrieved from the public web index for this question. "
@@ -201,7 +130,6 @@ export function asWebContext(found: WebPassage[]): string {
   return out;
 }
 
-/** A one-line account of what the web gave this round, for the run's notes. */
 export function webSummary(query: string, found: WebPassage[]): string {
   let urls: string[] = [];
   let i: int = 0;
@@ -209,20 +137,6 @@ export function webSummary(query: string, found: WebPassage[]): string {
   return "web index: \"" + query + "\" -> " + `${found.length}` + " passages (" + urls.join(", ") + ")";
 }
 
-
-// --- the web index, as a tool the model can call ---------------------------------
-//
-// Retrieval above is automatic: it runs on every turn of an agent configured
-// for it, whether the question needed the web or not. This is the other half —
-// the model deciding, mid-answer, that it needs to look something up.
-//
-// It replaces a skill that drove a real browser in a container: the old
-// search-web loaded Chromium and scraped DuckDuckGo, then Bing, then Brave,
-// which is minutes of container start and page load, and depends on three
-// sites not blocking a datacentre address. This is one HTTP call to an index
-// the deployment already runs and already trusts. The script image stays where
-// it is — nothing here deletes it — so a deployment that wants the browser
-// path back has it.
 
 export function webSearchTools(): ToolSpec[] {
   let out: ToolSpec[] = [];
@@ -250,7 +164,6 @@ export function webSearchTools(): ToolSpec[] {
   return out;
 }
 
-/** Answer `read_link`, or "" when the call is not this tool's. */
 export function callReadLinkTool(name: string, args: string): string {
   if (name != "read_link") { return ""; }
   let url = jsonText(args, "url").trim();
@@ -273,10 +186,6 @@ export function callReadLinkTool(name: string, args: string): string {
     + "Source: " + url + "\n\n" + md;
 }
 
-/** Answer `search_web`, or "" when the call is not this tool's.
- *
- *  The same shape every other dispatcher in run.ts has: asked about every
- *  call, answers only its own name, so the eager ask costs one comparison. */
 export function callWebSearchTool(name: string, args: string): string {
   if (name != "search_web") { return ""; }
   let query = jsonText(args, "query");
@@ -285,8 +194,6 @@ export function callWebSearchTool(name: string, args: string): string {
   }
   let count = parseInt(jsonText(args, "count"), 10) ?? 5;
   if (count <= 0 || count > 20) { count = 5; }
-  // A character budget rather than a passage count alone: the index spends it
-  // and stops, so a call cannot return more context than a reply can hold.
   let found = retrieveWeb(query, count, 6000);
   if (!found.ok) { return "The search index did not answer: " + found.error; }
   if (found.found.length == 0) {

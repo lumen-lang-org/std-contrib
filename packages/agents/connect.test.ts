@@ -1,12 +1,3 @@
-// An OAuth client the operator obtained by hand, against a live database.
-//
-// The flow around it needs a server to talk to and is covered by
-// e2e/oauth-double.mjs. What is here is the half that decides whether a
-// connector is configured at all: both credentials go in together, they come
-// out together, and neither outlives the connector.
-//
-//   cd packages/agents && lumen test connect.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, dropTable, findById, persist } from "../plume/plume.ts";
@@ -35,9 +26,6 @@ function fresh(): void {
   dropTable(database, promptsMapping());
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
-  // Everything else the plan ALTERs — a column added to a standing table is a
-  // duplicate on the second fresh(), and a stopped plan surfaces as failures
-  // in whatever this suite happens to touch next.
   execute(database, "DROP TABLE IF EXISTS agent_skills");
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
@@ -48,7 +36,6 @@ function fresh(): void {
   migrate(database, schemaPlan(database));
 }
 
-// A connector row to hang a client off. Built whole; records are immutable.
 function server(id: string): void {
   let row: McpServerRow = {
     id: id, serverName: id, transport: "http",
@@ -66,19 +53,15 @@ test("a supplied client goes in whole and the id comes back", () => {
   let refused = setSuppliedClient(database, "s1", "cid-123", "shh-456", testKey());
   expect(refused == "");
   expect(suppliedClientId(database, "s1", testKey()) == "cid-123");
-  // The secret is stored, and this module answers nobody who asks for it.
   expect(hasCredential(database, "mcpclient:s1"));
 });
 
 test("half a client is no client", () => {
   fresh();
   server("s1");
-  // A client id with no secret reaches the consent screen and fails at the
-  // token exchange, which is the most confusing place to fail.
   expect(setSuppliedClient(database, "s1", "cid-123", "", testKey()) != "");
   expect(setSuppliedClient(database, "s1", "", "shh-456", testKey()) != "");
   expect(setSuppliedClient(database, "s1", "   ", "  ", testKey()) != "");
-  // Nothing was left behind by any of the three.
   expect(suppliedClientId(database, "s1", testKey()) == "");
   expect(!hasCredential(database, "mcpclientid:s1"));
 });
@@ -86,7 +69,6 @@ test("half a client is no client", () => {
 test("supplying a client drops the registration built around the old one", () => {
   fresh();
   server("s1");
-  // A registration this deployment made for itself earlier.
   let cached: McpOauthRow = {
     id: "s1", issuer: "https://mcp.example.com",
     authorizeUrl: "https://mcp.example.com/authorize",
@@ -99,7 +81,6 @@ test("supplying a client drops the registration built around the old one", () =>
   expect(findById(database, mcpOauthMapping(), "s1") != "");
 
   setSuppliedClient(database, "s1", "cid-123", "shh-456", testKey());
-  // Left standing, the next Connect would sign in as the wrong application.
   expect(findById(database, mcpOauthMapping(), "s1") == "");
 });
 
@@ -117,8 +98,6 @@ test("forgetting the connector takes the client with it", () => {
   fresh();
   server("s1");
   setSuppliedClient(database, "s1", "cid-123", "shh-456", testKey());
-  // A credential outliving the connector that named it is a leak waiting for
-  // an id to be recycled — forgetServer's rule, held here too.
   forgetConnector(database, "s1", testKey());
   expect(!hasCredential(database, "mcpclientid:s1"));
   expect(!hasCredential(database, "mcpclient:s1"));

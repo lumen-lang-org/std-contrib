@@ -5,12 +5,6 @@ import { Reply, Request, badRequest, created, noContent, notFound, ok, param, pr
 import { createProblem, jsonId } from "../../payload.ts";
 import { ScriptImageRow, scriptImagesMapping } from "../../schema.ts";
 
-// The /script-images routes.
-
-// Why an image row will not be written. A label to pick it by, and an image
-// reference that is one word with no shell metacharacters — it becomes an
-// argv entry to docker, never a shell string, but a reference carrying a
-// space or a quote is a mistake worth naming at the door.
 export function scriptImageProblem(row: ScriptImageRow): string {
   if (row.label.trim() == "") { return "an image needs a label to pick it by"; }
   if (row.image.trim() == "") { return "an image needs a reference, such as agents-runtime:1"; }
@@ -25,13 +19,6 @@ export function scriptImageProblem(row: ScriptImageRow): string {
   return "";
 }
 
-// The images an operator will run scripts in.
-//
-// Curated, and by an operator rather than by a model: run_script builds a
-// conversation's container from the agent's chosen row, and a model that
-// could name its own image could make this server pull anything off the
-// internet and execute it. So the set lives here, an agent points at one, and
-// nothing on the model's side of the wire names an image at all.
 @controller("/script-images")
 export class ScriptImageApi {
   db: Db;
@@ -74,10 +61,6 @@ export class ScriptImageApi {
     return ok(findById(this.db, scriptImagesMapping(), param(req, "id")));
   }
 
-  // Removing an image leaves the agents that pointed at it alone: their
-  // environments fall back to the deployment default, which is a working
-  // image by definition. Rewriting other rows from a delete would be a
-  // surprise larger than the one it prevents.
   @del("/:id")
   remove(req: Request): Reply {
     if (!existsById(this.db, scriptImagesMapping(), param(req, "id"))) {

@@ -1,7 +1,3 @@
-// What a connector last said it could do, against a live database.
-//
-//   cd packages/agents && lumen test mcp-roster.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, dropTable } from "../plume/plume.ts";
@@ -31,8 +27,6 @@ function fresh(): void {
   execute(database, "DROP TABLE IF EXISTS auth_providers");
   execute(database, "DROP TABLE IF EXISTS script_images");
   dropTable(database, mcpRosterMapping());
-  // One plan, extended — a second migrate() call is handed a plan lacking the
-  // versions already recorded, and refuses everything.
   let plan = schemaPlan(database);
   let extra = mcpRosterPlan(database);
   let i: int = 0;
@@ -49,8 +43,6 @@ test("a connector that has never been listed has nothing to show", () => {
   fresh();
   let held = rosterOf(database, "linear");
   expect(held.tools == "[]");
-  // The empty stamp is what tells a screen to say nothing rather than to date
-  // an answer it does not have.
   expect(held.listedAt == "");
 });
 
@@ -65,7 +57,6 @@ test("a listing is kept, dated, and comes back", () => {
   expect(held.listedAt == "t1");
   expect(held.tools.indexOf("create_issue") >= 0);
   expect(held.tools.indexOf("What a team is working on") >= 0);
-  // The schema is the biggest part of a listing and no screen needs it.
   expect(held.tools.indexOf("\"type\"") < 0);
 });
 
@@ -81,8 +72,6 @@ test("a later listing replaces the earlier one", () => {
   let held = rosterOf(database, "linear");
   expect(held.listedAt == "t2");
   expect(held.tools.indexOf("new_name") >= 0);
-  // A renamed tool must not linger — a picker offering it calls something the
-  // connector no longer answers.
   expect(held.tools.indexOf("old_name") < 0);
 });
 
@@ -110,8 +99,6 @@ test("the switches are filled in fresh, not remembered", () => {
   let off: string[] = [];
   off.push("delete_issue");
   let shown = rosterWithSwitches(rosterOf(database, "linear").tools, off);
-  // Which tools are mounted is this deployment's own decision and changes
-  // without the connector being asked anything.
   expect(shown.indexOf("{\"name\":\"create_issue\",\"description\":\"File an issue\",\"on\":true}") >= 0);
   expect(shown.indexOf("\"delete_issue\",\"description\":\"Remove one\",\"on\":false") >= 0);
 });
@@ -127,6 +114,5 @@ test("a connector with an absurd number of tools is bounded", () => {
   rememberRoster(database, "big", tools, "t1");
   let held = rosterOf(database, "big");
   expect(held.tools.indexOf("\"tool_0\"") >= 0);
-  // A row that grows without bound is the one that eventually will not load.
   expect(held.tools.indexOf("\"tool_" + `${MAX_REMEMBERED_TOOLS + 10}` + "\"") < 0);
 });

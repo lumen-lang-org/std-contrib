@@ -5,8 +5,6 @@ import { pendingJobs } from "../../indexing.ts";
 import { scopeCounts } from "../../knowledge.ts";
 import { scopesJson } from "../../payload.ts";
 
-// The /scopes routes.
-
 @controller("/scopes")
 export class ScopeApi {
   db: Db;
@@ -18,8 +16,6 @@ export class ScopeApi {
     if (this.db.name != "postgres") {
       return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
     }
-    // The scopes of work that is queued or failed, so a folder someone just
-    // uploaded into is in the tree before the indexer has reached it.
     let waiting = pendingJobs(this.db, "");
     let pending: string[] = [];
     let w: int = 0;

@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Moves one @controller class out of api.ts into its own module, imports and all.
-// Usage: node extract-controller.mjs /banner banner-api.ts
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
@@ -10,7 +8,6 @@ if (!target || !outFile) { console.error("usage: extract-controller.mjs <route-p
 const src = readFileSync("api.ts", "utf8");
 const lines = src.split("\n");
 
-// Where api.ts gets each name it uses, so the moved class can ask the same places.
 const origin = new Map();
 for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*"([^"]+)"/gm))
   for (const n of m[1].split(",")) { const t = n.trim(); if (t) origin.set(t, m[2]); }
@@ -24,7 +21,6 @@ for (const l of lines) {
 let start = -1;
 for (let i = 0; i < lines.length; i++) if (lines[i].includes(`@controller("${target}")`)) { start = i; break; }
 if (start < 0) { console.error(`no @controller("${target}") in api.ts`); process.exit(1); }
-// Carry the comment block that introduces it.
 while (start > 0 && lines[start - 1].trim().startsWith("//")) start--;
 
 let j = start; while (!/\bclass\s+(\w+)/.test(lines[j])) j++;
@@ -36,8 +32,6 @@ for (let k = j; k < lines.length; k++) {
 }
 
 const block = lines.slice(start, end + 1).join("\n");
-// Identifiers in code only. A name inside a string or a comment is text:
-// `this.db.name != "postgres"` was importing plume/postgres.ts.
 const code = block
   .replace(/\/\*[\s\S]*?\*\//g, " ")
   .replace(/\/\/[^\n]*/g, " ")
@@ -47,9 +41,6 @@ const code = block
 const used = new Set();
 for (const m of code.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) used.add(m[1]);
 
-// A helper only this controller uses travels with it. One used by another
-// controller, or by anything left behind, would have to be imported back from
-// here and that is the cycle; those go to api-core.ts instead.
 function declAt(name) {
   const pat = new RegExp(`^(?:export\\s+)?(?:async\\s+)?(?:function|const|let|type|interface|enum)\\s+${name}\\b`);
   for (let i = 0; i < lines.length; i++) if (pat.test(lines[i])) {
@@ -85,7 +76,6 @@ while (queue.length) {
     if (defined.has(m) && !origin.has(m) && m !== cls && !carry.has(m)) queue.push(m);
 }
 
-// Refuse if anything left in api.ts still needs a name we are taking.
 const carrySpans = [...carry.values()];
 const takenLines = new Set([...Array(end - start + 1).keys()].map((i) => i + start));
 for (const sp of carrySpans) for (let i = sp.from; i <= sp.to; i++) takenLines.add(i);

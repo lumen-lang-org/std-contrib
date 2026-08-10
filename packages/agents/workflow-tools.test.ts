@@ -1,14 +1,3 @@
-// Workflows through a conversation: what the tools build, and what they
-// refuse.
-//
-//   cd packages/agents && ../cron/build.sh && lumen test workflow-tools.test.ts
-//
-// The chain builder is the piece a person never sees working — a model says
-// "search, then summarise" and a graph exists with positions, edges and an
-// END. So the tests read the graph back and walk its shape, and the refusals
-// get the same attention task-tools.test.ts gives them: a guest, a stranger's
-// row, a branch a splice must not guess about.
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, createTableSql, dropTable, listWhere, persist } from "../plume/plume.ts";
@@ -22,7 +11,6 @@ import { createSecret, secretsMapping, secretsPlan } from "./secrets.ts";
 
 let database: Db = sqlite();
 
-// Friday 2026-08-07T09:00:00Z, the fixture instant task-tools.test.ts uses.
 const NOW: number = 1786093200000.0;
 
 function seeded(): void {
@@ -49,9 +37,6 @@ function call(owner: string, name: string, args: string): FileToolResultLike {
   return out;
 }
 
-/** The quotedRight guard from task-tools.test.ts, holding the same line for
- *  these schemas: after a closing quote only a comma, colon, bracket or the
- *  end may follow, which is exactly what a bare quote in an example breaks. */
 function quotedRight(text: string): bool {
   let i: int = 0;
   let inString = false;
@@ -90,8 +75,6 @@ test("the thirteen names are offered, and nothing else answers to them", () => {
   let specs = workflowTools();
   expect(specs.length == 13);
   expect(specs[0].name == "list_workflows");
-  // By name, not index: an inserted verb shifted every position once and a
-  // test that counts positions re-breaks on every addition.
   let drafting = "";
   let scheduling = "";
   let i0: int = 0;
@@ -100,7 +83,6 @@ test("the thirteen names are offered, and nothing else answers to them", () => {
     if (specs[i0].name == "schedule_workflow") { scheduling = specs[i0].schema; }
     i0 = i0 + 1;
   }
-  // The grammar and the step kinds are IN the descriptions.
   expect(drafting.indexOf("web_search") >= 0);
   expect(drafting.indexOf("tap buttons") >= 0);
   expect(scheduling.indexOf("every weekday at 08:00") >= 0);
@@ -139,25 +121,18 @@ test("a draft becomes a chain: start, the steps in order, end, and a schedule", 
   expect(rows[0].kind == "every");
   expect(rows[0].cronExpr == "0 0 8 * * 1-5");
   expect(rows[0].tz == "Europe/Paris");
-  // The first firing was computed — a scheduled workflow with nothing to fire
-  // at is one that silently never runs.
   expect(rows[0].nextAt != "");
 
   let parsed = parseGraph(rows[0].graph);
   expect(parsed.ok);
-  // START + two steps + END, wired in order, and the whole thing passes the
-  // graph's own refusal — the builder is held to the same rules as a canvas.
   expect(parsed.graph.nodes.length == 4);
   expect(refuseGraph(parsed.graph) == "");
   expect(startOf(parsed.graph).schedule == "every weekday at 08:00");
   expect(parsed.graph.nodes[1].type == "WEB_SEARCH");
   expect(parsed.graph.nodes[2].type == "AGENT");
   expect(parsed.graph.nodes[2].instruction.indexOf("{{prev}}") >= 0);
-  // Positions were placed by the builder, not left at zero for the canvas to
-  // stack in a corner.
   expect(parsed.graph.nodes[2].x > parsed.graph.nodes[1].x);
 
-  // The reply is prose somebody can read out, not JSON.
   expect(made.text.indexOf("Drafted") >= 0);
   expect(made.text.indexOf("web search") >= 0);
 });
@@ -179,7 +154,6 @@ test("someone else's workflow is absent, not forbidden", () => {
   let asked = call("o2", "show_workflow", "{\"workflow\":\"" + theirs + "\"}");
   expect(!asked.ok);
   expect(asked.text.indexOf("no workflow") >= 0);
-  // And the same by name.
   let byName = call("o2", "delete_workflow", "{\"workflow\":\"Morning brief\"}");
   expect(!byName.ok);
   expect(flowsFor("o1").length == 1);
@@ -195,7 +169,6 @@ test("add_step splices before the end and the chain stays whole", () => {
   expect(parsed.ok);
   expect(parsed.graph.nodes.length == 5);
   expect(refuseGraph(parsed.graph) == "");
-  // The prose lists it in walking order: after the summary, before the end.
   let prose = added.text;
   expect(prose.indexOf("Translate") > prose.indexOf("Summarise"));
 });
@@ -220,7 +193,6 @@ test("change_step rewrites the one field its kind carries", () => {
   expect(changed.ok);
   let parsed = parseGraph(flowsFor("o1")[0].graph);
   expect(parsed.graph.nodes[1].query == "Lumen language releases this week");
-  // The other kinds' fields did not move.
   expect(parsed.graph.nodes[1].instruction == "");
 });
 
@@ -233,7 +205,6 @@ test("remove_step joins the chain around what it took out", () => {
   let parsed = parseGraph(flowsFor("o1")[0].graph);
   expect(parsed.graph.nodes.length == 3);
   expect(refuseGraph(parsed.graph) == "");
-  // START and END are kept, by refusal.
   let kept = call("o1", "remove_step", "{\"workflow\":\"Morning brief\",\"step\":\"start\"}");
   expect(!kept.ok);
   expect(kept.text.indexOf("start") >= 0);
@@ -247,7 +218,6 @@ test("schedule_workflow moves the schedule, and manual takes it away", () => {
   expect(moved.ok);
   let rows = flowsFor("o1");
   expect(rows[0].cronExpr == "0 30 7 * * *");
-  // The zone the draft carried is kept, and named in the reply's civil time.
   expect(rows[0].tz == "Europe/Paris");
 
   let byHand = call("o1", "schedule_workflow",
@@ -269,7 +239,6 @@ test("run_workflow moves the next firing to now and fires nothing itself", () =>
   let after = flowsFor("o1")[0];
   expect(after.nextAt == `${NOW}`);
   expect(after.nextAt != before);
-  // Nothing ran: no run row exists, because running is the scheduler's alone.
   let runs = listWhere(database, workflowRunsMapping(),
     "workflow_id = " + database.placeholder, [after.id]);
   expect(runs == "[]");
@@ -288,7 +257,6 @@ test("pause and resume through change_workflow, and failures clear on resume", (
   let row = flowsFor("o1")[0];
   expect(row.enabled);
   expect(row.failures == 0);
-  // A schedule that came back on has a firing to come back to.
   expect(row.nextAt != "");
 });
 
@@ -316,8 +284,6 @@ test("the eleventh workflow is refused before it is a row", () => {
 });
 
 test("a chat can draft the telegram shapes, and publish what it drafted", () => {
-  // A reply, an ask with tap-button options, and a connector step — the
-  // week's vocabulary, buildable from a sentence.
   let made = call("o9", "draft_workflow",
     "{\"name\":\"Triage over chat\",\"steps\":["
     + "{\"kind\":\"reply\",\"text\":\"On it…\",\"title\":\"Ack\"},"
@@ -345,8 +311,6 @@ test("a chat can draft the telegram shapes, and publish what it drafted", () => 
   expect(options == "Log it\nSkip");
   expect(server == "linear");
 
-  // Publish pins it: the draft column and the published column agree after,
-  // and the reply says so in words a person can repeat.
   let out = call("o9", "publish_workflow", "{\"workflow\":\"Triage over chat\"}");
   expect(out.ok);
   expect(out.text.includes("Published"));
@@ -360,9 +324,6 @@ test("a said switch lands valid, and connect_steps re-points one branch", () => 
   expect(made.ok);
   let rows = flowsFor("o9");
   let g = parseGraph(rows[0].graph).graph;
-  // Every branch exists from the first save: cases and else all point at
-  // whatever followed the anchor, so the graph never passes through a state
-  // the engine would refuse.
   let fanned: int = 0;
   let sid = "";
   let i: int = 0;
@@ -371,9 +332,6 @@ test("a said switch lands valid, and connect_steps re-points one branch", () => 
   while (i < g.edges.length) { if (g.edges[i].from == sid) { fanned = fanned + 1; } i = i + 1; }
   expect(fanned == 3);
 
-  // Every branch starts at the old next, so re-pointing a CASE to the same
-  // place proves nothing — the meaningful move is a plain edge: route the
-  // connector straight to the switch, skipping the ask.
   let wired = call("o9", "connect_steps",
     "{\"workflow\":\"Triage over chat\",\"from\":\"Issues\",\"to\":\"Route\"}");
   expect(wired.ok);
@@ -396,8 +354,6 @@ test("a said switch lands valid, and connect_steps re-points one branch", () => 
     i = i + 1;
   }
   expect(issuesTo == sid);
-  // The ask is now unwired — reachable by nobody, refused by nothing: a
-  // dangling step is the canvas's to reconnect, not a reason to lose a save.
   expect(askIn == 0);
 });
 
@@ -411,21 +367,17 @@ test("a reply's file rides in from a sentence, and none takes it away", () => {
   let body = replyBody("o10");
   expect(body == "/report.md");
 
-  // change_step moves it, and "none" clears it — an empty string cannot be
-  // sent to mean "clear", so the word does the job.
   expect(call("o10", "change_step", "{\"workflow\":\"Report over chat\",\"step\":\"Send\",\"file\":\"/summary.md\"}").ok);
   expect(replyBody("o10") == "/summary.md");
   expect(call("o10", "change_step", "{\"workflow\":\"Report over chat\",\"step\":\"Send\",\"file\":\"none\"}").ok);
   expect(replyBody("o10") == "");
 
-  // A file on a step that cannot send one is a refusal, not a silent drop.
   let wrong = call("o10", "change_step", "{\"workflow\":\"Report over chat\",\"step\":\"Write\",\"file\":\"/x.md\"}");
   expect(!wrong.ok);
   expect(wrong.text.includes("reply"));
 });
 
 test("a rename does not cost a switch its cases", () => {
-  // The o9 workflow of the earlier tests still holds its Route switch.
   let renamed = call("o9", "change_step",
     "{\"workflow\":\"Triage over chat\",\"step\":\"Route\",\"title\":\"Routing\"}");
   expect(renamed.ok);
@@ -449,10 +401,6 @@ function replyBody(owner: string): string {
   return "(no reply step)";
 }
 
-// --- secrets through the tools ----------------------------------------------
-
-// The workflow fixture plus the two tables a secret lives across: its row,
-// and the credential envelope its value is sealed in.
 function seededWithSecrets(): void {
   let cfg: DbConfig = { filename: "/tmp/agents_workflow_tools_test.db" };
   connectDatabase(database, cfg);
@@ -461,8 +409,6 @@ function seededWithSecrets(): void {
   dropTable(database, workflowRunsMapping());
   dropTable(database, secretsMapping());
   dropTable(database, credentialsMapping());
-  // One plan, extended — a second migrate() call refuses a plan that lacks
-  // the versions already recorded.
   let plan = workflowsPlan(database);
   let extra = secretsPlan(database);
   let i: int = 0;
@@ -473,7 +419,6 @@ function seededWithSecrets(): void {
 
 test("a secret is attached by name, never created, and never leaves its address", () => {
   seededWithSecrets();
-  // Nothing yet: the tool says where secrets come from, not how to say one.
   let none = call("o1", "list_secrets", "{}");
   expect(none.handled);
   expect(none.ok);
@@ -486,8 +431,6 @@ test("a secret is attached by name, never created, and never leaves its address"
     "{\"name\":\"Fetch\",\"steps\":[{\"kind\":\"http\",\"text\":\"https://api.example.com/v1\",\"title\":\"Fetch\"}]}");
   expect(drafted.ok);
 
-  // An unknown name is refused, pointing at the list rather than inviting a
-  // value into the chat.
   let wrong = call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"secret\":\"nope\"}");
   expect(!wrong.ok);
   expect(wrong.text.indexOf("list_secrets") >= 0);
@@ -496,17 +439,13 @@ test("a secret is attached by name, never created, and never leaves its address"
   expect(attached.ok);
   expect((parseGraph(flowsFor("o1")[0].graph).graph.nodes[1].secrets ?? "") == made.id);
 
-  // The step can no longer be pointed at another host: the write is refused
-  // in the same sentence the canvas would get.
   let moved = call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"text\":\"https://evil.example/x\"}");
   expect(!moved.ok);
   expect(moved.text.indexOf("stored for") >= 0);
 
-  // "none" detaches, and then the move is an ordinary edit again.
   expect(call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"secret\":\"none\"}").ok);
   expect(call("o1", "change_step", "{\"workflow\":\"Fetch\",\"step\":\"Fetch\",\"text\":\"https://evil.example/x\"}").ok);
 
-  // The list names the secret and its address, and no value ever.
   let listed = call("o1", "list_secrets", "{}");
   expect(listed.text.indexOf("api key") >= 0);
   expect(listed.text.indexOf("https://api.example.com") >= 0);

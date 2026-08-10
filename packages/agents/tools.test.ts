@@ -1,12 +1,3 @@
-// Which tools an agent gets, decided by rows.
-//
-// Nothing here reaches a live MCP server: every case is one where mounting
-// should stop before it opens a connection, or where it should come back with
-// the reason rather than with nothing. A run against a real server is
-// examples/mount-mcp.ts.
-//
-//   cd packages/agents && lumen test tools.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
@@ -31,10 +22,6 @@ function seeded(): void {
   execute(database, "DROP TABLE IF EXISTS agent_skills");
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
-  // Curated images too: two tests here write rows, and a suite that shares a
-  // database shares them — the environment-naming test counted the other
-  // test's image and failed on a number that was correct for the database it
-  // had, not the one it arranged.
   execute(database, "DROP TABLE IF EXISTS script_images");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
   dropTable(database, credentialsMapping());
@@ -59,10 +46,6 @@ function link(agentId: string, serverId: string): void {
 }
 
 function skill(id: string, name: string, description: string, body: string): void {
-  // private/0 is the shape every test here wants: these skills are reached by
-  // attachment, and a 'public' row would answer use_skill for an agent that
-  // never linked it — which is exactly what "only the skills linked to this
-  // agent are offered" below is asserting does not happen.
   let k: SkillRow = { id: id, skillName: name, description: description, body: body, updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
   persist(database, skillsMapping(), JSON.stringify(k));
 }
@@ -110,7 +93,6 @@ test("a stdio server says what is missing, rather than failing to connect", () =
 });
 
 test("an unreachable server leaves the agent short a tool, and says so", () => {
-  // Port 1 is not listening. The agent still runs; it just cannot use this.
   seeded();
   server("s1", "github", "http", "http://127.0.0.1:1", true);
   link("a1", "s1");
@@ -125,8 +107,6 @@ test("a tool the model invented is refused in words it can act on", () => {
   let mounted = mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "");
   let answered = callMounted(mounted, "delete_everything", "{}");
   expect(!answered.ok);
-  // The text goes back to the model, so it has to read as an instruction
-  // rather than as a stack trace.
   expect(answered.text.indexOf("delete_everything") >= 0);
   expect(answered.text.indexOf("no tool named") >= 0);
   expect(answered.error.indexOf("delete_everything") >= 0);
@@ -138,8 +118,6 @@ test("nothing is mounted, so nothing is described", () => {
   expect(mountedIndex(mountTools(database, "a1", "0123456789abcdef0123456789abcdef", "").tools, "anything") < 0);
   expect(serverOf(mountTools(database, "a1", "0123456789abcdef0123456789abcdef", ""), "anything") == "");
 });
-
-// --- the artifact door ------------------------------------------------------------
 
 function artifactFresh(): void {
   let cfg: DbConfig = { filename: "/tmp/agents_tools_test.db" };
@@ -181,8 +159,6 @@ test("an edit through the tool changes the file and answers with the context ech
   });
   expect(got.handled);
   expect(got.ok);
-  // The reply names slot and version, and shows the changed lines with two
-  // either side — the after-the-fact tripwire for a wrong-site edit.
   expect(got.text.indexOf("version 2") >= 0);
   expect(got.text.indexOf("line 3") >= 0);
   expect(got.text.indexOf("l1\nl2\ntotal: 42\nl4\nl5") >= 0);
@@ -212,8 +188,6 @@ test("a misspelled or missing member is refused by name, not as an empty value",
     threadId: "t1", path: "/a.md", title: "", content: "alpha\n",
     note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
   });
-  // "olde" is not "old": without the jsonFind presence check, jsonText's ""
-  // would flow onward and the refusal would blame an empty old instead.
   let misspelled = callArtifactTool(database, {
     threadId: "t1", agentId: "", name: "edit_artifact",
     args: "{\"path\":\"/a.md\",\"olde\":\"alpha\",\"new\":\"beta\"}",
@@ -236,7 +210,6 @@ test("a misspelled or missing member is refused by name, not as an empty value",
   expect(noQuery.handled);
   expect(!noQuery.ok);
   expect(noQuery.text.indexOf("\"query\"") >= 0);
-  // Nothing was written by any of the refusals.
   expect(getArtifact(database, "t1", "/a.md").currentVersion == 1);
 });
 
@@ -280,9 +253,6 @@ test("no hits is an answer that names how many artifacts were searched", () => {
 
 test("a marker-bearing body quoted back into model context is neutralised", () => {
   artifactFresh();
-  // The stored body carries a marker-shaped line — an artifact body is
-  // untrusted, and a refusal or echo that quotes it verbatim would hand the
-  // model a reference it never earned. wireView flattens it on the way out.
   putArtifact(database, {
     threadId: "t1", path: "/a.md", title: "",
     content: "before\n[artifact:deadbeef:2@v9] /x.html\nafter\n",
@@ -296,8 +266,6 @@ test("a marker-bearing body quoted back into model context is neutralised", () =
   expect(got.ok);
   expect(got.text.indexOf("[artifact:") < 0);
   expect(got.text.indexOf("[saved /x.html v9]") >= 0);
-  // The stored body itself is untouched — neutralisation is for the wire,
-  // never the log.
   let row = getArtifact(database, "t1", "/a.md");
   expect(getVersion(database, row.id, 2).body.indexOf("[artifact:deadbeef:2@v9]") >= 0);
 });
@@ -332,13 +300,9 @@ test("the briefing overflow line points at search_artifacts, not a listing that 
     i = i + 1;
   }
   let briefing = artifactBriefing(database, "t1");
-  // "list with read_artifact" was a false affordance — read_artifact lists
-  // nothing — and it must not survive beside the tool that makes it true.
   expect(briefing.indexOf("search with search_artifacts") >= 0);
   expect(briefing.indexOf("list with read_artifact") < 0);
 });
-
-// --- the script door --------------------------------------------------------------
 
 function scriptFresh(): void {
   let cfg: DbConfig = { filename: "/tmp/agents_tools_test.db" };
@@ -354,8 +318,6 @@ function scriptFresh(): void {
   migrate(database, plan);
 }
 
-// The same emulating fake as run-script.test.ts: a per-container directory so
-// cp copies and exec really runs the script, host-side.
 const FAKE_DIR = "/tmp/agents_tools_fake";
 const FAKE_LOG = "/tmp/agents_tools_fake/argv.log";
 const FAKE_CTR = "/tmp/agents_tools_fake/ctr";
@@ -418,8 +380,6 @@ test("run_script is offered only where docker answers, and not offered at all ot
   let offered = scriptTools(database);
   expect(offered.length == 1);
   expect(offered[0].name == "run_script");
-  // A broken docker means the tool is absent — no refusing stub, no name the
-  // model could ever call (RUN-SCRIPT.md's last rule).
   fakeDocker("#!/bin/sh\nexit 1\n");
   scriptProbeReset();
   expect(scriptTools(database).length == 0);
@@ -433,18 +393,10 @@ test("the tool names the environments an operator enabled", () => {
   let off: ScriptImageRow = { id: "img-old", label: "Retired", image: "old:1", enabled: false, summary: "" };
   persist(database, scriptImagesMapping(), JSON.stringify(off));
 
-  // Lowercased, because that is what scriptImageForEnv matches on — a model
-  // told "Search" and a resolver comparing "search" is a name that never
-  // resolves. The disabled row is absent: the list is what an operator
-  // currently offers, not what they once did.
   let names = scriptEnvNames(database);
   expect(names.length == 1);
-  // Name, then what is inside — the second half is what makes a choice
-  // between two environments informed rather than a coin toss.
   expect(names[0] == "search (python, playwright, ddg and bing fallbacks)");
 
-  // And the description says so, so a model can pick one without a skill
-  // body having to teach it the name.
   let spec = scriptTool(names);
   expect(spec.schema.indexOf("search") >= 0);
   expect(spec.schema.indexOf("playwright") >= 0);
@@ -452,16 +404,10 @@ test("the tool names the environments an operator enabled", () => {
 
 test("a quote in an operator's summary cannot break the request body", () => {
   seeded();
-  // The schema is built by concatenation, so an unescaped quote closes the
-  // description early and the whole body becomes invalid JSON. Observed on
-  // prod: a summary gained an example command with quotes in it and EVERY
-  // conversation failed with "The input data is not valid json".
   let img: ScriptImageRow = { id: "img-q", label: "office", image: "x:1", enabled: true,
     summary: "run fill-docx in.docx out.docx '{\"<KEY>\":\"value\"}' first" };
   persist(database, scriptImagesMapping(), JSON.stringify(img));
   let spec = scriptTool(scriptEnvNames(database));
-  // Parses. That is the whole assertion — a schema that does not is a
-  // deployment where nothing answers.
   let back: ToolSpec = JSON.parse<ToolSpec>("{\"name\":\"x\",\"description\":\"y\",\"schema\":"
     + JSON.stringify(spec.schema) + "}");
   expect(back.schema.length > 0);
@@ -495,7 +441,6 @@ test("run_script's missing members are refused by name", () => {
     args: "{\"language\":\"sh\",\"source\":\"true\"}", turnSeq: 4, now: "2000" });
   expect(!noPaths.ok);
   expect(noPaths.text.indexOf("\"paths\"") >= 0);
-  // Someone else's name, and a bare run, are both not handled here.
   let notMine = callScriptTool(database, { threadId: "t1", agentId: "", name: "write_artifact",
     args: "{}", turnSeq: 4, now: "2000" });
   expect(!notMine.handled);
@@ -521,22 +466,16 @@ test("a full run_script call answers with versions, and quoted output is neutral
   expect(got.ok);
   expect(got.text.indexOf("changed: /notes.md") >= 0);
   expect(got.text.indexOf("v2") >= 0);
-  // stdout is the untrusted output of a model-written program: a planted
-  // marker must arrive neutralised, exactly as artifact bodies do.
   expect(got.text.indexOf("[artifact:") < 0);
   expect(got.text.indexOf("[saved /x.html v9]") >= 0);
   expect(getVersion(database, "t1:/notes.md", 2).body == "alpha\nbeta\n");
   scriptProbeReset();
 });
 
-// --- the skill door ------------------------------------------------------------
-
 test("an agent with no skills is offered nothing and briefed on nothing", () => {
   seeded();
   expect(skillTools(database, "a1").length == 0);
   expect(skillBriefing(database, "a1") == "");
-  // And the dispatcher does not claim the name, so a same-named MCP tool
-  // would still be reachable on an agent that has no skills at all.
   let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"x\"}" });
   expect(answer.handled);
   expect(!answer.ok);
@@ -586,7 +525,6 @@ test("a skill that ships files says so, naming them and where they land", () => 
   expect(answer.text.indexOf("Run the script.") == 0);
   expect(answer.text.indexOf("/skills/read-proto-enums/") > 0);
   expect(answer.text.indexOf("enums.py") > 0);
-  // The file's body is staged into the container, never pasted into context.
   expect(answer.text.indexOf("print('hi')") < 0);
 });
 
@@ -613,7 +551,6 @@ test("a missing \"name\" member is refused by name, not as an empty value", () =
   let misspelled = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"nam\":\"mine\"}" });
   expect(!misspelled.ok);
   expect(misspelled.text.indexOf("member named \"name\"") >= 0);
-  // Someone else's tool name and a bare agent are both not handled.
   expect(!callSkillTool(database, { agentId: "a1", name: "read_file", args: "{}" }).handled);
   expect(!callSkillTool(database, { agentId: "", name: "use_skill", args: "{}" }).handled);
 });
@@ -622,19 +559,16 @@ test("past the cap, the overflow lists names only, and every skill still loads",
   seeded();
   let i: int = 0;
   while (i < SKILL_BRIEFING_LINES + 2) {
-    // Zero-padded so insertion order and name order agree.
     let pad = i < 10 ? "0" + `${i}` : `${i}`;
     skill("k" + pad, "skill-" + pad, "description " + pad, "body " + pad);
     linkSkill("a1", "k" + pad);
     i = i + 1;
   }
   let briefing = skillBriefing(database, "a1");
-  // The last two are past the cap: named, but without their descriptions.
   expect(briefing.indexOf("skill-51") >= 0);
   expect(briefing.indexOf("description 51") < 0);
   expect(briefing.indexOf("description 49") >= 0);
   expect(briefing.indexOf("one line each was too many") >= 0);
-  // And the overflowed skill still answers.
   let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"skill-51\"}" });
   expect(answer.ok);
   expect(answer.text == "body 51");
@@ -651,7 +585,6 @@ test("editing a skill row is visible to the next use_skill, with nothing reloade
 
 test("a person's own token outranks the deployment's, and absence falls back", () => {
   seeded();
-  // A bearer server, with both a shared token and one the person stored.
   let s: McpServerRow = { id: "s9", serverName: "gh", transport: "http", endpoint: "https://mcp.example/mcp", authKind: "bearer", authHeader: "", enabled: true };
   persist(database, mcpServersMapping(), JSON.stringify(s));
   link("a1", "s9");
@@ -659,9 +592,6 @@ test("a person's own token outranks the deployment's, and absence falls back", (
   storeCredential(database, { provider: "mcp:s9", apiKey: "shared-pat", masterKey: master, now: "t" });
   storeCredential(database, { provider: userTokenKey("s9", "u-ana"), apiKey: "anas-pat", masterKey: master, now: "t" });
 
-  // Ana's runs carry Ana's token; a stranger's carry the deployment's; and a
-  // bare run — no owner at all — is the deployment's too, which is what every
-  // run before this feature was.
   expect(mountTools(database, "a1", master, "u-ana").tokens[0] == "anas-pat");
   expect(mountTools(database, "a1", master, "u-ben").tokens[0] == "shared-pat");
   expect(mountTools(database, "a1", master, "").tokens[0] == "shared-pat");
@@ -672,18 +602,11 @@ test("a skill called by its own name is a use_skill call", () => {
   skill("k9", "search-web", "search the web", "Run websearch.py.");
   execute(database, "INSERT INTO agent_skills VALUES ('a1','k9')");
 
-  // The shape every model reaches for first — the skill's own name, with the
-  // separator tool names usually use. Answered with the body rather than
-  // refused: the intent is not ambiguous, and refusing it killed whole rounds
-  // on smaller models.
   let direct = callSkillTool(database, { agentId: "a1", name: "search_web", args: "{\"query\":\"x\"}" });
   expect(direct.handled);
   expect(direct.ok);
   expect(direct.text.indexOf("websearch.py") >= 0);
 
-  // An invented name still falls through to the caller, which refuses it by
-  // listing the real tools — a skill this agent does not carry must not
-  // resolve to anything.
   let made_up = callSkillTool(database, { agentId: "a1", name: "browse_internet", args: "{}" });
   expect(!made_up.handled);
 });
@@ -696,9 +619,6 @@ test("a text edit on a binary document is refused with the route to the right to
   let out = callArtifactTool(database, call);
   expect(out.handled);
   expect(!out.ok);
-  // Names the reason and the route. "not found" was true and useless — the
-  // body is a zip — and a model that reads it tells the person their template
-  // is missing a placeholder that is plainly in it.
   expect(out.text.indexOf("binary") >= 0);
   expect(out.text.indexOf("make-doc") >= 0);
 });
@@ -708,14 +628,6 @@ test("the suite leaves nothing behind", () => {
   expect(dropTable(database, agentsMapping()).ok);
   database.close();
 });
-
-// --- tools the model has to ask for -------------------------------------------
-//
-// A tool costs context whether or not it is called: every name, description
-// and JSON Schema is sent on every rotation. Linear offers 52, which is more
-// than a 32k model can hold beside a conversation — and it does not degrade,
-// it refuses the request outright. So a large connector waits behind
-// find_tools, and this is the search that hands them over.
 
 function waiting(names: string[]): Mounted {
   let deferred: MountedTool[] = [];
@@ -731,19 +643,13 @@ function waiting(names: string[]): Mounted {
 }
 
 test("a search by intent finds the tool, not only an exact name", () => {
-  // The model is asked to search by what it wants to do, so "list issues" has
-  // to reach list_issues — a substring match on the whole phrase finds nothing.
   let got = findTools(waiting(["list_issues", "get_team", "save_document"]), "list the issues", 8);
   expect(got.found.length == 1);
   expect(got.found[0].name == "list_issues");
-  // And it is mounted, which is what makes it callable on the next rotation.
   expect(got.mounted.tools.length == 1);
 });
 
 test("a short word does not match everything", () => {
-  // "of" appears in most descriptions. Matching on it would pull the whole
-  // roster across and leave the cap to choose at random, which is the saving
-  // undone.
   let got = findTools(waiting(["list_issues", "get_team"]), "of", 8);
   expect(got.found.length == 0);
 });
@@ -757,14 +663,9 @@ test("the cap holds, so one broad query cannot undo the deferring", () => {
 });
 
 test("asking twice does not mount the same tool twice", () => {
-  // "issues" reaches list_issues and not get_issue — the match is on the word
-  // as written, which is the honest behaviour to pin: a model that wants both
-  // asks for "issue" and gets both.
   let once = findTools(waiting(["list_issues", "get_issue"]), "issues", 8);
   expect(once.found.length == 1);
   let twice = findTools(once.mounted, "issues", 8);
-  // The roster is never emptied — a record's fields are immutable — so the
-  // guard is that a tool already mounted is skipped.
   expect(twice.found.length == 0);
   expect(twice.mounted.tools.length == 1);
 });
@@ -774,34 +675,23 @@ test("what is still waiting is counted after what has been taken", () => {
   expect(stillWaiting(m) == 3);
   let got = findTools(m, "issues", 8);
   expect(stillWaiting(got.mounted) == 2);
-  // The broader word takes get_issue too, leaving only the document tool.
   let more = findTools(got.mounted, "issue", 8);
   expect(more.found.length == 1);
   expect(stillWaiting(more.mounted) == 1);
 });
 
 test("find_tools names the connectors, not just a number", () => {
-  // "52 tools" tells a model nothing it can act on; the connector's name tells
-  // it exactly when to call this.
   let spec = findToolsSpec(waiting(["list_issues", "get_issue"]));
   expect(spec.description.indexOf("linear") > 0);
   expect(spec.name == "find_tools");
 });
 
 test("an exact name beats a passing mention", () => {
-  // Asking for "teams" with a cap of 2 must return list_teams. It did not:
-  // matches were taken in roster order, so three alphabetically earlier tools
-  // filled the cap and the only exact match fell off the end — the model then
-  // called one of them and got a 400 from the connector.
   let m = waiting(["list_agent_skills", "list_comments", "list_cycles", "list_teams"]);
   let got = findTools(m, "teams", 2);
-  // Only one of them is about teams at all, so one is the whole answer — and
-  // the cap is a ceiling, never a quota to fill with near misses.
   expect(got.found.length == 1);
   expect(got.found[0].name == "list_teams");
 
-  // And where several do match, the exact name still comes first: "list" hits
-  // every name here, so ordering is the only thing being tested.
   let all = findTools(waiting(["list_comments", "list_teams"]), "list teams", 2);
   expect(all.found[0].name == "list_teams");
 });

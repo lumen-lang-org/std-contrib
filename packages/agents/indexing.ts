@@ -1,22 +1,7 @@
-// Indexing as a queue, because embedding is slow and a request is not.
-//
-// Uploading a document used to mean holding the HTTP connection open while
-// every chunk went to the model one at a time: a large file times out, a
-// browser shows nothing until it finishes, and a failure halfway leaves a
-// partly indexed corpus with nobody told. So an upload writes a job and
-// answers; a worker drains the queue and the job carries what happened.
-//
-// The queue is a table rather than a broker. PostgreSQL is already required
-// here — documents need pgvector — so a job table adds no service, and
-// `FOR UPDATE SKIP LOCKED` gives the same at-most-one-worker-per-row guarantee
-// a broker would. The rows are also the journal the console renders, which a
-// broker does not keep.
-
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
-// What a job is doing. A reader sees these words, so they are the words.
 export const JOB_QUEUED: string = "queued";
 export const JOB_INDEXING: string = "indexing";
 export const JOB_INDEXED: string = "indexed";
@@ -26,8 +11,6 @@ export type IndexJobRow = {
   id: string,
   source: string,
   scope: string,
-  // Which embedding model was active when this was queued. Kept on the job so
-  // a corpus reindexed after the model changed says which one produced it.
   modelId: string,
   body: string,
   status: string,
@@ -62,9 +45,6 @@ export function indexingPlan(db: Db): Migration[] {
   return plan;
 }
 
-// Queue a document. The body is carried on the job rather than in a file: a
-// worker in another process cannot read the uploader's disk, and a document
-// small enough to POST is small enough to hold.
 export function enqueue(db: Db, source: string, scope: string, modelId: string, body: string, now: string): string {
   let id = crypto.randomUUID();
   let row: IndexJobRow = {
@@ -76,11 +56,6 @@ export function enqueue(db: Db, source: string, scope: string, modelId: string, 
   return id;
 }
 
-// Take the oldest queued job, atomically.
-//
-// The claim is one statement — a SELECT then an UPDATE would hand the same row
-// to two workers between them. `SKIP LOCKED` is what makes a second worker
-// take the next row instead of waiting on this one.
 export function claimNext(db: Db, now: string): IndexJobRow {
   let none: IndexJobRow = {
     id: "", source: "", scope: "", modelId: "", body: "",
@@ -117,8 +92,6 @@ export function markFailed(db: Db, id: string, why: string, now: string): void {
     [JOB_FAILED, why, now, id]);
 }
 
-// Jobs that have not finished, for a scope or for everything. What the console
-// shows above the indexed documents, so an upload is visible while it waits.
 export function pendingJobs(db: Db, scope: string): IndexJobRow[] {
   let out: IndexJobRow[] = [];
   let sql = "SELECT id, source, scope, status, chunks, error, created_at FROM index_jobs"
@@ -144,21 +117,7 @@ export function pendingJobs(db: Db, scope: string): IndexJobRow[] {
   return out;
 }
 
-// A job whose worker died mid-flight: still "indexing" long after it was
-// claimed. Returned to the queue rather than left forever — the alternative is
-// a document nobody indexes and nobody is told about.
 export function requeueStalled(db: Db, before: string): void {
-  // An empty `before` means EVERY claimed row, not "claimed before the empty
-  // string". `updated_at` holds milliseconds as text and every one of them
-  // sorts above "", so the comparison was false for all of them and this
-  // function did nothing at all — a worker that died mid-job left its row
-  // saying "indexing" for good, which is precisely what the one caller calls
-  // it to prevent.
-  //
-  // Requeuing everything is right for the caller that passes "": the indexer
-  // is one systemd unit and systemd will not start a second while one runs,
-  // so a row still claimed when a worker starts belongs to a worker that is
-  // gone. A deployment running two would pass a real cutoff instead.
   if (before == "") {
     executeWith(db, "UPDATE index_jobs SET status = " + db.placeholder
       + " WHERE status = " + placeholderAt(db, 2),

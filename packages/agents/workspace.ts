@@ -1,23 +1,3 @@
-// The files a conversation is working on.
-//
-//   putFile(db, { threadId: threadId, fileName: "notes.md",
-//                 mime: "text/markdown", origin: "uploaded", body: body,
-//                 documentId: "", now: now });
-//   ... the agent reads, writes and lists them with built-in tools ...
-//   promoteFile(db, model, threadId, "notes.md", "/specs/notes", key);
-//
-// A file is current state with a name — unlike a turn, which is history, and
-// unlike a document, which is chunks under an embedding. Three origins:
-//
-//   uploaded    the user brought it
-//   generated   the model wrote it, with the write_file tool
-//   retrieved   pulled in from the corpus; a pointer, not a copy
-//
-// Files are read whole. What makes them useful to an agent is not this table
-// but the three tools the run offers when a thread has a workspace — the same
-// mechanism that offers a child agent, so a file write is a tool span in the
-// trace and a checkable expectation in an eval.
-
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
@@ -26,11 +6,6 @@ import { uploadBytesMax } from "./caps.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
 
-// The largest body one file may carry (AGENTS_UPLOAD_BYTES_MAX, caps.ts).
-//
-// Checked in putFile rather than at the REST door, because there are three
-// doors: the console's upload, the model's own `write_file`, and `pull` from
-// the corpus. A cap on the first alone is a cap a model walks around.
 export const UPLOAD_MAX: int = uploadBytesMax();
 
 export type WorkspaceFileRow = {
@@ -38,13 +13,8 @@ export type WorkspaceFileRow = {
   threadId: string,
   fileName: string,
   mime: string,
-  // "uploaded" | "generated" | "retrieved"
   origin: string,
   body: string,
-  // For a retrieved file: which document it points at. The body is still
-  // stored — a pointer alone would break when the corpus re-indexes — but the
-  // id says where it came from, which is what "why does the model think this"
-  // needs.
   documentId: string,
   updatedAt: string,
 };
@@ -72,11 +42,6 @@ export function workspacePlan(db: Db): Migration[] {
   return plan;
 }
 
-// --- reading and writing -----------------------------------------------------------
-
-// A name a file may have. Rejecting separators is not fussiness: these names
-// come from the model as tool arguments, and "../etc/passwd" as a file name
-// should die here, not be filtered by everything that later touches one.
 export function fileNameOk(name: string): bool {
   if (name == "" || name.length > 200) { return false; }
   let i: int = 0;
@@ -87,30 +52,16 @@ export function fileNameOk(name: string): bool {
     if (!ok) { return false; }
     i = i + 1;
   }
-  // Dots are for extensions, not for climbing.
   if (name.startsWith(".") || name.indexOf("..") >= 0) { return false; }
   return true;
 }
 
-// One row per (thread, name): writing a name that exists replaces it. Files
-// are current state — nothing points at a workspace file, which is what made
-// versioning prompts necessary and makes it dead weight here.
-// A file to write into a thread's workspace.
-//
-// Seven consecutive strings positionally, of which `body` and `documentId`
-// have no validation at all: swapped, the row keeps the whole document text
-// where the audit pointer belongs and the source id where the content
-// belongs, and persist accepts it. promoteFile is the call that passes a real
-// documentId, so it is the one that would have filed a document's text as its
-// own provenance.
 export type FileWrite = {
   threadId: string,
   fileName: string,
   mime: string,
-  // uploaded, generated or retrieved.
   origin: string,
   body: string,
-  // The knowledge-base document this came from, "" when it came from nowhere.
   documentId: string,
   now: string,
 };
@@ -173,32 +124,19 @@ export function deleteFile(db: Db, threadId: string, fileName: string): string {
   return "";
 }
 
-// --- promotion ----------------------------------------------------------------------
-
-// Make a file part of the corpus: split, embedded and filed under a scope,
-// where every agent granted that scope can retrieve it.
-//
-// Explicit, never a side effect of saving. The moment a conversation's
-// artifact becomes team knowledge is a decision, and this row's document_id is
-// the audit trail of it.
 export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName: string, scope: string, apiKey: string, now: string): Upload {
   let file = getFile(db, threadId, fileName);
   if (file.id == "") {
     let missing: Upload = { ok: false, chunks: 0, error: "no file \"" + fileName + "\" in this thread" };
     return missing;
   }
-  // The document source is derived from the file name: dots become
-  // underscores because a source must be a plain name.
   let source = sourceOf(fileName);
   let stored = uploadDocument(db, model, source, scope, file.body, apiKey);
   if (!stored.ok) { return stored; }
-  // The file remembers where it went.
   putFile(db, { threadId: threadId, fileName: fileName, mime: file.mime, origin: file.origin, body: file.body, documentId: source, now: now });
   return stored;
 }
 
-// A file name as a document source: the safe characters, with the rest
-// underscored.
 export function sourceOf(fileName: string): string {
   let out = "";
   let i: int = 0;
@@ -211,11 +149,6 @@ export function sourceOf(fileName: string): string {
   return out;
 }
 
-// --- the tools a workspace offers ---------------------------------------------------
-
-// The three file tools, described for the model. Offered by the run when it is
-// in a thread — a bare runAgent has no workspace, and offering tools that
-// answer "no thread" would be noise.
 export type WorkspaceTool = {
   name: string,
   description: string,
@@ -243,20 +176,11 @@ export function workspaceTools(): WorkspaceTool[] {
   return out;
 }
 
-// Dispatch one of the three. `answeredOk` distinguishes "the tool failed" from
-// "the tool answered no", same as an MCP call.
 export type FileToolResult = {
   handled: bool,
   ok: bool,
   text: string,
-  // Where an edit landed, 1-based; 0 for every answer that is not a
-  // successful edit_artifact. The step row carries it so the card can number
-  // the snippets it shows.
   line: int,
-  // What a script's reconcile landed, as a JSON list of {path, version} —
-  // "" for every answer that is not a run_script. The card draws these as
-  // chips that open the artifact panel's diff: a script that rewrote a file
-  // must not look identical to one that only printed.
   changed: string,
 };
 
@@ -265,12 +189,6 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
   if (threadId == "") { return not; }
 
   if (name == "list_files") {
-    // One answer for what used to be two stores. The split was real — an
-    // artifact is versioned output, a workspace file is scratch — but it was
-    // OUR split, and the model relayed it to the person verbatim: "the
-    // workspace is empty, but the following artifacts are available" is a
-    // sentence about database tables, told to somebody who asked what files
-    // they have. The person has files; this lists them.
     let arts = listArtifacts(db, threadId);
     let files = listFiles(db, threadId);
     if (arts.length == 0 && files.length == 0) {
@@ -301,9 +219,6 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
       let read: FileToolResult = { handled: true, ok: true, text: file.body, line: 0, changed: "" };
       return read;
     }
-    // Not scratch — an artifact then, by the same name the listing showed.
-    // Text comes back whole; a binary document is refused with its route,
-    // because base64 in a context window helps nobody.
     let artifact = getArtifact(db, threadId, argsName);
     if (artifact.id != "") {
       if (binaryKind(kindOf(argsName))) {
@@ -335,8 +250,6 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
   return not;
 }
 
-// A type from a name, for the common cases. "text/plain" otherwise: the body
-// is text whatever the name claims.
 export function mimeOf(fileName: string): string {
   if (fileName.endsWith(".md")) { return "text/markdown"; }
   if (fileName.endsWith(".json")) { return "application/json"; }

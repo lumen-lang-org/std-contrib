@@ -1,19 +1,6 @@
-// Talking to an MCP server whose address came out of the database.
-//
-// A server is a row: transport, endpoint, enabled. Mounting one is reading the
-// row and calling it — so adding a server to an agent is an INSERT, and no
-// part of this file changes.
-//
-// HTTP transport only. MCP's other transport is stdio, which needs to spawn a
-// process, and Lumen has no subprocess API; a stdio server has to be fronted
-// by something that speaks HTTP.
-
 import { McpServerRow } from "./schema.ts";
 import { jsonBlank, jsonValueAt, jsonRaw, jsonText, jsonList, jsonUnescape } from "./scan.ts";
 
-// A tool as its server describes it. `schema` is the tool's own JSON Schema,
-// kept as text: it is written by whoever wrote the tool, no record type can
-// declare its shape, and it is passed to the model unchanged.
 export type McpTool = {
   name: string,
   description: string,
@@ -26,12 +13,6 @@ export type McpCall = {
   error: string,
 };
 
-// The raw text of one of the envelope's own members, or "" when it has none.
-//
-// Top level only, which is the whole reason it is not `jsonRaw`: that searches
-// at any depth and takes the first match, and everything below the envelope
-// belongs to the tool. A tool that returns `{"error":"not found"}` as its
-// answer has answered.
 function envelopeMember(document: string, key: string): string {
   let i: int = 0;
   while (i < document.length && jsonBlank(document.charAt(i))) { i = i + 1; }
@@ -59,21 +40,11 @@ function envelopeMember(document: string, key: string): string {
   return "";
 }
 
-// Whether a JSON-RPC reply carries an error, and what it says.
 export type RpcFailure = {
   failed: bool,
   message: string,
 };
 
-// Whether the server refused the call.
-//
-// The envelope's own `error`, absent or null meaning success — which is what
-// the protocol says and was not what this asked. It asked whether the text of
-// the reply contained `"error"` anywhere, so a server that writes
-// `"error":null` beside a perfectly good result — legal, and common enough to
-// be the default in more than one MCP framework — had every tool it offers
-// reported broken, and the raw envelope was handed to the model as the tool's
-// answer.
 export function rpcFailure(document: string): RpcFailure {
   let none: RpcFailure = { failed: false, message: "" };
   let raw = envelopeMember(document, "error");
@@ -85,31 +56,14 @@ export function rpcFailure(document: string): RpcFailure {
   return refused;
 }
 
-// JSON-RPC over HTTP. The id is supplied by the caller rather than counted
-// here, because a record cannot hold a counter and a global would be shared
-// across the server's worker threads.
 function rpc(endpoint: string, id: int, method: string, params: string): McpCall {
   let none = new Map<string, string>();
   return rpcWith(endpoint, none, id, method, params);
 }
 
-// The same, carrying whatever the server needs to let us in. The token is
-// passed by the caller because it comes out of the encrypted store and this
-// file has no business reading credentials.
 function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: string, params: string): McpCall {
   let headers = new Map<string, string>();
   headers.set("content-type", "application/json");
-  // Both, and not one or the other.
-  //
-  // MCP's Streamable HTTP transport lets a server answer a single POST either
-  // as JSON or as an SSE stream, and it decides which — so a client has to say
-  // it will take both. Linear refuses outright without it:
-  //
-  //   HTTP 406 Not Acceptable: Client must accept both application/json and
-  //   text/event-stream
-  //
-  // which is what every hosted connector on the shelf does, and what made a
-  // perfectly good OAuth token look like a dead endpoint.
   headers.set("accept", "application/json, text/event-stream");
   for (const name of extra.keys()) {
     headers.set(name, extra.get(name) ?? "");
@@ -119,19 +73,11 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
   body = body + "}";
 
   let res = http.request(endpoint, "POST", body, headers);
-  // `ok` is false for every non-2xx, not only for a connection that failed —
-  // so this branch was reporting "no answer from <endpoint>" about servers
-  // that had answered perfectly clearly, 401 included. A person reading that
-  // goes looking at DNS and firewalls for a problem that is a token. The
-  // status is the thing to lead with wherever there is one.
   if (res.status == 0) {
     let failed: McpCall = { ok: false, text: "", error: "no answer from " + endpoint };
     return failed;
   }
   if (res.status != 200) {
-    // The body too, capped: an MCP server that refuses says why in it, and
-    // "HTTP 401" alone cannot distinguish an expired token from a revoked one
-    // from a scope the connector will not grant.
     let said = res.body.length > 200 ? res.body.slice(0, 200) : res.body;
     let bad: McpCall = { ok: false, text: res.body,
       error: "HTTP " + `${res.status}` + (said == "" ? "" : ": " + said) };
@@ -147,28 +93,9 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
   return good;
 }
 
-// The JSON-RPC envelope, whichever way the server chose to send it.
-//
-// Having asked for both, we get both: some servers answer a POST with a plain
-// JSON body and others frame the same envelope as one Server-Sent Event —
-//
-//   event: message
-//   data: {"jsonrpc":"2.0","id":2,"result":{"tools":[…]}}
-//
-// — and the difference is the server's to make per request, not a property of
-// the connector this could be configured with. Unwrapped here rather than in
-// each caller: `toolListing` and `callTool` both scan the envelope, and a
-// scanner handed an SSE frame finds the keys it wants inside the `data:` line
-// anyway, which is worse than failing — it half-works until a field name
-// appears in the framing.
 export function jsonOf(body: string): string {
   let text = body.trim();
   if (text == "" || text.startsWith("{") || text.startsWith("[")) { return text; }
-  // Take the LAST data line that carries an envelope: a stream may carry
-  // progress notifications before the reply, and the reply is what a caller
-  // asked for. Continuation lines of one SSE field are joined with "\n" by the
-  // specification, and no MCP server sends a multi-line JSON payload, so this
-  // reads one line per event and takes the last that parses as an object.
   let found = "";
   let rest = text;
   while (true) {
@@ -185,18 +112,6 @@ export function jsonOf(body: string): string {
   return text;
 }
 
-// The handshake. A server that will not initialise is not mounted, and saying
-// so beats discovering it on the first tool call.
-
-// What a server's auth setting means on the wire. "none" sends nothing;
-// "bearer" is the usual Authorization header; "header" is whatever name the
-// row carries, for a server that wants its own.
-//
-// "oauth" is on the wire exactly what "bearer" is — the difference is entirely
-// in where the token came from and who keeps it fresh, which is `connect.ts`'s
-// business and not this file's. That is the whole reason OAuth needed no new
-// transport code: RFC 9728 says the token goes in `Authorization: Bearer`, the
-// same header a pasted key goes in.
 export function authHeaders(server: McpServerRow, token: string): Map<string, string> {
   let out = new Map<string, string>();
   if (token == "" || server.authKind == "none" || server.authKind == "") { return out; }
@@ -222,21 +137,11 @@ export function initialize(server: McpServerRow, token: string): McpCall {
   return rpcWith(server.endpoint, authHeaders(server, token), 1, "initialize", "{}");
 }
 
-// What the server offers, and — when the answer is nothing — why.
-//
-// A caller mounting tools for a run only needs the list, and an empty one is
-// an answer it can act on. A console drawing the server needs the difference
-// between "offers no tools" and "could not be asked": the two look identical
-// on screen and mean opposite things about whether anything is wrong.
 export type ToolListing = {
   tools: McpTool[],
-  // Empty when the server answered. Otherwise a sentence a reader can act on.
   problem: string,
 };
 
-// Read by scanning rather than with JSON.parse: a tool's input schema is an
-// arbitrary shape by design, and a strict parse would refuse the whole reply
-// over a key it had never been told about.
 export function toolListing(server: McpServerRow, token: string): ToolListing {
   let out: McpTool[] = [];
   if (!server.enabled) { return { tools: out, problem: "this server is switched off" }; }
@@ -253,9 +158,6 @@ export function toolListing(server: McpServerRow, token: string): ToolListing {
   while (i < items.length) {
     let name = jsonText(items[i], "name");
     if (name != "") {
-      // A tool that declares no schema still takes an argument object; saying
-      // so explicitly is what every provider's tool format requires, and an
-      // absent `parameters` is rejected by some of them.
       let schema = jsonRaw(items[i], "inputSchema");
       if (schema == "" || !schema.startsWith("{")) {
         schema = "{\"type\":\"object\",\"properties\":{}}";
@@ -272,12 +174,10 @@ export function toolListing(server: McpServerRow, token: string): ToolListing {
   return { tools: out, problem: "" };
 }
 
-// The list alone, for a caller that has nowhere to put the reason.
 export function listTools(server: McpServerRow, token: string): McpTool[] {
   return toolListing(server, token).tools;
 }
 
-// Just the names, for a caller that only wants to know what is there.
 export function toolNames(server: McpServerRow, token: string): string[] {
   let out: string[] = [];
   let tools = listTools(server, token);
@@ -289,12 +189,6 @@ export function toolNames(server: McpServerRow, token: string): string[] {
   return out;
 }
 
-// The text blocks of a tool's result, joined.
-//
-// A result is `content: [{"type":"text","text":"..."}, ...]` and may hold more
-// than one block. Taking only the first would quietly drop the rest of an
-// answer, so they are joined in order; blocks of any other type — an image,
-// say — have no text and are left out.
 export function resultText(document: string): string {
   let out = "";
   let blocks = jsonList(jsonRaw(document, "content"));
@@ -310,17 +204,12 @@ export function resultText(document: string): string {
   return out;
 }
 
-// Call a tool. `args` is a JSON object as text, because its shape is the
-// tool's and not something this file can know.
 export function callTool(server: McpServerRow, toolName: string, args: string, token: string): McpCall {
   let body = args;
   if (body == "") { body = "{}"; }
   let params = "{\"name\":" + JSON.stringify(toolName) + ",\"arguments\":" + body + "}";
   let answered = rpcWith(server.endpoint, authHeaders(server, token), 3, "tools/call", params);
   if (!answered.ok) { return answered; }
-  // A tool that reports failure says so in the result rather than in a JSON-RPC
-  // error, and the model is the one that has to recover from it — so the text
-  // is handed back either way, with `ok` saying which happened.
   let failed = jsonRaw(answered.text, "isError") == "true";
   let value = resultText(answered.text);
   if (value == "") { value = answered.text; }

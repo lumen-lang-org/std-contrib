@@ -1,19 +1,3 @@
-// The scoped corpus, evaluated.
-//
-//   export LUMEN_MASTER_KEY=... MISTRAL_API_KEY=...
-//   cd packages/agents && EVAL_AGENT=eng lumen run examples/rag-evals.ts
-//   cd packages/agents && EVAL_AGENT=hr  lumen run examples/rag-evals.ts
-//
-// One dataset spanning both folders, run against each agent in turn. Neither
-// should pass all of it: an agent granted /hr can answer the leave questions
-// and not the engineering ones, and the reverse. A suite that scored either
-// agent 4/4 would mean the scopes were not holding.
-//
-// This is what evaluating retrieval is for. The answers alone cannot tell you
-// whether a wrong one came from a bad model, an empty folder or a grant that
-// does not cover what was asked -- `retrieval` scores which folder the passages
-// actually came off.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { postgres } from "../../plume/postgres.ts";
 import { connectDatabase, persist, execute, executeWith, dropTable } from "../../plume/plume.ts";
@@ -60,8 +44,6 @@ function main(): void {
   let ran = migrate(db, plan);
   if (!ran.ok) { console.log("migrate: " + ran.error); return; }
 
-  // --- the models -----------------------------------------------------------
-
   let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   let embed: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(chat));
@@ -76,8 +58,6 @@ function main(): void {
   let made = createDocuments(db, embedder);
   if (made != "") { console.log("documents: " + made); return; }
 
-  // --- two folders ----------------------------------------------------------
-
   let stored = credentialFor(db, "mistral", master);
   let engineering = uploadDocument(db, embedder, "plume_relations", "/engineering/plume",
     "A plume relation is a correlated subquery, not a join. An agent with three servers and two sub-agents is still one row, because each relation produces its own JSON that the database nests.\n\n"
@@ -91,10 +71,6 @@ function main(): void {
 
   console.log("");
   console.log("-- the folder tree ---------------------------------------------");
-  // No third list: `pending` names scopes whose only content is a queued or
-  // failed indexing job, and everything above was indexed inline and answered
-  // before this line ran. An example that passed a real queue here would be
-  // demonstrating the indexer, not the folder tree.
   let queued: string[] = [];
   let tree = scopeCounts(db, "", queued);
   let n: int = 0;
@@ -102,8 +78,6 @@ function main(): void {
     console.log("  " + tree[n].path + "   documents " + `${tree[n].documents}` + ", total " + `${tree[n].total}`);
     n = n + 1;
   }
-
-  // --- two agents, one corpus, different grants -----------------------------
 
   let engineer: AgentRow = { id: "eng", agentName: "engineer", description: "reads engineering docs", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
   let people: AgentRow = { id: "hr", agentName: "people", description: "reads HR policies", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
@@ -122,8 +96,6 @@ function main(): void {
   console.log("engineer granted " + agentScopes(db, "eng").join(", "));
   console.log("people   granted " + agentScopes(db, "hr").join(", "));
 
-  // --- the judge, and where the cases live ----------------------------------
-
   let judgePrompt: PromptRow = { id: "pj", promptName: "judge", version: 1, createdAt: "2026-07-26", body: "You grade answers. You are given a question, a reference answer and an answer to grade. Reply with JSON only: {\"score\": <0 to 1>, \"reason\": \"<one sentence>\"}. Score 1 when the facts match the reference, 0 when they contradict it or the answer declines to say. An answer that admits it does not know is 0 against a reference that states a fact." };
   persist(db, promptsMapping(), JSON.stringify(judgePrompt));
   let judge: AgentRow = { id: "judge", agentName: "judge", description: "grades answers", modelConfigId: "c1", promptId: "pj", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
@@ -137,8 +109,6 @@ function main(): void {
   };
   persist(db, traceConfigMapping(), JSON.stringify(traceRow));
   storeCredential(db, { provider: "tracing", apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo", masterKey: master, now: "2026-07-26" });
-
-  // --- the run ---------------------------------------------------------------
 
   let agentId = process.env("EVAL_AGENT") ?? "eng";
   let dataset = process.env("EVAL_DATASET") ?? "scoped-rag";

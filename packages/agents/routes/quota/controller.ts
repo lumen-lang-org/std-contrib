@@ -4,15 +4,6 @@ import { Reply, Request, ok } from "../../../rest/server.ts";
 import { GUEST_DAILY_RUNS, callerTags, guestTag } from "../../api-core.ts";
 import { nextUtcMidnightIso, runsSince, utcDayStartText } from "../../usage.ts";
 
-// The /quota routes.
-
-// What the day's ceiling looks like from where this caller stands — read once
-// at console boot; every send after that carries `guestRemaining` in its own
-// reply, so nothing polls this.
-//
-// A signed-in caller (and the community deployment, which has no gateway and
-// no guests) gets `{"limit":0}`: 0 is "no ceiling", and answering it here
-// rather than 404ing keeps the console's one boot call unconditional.
 @controller("/quota")
 export class QuotaApi {
   db: Db;

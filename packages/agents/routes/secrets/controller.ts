@@ -5,8 +5,6 @@ import { callerTags, guestTag } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";
 import { secretsOf } from "../../secrets.ts";
 
-// The /secrets routes.
-
 @controller("/secrets")
 export class SecretApi {
   db: Db;
@@ -25,8 +23,6 @@ export class SecretApi {
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    // The workflow rule, for the workflow reason: a secret is a standing key
-    // somebody else's API honours, and it has to belong to somebody.
     if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
       return badRequest("signing in is what makes a secret yours to keep");
     }
@@ -44,15 +40,11 @@ export class SecretApi {
       now: stamp(),
     });
     if (made.problem != "") { return badRequest(made.problem); }
-    // The row, never the value — the secrets table has no value column to
-    // leak; the envelope lives with the credentials and no route reads it.
     return created(findById(this.db, secretsMapping(), made.id));
   }
 
   @del("/:id")
   remove(req: Request): Reply {
-    // Owner-scoped inside forgetSecret: somebody else's secret is absent,
-    // not forbidden.
     if (!forgetSecret(this.db, param(req, "id"), owningTag(callerTags(req)))) {
       return notFound("secret " + param(req, "id"));
     }

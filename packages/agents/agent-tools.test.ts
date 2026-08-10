@@ -1,8 +1,3 @@
-// The agent verbs without a model: naming, the prompt-version rule, and the
-// sentences. Versions never edit — the roll-back is the point.
-//
-//   cd packages/agents && lumen test agent-tools.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, createTable, dropTable, persist } from "../plume/plume.ts";
@@ -17,9 +12,6 @@ function db(): Db {
   if (!ready) {
     let cfg: DbConfig = { filename: "/tmp/agents_agent_tools_test.db" };
     connectDatabase(database, cfg);
-    // The four tables these verbs touch, built directly: a full schemaPlan
-    // against a file that remembers half its tables aborts mid-plan, and
-    // this suite needs exactly these.
     dropTable(database, agentsMapping());
     dropTable(database, promptsMapping());
     dropTable(database, modelConfigsMapping(database));
@@ -75,7 +67,6 @@ test("a created agent is born on the default config with prompt v1", () => {
   expect(made.text.includes("french-tutor"));
   expect(made.text.includes("v1"));
   expect(made.text.includes("DeepSeek Flash"));
-  // A twin is refused with the way forward named.
   let twin = call("o1", "create_agent", "{\"name\":\"french-tutor\",\"prompt\":\"x\"}");
   expect(!twin.ok);
   expect(twin.text.includes("change_agent"));
@@ -100,7 +91,6 @@ test("nothing sent, nothing changed — and it says what could be", () => {
 });
 
 test("rollback repoints, delete refuses the default and takes the rest", () => {
-  // v1 was "You help."; write v2, then roll back to v1.
   let v2 = call("o1", "change_agent", "{\"agent\":\"helper\",\"prompt\":\"You help, tersely.\"}");
   expect(v2.ok);
   let back = call("o1", "change_agent", "{\"agent\":\"helper\",\"prompt_version\":1}");
@@ -110,7 +100,6 @@ test("rollback repoints, delete refuses the default and takes the rest", () => {
   expect(shown.text.includes("You help."));
   expect(!shown.text.includes("tersely"));
 
-  // The default cannot be deleted; a bystander can.
   let refused = call("o1", "delete_agent", "{\"agent\":\"helper\"}");
   expect(!refused.ok);
   expect(refused.text.includes("default"));

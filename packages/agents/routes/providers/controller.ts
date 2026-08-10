@@ -5,11 +5,6 @@ import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, masterKey, masterKeyProblem, providersWithCredentials, storeCredential } from "../../credentials.ts";
 import { KeyBody } from "./types.ts";
 
-// The /providers routes.
-
-// Credentials, over the API. A key can be written and named; it can never be
-// read back. Anything that returns one is a leak waiting for a log line, and
-// the caller who set it already knows what they set.
 @controller("/providers")
 export class ProviderApi {
   db: Db;
@@ -33,9 +28,6 @@ export class ProviderApi {
     return ok(out + "]");
   }
 
-  // Whether a provider has a usable key, without saying what it is. A caller
-  // needs to know a deployment is configured; it does not need the secret to
-  // find that out.
   @get("/:provider")
   status(req: Request): Reply {
     let usable = credentialFor(this.db, param(req, "provider"), this.master) != "";

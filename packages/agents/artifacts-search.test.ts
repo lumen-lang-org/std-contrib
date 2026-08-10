@@ -1,10 +1,3 @@
-// The scanners behind edit_artifact and search_artifacts, and the search
-// itself. The pure functions are tested byte for byte — offsets, lines and
-// cut points are the contract the tool layer builds refusals out of — and the
-// database cases run against a SQLite temp file, never the live database.
-//
-//   cd packages/agents && lumen test artifacts-search.test.ts
-
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
@@ -31,7 +24,6 @@ function seed(path: string, title: string, body: string): void {
   });
 }
 
-// n copies of `piece`, since there is no repeat in the stdlib.
 function copies(piece: string, n: int): string {
   let out = "";
   let i: int = 0;
@@ -39,11 +31,7 @@ function copies(piece: string, n: int): string {
   return out;
 }
 
-// --- editHits: occurrences, counted overlapping -----------------------------------
-
 test("aa in aaa is two hits — overlap decides the uniqueness rule", () => {
-  // Counted non-overlapping this would be one "unique" match, and the edit
-  // would splice the first two characters of a region the model never meant.
   let found = editHits("aaa", "aa", 8);
   expect(found.length == 2);
   expect(found[0].at == 0);
@@ -51,7 +39,6 @@ test("aa in aaa is two hits — overlap decides the uniqueness rule", () => {
 });
 
 test("hits carry byte offsets across a multi-byte character", () => {
-  // "é" is two bytes, so "llo" begins at byte 3, not character 2.
   let e = String.fromCodePoint(233);
   let body = "h" + e + "llo";
   let found = editHits(body, "llo", 8);
@@ -94,8 +81,6 @@ test("the walk stops at most+1, so more-than-most is knowable without walking to
   expect(found.length == 3);
 });
 
-// --- editLineAt -------------------------------------------------------------------
-
 test("editLineAt is 1-based and counts the newlines before the offset", () => {
   let body = "a\nbb\nccc";
   expect(editLineAt(body, 0) == 1);
@@ -103,8 +88,6 @@ test("editLineAt is 1-based and counts the newlines before the offset", () => {
   expect(editLineAt(body, 5) == 3);
   expect(editLineAt(body, body.length) == 3);
 });
-
-// --- editLoose: the near-miss scanner behind the zero-match refusal ---------------
 
 test("tab-for-space drift is found, with its line", () => {
   let body = "alpha\n\tlet x = 1;\ngamma";
@@ -121,10 +104,6 @@ test("a genuinely absent needle answers -1", () => {
 });
 
 test("NFC/NFD drift answers -1 — the blindness is documented, not accidental", () => {
-  // NFC "café" is c a f 0xC3 0xA9; NFD is c a f e 0xCC 0x81. The loose scan
-  // skips space, tab and CR, nothing else, so these are different bytes and
-  // no near miss is claimed. A later "improvement" that half-sees unicode
-  // fails this test instead of shipping quietly.
   let nfc = "caf" + String.fromCodePoint(233);
   let nfd = "cafe" + String.fromCodePoint(769);
   expect(editLoose(nfc, nfd) == -1);
@@ -135,8 +114,6 @@ test("a needle of nothing but blanks answers -1", () => {
   expect(editLoose("a b", "  ") == -1);
   expect(editLoose("a b", "") == -1);
 });
-
-// --- searchSnippet ----------------------------------------------------------------
 
 test("a line within the cap is quoted whole, with no marker", () => {
   let s = searchSnippet("let x = 1;");
@@ -157,17 +134,12 @@ test("a long line is cut with the visible marker, and only cut lines carry it", 
 });
 
 test("the cut lands on a UTF-8 boundary, walking back off continuation bytes", () => {
-  // Byte 159 starts a two-byte "é"; a cut at 160 would keep half of it and
-  // poison the row that quotes the snippet. The walk-back drops the whole
-  // character instead.
   let e = String.fromCodePoint(233);
   let line = copies("a", SEARCH_SNIPPET_MAX - 1) + e + copies("b", 20);
   let s = searchSnippet(line);
   expect(s.cut);
   expect(s.text == copies("a", SEARCH_SNIPPET_MAX - 1) + " [cut]");
 });
-
-// --- editContext ------------------------------------------------------------------
 
 test("context is the changed line with two lines either side", () => {
   let body = "l1\nl2\nl3\nl4\nl5\nl6\nl7";
@@ -199,11 +171,7 @@ test("a deletion shows the line the text was removed from", () => {
   expect(editContext(body, at, at) == "l1\nl2\nl3\nl4\nl5");
 });
 
-// --- searchArtifacts --------------------------------------------------------------
-
 test("percent and underscore are found literally, not as wildcards", () => {
-  // Unescaped, "50%" as a LIKE would match "50 anything". likeLiteral is the
-  // difference between a search tool and a pattern language nobody declared.
   fresh();
   seed("/a.md", "", "progress is 50% done\n");
   seed("/b.md", "", "progress is 50 percent done\n");
@@ -316,9 +284,6 @@ test("the query bounds and the one-line rule are refused outright", () => {
 });
 
 test("the length refusal counts bytes and says so", () => {
-  // A query of 101 two-byte letters is 202 bytes and refused, while its author
-  // counted 101 characters. The sentence has to name the unit it used, or the
-  // model reads a refusal whose arithmetic contradicts what it just wrote.
   fresh();
   seed("/a.md", "", "alpha\n");
   let arabic = copies("ل", 101);
@@ -326,7 +291,5 @@ test("the length refusal counts bytes and says so", () => {
   expect(!refused.ok);
   expect(refused.problem.includes("bytes of UTF-8"));
   expect(refused.problem.includes("202"));
-  // And the lower bound is bytes too: one Arabic letter is two bytes, which is
-  // the minimum, so a one-character query is accepted where "a" was not.
   expect(searchArtifacts(database, "t1", "ل").ok);
 });

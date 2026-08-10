@@ -4,12 +4,6 @@ import { Reply, Request, problem } from "../../../rest/server.ts";
 import { callerTags, forwardProduct } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";
 
-// The /playground routes.
-
-// The same forward, for a signed-in person trying it from the console. No key:
-// the playground is a person at a keyboard, authenticated by the proxy the way
-// every other console route is, and the key-scoped door is /v1. A guest is
-// asked to sign in rather than served.
 @controller("/playground")
 export class PlaygroundApi {
   db: Db;

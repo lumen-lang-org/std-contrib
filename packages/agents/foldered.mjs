@@ -1,14 +1,10 @@
 #!/usr/bin/env node
-// One folder per controller: routes/<name>/controller.ts and, where there are any,
-// routes/<name>/types.ts beside it.
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 
 const mods = readdirSync(".").filter((f) => /-routes\.ts$/.test(f) || f === "banner-api.ts");
 const rename = new Map();
 
-// Two directories deeper: packages/agents/x.ts -> packages/agents/routes/<name>/controller.ts.
-// So "./x.ts" gains two levels and "../x.ts" gains two as well, keeping its own.
 const deepen = (spec) =>
   spec.startsWith("../") ? "../../" + spec
   : spec.startsWith("./") ? "../../" + spec.slice(2)
@@ -23,7 +19,6 @@ for (const file of mods) {
   const imports = [], rest = [];
   for (const l of lines) (l.startsWith("import ") ? imports : rest).push(l);
 
-  // Type declarations, with the comment block above each.
   const body = rest.join("\n").split("\n");
   const typeSpans = [];
   for (let i = 0; i < body.length; i++) {
@@ -45,10 +40,6 @@ for (const file of mods) {
     body.slice(s, e + 1).join("\n").replace(/^(type|interface|enum) /m, "export $1 "));
   const controllerBody = body.filter((_, i) => !taken.has(i)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 
-  // One pass, tracking state. Stripping with ordered regexes cannot work here:
-  // comments-then-strings breaks on startsWith("https://"), whose // eats the
-  // closing quote and unbalances everything after it; strings-then-comments
-  // breaks on an apostrophe in a comment. Only a scanner gets both right.
   const codeOnly = (t) => {
     let out = "", i = 0;
     while (i < t.length) {

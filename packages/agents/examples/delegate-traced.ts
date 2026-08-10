@@ -1,14 +1,3 @@
-// The delegation run, traced.
-//
-//   python3 mcpserver.py 8200 &
-//   python3 otlp.py 8300 &                 # or point at Langfuse
-//   export LUMEN_MASTER_KEY=... MISTRAL_API_KEY=...
-//   cd packages/agents && lumen run examples/delegate-traced.ts
-//
-// Same two agents as delegate.ts. What is added is a trace_config row and a
-// secret in the credential store — tracing is off until both exist, and this
-// writes them the way the API would.
-
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../../plume/plume.ts";
@@ -67,8 +56,6 @@ function main(): void {
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
 
   storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
-
-  // --- tracing on, by two rows ----------------------------------------------
 
   let traceRow: TraceConfigRow = {
     id: "default",

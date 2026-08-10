@@ -1,32 +1,3 @@
-// Workflows, as tools an agent can call.
-//
-// The Workflows page is a canvas: you drag steps, connect them, press Run.
-// This is the other door onto the same rows — "every morning, search the web
-// for what changed about Lumen and have the assistant brief me" said in a
-// conversation, and a workflow exists, drawn and scheduled, that the person
-// can then open and rearrange by hand.
-//
-// Two doors, one set of rules, exactly as task-tools.ts holds them: every
-// refusal here is `packages/workflow`'s or `workflow-store.ts`'s own, called
-// from this side rather than reworded. What this module owns is prose — how
-// a graph is described to something that reads text — and the chain builder,
-// because a model should say "search, then summarise" and never place a
-// pixel.
-//
-// WHAT IT MAY NOT DO IS AS IMPORTANT AS WHAT IT DOES:
-//
-//   Nothing here fires anything. `run_workflow` moves `next_at` and stops,
-//   exactly as run_task_now does, so there stays one place a workflow can be
-//   claimed and recorded (scheduler.ts).
-//
-//   Nothing here crosses an owner. Somebody else's workflow is absent, not
-//   forbidden.
-//
-//   Nothing here draws. The tools build and edit CHAINS — the shape a
-//   sentence can describe. A graph that branches is the canvas's business,
-//   and a tool asked to splice around a branch says to open the page rather
-//   than guessing which arm was meant.
-
 import { Db } from "../plume/driver.ts";
 import { deleteById, executeWith, findById, listWhere, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
@@ -39,9 +10,6 @@ import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, en
 import { SecretRow, graphSecretProblem, secretByName, secretsOf } from "./secrets.ts";
 import { stampMs } from "./tasks.ts";
 
-// The step kinds a sentence can ask for, in the words a model would reach
-// for. The canvas vocabulary is wider (CONDITION branches are drawn, not
-// said); this list is what draft_workflow and add_step accept.
 const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\\\" (one model call, no tools), "
   + "\\\"web_search\\\" (the deployment's web index), \\\"knowledge\\\" (the agent's documents), "
   + "\\\"http\\\" (fetch a url), \\\"script\\\" (compiled Lumen, run sandboxed), "
@@ -75,10 +43,6 @@ function yes(text: string): FileToolResult {
   return good;
 }
 
-// The tools, described for a model. Every quote inside a schema is \\\" — an
-// escaped quote in the JSON the string becomes — because a schema reaches the
-// provider verbatim and one bare quote ends the request (task-tools.ts
-// records the DeepSeek 400 that taught this).
 export function workflowTools(): ToolSpec[] {
   let schedule = "How often, in words, or leave it out for a workflow run by hand. "
     + "Repeating: \\\"every day at 07:30\\\", \\\"every weekday at 08:00\\\", \\\"every 30 minutes\\\", \\\"every 6 hours\\\". "
@@ -231,8 +195,6 @@ function rowsOf(db: Db, owner: string): WorkflowRow[] {
     "owner = " + db.placeholder, [owner]));
 }
 
-/** The workflow this call is about, or an empty row — by id, then by unique
- *  name, ambiguity refused, exactly as task-tools resolves a task. */
 function mine(db: Db, owner: string, said: string): WorkflowRow {
   let none = emptyWorkflow();
   if (said == "") { return none; }
@@ -258,7 +220,6 @@ function mine(db: Db, owner: string, said: string): WorkflowRow {
   return none;
 }
 
-/** A step of this graph, by id then by unique name. */
 function stepOf(graph: WfGraph, said: string): WfNode {
   let wanted = said.toLowerCase().trim();
   let i: int = 0;
@@ -289,7 +250,6 @@ function whenReads(row: WorkflowRow): string {
   return "next " + civil(row.tz == "" ? "UTC" : row.tz, at as i64);
 }
 
-/** What one step does, in a phrase. */
 function stepReads(node: WfNode): string {
   if (node.type == "START") { return node.schedule == "" ? "start (by hand)" : "start (" + node.schedule + ")"; }
   if (node.type == "END") { return "end — the answer"; }
@@ -303,8 +263,6 @@ function stepReads(node: WfNode): string {
   return node.type;
 }
 
-/** The chain in walking order, as prose. A graph the tools built is a chain;
- *  one the canvas rearranged may branch, and then the edges are named too. */
 function graphProse(graph: WfGraph): string {
   let out = "";
   let at = startOf(graph);
@@ -366,22 +324,12 @@ function describe(row: WorkflowRow, parsedSteps: bool): string {
   return line;
 }
 
-// ---------------------------------------------------------------------------
-// Building and splicing chains
-// ---------------------------------------------------------------------------
-
-/** One said step as a node. `idx` places it; ids are short and stable so a
- *  model can quote them back. */
 export type SaidExtras = {
-  // ask: the options offered as tap buttons, one per line.
   options: string,
-  // switch: the values it routes on, one per line.
   cases: string,
-  // connector: which server and which of its tools, and the JSON arguments.
   server: string,
   tool: string,
   argsJson: string,
-  // reply only: the artifact path its send-a-document half posts.
   file: string,
 };
 
@@ -424,7 +372,6 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
   return built;
 }
 
-/** The extra fields a said step may carry, read once at either door. */
 export function extrasOf(said: string): SaidExtras {
   let held: SaidExtras = {
     options: jsonText(said, "options").trim(),
@@ -451,8 +398,6 @@ function startEndNode(kind: string, schedule: string, idx: int): WfNode {
   return built;
 }
 
-/** The text a step carries, changed for its kind — the one field a sentence
- *  edits. */
 function withText(node: WfNode, text: string, title: string, file: string): WfNode {
   let changed: WfNode = {
     id: node.id, type: node.type,
@@ -463,29 +408,17 @@ function withText(node: WfNode, text: string, title: string, file: string): WfNo
     serverId: node.serverId, tool: node.tool, args: node.args,
     url: text != "" && node.type == "HTTP" ? text : node.url,
     method: node.method,
-    // "none" is how a sentence clears a field it cannot send as empty.
     body: file != "" && node.type == "TELEGRAM_REPLY" ? (file == "none" ? "" : file) : node.body,
     query: text != "" && (node.type == "WEB_SEARCH" || node.type == "KNOWLEDGE") ? text : node.query,
     test: node.test, needle: node.needle, subject: node.subject,
     schedule: node.schedule, source: node.source ?? "",
-    // The optional fields ride too — the copy that dropped one once cost a
-    // switch its cases.
     cases: node.cases ?? "",
     headers: node.headers ?? "",
-    // Carried through the single-secret spelling too, so an old graph edited
-    // by a sentence keeps what it was sending.
     secrets: node.secrets ?? "", secretId: node.secretId ?? "",
   };
   return changed;
 }
 
-/** The same step carrying these stored secrets, by id — "" attaches none.
- *  The VALUE never passes through here: a sentence attaches names, and the
- *  names were resolved against the caller's own rows before this is called.
- *
- *  `secretId` is cleared whenever the list is written: two spellings of the
- *  same attachment, with the list winning, is a step whose visible pick and
- *  actual pick can disagree. */
 function withSecrets(node: WfNode, ids: string): WfNode {
   let changed: WfNode = {
     id: node.id, type: node.type, name: node.name, x: node.x, y: node.y,
@@ -500,7 +433,6 @@ function withSecrets(node: WfNode, ids: string): WfNode {
   return changed;
 }
 
-/** A said list — "stripe key, weather key" — as its pieces, blanks dropped. */
 function splitSaid(said: string): string[] {
   let out: string[] = [];
   let piece = "";
@@ -538,10 +470,6 @@ function edgeOf(from: string, to: string): WfEdge {
   return e;
 }
 
-/** The edges out of a NEW node toward the old next step. A plain node is one
- *  edge; a switch is one per case plus else, all pointing the same way until
- *  connect_steps re-points them — valid and runnable from the first save,
- *  which beats a switch that saves broken until somebody draws. */
 function branchEdges(node: WfNode, from: string, to: string): WfEdge[] {
   let out: WfEdge[] = [];
   if (node.type != "SWITCH") {
@@ -560,9 +488,6 @@ function branchEdges(node: WfNode, from: string, to: string): WfEdge[] {
   return out;
 }
 
-/** The row, rebuilt around a new graph and re-timed from its START — the one
- *  place a graph write happens, so refusal and recompilation cannot be
- *  skipped by one door and honoured by another. */
 type Stored = {
   ok: bool,
   row: WorkflowRow,
@@ -587,8 +512,6 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     lastRunAt: row.lastRunAt, lastRunId: row.lastRunId,
     lastStatus: row.lastStatus, lastError: row.lastError,
     runCount: row.runCount,
-    // Carried — a copy that dropped the published half would blank what
-    // production runs on the next conversational edit.
     publishedGraph: row.publishedGraph ?? "", publishedAt: row.publishedAt ?? "",
     createdAt: row.createdAt, updatedAt: `${nowMs}`,
   };
@@ -597,9 +520,6 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     let bad: Stored = { ok: false, row: row, error: wrong };
     return bad;
   }
-  // The secrets rule, at the tools' one choke point — every conversational
-  // graph write lands here, so an agent re-pointing an HTTP step away from
-  // its secret's address is refused in the same sentence the canvas gets.
   let secretWrong = graphSecretProblem(db, graph, row.owner);
   if (secretWrong != "") {
     let bad: Stored = { ok: false, row: row, error: secretWrong };
@@ -623,8 +543,6 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
   return good;
 }
 
-/** The zone to schedule in: asked, then this person's other workflows', then
- *  the deployment's, then UTC — the task-tools ladder. */
 function zoneFor(db: Db, owner: string, asked: string): string {
   if (asked != "") { return asked; }
   let rows = rowsOf(db, owner);
@@ -638,7 +556,6 @@ function zoneFor(db: Db, owner: string, asked: string): string {
   return "UTC";
 }
 
-// Dispatch one call. `handled` false means the name is not ours.
 export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult {
   if (call.name != "list_workflows" && call.name != "show_workflow"
     && call.name != "draft_workflow" && call.name != "add_step"
@@ -697,10 +614,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let nodes: WfNode[] = [];
     let edges: WfEdge[] = [];
     let said = jsonText(call.args, "schedule").trim();
-    // A chain with a reply or an ask in it is a BOT flow: it begins at a
-    // Telegram trigger, because an ask waits for a chat and a clock has
-    // none. A schedule alongside that is two answers to "what starts this",
-    // refused rather than silently half-honoured.
     let chatty = false;
     let look: int = 0;
     while (look < saidSteps.length) {
@@ -743,15 +656,10 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       let w: int = 0;
       while (w < ways.length) { edges.push(ways[w]); w = w + 1; }
       prevId = id;
-      // A switch mid-chain: its branches are wired when the NEXT step's edge
-      // is drawn, so the walk stays connected; nothing to do here beyond
-      // remembering that edgeOf(prev=switch) below must fan out.
       i = i + 1;
     }
     nodes.push(startEndNode("END", "", saidSteps.length + 1));
     edges.push(edgeOf(prevId, "end"));
-    // 60%: a five-step chain fits a laptop screen at this zoom, and the person
-    // can always lean in. The console opens drawings at the same figure.
     let view: WfView = { x: 0.0, y: 0.0, zoom: 0.6 };
     let graph: WfGraph = { nodes: nodes, edges: edges, view: view };
 
@@ -833,7 +741,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     };
     let wrong = refuseWorkflow(edited);
     if (wrong != "") { return no(wrong); }
-    // A paused schedule that comes back on needs a firing to come back to.
     let stored = edited;
     if (on && !row.enabled && edited.kind == "every") {
       let ahead = nextWorkflowFire(edited, call.nowMs);
@@ -867,7 +774,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     return yes((said == "" ? "It now runs only when asked." : "Scheduled.") + "\n\n" + describe(stored.row, false));
   }
 
-  // The three chain edits share the parse.
   let parsed = parseGraph(row.graph);
   if (!parsed.ok) { return no(parsed.error); }
   let graph = parsed.graph;
@@ -875,11 +781,8 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   if (call.name == "add_step") {
     let kind = jsonText(call.args, "kind").trim().toLowerCase();
     let text = jsonText(call.args, "text").trim();
-    // A switch says nothing — its cases are its meaning; a connector's is
-    // its server and tool. Everything else needs its text.
     if (text == "" && kind != "switch" && kind != "connector" && kind != "mcp") { return no("say what the step does: {\"kind\":\"agent\",\"text\":\"...\"}"); }
     let saidAfter = jsonText(call.args, "after").trim();
-    // Where the splice happens: after the named step, or on the edge into END.
     let fromId = "";
     if (saidAfter != "") {
       let anchor = stepOf(graph, saidAfter);
@@ -895,7 +798,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       }
       if (fromId == "") { return no("this workflow's end is reached by a branch — open it on the Workflows page and add the step there."); }
     }
-    // The one plain edge out of the anchor is replaced by two.
     let oldTo = "";
     let branchy = false;
     let e2: int = 0;
@@ -913,7 +815,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     if (built.id == "") {
       return no("\"" + kind + "\" is not a step kind — " + KINDS_SENTENCE + ".");
     }
-    // Placed just past its anchor; the canvas's tidy is a click away.
     let placed: WfNode = {
       id: built.id, type: built.type, name: built.name,
       x: anchorNode.x + 120.0, y: anchorNode.y + 140.0,
@@ -922,8 +823,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       url: built.url, method: built.method, body: built.body,
       query: built.query, test: built.test, needle: built.needle,
       subject: built.subject, schedule: built.schedule, source: built.source ?? "",
-      // The optional fields ride too — this copy dropped `cases` once and a
-      // said switch arrived caseless, refused by the graph's own rule.
       cases: built.cases ?? "",
       secrets: built.secrets ?? "", secretId: built.secretId ?? "",
     };
@@ -954,7 +853,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     return yes("Added.\n\n" + describe(stored.row, true));
   }
 
-  // connect_steps names its anchor "from"; the editing verbs say "step".
   let anchorSaid = call.name == "connect_steps" ? jsonText(call.args, "from").trim() : jsonText(call.args, "step").trim();
   let node = stepOf(graph, anchorSaid);
   if (node.id == "") { return no("no step by that id or name — show_workflow lists them."); }
@@ -1000,13 +898,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     if (file != "" && node.type != "TELEGRAM_REPLY") {
       return no("only a reply step sends a file — the file rides a reply, with the text as its caption.");
     }
-    // Secrets are ATTACHED here, never created: a person types values on the
-    // Workflows page or in Settings, and a conversation only points at them.
-    //
-    // No kind test: which steps can carry one is the runner's business (see
-    // WfNode.secrets), and a tool that decided it here would have to be
-    // edited every time that changed. Attaching one to a step that cannot
-    // send it does nothing rather than lying.
     let ids = "";
     let s: int = 0;
     let already = secretIds(node);
@@ -1018,8 +909,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       if (secretSaid == "none") {
         ids = "";
       } else {
-        // A list, so "stripe key, weather key" attaches both — the graph
-        // bounds how many, and refuses a repeat.
         let wanted = splitSaid(secretSaid);
         ids = "";
         let w: int = 0;
@@ -1047,7 +936,6 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     return yes("Changed.\n\n" + describe(stored.row, true));
   }
 
-  // remove_step.
   if (node.type == "START" || node.type == "END") {
     return no("every workflow keeps its start and end — remove the steps between them.");
   }
