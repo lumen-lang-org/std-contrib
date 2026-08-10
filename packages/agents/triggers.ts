@@ -528,20 +528,38 @@ export function queueOutboundFile(db: Db, botId: string, chatId: string, runId: 
   return row.id;
 }
 
+type KeyboardKey = {
+  text: string,
+};
+
+type ReplyKeyboardView = {
+  keyboard: KeyboardKey[][],
+  one_time_keyboard: bool,
+  resize_keyboard: bool,
+};
+
+function keyRow(one: string): KeyboardKey[] {
+  let key: KeyboardKey = { text: one };
+  let row: KeyboardKey[] = [key];
+  return row;
+}
+
 export function replyKeyboard(options: string): string {
-  let out = "";
+  let said: string[] = [];
   let lines = options.split("\n");
   let i: int = 0;
   while (i < lines.length) {
     let one = lines[i].trim();
-    if (one != "") {
-      if (out != "") { out = out + ","; }
-      out = out + "[{\"text\":" + JSON.stringify(one) + "}]";
-    }
+    if (one != "") { said.push(one); }
     i = i + 1;
   }
-  if (out == "") { return ""; }
-  return "{\"keyboard\":[" + out + "],\"one_time_keyboard\":true,\"resize_keyboard\":true}";
+  if (said.length == 0) { return ""; }
+  let board: ReplyKeyboardView = {
+    keyboard: said.map(keyRow),
+    one_time_keyboard: true,
+    resize_keyboard: true,
+  };
+  return JSON.stringify(board);
 }
 
 export function unsentOutbound(db: Db, botId: string): string {

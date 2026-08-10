@@ -730,23 +730,8 @@ export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
 
 function scriptChangedJson(ran: ScriptRan): string {
   if (ran.changed.length == 0 && ran.created.length == 0) { return ""; }
-  let out = "[";
-  let first = true;
-  let i: int = 0;
-  while (i < ran.changed.length) {
-    if (!first) { out = out + ","; }
-    out = out + "{\"path\":" + JSON.stringify(ran.changed[i].path) + ",\"version\":" + `${ran.changed[i].version}` + "}";
-    first = false;
-    i = i + 1;
-  }
-  i = 0;
-  while (i < ran.created.length) {
-    if (!first) { out = out + ","; }
-    out = out + "{\"path\":" + JSON.stringify(ran.created[i].path) + ",\"version\":" + `${ran.created[i].version}` + "}";
-    first = false;
-    i = i + 1;
-  }
-  return out + "]";
+  let all: ScriptVersioned[] = [...ran.changed, ...ran.created];
+  return JSON.stringify(all);
 }
 
 function scriptRunAnswer(ran: ScriptRan, envName: string): string {

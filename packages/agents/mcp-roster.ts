@@ -46,18 +46,20 @@ export function emptyRoster(): Roster {
   return none;
 }
 
+type RosterTool = {
+  name: string,
+  description: string,
+};
+
+function rosterTool(tool: McpTool): RosterTool {
+  let out: RosterTool = { name: tool.name, description: tool.description };
+  return out;
+}
+
 export function rememberRoster(db: Db, serverId: string, tools: McpTool[], now: string): void {
   if (serverId == "") { return; }
-  let out = "[";
-  let i: int = 0;
-  while (i < tools.length && i < MAX_REMEMBERED_TOOLS) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"name\":" + JSON.stringify(tools[i].name)
-      + ",\"description\":" + JSON.stringify(tools[i].description) + "}";
-    i = i + 1;
-  }
-  out = out + "]";
-  let row: McpRosterRow = { id: serverId, tools: out, listedAt: now };
+  let kept = tools.length > MAX_REMEMBERED_TOOLS ? tools.slice(0, MAX_REMEMBERED_TOOLS) : tools;
+  let row: McpRosterRow = { id: serverId, tools: JSON.stringify(kept.map(rosterTool)), listedAt: now };
   persist(db, mcpRosterMapping(), JSON.stringify(row));
 }
 
@@ -74,21 +76,16 @@ export function forgetRoster(db: Db, serverId: string): void {
   deleteById(db, mcpRosterMapping(), serverId);
 }
 
-type RosterTool = {
+type RosterSwitch = {
   name: string,
   description: string,
+  on: bool,
 };
 
 export function rosterWithSwitches(tools: string, declined: string[]): string {
   let rows: RosterTool[] = JSON.parse<RosterTool[]>(tools);
-  let out = "[";
-  let i: int = 0;
-  while (i < rows.length) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"name\":" + JSON.stringify(rows[i].name)
-      + ",\"description\":" + JSON.stringify(rows[i].description)
-      + ",\"on\":" + (declined.includes(rows[i].name) ? "false" : "true") + "}";
-    i = i + 1;
-  }
-  return out + "]";
+  return JSON.stringify(rows.map((row: RosterTool): RosterSwitch => {
+    let out: RosterSwitch = { name: row.name, description: row.description, on: !declined.includes(row.name) };
+    return out;
+  }));
 }

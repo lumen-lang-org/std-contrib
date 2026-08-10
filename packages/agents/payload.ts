@@ -40,15 +40,17 @@ export function knownBackend(name: string): bool {
     || name == "braintrust" || name == "langsmith" || name == "arize";
 }
 
+type ScopeView = {
+  path: string,
+  documents: int,
+  total: int,
+};
+
+function scopeView(node: ScopeNode): ScopeView {
+  let view: ScopeView = { path: node.path, documents: node.documents, total: node.total };
+  return view;
+}
+
 export function scopesJson(nodes: ScopeNode[]): string {
-  let out = "[";
-  let i: int = 0;
-  while (i < nodes.length) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"path\":" + JSON.stringify(nodes[i].path)
-      + ",\"documents\":" + `${nodes[i].documents}`
-      + ",\"total\":" + `${nodes[i].total}` + "}";
-    i = i + 1;
-  }
-  return out + "]";
+  return JSON.stringify(nodes.map(scopeView));
 }

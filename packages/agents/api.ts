@@ -374,20 +374,26 @@ export function routerRowProblem(db: Db, row: ModelRouterRow): string {
   return candidatesProblem(db, row.candidatesJson);
 }
 
+type CandidateView = {
+  key: string,
+  configId: string,
+  when: string,
+};
+
+function candidateView(item: string): CandidateView {
+  let out: CandidateView = {
+    key: jsonText(item, "key").trim(),
+    configId: jsonText(item, "configId").trim(),
+    when: jsonText(item, "when").trim(),
+  };
+  return out;
+}
+
 export function withCanonicalCandidates(row: ModelRouterRow): ModelRouterRow {
   let items = jsonList(row.candidatesJson.trim());
-  let list = "[";
-  let i: int = 0;
-  while (i < items.length) {
-    if (i > 0) { list = list + ","; }
-    list = list + "{\"key\":" + JSON.stringify(jsonText(items[i], "key").trim())
-      + ",\"configId\":" + JSON.stringify(jsonText(items[i], "configId").trim())
-      + ",\"when\":" + JSON.stringify(jsonText(items[i], "when").trim()) + "}";
-    i = i + 1;
-  }
   let out: ModelRouterRow = {
     id: row.id, label: row.label, routerConfigId: row.routerConfigId,
-    candidatesJson: list + "]", fallbackConfigId: row.fallbackConfigId,
+    candidatesJson: JSON.stringify(items.map(candidateView)), fallbackConfigId: row.fallbackConfigId,
     routeEvery: row.routeEvery, escalateOnly: row.escalateOnly, enabled: row.enabled,
   };
   return out;
