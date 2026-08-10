@@ -1,4 +1,4 @@
-import { View, view, render, escapeHtml, templateProblem } from "./template.ts";
+import { View, view, render, escapeHtml, checkTemplate } from "./template.ts";
 
 function withText(pairs: string[][]): View {
   let v = view();
@@ -81,10 +81,10 @@ test("a comment renders nothing", () => {
 });
 
 test("an unclosed block is refused before it is rendered", () => {
-  expect(templateProblem("<% if x %>no end") != "");
-  expect(templateProblem("<% end %>") != "");
-  expect(templateProblem("<% while x %><% end %>") != "");
-  expect(templateProblem("<% if %><% end %>") != "");
-  expect(templateProblem("<h1><%= title %></h1>") == "");
-  expect(templateProblem("<% each rows %><%= .a %><% end %>") == "");
+  expect(checkTemplate("<% if x %>no end") != "");
+  expect(checkTemplate("<% end %>") != "");
+  expect(checkTemplate("<% while x %><% end %>") != "");
+  expect(checkTemplate("<% if %><% end %>") != "");
+  expect(checkTemplate("<h1><%= title %></h1>") == "");
+  expect(checkTemplate("<% each rows %><%= .a %><% end %>") == "");
 });

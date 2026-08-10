@@ -61,7 +61,7 @@ text and land in the page as text.
 
 ## Checked before it renders
 
-`templateProblem(src)` answers why a template will not work, or `""`:
+`checkTemplate(src)` answers why a template will not work, or `""`:
 
 ```
 a block is opened and never closed with <% end %>

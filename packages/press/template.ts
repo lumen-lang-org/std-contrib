@@ -153,7 +153,7 @@ export function render(src: string, v: View): string {
   return renderRange(src, 0, src.length, v, new Map<string, string>(), false);
 }
 
-export function templateProblem(src: string): string {
+export function checkTemplate(src: string): string {
   let depth: int = 0;
   let at: int = 0;
   while (at < src.length) {
