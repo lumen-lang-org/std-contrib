@@ -120,6 +120,20 @@ Rule 1: a block is never on one line. Rule 2: a record does not sit inline in a 
 characters. No comments explaining what the code already says — `node tools/strip-comments.mjs`
 in joule-console removes them.
 
+## The scorecard
+
+    node tools/check-pattern.mjs                  # every rule, every route, exits 1
+    node tools/check-pattern.mjs --route tasks    # one route: is it done?
+    node tools/check-pattern.mjs --summary        # counts only
+
+Run it BEFORE claiming a route is converted, and before claiming a sweep is
+finished. It exists because "I converted the mappings" was true of two of them
+and false of thirty-four, and nothing said so — a rule nobody can run is a rule
+that gets half-applied.
+
+A route is done when its count is 0. `agents` and `runs` are 0; everything else
+is the worklist, worst first.
+
 ## Verifying a conversion
 
 All four, every time. The first three are cheap and the fourth catches what they cannot.

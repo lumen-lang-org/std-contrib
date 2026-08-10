@@ -130,13 +130,23 @@ export class AgentRepository {
     return runsOf(this.database, id, tags, limit);
   }
 
-  forget(id: string): void {
-    unlinkAllOwnedBy(this.database, linkOf(this.agents, "subAgents"), id);
-    unlinkAllPointingAt(this.database, linkOf(this.agents, "subAgents"), id);
-    unlinkAllOwnedBy(this.database, linkOf(this.agents, "servers"), id);
-    unlinkAllOwnedBy(this.database, linkOf(this.agents, "skills"), id);
-    unlinkAllOwnedBy(this.database, linkOf(this.agents, "scopes"), id);
-    deleteById(this.database, agentRetrievalMapping(), id);
-    deleteById(this.database, agentRepository(), id);
+  forget(id: string): string {
+    let steps: DbResult[] = [
+      unlinkAllOwnedBy(this.database, linkOf(this.agents, "subAgents"), id),
+      unlinkAllPointingAt(this.database, linkOf(this.agents, "subAgents"), id),
+      unlinkAllOwnedBy(this.database, linkOf(this.agents, "servers"), id),
+      unlinkAllOwnedBy(this.database, linkOf(this.agents, "skills"), id),
+      unlinkAllOwnedBy(this.database, linkOf(this.agents, "scopes"), id),
+      deleteById(this.database, agentRetrievalMapping(), id),
+      deleteById(this.database, agentRepository(), id),
+    ];
+    let i: int = 0;
+    while (i < steps.length) {
+      if (!steps[i].ok) {
+        return steps[i].error;
+      }
+      i = i + 1;
+    }
+    return "";
   }
 }

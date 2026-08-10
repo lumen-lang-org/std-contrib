@@ -3,10 +3,10 @@ import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../tracing/t
 import { AgentRetrievalRow } from "../../knowledge.ts";
 import { runAgentTraced } from "../../run.ts";
 import { recordRun } from "../../runlog.ts";
-import { ModelRow } from "../../schema.ts";
 import { tracerFor } from "../../trace.ts";
 import { runsSince, utcDayStartText } from "../../usage.ts";
 import { AgentWebRagRow } from "../../webrag.ts";
+import { Model } from "../models/entities/model.entity.ts";
 import { Outcome, produced, refusing } from "../../../rest/server.ts";
 import { AgentBody } from "./dtos/agent-body.dto.ts";
 import { RetrievalSetup } from "./dtos/retrieval-setup.dto.ts";
@@ -48,8 +48,12 @@ export class AgentService {
     return this.repository.runs(id, tags, limit);
   }
 
-  forget(id: string): void {
-    this.repository.forget(id);
+  forget(id: string): Outcome {
+    let fault = this.repository.forget(id);
+    if (fault != "") {
+      return refusing(fault);
+    }
+    return produced("");
   }
 
   runsToday(guest: string, at: number): int {
@@ -199,7 +203,7 @@ export class AgentService {
       if (document == "") {
         return refusing("queryMode generated needs an existing chat model as queryModelId");
       }
-      let model: ModelRow = JSON.parse<ModelRow>(document);
+      let model: Model = JSON.parse<Model>(document);
       if (model.kind != "chat") {
         return refusing(model.label + " is not a chat model");
       }

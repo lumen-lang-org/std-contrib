@@ -153,7 +153,10 @@ export class AgentApi {
   @Delete("/:id")
   @Guard(theAgent)
   remove(@PathVariable("id") id: string): Reply {
-    this.agents.forget(id);
+    let gone = this.agents.forget(id);
+    if (gone.fault != "") {
+      return BadRequest(gone.fault);
+    }
     return NoContent();
   }
 }
