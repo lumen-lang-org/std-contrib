@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById, persist } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, notFound, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { DestinationMove, credentialFor, destinationProblem, forgetCredential, hasCredential, masterKey, masterKeyProblem, storeCredential } from "../../credentials.ts";
@@ -24,6 +25,7 @@ export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
 }
 
 @controller("/tracing")
+@bindings
 export class TraceApi {
   db: Db;
   master: string;

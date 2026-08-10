@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, accepted, badRequest, created, noContent, notFound, ok, param } from "../../../rest/server.ts";
 import { callerTags, choiceProblem, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
@@ -28,6 +29,7 @@ export type TaskChangeAsk = {
 };
 
 @controller("/tasks")
+@bindings
 export class TaskApi {
   db: Db;
 

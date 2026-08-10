@@ -1,5 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { utf8Length } from "../../artifacts.ts";
@@ -9,6 +10,7 @@ import { readSetting, writeSetting } from "../../schema.ts";
 import { CaptchaAsk, CaptchaOff, CaptchaResolved, CaptchaSecretStored, CaptchaSetting, CaptchaView } from "./types.ts";
 
 @controller("/captcha")
+@bindings
 export class CaptchaApi {
   db: Db;
   master: string;

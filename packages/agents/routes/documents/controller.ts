@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, persist, safeIdentifier } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Guarded, Reply, Request, badRequest, jsonOf, noContent, notFound, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { pgOnly } from "../../guards.ts";
@@ -39,6 +40,7 @@ export function decodedSize(base64: string): int {
 }
 
 @controller("/documents")
+@bindings
 export class DocumentApi {
   db: Db;
   master: string;

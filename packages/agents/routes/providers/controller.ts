@@ -1,11 +1,13 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, badRequest, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, masterKey, masterKeyProblem, providersWithCredentials, storeCredential } from "../../credentials.ts";
 import { KeyBody, ProviderStatus } from "./types.ts";
 
 @controller("/providers")
+@bindings
 export class ProviderApi {
   db: Db;
   master: string;

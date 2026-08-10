@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, countWhere, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { DestinationMove, credentialFor, destinationOf, destinationProblem, hasCredential } from "../../credentials.ts";
 import { createProblem } from "../../payload.ts";
@@ -73,6 +74,7 @@ export function modelDestinationProblem(db: Db, row: ModelRow): string {
 }
 
 @controller("/models")
+@bindings
 export class ModelApi {
   db: Db;
   master: string;

@@ -1,10 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, problem } from "../../../rest/server.ts";
 import { callerTags, forwardProduct } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";
 
 @controller("/playground")
+@bindings
 export class PlaygroundApi {
   db: Db;
 

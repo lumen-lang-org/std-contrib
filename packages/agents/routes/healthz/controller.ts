@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { appliedHighWater } from "../../../plume/migrate.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, ok } from "../../../rest/server.ts";
 import { boolJson, stamp } from "../../api-core.ts";
 import { envDockerUp } from "../../environments.ts";
@@ -14,6 +15,7 @@ export function healthJson(db: Db, now: string): string {
 }
 
 @controller("/healthz")
+@bindings
 export class HealthApi {
   db: Db;
 

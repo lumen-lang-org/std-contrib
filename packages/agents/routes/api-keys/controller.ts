@@ -1,5 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { apiKeysOf, forgetApiKey, mintApiKey } from "../../api-keys.ts";
@@ -8,6 +9,7 @@ import { jsonText } from "../../scan.ts";
 import { MintedKey } from "./types.ts";
 
 @controller("/api-keys")
+@bindings
 export class ApiKeyApi {
   db: Db;
 

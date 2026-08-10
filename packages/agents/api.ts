@@ -1,5 +1,6 @@
 import { apiKeysPlan } from "./api-keys.ts";
-import { controller } from "../rest/controller.ts";
+import { bindings, controller } from "../rest/controller.ts";
+import { Bound } from "../rest/plan.ts";
 import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, okJson, createdJson, noContent, notFound, badRequest, problem } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
@@ -89,6 +90,7 @@ type PromptChange = { promptId: string };
 
 
 @controller("/model-configs")
+@bindings
 class ConfigApi {
   db: Db;
   constructor(db: Db) { this.db = db; }
@@ -237,6 +239,7 @@ export function choiceInUse(db: Db, choiceId: string): string {
 }
 
 @controller("/model-choices")
+@bindings
 class ChoiceApi {
   db: Db;
   constructor(db: Db) { this.db = db; }
@@ -444,6 +447,7 @@ export function routerInUse(db: Db, routerId: string): string {
 }
 
 @controller("/model-routers")
+@bindings
 class RouterApi {
   db: Db;
   constructor(db: Db) { this.db = db; }
@@ -666,6 +670,7 @@ type TranscriptView = {
 };
 
 @controller("/threads")
+@bindings
 class ThreadApi {
   db: Db;
   master: string;

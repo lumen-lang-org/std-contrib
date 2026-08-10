@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
@@ -17,6 +18,7 @@ export function authProviderProblem(ask: AuthProviderAsk): string {
 }
 
 @controller("/auth-providers")
+@bindings
 export class AuthProviderApi {
   db: Db;
   master: string;

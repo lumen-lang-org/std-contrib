@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, existsById, findById, listOrdered, pageOrdered, persist } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, ok } from "../../../rest/server.ts";
 import { PromptRow, promptsMapping } from "../../schema.ts";
 
@@ -14,6 +15,7 @@ function maxVersion(db: Db, name: string): int {
 }
 
 @controller("/prompts")
+@bindings
 export class PromptApi {
   db: Db;
   constructor(db: Db) { this.db = db; }

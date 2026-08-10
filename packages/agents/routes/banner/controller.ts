@@ -1,5 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, ok } from "../../../rest/server.ts";
 import { readSetting, writeSetting } from "../../schema.ts";
 import { utf8Length } from "../../artifacts.ts";
@@ -35,6 +36,7 @@ export function bannerChange(db: Db, body: string): Reply {
 }
 
 @controller("/banner")
+@bindings
 export class BannerApi {
   db: Db;
 

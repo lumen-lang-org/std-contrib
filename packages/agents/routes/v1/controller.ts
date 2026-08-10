@@ -1,11 +1,13 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, header, ok, problem } from "../../../rest/server.ts";
 import { forwardProduct, stamp } from "../../api-core.ts";
 import { hasScope, touchApiKey, verifyApiKey } from "../../api-keys.ts";
 import { presentedKey } from "../../search-gateway.ts";
 
 @controller("/v1")
+@bindings
 export class V1Api {
   db: Db;
 

@@ -1,10 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, okJson, problem } from "../../../rest/server.ts";
 import { SandboxLimits, defaultLimits, sandboxLimits, saveSandboxLimits } from "../../sandbox-limits.ts";
 import { SandboxLimitsView } from "./types.ts";
 
 @controller("/sandbox-limits")
+@bindings
 export class SandboxLimitsApi {
   db: Db;
 

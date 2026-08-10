@@ -1,10 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, notFound, ok } from "../../../rest/server.ts";
 import { callerTags } from "../../api-core.ts";
 import { ownedRun } from "../../runlog.ts";
 
 @controller("/runs")
+@bindings
 export class RunApi {
   db: Db;
 

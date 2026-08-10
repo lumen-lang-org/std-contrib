@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Guarded, Reply, Request, badRequest, createdJson, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { credentialFor } from "../../credentials.ts";
@@ -12,6 +13,7 @@ import { deleteFile, getFile, listFiles, mimeOf, promoteFile, putFile } from "..
 import { FileContent, FilePromote, FilePromoted, FilePull, FilePulled, FileUpload, FileUploaded, FileView } from "./types.ts";
 
 @controller("/threads/:id/files")
+@bindings
 export class WorkspaceApi {
   db: Db;
   master: string;

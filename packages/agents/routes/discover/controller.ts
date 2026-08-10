@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, listOrdered, persist } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { DiscoverFeed, allFeeds, discoverFeedsMapping, discoverStoriesMapping, discoverText, discoverTextMapping, ensureGeoFeed, feedById, geoCode, setDiscoverText, storiesFor, storyById } from "../../discover.ts";
@@ -10,6 +11,7 @@ import { DeletedView, DiscoverFeedView, DiscoverStoryView, FeedAsk, PlaceView, P
 const PROMPT_CHARS_MAX: int = 20000;
 
 @controller("/discover")
+@bindings
 export class DiscoverApi {
   @get("/prompt")
   readPrompt(req: Request): Reply {

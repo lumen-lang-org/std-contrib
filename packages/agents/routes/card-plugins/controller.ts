@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, notFound, ok } from "../../../rest/server.ts";
 import { stamp, toolCardProblem } from "../../api-core.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping } from "../../plugincards.ts";
@@ -15,6 +16,7 @@ function rawListOr(body: string, member: string): string {
 }
 
 @controller("/card-plugins")
+@bindings
 export class CardPluginApi {
   db: Db;
 

@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { View, view, render } from "../../../press/template.ts";
 import { placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, header, notFound, param, reply } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { ArtifactRow, findByToken, getArtifact, getVersion, imageMediaType } from "../../artifacts.ts";
@@ -151,6 +152,7 @@ function previewLiveReply(db: Db, req: Request, artifact: ArtifactRow, body: str
 }
 
 @controller("/preview")
+@bindings
 export class PreviewApi {
   db: Db;
 

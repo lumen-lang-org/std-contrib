@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, accepted, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
@@ -12,6 +13,7 @@ import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCou
 import { ScriptCheckFailed, ScriptCheckFresh } from "./types.ts";
 
 @controller("/workflows")
+@bindings
 export class WorkflowApi {
   db: Db;
 

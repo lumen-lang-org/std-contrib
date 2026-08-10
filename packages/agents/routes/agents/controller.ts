@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, reply } from "../../../rest/server.ts";
 import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../tracing/tracing.ts";
 import { GUEST_DAILY_RUNS, callerTags, guestQuotaJson, guestTag } from "../../api-core.ts";
@@ -43,6 +44,7 @@ export function forgetAgent(db: Db, agentId: string): void {
 }
 
 @controller("/agents")
+@bindings
 export class AgentApi {
   db: Db;
   flat: DbRepository;

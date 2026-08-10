@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { forgetCredential, storeCredential } from "../../credentials.ts";
@@ -25,6 +26,7 @@ export type TriggerTestAsk = {
 };
 
 @controller("/triggers")
+@bindings
 export class TriggerApi {
   db: Db;
   master: string;

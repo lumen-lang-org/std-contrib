@@ -1,12 +1,14 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, notFound, ok, okJson, problem } from "../../../rest/server.ts";
 import { toolCardProblem } from "../../api-core.ts";
 import { ToolCardRow, toolCardsMapping } from "../../toolcards.ts";
 import { ToolCardDeleted } from "./types.ts";
 
 @controller("/tool-cards")
+@bindings
 export class ToolCardApi {
   db: Db;
 

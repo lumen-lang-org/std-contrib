@@ -1,5 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, header, noContent, ok } from "../../../rest/server.ts";
 import { callerTags, guestTag } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";
@@ -7,6 +8,7 @@ import { secretsOf } from "../../secrets.ts";
 import { SecretCreateAsk } from "./types.ts";
 
 @controller("/secrets")
+@bindings
 export class SecretApi {
   db: Db;
   master: string;

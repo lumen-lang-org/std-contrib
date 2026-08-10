@@ -1,5 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
-import { controller } from "../../../rest/controller.ts";
+import { bindings, controller } from "../../../rest/controller.ts";
+import { Bound } from "../../../rest/plan.ts";
 import { Guarded, Reply, Request, ok } from "../../../rest/server.ts";
 import { pgOnly } from "../../guards.ts";
 import { IndexJobRow, pendingJobs } from "../../indexing.ts";
@@ -18,6 +19,7 @@ function jobView(r: IndexJobRow): JobView {
 }
 
 @controller("/jobs")
+@bindings
 export class JobApi {
   db: Db;
 

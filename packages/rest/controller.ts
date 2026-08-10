@@ -258,6 +258,15 @@ function isOwnMethod(d: Description, name: string): bool {
   return false;
 }
 
+function paramHas(p: ControllerParam, name: string): bool {
+  let i: int = 0;
+  while (i < p.decorators.length) {
+    if (p.decorators[i].name == name) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
 function guardsFor(d: Description, m: ControllerMethod): string[] {
   let out: string[] = [];
   let i: int = 0;
@@ -279,6 +288,18 @@ function guardsFor(d: Description, m: ControllerMethod): string[] {
       }
     }
     i = i + 1;
+  }
+  // `@Valid` beside `@RequestBody` runs the rules its type carries before the
+  // handler is called. The rule list is the constant `@validated` left, found
+  // by name the same way `Class.decorator` finds one, so a type with no rules
+  // simply has no guard.
+  let k: int = 0;
+  while (k < m.params.length) {
+    let p = m.params[k];
+    if (paramHas(p, "Valid") && paramHas(p, "RequestBody") && p.type != "") {
+      out.push("validatedBody(validated" + p.type + ", req.body)");
+    }
+    k = k + 1;
   }
   return out;
 }
