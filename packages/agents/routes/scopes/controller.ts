@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, badRequest, ok } from "../../../rest/server.ts";
+import { Guarded, Reply, ok } from "../../../rest/server.ts";
+import { pgOnly } from "../../guards.ts";
 import { pendingJobs } from "../../indexing.ts";
 import { scopeCounts } from "../../knowledge.ts";
 import { scopesJson } from "../../payload.ts";
@@ -11,11 +12,13 @@ export class ScopeApi {
 
   constructor(db: Db) { this.db = db; }
 
+  needsPg(): Guarded {
+    return pgOnly(this.db, "documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+  }
+
   @get("/")
+  @Guard("needsPg")
   tree(@RequestParam("prefix", "") prefix: string): Reply {
-    if (this.db.name != "postgres") {
-      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
     let waiting = pendingJobs(this.db, "");
     let pending: string[] = [];
     let w: int = 0;

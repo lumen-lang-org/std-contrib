@@ -1,8 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, persist, safeIdentifier } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, jsonOf, noContent, notFound, okJson } from "../../../rest/server.ts";
+import { Guarded, Reply, Request, badRequest, jsonOf, noContent, notFound, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
+import { pgOnly } from "../../guards.ts";
 import { credentialFor } from "../../credentials.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "../../document-files.ts";
 import { JOB_QUEUED, enqueue, pendingJobs } from "../../indexing.ts";
@@ -47,11 +48,13 @@ export class DocumentApi {
     this.master = master;
   }
 
+  needsPg(): Guarded {
+    return pgOnly(this.db, "documents need PostgreSQL (pgvector); this runs on " + this.db.name);
+  }
+
   @get("/")
+  @Guard("needsPg")
   list(@RequestParam("scope", "/") asked: string): Reply {
-    if (this.db.name != "postgres") {
-      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
     let scope = normalScope(asked);
 
     let originals = sourcesWithFiles(this.db, scope);
@@ -92,10 +95,8 @@ export class DocumentApi {
   }
 
   @post("/")
+  @Guard("needsPg")
   upload(req: Request, @RequestParam("model", "") modelId: string): Reply {
-    if (this.db.name != "postgres") {
-      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: DocumentUpload = JSON.parse<DocumentUpload>(req.body);
     if (body.scope == "") { return badRequest("a document needs a scope: \"/specs/plume\""); }
@@ -124,10 +125,8 @@ export class DocumentApi {
   }
 
   @put("/file")
+  @Guard("needsPg")
   keepFile(req: Request): Reply {
-    if (this.db.name != "postgres") {
-      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"source\":\"...\",\"scope\":\"...\",\"filename\":\"...\",\"mime\":\"...\",\"contentBase64\":\"...\"}");
     }
@@ -159,11 +158,9 @@ export class DocumentApi {
   }
 
   @get("/file")
+  @Guard("needsPg")
   file(@RequestParam("source", "") source: string,
        @RequestParam("scope", "/") scope: string): Reply {
-    if (this.db.name != "postgres") {
-      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
     if (source == "") { return badRequest("name the document: ?source=notes&scope=/specs"); }
     let kept = findDocumentFile(this.db, scope, source);
     if (kept.id == "") { return notFound("no kept file for " + source); }
@@ -177,10 +174,8 @@ export class DocumentApi {
   }
 
   @del("/:source")
+  @Guard("needsPg")
   remove(@PathVariable("source") source: string): Reply {
-    if (this.db.name != "postgres") {
-      return badRequest("documents need PostgreSQL (pgvector); this runs on " + this.db.name);
-    }
     executeWith(this.db, "DELETE FROM documents WHERE source = " + this.db.placeholder, [source]);
     forgetDocumentFiles(this.db, source);
     return noContent();

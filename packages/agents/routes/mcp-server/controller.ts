@@ -1,3 +1,4 @@
+import { INVALID_REQUEST, METHOD_NOT_FOUND, answered, envelopeOf, jsonArrayOf, jsonObjectOf, refused, rpcOk, rpcRaw } from "../../../jsonrpc/rpc.ts";
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, ok } from "../../../rest/server.ts";
@@ -12,6 +13,7 @@ import { callTaskTool, taskTools } from "../../task-tools.ts";
 import { callTriggerTool, triggerTools } from "../../trigger-tools.ts";
 import { callWorkflowTool, workflowTools } from "../../workflow-tools.ts";
 import { FileToolResult } from "../../workspace.ts";
+import { McpAcknowledged, McpCallResult, McpInitializeResult } from "./types.ts";
 
 function mcpExportedTools(): ToolSpec[] {
   let out: ToolSpec[] = [];
@@ -62,51 +64,57 @@ export class McpServerApi {
 
   @post("/")
   rpc(req: Request): Reply {
-    let id = jsonRaw(req.body, "id");
-    if (id == "") { id = "null"; }
-    let method = jsonText(req.body, "method");
-
-    if (method == "initialize") {
-      return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{"
-        + "\"protocolVersion\":\"2024-11-05\","
-        + "\"capabilities\":{\"tools\":{}},"
-        + "\"serverInfo\":{\"name\":\"joule\",\"version\":\"1\"}}}");
-    }
-    if (method == "notifications/initialized" || method == "ping") {
-      return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{}}");
+    let asked = envelopeOf(req.body);
+    if (asked.fault != "") {
+      return ok(refused(asked.id, INVALID_REQUEST, asked.fault));
     }
 
-    if (method == "tools/list") {
+    if (asked.method == "initialize") {
+      let hello: McpInitializeResult = {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "joule", version: "1" },
+      };
+      return ok(answered(asked.id, rpcOk(hello)));
+    }
+
+    if (asked.method == "notifications/initialized" || asked.method == "ping") {
+      let noted: McpAcknowledged = {};
+      return ok(answered(asked.id, rpcOk(noted)));
+    }
+
+    if (asked.method == "tools/list") {
       let specs = mcpExportedTools();
-      let out = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"tools\":[";
+      let listed: string[] = [];
       let i: int = 0;
       while (i < specs.length) {
-        if (i > 0) { out = out + ","; }
-        out = out + "{\"name\":" + JSON.stringify(specs[i].name)
-          + ",\"description\":" + JSON.stringify(specs[i].description)
-          + ",\"inputSchema\":" + specs[i].schema + "}";
+        listed.push(jsonObjectOf([
+          { key: "name", json: JSON.stringify(specs[i].name) },
+          { key: "description", json: JSON.stringify(specs[i].description) },
+          { key: "inputSchema", json: specs[i].schema },
+        ]));
         i = i + 1;
       }
-      return ok(out + "]}}");
+      let roster = jsonObjectOf([{ key: "tools", json: jsonArrayOf(listed) }]);
+      return ok(answered(asked.id, rpcRaw(roster)));
     }
 
-    if (method == "tools/call") {
-      let params = jsonRaw(req.body, "params");
-      let name = jsonText(params, "name");
-      let args = jsonRaw(params, "arguments");
+    if (asked.method == "tools/call") {
+      let name = jsonText(asked.params, "name");
+      let args = jsonRaw(asked.params, "arguments");
       if (args == "") { args = "{}"; }
       let owner = owningTag(callerTags(req));
-      let answered = mcpDispatch(this.db, owner, name, args);
-      if (!answered.handled) {
-        return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id
-          + ",\"error\":{\"code\":-32601,\"message\":" + JSON.stringify("no tool named " + name) + "}}");
+      let done = mcpDispatch(this.db, owner, name, args);
+      if (!done.handled) {
+        return ok(refused(asked.id, METHOD_NOT_FOUND, "no tool named " + name));
       }
-      return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{"
-        + "\"content\":[{\"type\":\"text\",\"text\":" + JSON.stringify(answered.text) + "}],"
-        + "\"isError\":" + (answered.ok ? "false" : "true") + "}}");
+      let said: McpCallResult = {
+        content: [{ type: "text", text: done.text }],
+        isError: !done.ok,
+      };
+      return ok(answered(asked.id, rpcOk(said)));
     }
 
-    return ok("{\"jsonrpc\":\"2.0\",\"id\":" + id
-      + ",\"error\":{\"code\":-32601,\"message\":\"unknown method\"}}");
+    return ok(refused(asked.id, METHOD_NOT_FOUND, "unknown method"));
   }
 }

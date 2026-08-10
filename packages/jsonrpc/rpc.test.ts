@@ -1,4 +1,5 @@
-import { rpc, Description, RpcMethodNote, RpcDecoratorUse, RpcRoute, tableFault, handlerFor, envelopeOf, jsonObjectOf, jsonArrayOf, rpcOk, rpcRaw, answered, refused, METHOD_NOT_FOUND, INVALID_REQUEST, PARSE_ERROR, INVALID_PARAMS, INTERNAL_ERROR } from "./rpc.ts";
+import { rpc, Description, RpcMethodNote, RpcDecoratorUse, RpcRoute, tableFault, handlerFor } from "./decorator.ts";
+import { envelopeOf, jsonObjectOf, jsonArrayOf, rpcOk, rpcRaw, answered, refused, METHOD_NOT_FOUND, INVALID_REQUEST, PARSE_ERROR, INVALID_PARAMS, INTERNAL_ERROR } from "./rpc.ts";
 
 type Info = { name: string, version: string };
 

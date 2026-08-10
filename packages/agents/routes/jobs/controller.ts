@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, ok } from "../../../rest/server.ts";
+import { Guarded, Reply, Request, ok } from "../../../rest/server.ts";
+import { pgOnly } from "../../guards.ts";
 import { IndexJobRow, pendingJobs } from "../../indexing.ts";
 import { JobView } from "./types.ts";
 
@@ -22,9 +23,13 @@ export class JobApi {
 
   constructor(db: Db) { this.db = db; }
 
+  needsPg(): Guarded {
+    return pgOnly(this.db, "jobs need PostgreSQL (pgvector); this runs on " + this.db.name);
+  }
+
   @get("/")
+  @Guard("needsPg")
   list(req: Request): Reply {
-    if (this.db.name != "postgres") { return ok("[]"); }
     return ok(JSON.stringify(pendingJobs(this.db, "").map(jobView)));
   }
 }

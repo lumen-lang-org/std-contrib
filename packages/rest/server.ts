@@ -77,6 +77,16 @@ export function jsonOf<T>(status: int, value: T): Reply {
 
 export function okJson<T>(value: T): Reply { return jsonOf(200, value); }
 
+export type Guarded = { stop: bool, reply: Reply };
+
+export function passes(): Guarded {
+  return { stop: false, reply: reply(200, "", "application/json") };
+}
+
+export function stops(r: Reply): Guarded {
+  return { stop: true, reply: r };
+}
+
 export function validationRefusal(rules: Rule[], body: string): string {
   let wrong = faults(rules, body);
   if (wrong.length == 0) { return ""; }

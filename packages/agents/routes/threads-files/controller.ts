@@ -1,9 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
+import { Guarded, Reply, Request, badRequest, createdJson, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { credentialFor } from "../../credentials.ts";
+import { pgOnly } from "../../guards.ts";
 import { documentsMapping, embeddingModel, normalScope } from "../../knowledge.ts";
 import { jsonText } from "../../scan.ts";
 import { ownedThread } from "../../threads.ts";
@@ -18,6 +19,10 @@ export class WorkspaceApi {
   constructor(db: Db, master: string) {
     this.db = db;
     this.master = master;
+  }
+
+  needsPg(): Guarded {
+    return pgOnly(this.db, "the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
   }
 
   @get("/")
@@ -88,12 +93,10 @@ export class WorkspaceApi {
   }
 
   @post("/pull")
+  @Guard("needsPg")
   pull(req: Request, @PathVariable("id") id: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
       return notFound("thread " + id);
-    }
-    if (this.db.name != "postgres") {
-      return badRequest("the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
     }
     let body: FilePull = JSON.parse<FilePull>(req.body);
     let document = findById(this.db, documentsMapping(), body.documentId);
@@ -106,14 +109,12 @@ export class WorkspaceApi {
   }
 
   @post("/:name/promote")
+  @Guard("needsPg")
   promote(req: Request,
           @PathVariable("id") id: string,
           @PathVariable("name") name: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
       return notFound("thread " + id);
-    }
-    if (this.db.name != "postgres") {
-      return badRequest("the corpus needs PostgreSQL (pgvector); this runs on " + this.db.name);
     }
     if (req.body == "") { return badRequest("a body is required: {\"scope\":\"/specs\",\"modelId\":\"e1\"}"); }
     let body: FilePromote = JSON.parse<FilePromote>(req.body);
