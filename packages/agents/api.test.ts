@@ -27,8 +27,15 @@ import { putFile, getFile, listFiles } from "./workspace.ts";
 import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
-import { migrationProblem, decodedSize, modelProblem, modelDestinationProblem, serverDestinationProblem, traceDestinationProblem, forgetServer, forgetAgent, skillProblem, skillFileProblem, bearerRefused, healthJson, choicesJson, askedChoice, askedPick, choiceProblem, configInUse, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
-import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson } from "./api-core.ts";
+import { migrationProblem, bearerRefused, askedPick, configInUse, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { forgetAgent } from "./agents-routes.ts";
+import { decodedSize } from "./documents-routes.ts";
+import { healthJson } from "./healthz-routes.ts";
+import { choicesJson, modelDestinationProblem, modelProblem } from "./models-routes.ts";
+import { forgetServer, serverDestinationProblem } from "./servers-routes.ts";
+import { skillFileProblem, skillProblem } from "./skills-routes.ts";
+import { traceDestinationProblem } from "./tracing-routes.ts";
+import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson, askedChoice, choiceProblem } from "./api-core.ts";
 
 let database: Db = sqlite();
 
