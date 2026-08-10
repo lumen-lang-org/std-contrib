@@ -5,6 +5,7 @@ import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { apiKeysOf, forgetApiKey, mintApiKey } from "../../api-keys.ts";
 import { owningTag } from "../../owner.ts";
 import { jsonText } from "../../scan.ts";
+import { MintedKey } from "./types.ts";
 
 @controller("/api-keys")
 export class ApiKeyApi {
@@ -34,8 +35,8 @@ export class ApiKeyApi {
       jsonText(req.body, "scopes"),
       stamp());
     if (made.problem != "") { return badRequest(made.problem); }
-    let body = "{\"id\":\"" + made.id + "\",\"secret\":\"" + made.secret + "\",\"keyPrefix\":\"" + made.prefix + "\"}";
-    return created(body);
+    let minted: MintedKey = { id: made.id, secret: made.secret, keyPrefix: made.prefix };
+    return created(JSON.stringify(minted));
   }
 
   @del("/:id")
