@@ -6,6 +6,34 @@ export const INTERNAL_ERROR: int = -32603;
 
 export type Envelope = { id: string, method: string, params: string, fault: string };
 
+export type RpcRoute = { method: string, handler: string };
+
+export function tableFault(routes: RpcRoute[]): string {
+  if (routes.length == 0) { return "a class carrying @rpc must name at least one @method"; }
+  let i: int = 0;
+  while (i < routes.length) {
+    if (routes[i].method == "") { return "a @method needs a name"; }
+    let j: int = i + 1;
+    while (j < routes.length) {
+      if (routes[j].method == routes[i].method) {
+        return "two methods answer \"" + routes[i].method + "\": " + routes[i].handler + " and " + routes[j].handler;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
+export function handlerFor(routes: RpcRoute[], method: string): string {
+  let i: int = 0;
+  while (i < routes.length) {
+    if (routes[i].method == method) { return routes[i].handler; }
+    i = i + 1;
+  }
+  return "";
+}
+
 function member(body: string, key: string, raw: bool): string {
   let mark = "\"" + key + "\"";
   let at = body.indexOf(mark);
@@ -98,21 +126,26 @@ export function jsonArrayOf(items: string[]): string {
   return out + "]";
 }
 
-export type RpcReply = { json: string };
+export type RpcReply = { json: string, code: int, fault: string };
 
 export function rpcOk<T>(value: T): RpcReply {
-  return { json: JSON.stringify(value) };
+  return { json: JSON.stringify(value), code: 0, fault: "" };
 }
 
 export function rpcRaw(json: string): RpcReply {
-  return { json: json };
+  return { json: json, code: 0, fault: "" };
 }
 
-export function answered(id: string, result: RpcReply): string {
-  return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result.json + "}";
+export function rpcFailed(code: int, said: string): RpcReply {
+  return { json: "", code: code, fault: said };
 }
 
 export function refused(id: string, code: int, said: string): string {
   return "{\"jsonrpc\":\"2.0\",\"id\":" + id
     + ",\"error\":{\"code\":" + `${code}` + ",\"message\":" + JSON.stringify(said) + "}}";
+}
+
+export function answered(id: string, result: RpcReply): string {
+  if (result.fault != "") { return refused(id, result.code, result.fault); }
+  return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result.json + "}";
 }
