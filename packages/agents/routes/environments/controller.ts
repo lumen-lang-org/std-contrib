@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { EnvKeyRow, envKeysOf, forgetEnvKey } from "../../env-keys.ts";
 import { envTemplateById } from "../../env-templates.ts";
@@ -11,6 +11,7 @@ import { jsonText } from "../../scan.ts";
 import { ScriptImageRow, scriptImagesMapping } from "../../schema.ts";
 import { threadOwner } from "../../threads.ts";
 import { createUserEnv, forgetUserEnv, userEnvsMapping, userEnvsOf } from "../../user-environments.ts";
+import { EnvCatalogItem } from "./types.ts";
 
 @controller("/environments")
 export class EnvironmentApi {
@@ -22,32 +23,42 @@ export class EnvironmentApi {
   catalog(req: Request): Reply {
     let tags = callerTags(req);
     if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
-    let out = "[";
+    let items: EnvCatalogItem[] = [];
     let mine = userEnvsOf(this.db, owningTag(tags));
     let m: int = 0;
     while (m < mine.length) {
-      if (m > 0) { out = out + ","; }
-      out = out + "{\"id\":" + JSON.stringify(mine[m].id)
-        + ",\"label\":" + JSON.stringify(mine[m].name)
-        + ",\"summary\":" + JSON.stringify(mine[m].source == "dockerfile" ? "built from your Dockerfile" : mine[m].image)
-        + ",\"mine\":true,\"present\":" + `${envImagePresent(mine[m].image)}` + "}";
+      let own: EnvCatalogItem = {
+        id: mine[m].id,
+        label: mine[m].name,
+        summary: mine[m].source == "dockerfile" ? "built from your Dockerfile" : mine[m].image,
+        mine: true,
+        present: envImagePresent(mine[m].image),
+      };
+      items.push(own);
       m = m + 1;
     }
     let rows = JSON.parse<ScriptImageRow[]>(listWhere(this.db, scriptImagesMapping(), "enabled = " + placeholderAt(this.db, 1), ["1"]));
     let i: int = 0;
     while (i < rows.length) {
-      if (m + i > 0) { out = out + ","; }
-      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
-        + ",\"label\":" + JSON.stringify(rows[i].label)
-        + ",\"summary\":" + JSON.stringify(rows[i].summary)
-        + ",\"mine\":false,\"present\":" + `${envImagePresent(rows[i].image)}` + "}";
+      let shared: EnvCatalogItem = {
+        id: rows[i].id,
+        label: rows[i].label,
+        summary: rows[i].summary,
+        mine: false,
+        present: envImagePresent(rows[i].image),
+      };
+      items.push(shared);
       i = i + 1;
     }
-    if (m + i > 0) { out = out + ","; }
-    out = out + "{\"id\":\"default\",\"label\":\"Default\",\"summary\":"
-      + "\"the image an agent gets when nobody chose one\""
-      + ",\"mine\":false,\"present\":" + `${envImagePresent(scriptImage())}` + "}";
-    return ok(out + "]");
+    let fallback: EnvCatalogItem = {
+      id: "default",
+      label: "Default",
+      summary: "the image an agent gets when nobody chose one",
+      mine: false,
+      present: envImagePresent(scriptImage()),
+    };
+    items.push(fallback);
+    return okJson(items);
   }
 
   @post("/")

@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, ok, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, okJson, problem } from "../../../rest/server.ts";
 import { SandboxLimits, defaultLimits, sandboxLimits, saveSandboxLimits } from "../../sandbox-limits.ts";
+import { SandboxLimitsView } from "./types.ts";
 
 @controller("/sandbox-limits")
 export class SandboxLimitsApi {
@@ -11,8 +12,8 @@ export class SandboxLimitsApi {
 
   @get("/")
   show(req: Request): Reply {
-    return ok("{\"limits\":" + JSON.stringify(sandboxLimits(this.db))
-      + ",\"defaults\":" + JSON.stringify(defaultLimits()) + "}");
+    let v: SandboxLimitsView = { limits: sandboxLimits(this.db), defaults: defaultLimits() };
+    return okJson(v);
   }
 
   @put("/")

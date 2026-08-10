@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { accessTokenFor, connectionOf, forgetConnector, setToolOn, suppliedClientId, toolsOff, userTokenKey } from "../../connect.ts";
 import { DestinationMove, destinationProblem, forgetCredential, hasCredential, masterKey, storeCredential } from "../../credentials.ts";
@@ -10,7 +10,7 @@ import { toolListing } from "../../mcp.ts";
 import { owningTag } from "../../owner.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { McpServerRow, mcpServersMapping } from "../../schema.ts";
-import { MineAsk, ServerAuth, ToolSwitch } from "./types.ts";
+import { ConnectionView, MineAsk, ServerAuth, ServerToolsView, StoredView, ToolSwitch, ToolView } from "./types.ts";
 
 export function serverDestinationProblem(db: Db, row: McpServerRow): string {
   let held = findById(db, mcpServersMapping(), row.id);
@@ -65,18 +65,25 @@ export class ServerApi {
       }
     }
 
-    let out = "{\"serverId\":" + JSON.stringify(server.id)
-      + ",\"problem\":" + JSON.stringify(listed.problem)
-      + ",\"stale\":false,\"listedAt\":\"\",\"tools\":[";
+    let views: ToolView[] = [];
     let i: int = 0;
     while (i < listed.tools.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + "{\"name\":" + JSON.stringify(listed.tools[i].name)
-        + ",\"description\":" + JSON.stringify(listed.tools[i].description)
-        + ",\"on\":" + (declined.includes(listed.tools[i].name) ? "false" : "true") + "}";
+      let one: ToolView = {
+        name: listed.tools[i].name,
+        description: listed.tools[i].description,
+        on: !declined.includes(listed.tools[i].name),
+      };
+      views.push(one);
       i = i + 1;
     }
-    return ok(out + "]}");
+    let v: ServerToolsView = {
+      serverId: server.id,
+      problem: listed.problem,
+      stale: false,
+      listedAt: "",
+      tools: views,
+    };
+    return okJson(v);
   }
 
   @post("/")
@@ -160,7 +167,8 @@ export class ServerApi {
     let stored = storeCredential(this.db, { provider: userTokenKey(param(req, "id"), owner),
       apiKey: asked.token, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
-    return ok("{\"stored\":true}");
+    let v: StoredView = { stored: true };
+    return okJson(v);
   }
 
   @get("/:id/mine")
@@ -169,9 +177,13 @@ export class ServerApi {
       return notFound("server " + param(req, "id"));
     }
     let owner = owningTag(callerTags(req));
-    if (owner == "") { return ok("{\"stored\":false}"); }
+    if (owner == "") {
+      let none: StoredView = { stored: false };
+      return okJson(none);
+    }
     let has = hasCredential(this.db, userTokenKey(param(req, "id"), owner));
-    return ok("{\"stored\":" + (has ? "true" : "false") + "}");
+    let v: StoredView = { stored: has };
+    return okJson(v);
   }
 
   @del("/:id/mine")
@@ -223,19 +235,21 @@ export class ServerApi {
     let owner = owningTag(callerTags(req));
     let keys: DbOrder[] = [asc("server_name")];
     let rows = JSON.parse<McpServerRow[]>(listOrdered(this.db, mcpServersMapping(), "", [], keys));
-    let out = "[";
+    let views: ConnectionView[] = [];
     let i: int = 0;
     while (i < rows.length) {
-      if (i > 0) { out = out + ","; }
       let held = connectionOf(this.db, rows[i].id, owner);
-      out = out + "{\"serverId\":" + JSON.stringify(rows[i].id)
-        + ",\"authKind\":" + JSON.stringify(rows[i].authKind)
-        + ",\"state\":" + JSON.stringify(held.state)
-        + ",\"whose\":" + JSON.stringify(held.whose)
-        + ",\"clientId\":" + JSON.stringify(suppliedClientId(this.db, rows[i].id, this.master))
-        + ",\"connectedAt\":" + JSON.stringify(held.connectedAt) + "}";
+      let one: ConnectionView = {
+        serverId: rows[i].id,
+        authKind: rows[i].authKind,
+        state: held.state,
+        whose: held.whose,
+        clientId: suppliedClientId(this.db, rows[i].id, this.master),
+        connectedAt: held.connectedAt,
+      };
+      views.push(one);
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(views);
   }
 }

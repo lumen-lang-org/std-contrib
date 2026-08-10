@@ -1,14 +1,14 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, persist, safeIdentifier } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, accepted, badRequest, noContent, notFound, ok, param, queryParam } from "../../../rest/server.ts";
-import { boolJson, stamp } from "../../api-core.ts";
+import { Reply, Request, badRequest, jsonOf, noContent, notFound, okJson, param, queryParam } from "../../../rest/server.ts";
+import { stamp } from "../../api-core.ts";
 import { credentialFor } from "../../credentials.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "../../document-files.ts";
 import { JOB_QUEUED, enqueue, pendingJobs } from "../../indexing.ts";
 import { createDocuments, embeddingModel, listSources, normalScope } from "../../knowledge.ts";
 import { jsonText } from "../../scan.ts";
-import { DocumentUpload } from "./types.ts";
+import { DocumentFileView, DocumentQueued, DocumentStored, DocumentSummary, DocumentUpload } from "./types.ts";
 
 function sourceProblem(source: string, body: string): string {
   if (source.trim() == "") { return "a document needs a source to be filed under"; }
@@ -58,32 +58,38 @@ export class DocumentApi {
     let originals = sourcesWithFiles(this.db, scope);
 
     let waiting = pendingJobs(this.db, scope);
-    let out = "[";
+    let out: DocumentSummary[] = [];
     let w: int = 0;
     while (w < waiting.length) {
-      if (w > 0) { out = out + ","; }
-      out = out + "{\"source\":" + JSON.stringify(waiting[w].source)
-        + ",\"scope\":" + JSON.stringify(waiting[w].scope)
-        + ",\"chunks\":0,\"bytes\":0"
-        + ",\"status\":" + JSON.stringify(waiting[w].status)
-        + ",\"error\":" + JSON.stringify(waiting[w].error)
-        + ",\"hasFile\":" + boolJson(holdsSource(originals, waiting[w].source)) + "}";
+      let queued: DocumentSummary = {
+        source: waiting[w].source,
+        scope: waiting[w].scope,
+        chunks: 0,
+        bytes: 0,
+        status: waiting[w].status,
+        error: waiting[w].error,
+        hasFile: holdsSource(originals, waiting[w].source),
+      };
+      out.push(queued);
       w = w + 1;
     }
 
     let rows = listSources(this.db, scope);
     let i: int = 0;
     while (i < rows.length) {
-      if (w + i > 0) { out = out + ","; }
-      out = out + "{\"source\":" + JSON.stringify(rows[i].source)
-        + ",\"scope\":" + JSON.stringify(rows[i].scope)
-        + ",\"chunks\":" + `${rows[i].chunks}`
-        + ",\"bytes\":" + `${rows[i].bytes}`
-        + ",\"status\":\"indexed\",\"error\":\"\""
-        + ",\"hasFile\":" + boolJson(holdsSource(originals, rows[i].source)) + "}";
+      let one: DocumentSummary = {
+        source: rows[i].source,
+        scope: rows[i].scope,
+        chunks: rows[i].chunks,
+        bytes: rows[i].bytes,
+        status: "indexed",
+        error: "",
+        hasFile: holdsSource(originals, rows[i].source),
+      };
+      out.push(one);
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(out);
   }
 
   @post("/")
@@ -110,10 +116,13 @@ export class DocumentApi {
 
     let jobId = enqueue(this.db, body.source, normalScope(body.scope), embedder.id, body.body, `${Date.now()}`);
     if (jobId == "") { return badRequest("the document could not be queued"); }
-    return accepted("{\"job\":" + JSON.stringify(jobId)
-      + ",\"source\":" + JSON.stringify(body.source)
-      + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
-      + ",\"status\":" + JSON.stringify(JOB_QUEUED) + "}");
+    let v: DocumentQueued = {
+      job: jobId,
+      source: body.source,
+      scope: normalScope(body.scope),
+      status: JOB_QUEUED,
+    };
+    return jsonOf(202, v);
   }
 
   @put("/file")
@@ -146,7 +155,8 @@ export class DocumentApi {
     };
     let written = persist(this.db, documentFilesMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
-    return ok("{\"stored\":true}");
+    let v: DocumentStored = { stored: true };
+    return okJson(v);
   }
 
   @get("/file")
@@ -159,10 +169,13 @@ export class DocumentApi {
     if (source == "") { return badRequest("name the document: ?source=notes&scope=/specs"); }
     let kept = findDocumentFile(this.db, scope, source);
     if (kept.id == "") { return notFound("no kept file for " + source); }
-    return ok("{\"filename\":" + JSON.stringify(kept.filename)
-      + ",\"mime\":" + JSON.stringify(kept.mime)
-      + ",\"size\":" + `${kept.size}`
-      + ",\"contentBase64\":" + JSON.stringify(kept.bytes) + "}");
+    let v: DocumentFileView = {
+      filename: kept.filename,
+      mime: kept.mime,
+      size: kept.size,
+      contentBase64: kept.bytes,
+    };
+    return okJson(v);
   }
 
   @del("/:source")

@@ -1,9 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
 import { asc, deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, notFound, ok, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, notFound, ok, okJson, problem } from "../../../rest/server.ts";
 import { toolCardProblem } from "../../api-core.ts";
 import { ToolCardRow, toolCardsMapping } from "../../toolcards.ts";
+import { ToolCardDeleted } from "./types.ts";
 
 @controller("/tool-cards")
 export class ToolCardApi {
@@ -52,6 +53,7 @@ export class ToolCardApi {
       return notFound("no tool card " + id);
     }
     deleteById(this.db, toolCardsMapping(), id);
-    return ok("{\"deleted\":" + JSON.stringify(id) + "}");
+    let v: ToolCardDeleted = { deleted: id };
+    return okJson(v);
   }
 }

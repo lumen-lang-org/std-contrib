@@ -1,9 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, noContent, notFound, okJson, param, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, masterKey, masterKeyProblem, providersWithCredentials, storeCredential } from "../../credentials.ts";
-import { KeyBody } from "./types.ts";
+import { KeyBody, ProviderStatus } from "./types.ts";
 
 @controller("/providers")
 export class ProviderApi {
@@ -17,22 +17,15 @@ export class ProviderApi {
 
   @get("/")
   list(req: Request): Reply {
-    let names = providersWithCredentials(this.db);
-    let out = "[";
-    let i: int = 0;
-    while (i < names.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + JSON.stringify(names[i]);
-      i = i + 1;
-    }
-    return ok(out + "]");
+    let names: string[] = providersWithCredentials(this.db);
+    return okJson(names);
   }
 
   @get("/:provider")
   status(req: Request): Reply {
     let usable = credentialFor(this.db, param(req, "provider"), this.master) != "";
-    return ok("{\"provider\":" + JSON.stringify(param(req, "provider"))
-      + ",\"configured\":" + `${usable}` + "}");
+    let v: ProviderStatus = { provider: param(req, "provider"), configured: usable };
+    return okJson(v);
   }
 
   @put("/:provider/key")
@@ -43,7 +36,8 @@ export class ProviderApi {
     let body: KeyBody = JSON.parse<KeyBody>(req.body);
     let stored = storeCredential(this.db, { provider: param(req, "provider"), apiKey: body.apiKey, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
-    return ok("{\"provider\":" + JSON.stringify(param(req, "provider")) + ",\"configured\":true}");
+    let v: ProviderStatus = { provider: param(req, "provider"), configured: true };
+    return okJson(v);
   }
 
   @del("/:provider/key")

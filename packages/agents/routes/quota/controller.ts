@@ -1,8 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, ok } from "../../../rest/server.ts";
+import { Reply, Request, okJson } from "../../../rest/server.ts";
 import { GUEST_DAILY_RUNS, callerTags, guestTag } from "../../api-core.ts";
 import { nextUtcMidnightIso, runsSince, utcDayStartText } from "../../usage.ts";
+import { QuotaNone, QuotaView } from "./types.ts";
 
 @controller("/quota")
 export class QuotaApi {
@@ -15,14 +16,16 @@ export class QuotaApi {
   @get("/")
   show(req: Request): Reply {
     let guest = guestTag(callerTags(req));
-    if (guest == "") { return ok("{\"limit\":0}"); }
+    if (guest == "") {
+      let none: QuotaNone = { limit: 0 };
+      return okJson(none);
+    }
     let now = Date.now();
     let used = runsSince(this.db, guest, utcDayStartText(now));
     let left = GUEST_DAILY_RUNS - used;
     if (left < 0) { left = 0; }
-    return ok("{\"limit\":" + `${GUEST_DAILY_RUNS}`
-      + ",\"used\":" + `${used}`
-      + ",\"remaining\":" + `${left}`
-      + ",\"resetsAt\":" + JSON.stringify(nextUtcMidnightIso(now)) + "}");
+    let v: QuotaView = { limit: GUEST_DAILY_RUNS, used: used, remaining: left,
+      resetsAt: nextUtcMidnightIso(now) };
+    return okJson(v);
   }
 }
