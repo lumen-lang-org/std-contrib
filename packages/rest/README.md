@@ -332,7 +332,26 @@ case-insensitive, since the server lowercases what it receives — and
 
 `ok`, `created`, `accepted`, `noContent`, `json`, `problem`, `notFound` and
 `badRequest` build replies, over `reply(status, body, contentType)` for anything
-that is not JSON. An error is a JSON document, because a client parsing the body
+that is not JSON.
+
+Those take a body that is already text. **`okJson`, `createdJson` and
+`jsonOf(status, value)` take the value itself** and serialise it once:
+
+```ts
+type JobView = { id: string, source: string, chunks: int, failed: bool };
+
+@get("/")
+list(req: Request): Reply {
+  return okJson(pendingJobs(this.db).map(view));
+}
+```
+
+A handler that builds its body by concatenation is doing three jobs: choosing
+the shape, escaping the values and remembering the commas. Only the first is
+its own. `JSON.stringify` lives here, once, instead of at every route that has
+to get the quoting right — and a record literal cannot infer a generic type
+parameter, so the call site names its type, which is what decides the fields
+that ship rather than the author remembering which to concatenate. An error is a JSON document, because a client parsing the body
 should not have to guess whether it got JSON or a sentence. `accepted` is its own
 function rather than a 201 with a different number: answering 201 for work
 merely queued tells a client the resource exists when it does not yet.
