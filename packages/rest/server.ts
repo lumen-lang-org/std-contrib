@@ -29,6 +29,7 @@
 // there is then no class for `Class.*` to know anything about.
 
 import { Route, Match, match, route, allowedMethods, tableProblem } from "./router.ts";
+import { Rule, faults, faultsJson } from "../validation/validation.ts";
 
 // What a handler is given. The path parameters and query are already parsed;
 // the body and headers are the request's own.
@@ -75,6 +76,13 @@ export function jsonOf<T>(status: int, value: T): Reply {
 }
 
 export function okJson<T>(value: T): Reply { return jsonOf(200, value); }
+
+export function validationRefusal(rules: Rule[], body: string): string {
+  let wrong = faults(rules, body);
+  if (wrong.length == 0) { return ""; }
+  return faultsJson(wrong);
+}
+
 export function createdJson<T>(value: T): Reply { return jsonOf(201, value); }
 
 // The work was taken but is not done — a queued job, not a finished one.
