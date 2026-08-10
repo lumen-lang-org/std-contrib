@@ -118,6 +118,26 @@ function fresh(): string {
   // order a fact about how often this suite has been run.
   execute(database, "DROP TABLE IF EXISTS model_choices");
   execute(database, "DROP TABLE IF EXISTS model_routers");
+  // Everything migrated above secrets' 109. Each is its own plan appended to
+  // migrationProblem's, and none was in this list, so the first fresh() of a
+  // run created them and every fresh() after it met a table its migration was
+  // about to create. That stops the plan, and a stopped plan takes every step
+  // numbered above it, which is why the failures read as scoping and document
+  // bugs rather than as a fixture that had not kept up.
+  // The triggers tables, and trigger_inbox is the one that was actually
+  // failing: 106.1 creates it from a mapping frozen without thread_id and
+  // 106.2 adds that column. Left standing, 106.1's CREATE finds the table
+  // already there and does nothing, then 106.2 adds a column that is already
+  // there and the plan stops at 106.2 — taking every step above it with it.
+  execute(database, "DROP TABLE IF EXISTS trigger_inbox");
+  execute(database, "DROP TABLE IF EXISTS trigger_outbox");
+  execute(database, "DROP TABLE IF EXISTS trigger_bots");
+  execute(database, "DROP TABLE IF EXISTS env_keys");            // 110
+  execute(database, "DROP TABLE IF EXISTS user_environments");   // 111
+  execute(database, "DROP TABLE IF EXISTS env_templates");       // 112
+  execute(database, "DROP TABLE IF EXISTS mcp_tool_roster");     // 113
+  execute(database, "DROP TABLE IF EXISTS api_keys");            // 115
+  execute(database, "DROP TABLE IF EXISTS sandbox_limits");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
   execute(database, "DROP INDEX IF EXISTS scopes_by_agent");
   dropTable(database, credentialsMapping());
@@ -126,7 +146,12 @@ function fresh(): string {
   dropTable(database, promptsMapping());
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
-  return migrationProblem(database);
+  // Said out loud. Twenty-two tests across owners, documents, the model menu
+  // and healthz failed on this one line returning a sentence nobody printed,
+  // and each of them read as a bug in the thing it was testing.
+  let problem = migrationProblem(database);
+  if (problem != "") { console.error("[fixture] the plan did not run: " + problem); }
+  return problem;
 }
 
 function modelRow(id: string, provider: string, kind: string, baseUrl: string): ModelRow {
@@ -619,7 +644,7 @@ test("healthz says which build, how far the schema got, and whether docker is th
   // "76" while the top was 86.2, because `fresh()` did not drop `skills` and
   // the plan had been stopping at migration 77 for real. A canary that is
   // never updated is a canary that has already died.
-  expect(said.indexOf("\"migration\":\"104\"") >= 0);
+  expect(said.indexOf("\"migration\":\"115\"") >= 0);
   // A fact, whichever way it falls: this suite runs on hosts with docker and
   // hosts without.
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);
