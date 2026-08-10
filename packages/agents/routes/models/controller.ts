@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, countWhere, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { DestinationMove, credentialFor, destinationOf, destinationProblem, hasCredential } from "../../credentials.ts";
 import { createProblem } from "../../payload.ts";
 import { complete, embedText, embeddingEndpoint, endpointFor, replyText } from "../../provider.ts";
@@ -105,9 +105,9 @@ export class ModelApi {
   }
 
   @post("/:id/test")
-  test(req: Request): Reply {
-    let document = findById(this.db, modelsMapping(), param(req, "id"));
-    if (document == "") { return notFound("model " + param(req, "id")); }
+  test(@PathVariable("id") id: string): Reply {
+    let document = findById(this.db, modelsMapping(), id);
+    if (document == "") { return notFound("model " + id); }
     let stored: ModelRow = JSON.parse<ModelRow>(document);
     let key = credentialFor(this.db, stored.provider, this.master);
     if (key == "") { return badRequest("no credential stored for " + stored.provider); }
@@ -174,14 +174,14 @@ export class ModelApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, modelsMapping(), param(req, "id"))) {
-      return notFound("model " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, modelsMapping(), id)) {
+      return notFound("model " + id);
     }
-    if (countWhere(this.db, modelConfigsMapping(this.db), "model_id = " + this.db.placeholder, [param(req, "id")]) > 0) {
-      return badRequest("model " + param(req, "id") + " is used by a model config; delete or repoint those first");
+    if (countWhere(this.db, modelConfigsMapping(this.db), "model_id = " + this.db.placeholder, [id]) > 0) {
+      return badRequest("model " + id + " is used by a model config; delete or repoint those first");
     }
-    deleteById(this.db, modelsMapping(), param(req, "id"));
+    deleteById(this.db, modelsMapping(), id);
     return noContent();
   }
 }

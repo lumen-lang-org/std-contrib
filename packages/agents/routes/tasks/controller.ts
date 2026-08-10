@@ -119,9 +119,9 @@ export class TaskApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
+  update(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("task " + param(req, "id")); }
+    if (mine.id == "") { return notFound("task " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
 
     let ask: TaskChangeAsk = JSON.parse<TaskChangeAsk>(req.body);
@@ -176,9 +176,9 @@ export class TaskApi {
   }
 
   @post("/:id/run-now")
-  runNow(req: Request): Reply {
+  runNow(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("task " + param(req, "id")); }
+    if (mine.id == "") { return notFound("task " + id); }
     let now = stamp();
     executeWith(this.db,
       "UPDATE scheduled_tasks SET next_at = " + this.db.placeholder
@@ -189,9 +189,9 @@ export class TaskApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
+  remove(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("task " + param(req, "id")); }
+    if (mine.id == "") { return notFound("task " + id); }
     let gone = deleteById(this.db, tasksMapping(), mine.id);
     if (!gone.ok) { return badRequest(gone.error); }
     return noContent();

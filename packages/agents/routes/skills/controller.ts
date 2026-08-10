@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, countWhere, deleteWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok } from "../../../rest/server.ts";
 import { utf8Length } from "../../artifacts.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { scriptEnvNameProblem } from "../../run-script.ts";
@@ -64,8 +64,8 @@ export class SkillApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
-    if (queryParam(req, "featured", "") == "1") {
+  list(@RequestParam("featured", "") featured: string): Reply {
+    if (featured == "1") {
       let ranked: DbOrder[] = [asc("featured_rank")];
       return ok(listOrdered(this.db, skillsMapping(),
         "visibility = 'public' AND featured_rank > 0", [], ranked));
@@ -75,9 +75,9 @@ export class SkillApi {
   }
 
   @get("/:id")
-  find(req: Request): Reply {
-    let held = findById(this.db, skillsMapping(), param(req, "id"));
-    if (held == "") { return notFound("skill " + param(req, "id")); }
+  find(@PathVariable("id") id: string): Reply {
+    let held = findById(this.db, skillsMapping(), id);
+    if (held == "") { return notFound("skill " + id); }
     return ok(held);
   }
 
@@ -94,15 +94,15 @@ export class SkillApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
-      return notFound("skill " + param(req, "id"));
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, skillsMapping(), id)) {
+      return notFound("skill " + id);
     }
     let row: SkillRow = JSON.parse<SkillRow>(req.body);
-    if (row.id != param(req, "id")) {
+    if (row.id != id) {
       return badRequest("the id in the body must match the path");
     }
-    let before: SkillRow = JSON.parse<SkillRow>(findById(this.db, skillsMapping(), param(req, "id")));
+    let before: SkillRow = JSON.parse<SkillRow>(findById(this.db, skillsMapping(), id));
     if (before.source == "repo") {
       return badRequest("this skill comes from " + before.sourceUrl
         + " and is edited there; copy it to a local skill to change it here");
@@ -111,13 +111,13 @@ export class SkillApi {
     if (named != "") { return badRequest(named); }
     let written = persist(this.db, skillsMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, skillsMapping(), param(req, "id")));
+    return ok(findById(this.db, skillsMapping(), id));
   }
 
   @post("/:id/copy")
-  copyLocal(req: Request): Reply {
-    let held = findById(this.db, skillsMapping(), param(req, "id"));
-    if (held == "") { return notFound("skill " + param(req, "id")); }
+  copyLocal(@PathVariable("id") id: string): Reply {
+    let held = findById(this.db, skillsMapping(), id);
+    if (held == "") { return notFound("skill " + id); }
     let from: SkillRow = JSON.parse<SkillRow>(held);
     if (from.source != "repo") {
       return badRequest("this skill is already yours to edit — copying it would only make a second name for the same instructions");
@@ -162,34 +162,34 @@ export class SkillApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
-      return notFound("skill " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, skillsMapping(), id)) {
+      return notFound("skill " + id);
     }
-    executeWith(this.db, "DELETE FROM agent_skills WHERE skill_id = " + this.db.placeholder, [param(req, "id")]);
-    deleteWhere(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [param(req, "id")]);
-    deleteWhere(this.db, skillsMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    executeWith(this.db, "DELETE FROM agent_skills WHERE skill_id = " + this.db.placeholder, [id]);
+    deleteWhere(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [id]);
+    deleteWhere(this.db, skillsMapping(), "id = " + placeholderAt(this.db, 1), [id]);
     return noContent();
   }
 
   @get("/:id/files")
-  files(req: Request): Reply {
-    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
-      return notFound("skill " + param(req, "id"));
+  files(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, skillsMapping(), id)) {
+      return notFound("skill " + id);
     }
     let keys: DbOrder[] = [asc("path")];
-    return ok(listOrdered(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [param(req, "id")], keys));
+    return ok(listOrdered(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [id], keys));
   }
 
   @post("/:id/files")
-  addFile(req: Request): Reply {
-    if (!existsById(this.db, skillsMapping(), param(req, "id"))) {
-      return notFound("skill " + param(req, "id"));
+  addFile(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, skillsMapping(), id)) {
+      return notFound("skill " + id);
     }
     let problem = createProblem(this.db, skillFilesMapping(), req.body);
     if (problem != "") { return badRequest(problem); }
     let row: SkillFileRow = JSON.parse<SkillFileRow>(req.body);
-    if (row.skillId != param(req, "id")) {
+    if (row.skillId != id) {
       return badRequest("the skillId in the body must match the path");
     }
     let named = skillFileProblem(row);
@@ -200,30 +200,32 @@ export class SkillApi {
   }
 
   @put("/:id/files/:fileId")
-  updateFile(req: Request): Reply {
-    if (!existsById(this.db, skillFilesMapping(), param(req, "fileId"))) {
-      return notFound("skill file " + param(req, "fileId"));
+  updateFile(req: Request,
+             @PathVariable("id") id: string,
+             @PathVariable("fileId") fileId: string): Reply {
+    if (!existsById(this.db, skillFilesMapping(), fileId)) {
+      return notFound("skill file " + fileId);
     }
     let row: SkillFileRow = JSON.parse<SkillFileRow>(req.body);
-    if (row.id != param(req, "fileId")) {
+    if (row.id != fileId) {
       return badRequest("the id in the body must match the path");
     }
-    if (row.skillId != param(req, "id")) {
+    if (row.skillId != id) {
       return badRequest("the skillId in the body must match the path");
     }
     let named = skillFileProblem(row);
     if (named != "") { return badRequest(named); }
     let written = persist(this.db, skillFilesMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, skillFilesMapping(), param(req, "fileId")));
+    return ok(findById(this.db, skillFilesMapping(), fileId));
   }
 
   @del("/:id/files/:fileId")
-  removeFile(req: Request): Reply {
-    if (!existsById(this.db, skillFilesMapping(), param(req, "fileId"))) {
-      return notFound("skill file " + param(req, "fileId"));
+  removeFile(@PathVariable("fileId") fileId: string): Reply {
+    if (!existsById(this.db, skillFilesMapping(), fileId)) {
+      return notFound("skill file " + fileId);
     }
-    deleteWhere(this.db, skillFilesMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "fileId")]);
+    deleteWhere(this.db, skillFilesMapping(), "id = " + placeholderAt(this.db, 1), [fileId]);
     return noContent();
   }
 }

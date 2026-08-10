@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, queryParam, reply } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, reply } from "../../../rest/server.ts";
 import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../tracing/tracing.ts";
 import { GUEST_DAILY_RUNS, callerTags, guestQuotaJson, guestTag } from "../../api-core.ts";
 import { AgentRetrievalRow, agentRetrievalMapping, agentScopes, embeddingModel, grantScope, revokeScope } from "../../knowledge.ts";
@@ -57,18 +57,18 @@ export class AgentApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
+  list(@RequestParam("enabled", "") enabled: string): Reply {
     let keys: DbOrder[] = [asc("agent_name")];
-    if (queryParam(req, "enabled", "") == "true") {
+    if (enabled == "true") {
       return ok(listOrdered(this.db, this.full, "enabled = " + this.db.placeholder, ["1"], keys));
     }
     return ok(listOrdered(this.db, this.full, "", [], keys));
   }
 
   @get("/:id")
-  find(req: Request): Reply {
-    let document = findById(this.db, this.full, param(req, "id"));
-    if (document == "") { return notFound("agent " + param(req, "id")); }
+  find(@PathVariable("id") id: string): Reply {
+    let document = findById(this.db, this.full, id);
+    if (document == "") { return notFound("agent " + id); }
     return ok(document);
   }
 
@@ -91,13 +91,13 @@ export class AgentApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     if (req.body == "") { return badRequest("a body is required"); }
     let row: AgentRow = JSON.parse<AgentRow>(req.body);
-    if (row.id != param(req, "id")) {
+    if (row.id != id) {
       return badRequest("the id in the body must match the path");
     }
     if (!existsById(this.db, modelConfigsMapping(this.db), row.modelConfigId)) {
@@ -114,90 +114,90 @@ export class AgentApi {
     }
     let written = persist(this.db, this.flat, req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, this.full, param(req, "id")));
+    return ok(findById(this.db, this.full, id));
   }
 
   @post("/:id/servers")
-  addServer(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  addServer(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     let link: ServerLink = JSON.parse<ServerLink>(req.body);
     if (!existsById(this.db, mcpServersMapping(), link.serverId)) {
       return badRequest("no server " + link.serverId);
     }
     executeWith(this.db, "INSERT INTO agent_mcp_servers (agent_id, server_id) VALUES ("
-      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [param(req, "id"), link.serverId]);
-    return ok(findById(this.db, this.full, param(req, "id")));
+      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [id, link.serverId]);
+    return ok(findById(this.db, this.full, id));
   }
 
   @post("/:id/sub-agents")
-  addChild(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  addChild(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     let link: ChildLink = JSON.parse<ChildLink>(req.body);
     if (!existsById(this.db, this.flat, link.childId)) {
       return badRequest("no agent " + link.childId);
     }
-    if (link.childId == param(req, "id")) {
+    if (link.childId == id) {
       return badRequest("an agent cannot be its own sub-agent");
     }
     executeWith(this.db, "INSERT INTO agent_sub_agents (parent_id, child_id) VALUES ("
-      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [param(req, "id"), link.childId]);
-    return ok(findById(this.db, this.full, param(req, "id")));
+      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [id, link.childId]);
+    return ok(findById(this.db, this.full, id));
   }
 
   @del("/:id/sub-agents/:childId")
-  removeChild(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  removeChild(@PathVariable("id") id: string, @PathVariable("childId") childId: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     executeWith(this.db, "DELETE FROM agent_sub_agents WHERE parent_id = " + this.db.placeholder
-      + " AND child_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "childId")]);
-    return ok(findById(this.db, this.full, param(req, "id")));
+      + " AND child_id = " + placeholderAt(this.db, 2), [id, childId]);
+    return ok(findById(this.db, this.full, id));
   }
 
   @del("/:id/servers/:serverId")
-  removeServer(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  removeServer(@PathVariable("id") id: string, @PathVariable("serverId") serverId: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     executeWith(this.db, "DELETE FROM agent_mcp_servers WHERE agent_id = " + this.db.placeholder
-      + " AND server_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "serverId")]);
-    return ok(findById(this.db, this.full, param(req, "id")));
+      + " AND server_id = " + placeholderAt(this.db, 2), [id, serverId]);
+    return ok(findById(this.db, this.full, id));
   }
 
   @post("/:id/skills")
-  addSkill(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  addSkill(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     let link: SkillLink = JSON.parse<SkillLink>(req.body);
     if (!existsById(this.db, skillsMapping(), link.skillId)) {
       return badRequest("no skill " + link.skillId);
     }
     executeWith(this.db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
-      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [param(req, "id"), link.skillId]);
-    return ok(findById(this.db, this.full, param(req, "id")));
+      + this.db.placeholder + ", " + placeholderAt(this.db, 2) + ")", [id, link.skillId]);
+    return ok(findById(this.db, this.full, id));
   }
 
   @del("/:id/skills/:skillId")
-  removeSkill(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  removeSkill(@PathVariable("id") id: string, @PathVariable("skillId") skillId: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     executeWith(this.db, "DELETE FROM agent_skills WHERE agent_id = " + this.db.placeholder
-      + " AND skill_id = " + placeholderAt(this.db, 2), [param(req, "id"), param(req, "skillId")]);
-    return ok(findById(this.db, this.full, param(req, "id")));
+      + " AND skill_id = " + placeholderAt(this.db, 2), [id, skillId]);
+    return ok(findById(this.db, this.full, id));
   }
 
   @get("/:id/scopes")
-  scopes(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  scopes(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    return scopesReply(this.db, param(req, "id"));
+    return scopesReply(this.db, id);
   }
 
   @post("/:id/scopes")
@@ -211,13 +211,13 @@ export class AgentApi {
   }
 
   @del("/:id/scopes/:scope")
-  revoke(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  revoke(@PathVariable("id") id: string, @PathVariable("scope") scope: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    let problem = revokeScope(this.db, param(req, "id"), param(req, "scope").replaceAll("~", "/"));
+    let problem = revokeScope(this.db, id, scope.replaceAll("~", "/"));
     if (problem != "") { return badRequest(problem); }
-    return this.scopes(req);
+    return this.scopes(id);
   }
 
   @put("/:id/retrieval")
@@ -241,17 +241,17 @@ export class AgentApi {
   }
 
   @get("/:id/web-rag")
-  webRag(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  webRag(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    return ok(JSON.stringify(webRagFor(this.db, param(req, "id"))));
+    return ok(JSON.stringify(webRagFor(this.db, id)));
   }
 
   @put("/:id/web-rag")
-  setWebRag(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  setWebRag(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: AgentWebRagRow = JSON.parse<AgentWebRagRow>(req.body);
@@ -267,7 +267,7 @@ export class AgentApi {
       if (m.kind != "chat") { return badRequest(m.label + " is not a chat model"); }
     }
     let row: AgentWebRagRow = {
-      agentId: param(req, "id"),
+      agentId: id,
       enabled: body.enabled,
       topK: body.topK,
       maxChars: body.maxChars,
@@ -276,16 +276,16 @@ export class AgentApi {
     };
     let written = persist(this.db, agentWebRagMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, agentWebRagMapping(), param(req, "id")));
+    return ok(findById(this.db, agentWebRagMapping(), id));
   }
 
   @post("/:id/run")
-  run(req: Request): Reply {
+  run(req: Request, @PathVariable("id") id: string): Reply {
     if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
     let body: RunBody = JSON.parse<RunBody>(req.body);
     if (body.text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
 
     let guest = guestTag(callerTags(req));
@@ -300,10 +300,10 @@ export class AgentApi {
     }
 
     let tracer = tracerFor(this.db, this.master);
-    let answered = runAgentTraced(this.db, param(req, "id"), body.text, this.master, tracer);
+    let answered = runAgentTraced(this.db, id, body.text, this.master, tracer);
 
     let runId = recordRun(this.db, {
-      agentId: param(req, "id"), threadId: "", owner: owningTag(callerTags(req)),
+      agentId: id, threadId: "", owner: owningTag(callerTags(req)),
       question: body.text, run: answered, modelChoiceId: "", routeNote: "",
     });
 
@@ -330,19 +330,19 @@ export class AgentApi {
   }
 
   @get("/:id/runs")
-  runs(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  runs(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    return ok(runsOf(this.db, param(req, "id"), callerTags(req), 50));
+    return ok(runsOf(this.db, id, callerTags(req), 50));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, this.flat, param(req, "id"))) {
-      return notFound("agent " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, this.flat, id)) {
+      return notFound("agent " + id);
     }
-    forgetAgent(this.db, param(req, "id"));
+    forgetAgent(this.db, id);
     return noContent();
   }
 }

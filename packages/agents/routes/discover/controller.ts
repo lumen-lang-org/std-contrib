@@ -42,8 +42,9 @@ export class DiscoverApi {
   }
 
   @get("/")
-  read(req: Request): Reply {
-    let lang = req.query.get("lang") ?? "";
+  read(req: Request,
+       @RequestParam("lang", "") lang: string,
+       @RequestParam("all", "") all: string): Reply {
     let country = geoCode(req.query.get("country") ?? "");
     if (country != "") { ensureGeoFeed(this.db, country); }
     let feeds = allFeeds(this.db);
@@ -54,10 +55,10 @@ export class DiscoverApi {
       let feed = feeds[i];
       let langOk = feed.lang == "" || lang == "" || feed.lang == lang;
       let placeOk = feed.country == "" || feed.country == country;
-      let all = req.query.get("all") == "1";
-      if (feed.enabled && (all || (langOk && placeOk))) {
+      let showAll = all == "1";
+      if (feed.enabled && (showAll || (langOk && placeOk))) {
         let rows = storiesFor(this.db, feed.id);
-        if (all || rows.length > 0) {
+        if (showAll || rows.length > 0) {
           let stories: DiscoverStoryView[] = [];
           let r: int = 0;
           while (r < rows.length) {
@@ -98,8 +99,7 @@ export class DiscoverApi {
   }
 
   @get("/story/:id")
-  story(req: Request): Reply {
-    let id = req.params.get("id") ?? "";
+  story(@PathVariable("id") id: string): Reply {
     let row = storyById(this.db, id);
     if (row.id == "") {
       return notFound("story " + id + " has rolled off its feed");
@@ -148,8 +148,7 @@ export class DiscoverApi {
   }
 
   @del("/feeds/:id")
-  dropFeed(req: Request): Reply {
-    let id = req.params.get("id") ?? "";
+  dropFeed(@PathVariable("id") id: string): Reply {
     deleteWhere(this.db, discoverStoriesMapping(), "feed_id = " + this.db.placeholder, [id]);
     deleteById(this.db, discoverFeedsMapping(), id);
     let v: DeletedView = { deleted: id };

@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { accessTokenFor, connectionOf, forgetConnector, setToolOn, suppliedClientId, toolsOff, userTokenKey } from "../../connect.ts";
 import { DestinationMove, destinationProblem, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
@@ -46,9 +46,9 @@ export class ServerApi {
   }
 
   @get("/:id/tools")
-  tools(req: Request): Reply {
-    let document = findById(this.db, mcpServersMapping(), param(req, "id"));
-    if (document == "") { return notFound("no server " + param(req, "id")); }
+  tools(req: Request, @PathVariable("id") id: string): Reply {
+    let document = findById(this.db, mcpServersMapping(), id);
+    if (document == "") { return notFound("no server " + id); }
     let server: McpServerRow = JSON.parse<McpServerRow>(document);
     let listed = toolListing(server, accessTokenFor(this.db, server, owningTag(callerTags(req)), this.master));
     let declined = toolsOff(this.db, server.id);
@@ -102,9 +102,9 @@ export class ServerApi {
   }
 
   @put("/:id/auth")
-  setAuth(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  setAuth(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: ServerAuth = JSON.parse<ServerAuth>(req.body);
@@ -124,36 +124,36 @@ export class ServerApi {
     executeWith(this.db, "UPDATE mcp_servers SET auth_kind = " + this.db.placeholder
       + ", auth_header = " + placeholderAt(this.db, 2)
       + " WHERE id = " + placeholderAt(this.db, 3),
-      [body.authKind, body.authHeader, param(req, "id")]);
+      [body.authKind, body.authHeader, id]);
     if (body.authKind == "none") {
-      forgetConnector(this.db, param(req, "id"), this.master);
-      return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+      forgetConnector(this.db, id, this.master);
+      return ok(findById(this.db, mcpServersMapping(), id));
     }
     if (body.authKind == "oauth") {
-      return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+      return ok(findById(this.db, mcpServersMapping(), id));
     }
-    let stored = storeCredential(this.db, { provider: "mcp:" + param(req, "id"),
+    let stored = storeCredential(this.db, { provider: "mcp:" + id,
       apiKey: body.token, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
-    return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+    return ok(findById(this.db, mcpServersMapping(), id));
   }
 
   @put("/:id/tools/:tool")
-  setTool(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  setTool(req: Request, @PathVariable("id") id: string, @PathVariable("tool") tool: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
     if (req.body == "") { return badRequest("a body is required"); }
     let body: ToolSwitch = JSON.parse<ToolSwitch>(req.body);
-    if (param(req, "tool").trim() == "") { return badRequest("a tool needs a name"); }
-    setToolOn(this.db, param(req, "id"), param(req, "tool"), body.on);
+    if (tool.trim() == "") { return badRequest("a tool needs a name"); }
+    setToolOn(this.db, id, tool, body.on);
     return noContent();
   }
 
   @put("/:id/mine")
-  setMine(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  setMine(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
     let owner = owningTag(callerTags(req));
     if (owner == "") {
@@ -164,7 +164,7 @@ export class ServerApi {
     if (asked.token == "") {
       return badRequest("a token is required — to stop using your own, DELETE this route instead");
     }
-    let stored = storeCredential(this.db, { provider: userTokenKey(param(req, "id"), owner),
+    let stored = storeCredential(this.db, { provider: userTokenKey(id, owner),
       apiKey: asked.token, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
     let v: StoredView = { stored: true };
@@ -172,39 +172,39 @@ export class ServerApi {
   }
 
   @get("/:id/mine")
-  mine(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  mine(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
     let owner = owningTag(callerTags(req));
     if (owner == "") {
       let none: StoredView = { stored: false };
       return okJson(none);
     }
-    let has = hasCredential(this.db, userTokenKey(param(req, "id"), owner));
+    let has = hasCredential(this.db, userTokenKey(id, owner));
     let v: StoredView = { stored: has };
     return okJson(v);
   }
 
   @del("/:id/mine")
-  forgetMine(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  forgetMine(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
     let owner = owningTag(callerTags(req));
     if (owner == "") { return badRequest("nobody is signed in, so there is nothing of theirs to forget"); }
-    forgetCredential(this.db, userTokenKey(param(req, "id"), owner));
+    forgetCredential(this.db, userTokenKey(id, owner));
     return noContent();
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
     if (req.body == "") { return badRequest("a body is required"); }
     let row: McpServerRow = JSON.parse<McpServerRow>(req.body);
-    if (row.id != param(req, "id")) {
+    if (row.id != id) {
       return badRequest("the id in the body must match the path");
     }
     if (row.serverName.trim() == "") { return badRequest("a server needs a name"); }
@@ -216,17 +216,17 @@ export class ServerApi {
     if (moved != "") { return badRequest(moved); }
     let written = persist(this.db, mcpServersMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, mcpServersMapping(), param(req, "id")));
+    return ok(findById(this.db, mcpServersMapping(), id));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
-    forgetServer(this.db, param(req, "id"));
-    forgetConnector(this.db, param(req, "id"), this.master);
-    forgetRoster(this.db, param(req, "id"));
+    forgetServer(this.db, id);
+    forgetConnector(this.db, id, this.master);
+    forgetRoster(this.db, id);
     return noContent();
   }
 
