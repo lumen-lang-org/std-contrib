@@ -53,7 +53,7 @@ export class DocumentApi {
   }
 
   @get("/")
-  @Guard("needsPg")
+  @Guard(needsPg)
   list(@RequestParam("scope", "/") asked: string): Reply {
     let scope = normalScope(asked);
 
@@ -95,7 +95,7 @@ export class DocumentApi {
   }
 
   @post("/")
-  @Guard("needsPg")
+  @Guard(needsPg)
   upload(req: Request, @RequestParam("model", "") modelId: string): Reply {
     if (req.body == "") { return badRequest("a body is required"); }
     let body: DocumentUpload = JSON.parse<DocumentUpload>(req.body);
@@ -125,7 +125,7 @@ export class DocumentApi {
   }
 
   @put("/file")
-  @Guard("needsPg")
+  @Guard(needsPg)
   keepFile(req: Request): Reply {
     if (req.body == "") {
       return badRequest("a body is required: {\"source\":\"...\",\"scope\":\"...\",\"filename\":\"...\",\"mime\":\"...\",\"contentBase64\":\"...\"}");
@@ -158,7 +158,7 @@ export class DocumentApi {
   }
 
   @get("/file")
-  @Guard("needsPg")
+  @Guard(needsPg)
   file(@RequestParam("source", "") source: string,
        @RequestParam("scope", "/") scope: string): Reply {
     if (source == "") { return badRequest("name the document: ?source=notes&scope=/specs"); }
@@ -174,7 +174,7 @@ export class DocumentApi {
   }
 
   @del("/:source")
-  @Guard("needsPg")
+  @Guard(needsPg)
   remove(@PathVariable("source") source: string): Reply {
     executeWith(this.db, "DELETE FROM documents WHERE source = " + this.db.placeholder, [source]);
     forgetDocumentFiles(this.db, source);

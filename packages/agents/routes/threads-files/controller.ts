@@ -93,7 +93,7 @@ export class WorkspaceApi {
   }
 
   @post("/pull")
-  @Guard("needsPg")
+  @Guard(needsPg)
   pull(req: Request, @PathVariable("id") id: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
       return notFound("thread " + id);
@@ -109,7 +109,7 @@ export class WorkspaceApi {
   }
 
   @post("/:name/promote")
-  @Guard("needsPg")
+  @Guard(needsPg)
   promote(req: Request,
           @PathVariable("id") id: string,
           @PathVariable("name") name: string): Reply {

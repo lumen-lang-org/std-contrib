@@ -17,7 +17,7 @@ export class ScopeApi {
   }
 
   @get("/")
-  @Guard("needsPg")
+  @Guard(needsPg)
   tree(@RequestParam("prefix", "") prefix: string): Reply {
     let waiting = pendingJobs(this.db, "");
     let pending: string[] = [];

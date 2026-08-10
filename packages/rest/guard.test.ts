@@ -16,7 +16,7 @@ export class DocumentApi {
   constructor(kind: string) { this.kind = kind; }
 
   @get("/")
-  @Guard("needsPostgres")
+  @Guard(needsPostgres)
   list(req: Request): Reply { return ok("[\"a\"]"); }
 
   @get("/open")
@@ -28,7 +28,7 @@ export class DocumentApi {
   }
 
   @get("/own")
-  @Guard("ready")
+  @Guard(ready)
   own(req: Request): Reply { return ok("{\"own\":true}"); }
 }
 

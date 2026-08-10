@@ -28,7 +28,7 @@ export class JobApi {
   }
 
   @get("/")
-  @Guard("needsPg")
+  @Guard(needsPg)
   list(req: Request): Reply {
     return ok(JSON.stringify(pendingJobs(this.db, "").map(jobView)));
   }
