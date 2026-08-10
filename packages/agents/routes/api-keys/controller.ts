@@ -7,6 +7,7 @@ import { apiKeysOf, forgetApiKey, mintApiKey } from "../../api-keys.ts";
 import { owningTag } from "../../owner.ts";
 import { jsonText } from "../../scan.ts";
 import { MintedKey } from "./types.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 @controller("/api-keys")
 @bindings
@@ -16,19 +17,17 @@ export class ApiKeyApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(apiKeysOf(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a key yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes a key yours to keep");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"scopes\":\"search,retrieve\"}");
     }

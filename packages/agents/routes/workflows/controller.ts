@@ -11,6 +11,7 @@ import { ensureBuilt } from "../../script-wasm.ts";
 import { graphSecretProblem } from "../../secrets.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsOf, workflowsMapping, workflowsOf } from "../../workflow-store.ts";
 import { ScriptCheckFailed, ScriptCheckFresh } from "./types.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 @controller("/workflows")
 @bindings
@@ -20,19 +21,17 @@ export class WorkflowApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(workflowsOf(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a workflow yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes a workflow yours to keep");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"agentId\":\"a1\",\"graph\":{...}}");
     }

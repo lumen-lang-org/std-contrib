@@ -12,6 +12,7 @@ import { ScriptImageRow, scriptImagesMapping } from "../../schema.ts";
 import { threadOwner } from "../../threads.ts";
 import { createUserEnv, forgetUserEnv, userEnvsMapping, userEnvsOf } from "../../user-environments.ts";
 import { EnvCatalogItem, EnvCreateAsk } from "./types.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 @controller("/environments")
 @bindings
@@ -21,9 +22,9 @@ export class EnvironmentApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   catalog(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     let items: EnvCatalogItem[] = [];
     let mine = userEnvsOf(this.db, owningTag(tags));
     let m: int = 0;
@@ -63,12 +64,10 @@ export class EnvironmentApi {
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes an environment yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes an environment yours to keep");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"image\":\"...\"}, {\"name\":\"...\",\"dockerfile\":\"FROM ...\"}, or {\"name\":\"...\",\"templateId\":\"...\"}");
     }
@@ -105,9 +104,9 @@ export class EnvironmentApi {
   }
 
   @get("/mine")
+  @Guard(ownedOrEmpty)
   mine(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     let rows = envOwned(this.db, owningTag(tags));
     return okJson(rows);
   }

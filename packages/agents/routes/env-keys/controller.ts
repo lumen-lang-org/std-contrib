@@ -9,6 +9,7 @@ import { owningTag } from "../../owner.ts";
 import { jsonText } from "../../scan.ts";
 import { scriptImagesMapping } from "../../schema.ts";
 import { userEnvById } from "../../user-environments.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 @controller("/env-keys")
 @bindings
@@ -19,19 +20,17 @@ export class EnvKeyApi {
   constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(envKeysOwnedBy(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes an environment key yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes an environment key yours to keep");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"imageId\":\"...\",\"name\":\"OPENAI_API_KEY\",\"value\":\"...\"}");
     }

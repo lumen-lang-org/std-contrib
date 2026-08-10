@@ -7,6 +7,7 @@ import { callerTags, choiceProblem, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
 import { agentsMapping } from "../../schema.ts";
 import { MAX_PER_OWNER, TaskRow, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, withNextAt } from "../../tasks.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 export type TaskCreateAsk = {
   agentId?: string,
@@ -36,19 +37,17 @@ export class TaskApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(tasksOf(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a task yours to run"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes a task yours to run");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"agentId\":\"a1\",\"instruction\":\"...\",\"schedule\":\"every weekday at 08:00\"}");
     }

@@ -6,6 +6,7 @@ import { callerTags, guestTag } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";
 import { secretsOf } from "../../secrets.ts";
 import { SecretCreateAsk } from "./types.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 @controller("/secrets")
 @bindings
@@ -16,19 +17,17 @@ export class SecretApi {
   constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(secretsOf(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a secret yours to keep"))
   create(req: Request, @RequestBody body: string): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes a secret yours to keep");
-    }
     if (body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"value\":\"...\",\"destination\":\"https://api.example.com\",\"header\":\"Authorization\",\"category\":\"Payments\"}");
     }

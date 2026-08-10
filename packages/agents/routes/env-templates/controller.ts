@@ -6,6 +6,7 @@ import { callerTags, stamp } from "../../api-core.ts";
 import { EnvTemplateWrite, envTemplatesAll, forgetEnvTemplate, saveEnvTemplate } from "../../env-templates.ts";
 import { owningTag } from "../../owner.ts";
 import { EnvTemplateAsk } from "./types.ts";
+import { ownedOrEmpty } from "../../guards.ts";
 
 @controller("/env-templates")
 @bindings
@@ -15,9 +16,8 @@ export class EnvTemplateApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
-  list(req: Request): Reply {
-    let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+  @Guard(ownedOrEmpty)
+  list(): Reply {
     return ok(JSON.stringify(envTemplatesAll(this.db)));
   }
 

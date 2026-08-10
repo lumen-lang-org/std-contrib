@@ -9,6 +9,7 @@ import { PROJECT_FILES_KEY, ProjectRow, emptyProject, projectsMapping, projectsO
 import { jsonText } from "../../scan.ts";
 import { openThread, rememberRouteKey, threadsMapping } from "../../threads.ts";
 import { FilesThreadView } from "./types.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 @controller("/projects")
 @bindings
@@ -18,19 +19,17 @@ export class ProjectApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(projectsOf(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a project yours"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes a project yours");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"instructions\":\"...\"}");
     }

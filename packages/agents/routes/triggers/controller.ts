@@ -8,6 +8,7 @@ import { forgetCredential, storeCredential } from "../../credentials.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
 import { TriggerBotRow, botsOf, emptyBot, queuedFor, triggerBotsMapping } from "../../triggers.ts";
 import { workflowsMapping } from "../../workflow-store.ts";
+import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 
 export type TriggerCreateAsk = {
   name?: string,
@@ -34,19 +35,17 @@ export class TriggerApi {
   constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @get("/")
+  @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
     return ok(botsOf(this.db, owningTag(tags)));
   }
 
   @post("/")
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a bot yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
-    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
-      return badRequest("signing in is what makes a bot yours to keep");
-    }
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"workflowId\":\"...\",\"token\":\"...\"}");
     }
