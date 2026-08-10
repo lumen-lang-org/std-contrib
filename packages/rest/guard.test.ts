@@ -62,3 +62,29 @@ test("a guard that is a method reaches the controller's own state", () => {
   let good: Mount[] = [new DocumentApi("postgres")];
   expect(dispatchedMounted(good, "GET", "/documents/own", "", new Map<string, string>()).body == "{\"own\":true}");
 });
+
+export function roleAtLeast(req: Request, role: string): Guarded {
+  if (role == "signed-in" && header(req, "x-user").trim() == "") {
+    return stops(badRequest("signing in is what makes this yours"));
+  }
+  return passes();
+}
+
+@controller("/roled")
+@bindings
+export class RoledApi {
+  @get("/")
+  @Guard(roleAtLeast("signed-in"))
+  mine(req: Request): Reply { return ok("{\"mine\":true}"); }
+}
+
+test("a guard written as a call carries its argument", () => {
+  let m: Mount[] = [new RoledApi()];
+  let out = dispatchedMounted(m, "GET", "/roled", "", new Map<string, string>());
+  expect(out.status == 400);
+  expect(out.body.indexOf("signing in") >= 0);
+
+  let h = new Map<string, string>();
+  h.set("x-user", "alice");
+  expect(dispatchedMounted(m, "GET", "/roled", "", h).body == "{\"mine\":true}");
+});
