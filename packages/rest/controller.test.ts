@@ -71,7 +71,7 @@ test("a method with no route decorator serves nothing", () => {
 test("each verb becomes its HTTP method", () => {
   let table = controller(agentController());
   expect(table[2].method == "POST");
-  // `delete` is a reserved word, so the decorator is @del.
+  // `@delete` is the verb; `@del` is kept for code written against it.
   expect(table[3].method == "DELETE");
   expect(table[3].pattern == "/agents/:id");
 });
@@ -169,4 +169,20 @@ test("two controllers can share a prefix without colliding", () => {
   expect(tableProblem(both) == "");
   expect(match(both, "GET", "/teams").handler == "list");
   expect(match(both, "GET", "/agents").handler == "list");
+});
+
+test("@delete and @del both mean DELETE", () => {
+  let d = agentController();
+  let methods: ControllerMethod[] = [
+    controllerMethod("remove", [on("delete", ["/:id"])]),
+    controllerMethod("drop", [on("del", ["/:id/hard"])]),
+  ];
+  let spelled: Description = {
+    protocol: 1, kind: "class", name: "ThingController", args: ["/things"],
+    file: "api.ts", line: 4, fields: d.fields, methods: methods,
+  };
+  let table = controller(spelled);
+  expect(table.length == 2);
+  expect(match(table, "DELETE", "/things/x").handler == "remove");
+  expect(match(table, "DELETE", "/things/x/hard").handler == "drop");
 });

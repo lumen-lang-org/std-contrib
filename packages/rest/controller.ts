@@ -109,18 +109,18 @@ export function httpMethodOf(m: ControllerMethod): string {
   if (methodHas(m, "post")) { return "POST"; }
   if (methodHas(m, "put")) { return "PUT"; }
   if (methodHas(m, "patch")) { return "PATCH"; }
-  if (methodHas(m, "del")) { return "DELETE"; }
+  if (methodHas(m, "delete") || methodHas(m, "del")) { return "DELETE"; }
   if (methodHas(m, "head")) { return "HEAD"; }
   return "";
 }
 
-// `delete` is a reserved word, so the decorator is `@del`. Naming it anything
-// cleverer would be worse: this is the one place the language shows through.
+// `@delete` is the verb; `@del` is kept because code was written against it.
 export function routeDecoratorName(m: ControllerMethod): string {
   if (methodHas(m, "get")) { return "get"; }
   if (methodHas(m, "post")) { return "post"; }
   if (methodHas(m, "put")) { return "put"; }
   if (methodHas(m, "patch")) { return "patch"; }
+  if (methodHas(m, "delete")) { return "delete"; }
   if (methodHas(m, "del")) { return "del"; }
   if (methodHas(m, "head")) { return "head"; }
   return "";
