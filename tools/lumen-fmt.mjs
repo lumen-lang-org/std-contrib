@@ -28,7 +28,14 @@ const checkOnly = process.argv.includes("--check");
 const roots = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 
 function sources(path) {
-  if (statSync(path).isFile()) return extname(path) === ".ts" ? [path] : [];
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    console.error("lumen-fmt: no such path: " + path);
+    process.exit(2);
+  }
+  if (stat.isFile()) return extname(path) === ".ts" ? [path] : [];
   return readdirSync(path).flatMap((e) => sources(join(path, e)));
 }
 

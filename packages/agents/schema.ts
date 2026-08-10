@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, ManyThrough, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, ManyThrough, withoutRelations, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { agentRepository } from "./routes/agents/entities/agent.entity.ts";
 import { promptRepository } from "./routes/prompts/entities/prompt.entity.ts";
@@ -323,7 +323,7 @@ export function configAndModel(db: Db, configId: string): ConfigAndModel {
 // See entities/prompt.entity.ts — @entity is what plume has offered all along,
 // and what the rest of these should become.
 export function promptsMapping(): DbRepository {
-  return promptRepository();
+  return withoutRelations(promptRepository());
 }
 
 export function mcpServersMapping(): DbRepository {
@@ -640,7 +640,7 @@ export function officeRendersMapping(): DbRepository {
 }
 
 export function agentsMapping(): DbRepository {
-  return agentRepository();
+  return withoutRelations(agentRepository());
 }
 
 // The three link tables an agent owns, named so they can be written as well as

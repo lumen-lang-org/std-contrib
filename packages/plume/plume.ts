@@ -1032,6 +1032,20 @@ export type DbLink = {
 // entity declaring @hasManyThrough has said where the table is and which column
 // means which side; this is how a write reaches the same description the read
 // uses, without it being written down twice.
+// The same mapping without its joins. An entity declares the whole graph, but a
+// row read for its own columns is not the joined document: JSON.parse accepts
+// only the keys its target type declares, so handing it a document carrying
+// prompt, config and servers refuses the parse.
+export function withoutRelations(repo: DbRepository): DbRepository {
+  return repository({
+    table: repo.table,
+    idField: repo.idField,
+    idColumn: repo.idColumn,
+    fields: repo.fields,
+    relations: [],
+  });
+}
+
 export function linkOf(repo: DbRepository, field: string): ManyThrough {
   let i: int = 0;
   while (i < repo.relations.length) {

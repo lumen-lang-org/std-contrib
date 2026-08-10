@@ -53,7 +53,7 @@ import { SandboxLimitsApi } from "./routes/sandbox-limits/controller.ts";
 import { ScopeApi } from "./routes/scopes/controller.ts";
 import { QuotaApi } from "./routes/quota/controller.ts";
 import { LibraryApi } from "./routes/library/controller.ts";
-import { RunApi } from "./routes/runs/controller.ts";
+import { RunApi } from "./routes/runs/run.controller.ts";
 import { UsageApi } from "./routes/usage/controller.ts";
 import { BannerApi } from "./routes/banner/controller.ts";
 import { mcpRosterPlan } from "./mcp-roster.ts";
