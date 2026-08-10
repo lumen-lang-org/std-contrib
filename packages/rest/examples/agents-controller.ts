@@ -59,22 +59,34 @@ class AgentController {
   list(req: Request): Reply {
     let keys: DbOrder[] = [{ column: "agent_name" }];
     let ceiling = queryParam(req, "maxSteps", "");
-    if (ceiling == "") { return ok(this.agents.listOrdered({ order: keys })); }
-    return ok(this.agents.listOrdered({ where: "max_steps <= " + this.agents.db.placeholder, args: [ceiling], order: keys }));
+    if (ceiling == "") {
+      return ok(this.agents.listOrdered({ order: keys }));
+    }
+    return ok(this.agents.listOrdered({
+      where: "max_steps <= " + this.agents.db.placeholder,
+      args: [ceiling],
+      order: keys,
+    }));
   }
 
   @get("/:id")
   find(req: Request): Reply {
     let document = this.agents.findById(keyOf(req));
-    if (document == "") { return notFound("agent " + keyOf(req)); }
+    if (document == "") {
+      return notFound("agent " + keyOf(req));
+    }
     return ok(document);
   }
 
   @post("/")
   create(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
+    if (req.body == "") {
+      return badRequest("a body is required");
+    }
     let written = this.agents.persist(req.body);
-    if (!written.ok) { return badRequest(written.error); }
+    if (!written.ok) {
+      return badRequest(written.error);
+    }
     return created(req.body);
   }
 
@@ -130,7 +142,9 @@ function main(): void {
   }
 
   let problem = listen(8092, mounts);
-  if (problem != "") { console.error(problem); }
+  if (problem != "") {
+    console.error(problem);
+  }
 }
 
 main();

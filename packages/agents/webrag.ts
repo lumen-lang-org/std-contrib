@@ -25,7 +25,12 @@ export function agentWebRagMapping(): DbRepository {
     field("queryMode", "query_mode", "text"),
     field("queryModelId", "query_model_id", "text"),
   ];
-  return repository({ table: "agent_web_rag", idField: "agentId", idColumn: "agent_id", fields: fs });
+  return repository({
+    table: "agent_web_rag",
+    idField: "agentId",
+    idColumn: "agent_id",
+    fields: fs,
+  });
 }
 
 export function webRagPlan(db: Db): Migration[] {
@@ -37,7 +42,14 @@ export function webRagPlan(db: Db): Migration[] {
 export function webRagFor(db: Db, agentId: string): AgentWebRagRow {
   let held = findById(db, agentWebRagMapping(), agentId);
   if (held == "") {
-    let none: AgentWebRagRow = { agentId: agentId, enabled: false, topK: 5, maxChars: 6000, queryMode: "verbatim", queryModelId: "" };
+    let none: AgentWebRagRow = {
+      agentId: agentId,
+      enabled: false,
+      topK: 5,
+      maxChars: 6000,
+      queryMode: "verbatim",
+      queryModelId: "",
+    };
     return none;
   }
   return JSON.parse<AgentWebRagRow>(held);
@@ -111,11 +123,21 @@ export function retrieveWeb(query: string, topK: int, maxChars: int): WebFound {
     + "&k=" + `${topK}` + "&max_chars=" + `${maxChars}`;
   let res = http.request(url, "GET", "", new Map<string, string>());
   if (!res.ok) {
-    let dead: WebFound = { ok: false, query: query, found: [], error: "the search index did not answer" };
+    let dead: WebFound = {
+      ok: false,
+      query: query,
+      found: [],
+      error: "the search index did not answer",
+    };
     return dead;
   }
   if (res.status != 200) {
-    let refused: WebFound = { ok: false, query: query, found: [], error: "the search index answered " + `${res.status}` };
+    let refused: WebFound = {
+      ok: false,
+      query: query,
+      found: [],
+      error: "the search index answered " + `${res.status}`,
+    };
     return refused;
   }
   let out: WebPassage[] = [];

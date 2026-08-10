@@ -59,7 +59,9 @@ export function fieldArg(f: FieldDescription, name: string, index: int): string 
   let i: int = 0;
   while (i < f.decorators.length) {
     if (f.decorators[i].name == name) {
-      if (index < f.decorators[i].args.length) { return f.decorators[i].args[index]; }
+      if (index < f.decorators[i].args.length) {
+        return f.decorators[i].args[index];
+      }
       return "";
     }
     i = i + 1;
@@ -70,7 +72,9 @@ export function fieldArg(f: FieldDescription, name: string, index: int): string 
 export function fieldHas(f: FieldDescription, name: string): bool {
   let i: int = 0;
   while (i < f.decorators.length) {
-    if (f.decorators[i].name == name) { return true; }
+    if (f.decorators[i].name == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -81,9 +85,15 @@ export function fieldHas(f: FieldDescription, name: string): bool {
 // type still has to produce something, and the annotation is the only other
 // evidence. `@column("id", "text")` overrides it.
 export function defaultSqlType(declared: string): string {
-  if (declared == "int" || declared == "i32" || declared == "i64") { return "int"; }
-  if (declared == "number" || declared == "f64") { return "float8"; }
-  if (declared == "bool" || declared == "boolean") { return "bool"; }
+  if (declared == "int" || declared == "i32" || declared == "i64") {
+    return "int";
+  }
+  if (declared == "number" || declared == "f64") {
+    return "float8";
+  }
+  if (declared == "bool" || declared == "boolean") {
+    return "bool";
+  }
   return "text";
 }
 
@@ -105,14 +115,41 @@ export function entity(d: EntityDescription): DbRepository {
     // fetched alongside. @hasOne/@hasMany name the other table, the column on
     // each side, and the select list that shapes what comes back.
     if (fieldHas(f, "hasOne")) {
-      relations.push(hasOne({ field: f.name, table: fieldArg(f, "hasOne", 0), localColumn: fieldArg(f, "hasOne", 1), foreignColumn: fieldArg(f, "hasOne", 2), columns: fieldArg(f, "hasOne", 3) }));
+      relations.push(hasOne({
+        field: f.name,
+        table: fieldArg(f, "hasOne", 0),
+        localColumn: fieldArg(f, "hasOne", 1),
+        foreignColumn: fieldArg(f, "hasOne", 2),
+        columns: fieldArg(f, "hasOne", 3),
+      }));
+    } else if (fieldHas(f, "hasManyThrough")) {
+      relations.push(hasManyThrough({
+        field: f.name,
+        table: fieldArg(f, "hasManyThrough", 0),
+        foreignColumn: fieldArg(f, "hasManyThrough", 1),
+        linkTable: fieldArg(f, "hasManyThrough", 2),
+        linkLocalColumn: fieldArg(f, "hasManyThrough", 3),
+        linkForeignColumn: fieldArg(f, "hasManyThrough", 4),
+        localColumn: fieldArg(f, "hasManyThrough", 5),
+        columns: fieldArg(f, "hasManyThrough", 6),
+      }));
     } else if (fieldHas(f, "hasMany")) {
-      relations.push(hasMany({ field: f.name, table: fieldArg(f, "hasMany", 0), localColumn: fieldArg(f, "hasMany", 1), foreignColumn: fieldArg(f, "hasMany", 2), columns: fieldArg(f, "hasMany", 3) }));
+      relations.push(hasMany({
+        field: f.name,
+        table: fieldArg(f, "hasMany", 0),
+        localColumn: fieldArg(f, "hasMany", 1),
+        foreignColumn: fieldArg(f, "hasMany", 2),
+        columns: fieldArg(f, "hasMany", 3),
+      }));
     } else if (fieldHas(f, "column")) {
       let column = fieldArg(f, "column", 0);
-      if (column == "") { column = f.name; }
+      if (column == "") {
+        column = f.name;
+      }
       let sqlType = fieldArg(f, "column", 1);
-      if (sqlType == "") { sqlType = defaultSqlType(f.type); }
+      if (sqlType == "") {
+        sqlType = defaultSqlType(f.type);
+      }
       fields.push(field(f.name, column, sqlType));
       if (fieldHas(f, "id")) {
         idField = f.name;
@@ -123,9 +160,19 @@ export function entity(d: EntityDescription): DbRepository {
   }
 
   let table = "";
-  if (d.args.length > 0) { table = d.args[0]; }
-  if (relations.length == 0) { return repository({ table: table, idField: idField, idColumn: idColumn, fields: fields }); }
-  return repository({ table: table, idField: idField, idColumn: idColumn, fields: fields, relations: relations });
+  if (d.args.length > 0) {
+    table = d.args[0];
+  }
+  if (relations.length == 0) {
+    return repository({ table: table, idField: idField, idColumn: idColumn, fields: fields });
+  }
+  return repository({
+    table: table,
+    idField: idField,
+    idColumn: idColumn,
+    fields: fields,
+    relations: relations,
+  });
 }
 
 // Whether a description would produce a usable mapping, and why not. Called by
@@ -149,13 +196,17 @@ export function entityViolation(d: EntityDescription): string {
   while (i < d.fields.length) {
     if (fieldHas(d.fields[i], "hasOne") || fieldHas(d.fields[i], "hasMany")) {
       let which = "hasOne";
-      if (fieldHas(d.fields[i], "hasMany")) { which = "hasMany"; }
+      if (fieldHas(d.fields[i], "hasMany")) {
+        which = "hasMany";
+      }
       if (fieldArg(d.fields[i], which, 3) == "") {
         return "@" + which + " on \"" + d.fields[i].name
           + "\" needs four arguments: the other table, the column on this one, the column on that one, and the select list";
       }
     }
-    if (fieldHas(d.fields[i], "column")) { mapped = mapped + 1; }
+    if (fieldHas(d.fields[i], "column")) {
+      mapped = mapped + 1;
+    }
     if (fieldHas(d.fields[i], "id")) {
       keys = keys + 1;
       if (!fieldHas(d.fields[i], "column")) {

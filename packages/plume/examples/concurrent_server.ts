@@ -51,7 +51,9 @@ function idOf(path: string): string {
   let bare = parts[0];
   let segments = bare.split("/");
   let last = segments[segments.length - 1];
-  if (last == "agents") { return ""; }
+  if (last == "agents") {
+    return "";
+  }
   return last;
 }
 
@@ -64,7 +66,9 @@ function main(): void {
     let id = idOf(req.path);
     if (req.method == "POST") {
       let written = agents.persist(req.body);
-      if (!written.ok) { return reply(400, "{\"error\":\"" + written.error + "\"}"); }
+      if (!written.ok) {
+        return reply(400, "{\"error\":\"" + written.error + "\"}");
+      }
       return reply(201, req.body);
     }
     if (id == "") {
@@ -73,7 +77,9 @@ function main(): void {
       return reply(200, agents.listOrdered({ args: empty, order: keys }));
     }
     let document = agents.findById(id);
-    if (document == "") { return reply(404, "{\"error\":\"no agent " + id + "\"}"); }
+    if (document == "") {
+      return reply(404, "{\"error\":\"no agent " + id + "\"}");
+    }
     return reply(200, document);
   });
 }

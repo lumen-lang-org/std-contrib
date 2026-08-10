@@ -13,7 +13,17 @@ export type DocumentRow = {
 };
 
 export function embeddingModel(db: Db, modelId: string): ModelRow {
-  let absent: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
+  let absent: ModelRow = {
+    id: "",
+    label: "",
+    apiName: "",
+    provider: "",
+    kind: "",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: false,
+    contextTokens: 0,
+  };
   let document = findById(db, modelsMapping(), modelId);
   if (document == "") {
     return absent;
@@ -200,11 +210,19 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
     return bad;
   }
   if (model.kind != "embedding") {
-    let wrong: Retrieval = { ok: false, found: none, error: model.label + " is not an embedding model" };
+    let wrong: Retrieval = {
+      ok: false,
+      found: none,
+      error: model.label + " is not an embedding model",
+    };
     return wrong;
   }
   if (scopes.length == 0) {
-    let ungranted: Retrieval = { ok: false, found: none, error: "no scopes granted, so nothing is readable" };
+    let ungranted: Retrieval = {
+      ok: false,
+      found: none,
+      error: "no scopes granted, so nothing is readable",
+    };
     return ungranted;
   }
   let vector = embedText(model, question, apiKey);
@@ -246,7 +264,11 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
   }
   args.push(vector.vector);
   if (!db.query(sql, args)) {
-    let refused: Retrieval = { ok: false, found: none, error: "the search was refused: " + db.lastError() };
+    let refused: Retrieval = {
+      ok: false,
+      found: none,
+      error: "the search was refused: " + db.lastError(),
+    };
     return refused;
   }
   let found: Retrieved[] = [];
@@ -357,15 +379,27 @@ export function splitIntoChunks(body: string, maxChars: int): string[] {
 
 export function uploadDocument(db: Db, model: ModelRow, source: string, scope: string, body: string, apiKey: string): Upload {
   if (source == "") {
-    let unnamed: Upload = { ok: false, chunks: 0, error: "a document needs a source to be filed under" };
+    let unnamed: Upload = {
+      ok: false,
+      chunks: 0,
+      error: "a document needs a source to be filed under",
+    };
     return unnamed;
   }
   if (body.trim() == "") {
-    let empty: Upload = { ok: false, chunks: 0, error: "an empty document has nothing to retrieve" };
+    let empty: Upload = {
+      ok: false,
+      chunks: 0,
+      error: "an empty document has nothing to retrieve",
+    };
     return empty;
   }
   if (!safeIdentifier(source)) {
-    let odd: Upload = { ok: false, chunks: 0, error: "a source must be a plain name: letters, digits, _ and -" };
+    let odd: Upload = {
+      ok: false,
+      chunks: 0,
+      error: "a source must be a plain name: letters, digits, _ and -",
+    };
     return odd;
   }
 
@@ -380,10 +414,19 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
   let written: int = 0;
   let i: int = 0;
   while (i < chunks.length) {
-    let part: DocumentChunk = { id: stem + "_" + `${i}`, source: source, scope: scope, body: chunks[i] };
+    let part: DocumentChunk = {
+      id: stem + "_" + `${i}`,
+      source: source,
+      scope: scope,
+      body: chunks[i],
+    };
     let problem = indexDocument(db, model, part, apiKey);
     if (problem != "") {
-      let failed: Upload = { ok: false, chunks: written, error: "chunk " + `${i}` + ": " + problem };
+      let failed: Upload = {
+        ok: false,
+        chunks: written,
+        error: "chunk " + `${i}` + ": " + problem,
+      };
       return failed;
     }
     written = written + 1;
@@ -484,7 +527,11 @@ export function scopeCounts(db: Db, prefix: string, pending: string[]): ScopeNod
         }
         q = q + 1;
       }
-      let node: ScopeNode = { path: paths[p], documents: counts[p] + pendingIn(pending, paths[p]), total: total };
+      let node: ScopeNode = {
+        path: paths[p],
+        documents: counts[p] + pendingIn(pending, paths[p]),
+        total: total,
+      };
       out.push(node);
     }
     p = p + 1;
@@ -508,7 +555,12 @@ export function agentRetrievalMapping(): DbRepository {
     field("maxDistance", "max_distance", "float8"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository({ table: "agent_retrieval", idField: "agentId", idColumn: "agent_id", fields: fs });
+  return repository({
+    table: "agent_retrieval",
+    idField: "agentId",
+    idColumn: "agent_id",
+    fields: fs,
+  });
 }
 
 export function knowledgePlan(db: Db): Migration[] {

@@ -62,27 +62,65 @@ export function store(db: Db, mapping: DbRepository): Store {
     db: db,
     mapping: mapping,
 
-    createTable: () => { return createTable(db, mapping); },
-    dropTable: () => { return dropTable(db, mapping); },
-    createTableSql: () => { return createTableSql(db, mapping); },
-    createTableSqlWithKeys: () => { return createTableSqlWithKeys(db, mapping); },
-    foreignKeys: () => { return foreignKeys(db, mapping); },
+    createTable: () => {
+      return createTable(db, mapping);
+    },
+    dropTable: () => {
+      return dropTable(db, mapping);
+    },
+    createTableSql: () => {
+      return createTableSql(db, mapping);
+    },
+    createTableSqlWithKeys: () => {
+      return createTableSqlWithKeys(db, mapping);
+    },
+    foreignKeys: () => {
+      return foreignKeys(db, mapping);
+    },
 
-    persist: (document: string) => { return persist(db, mapping, document); },
-    persistMany: (documents: string) => { return persistMany(db, mapping, documents); },
-    deleteById: (id: string) => { return deleteById(db, mapping, id); },
-    deleteWhere: (where: string, args: string[]) => { return deleteWhere(db, mapping, where, args); },
+    persist: (document: string) => {
+      return persist(db, mapping, document);
+    },
+    persistMany: (documents: string) => {
+      return persistMany(db, mapping, documents);
+    },
+    deleteById: (id: string) => {
+      return deleteById(db, mapping, id);
+    },
+    deleteWhere: (where: string, args: string[]) => {
+      return deleteWhere(db, mapping, where, args);
+    },
 
-    findById: (id: string) => { return findById(db, mapping, id); },
-    findProjected: (columns: string, id: string) => { return findProjected(db, mapping, columns, id); },
-    list: () => { return listWhere(db, mapping, "", none); },
-    listWhere: (where: string, args: string[]) => { return listWhere(db, mapping, where, args); },
-    listProjected: (columns: string, where: string, args: string[]) => { return listProjected(db, mapping, columns, where, args); },
-    listOrdered: (q: DbQuery) => { return listOrdered(db, mapping, q); },
-    pageOrdered: (q: DbQuery) => { return pageOrdered(db, mapping, q); },
-    count: () => { return countWhere(db, mapping, "", none); },
-    countWhere: (where: string, args: string[]) => { return countWhere(db, mapping, where, args); },
-    existsById: (id: string) => { return existsById(db, mapping, id); },
+    findById: (id: string) => {
+      return findById(db, mapping, id);
+    },
+    findProjected: (columns: string, id: string) => {
+      return findProjected(db, mapping, columns, id);
+    },
+    list: () => {
+      return listWhere(db, mapping, "", none);
+    },
+    listWhere: (where: string, args: string[]) => {
+      return listWhere(db, mapping, where, args);
+    },
+    listProjected: (columns: string, where: string, args: string[]) => {
+      return listProjected(db, mapping, columns, where, args);
+    },
+    listOrdered: (q: DbQuery) => {
+      return listOrdered(db, mapping, q);
+    },
+    pageOrdered: (q: DbQuery) => {
+      return pageOrdered(db, mapping, q);
+    },
+    count: () => {
+      return countWhere(db, mapping, "", none);
+    },
+    countWhere: (where: string, args: string[]) => {
+      return countWhere(db, mapping, where, args);
+    },
+    existsById: (id: string) => {
+      return existsById(db, mapping, id);
+    },
   };
   return s;
 }

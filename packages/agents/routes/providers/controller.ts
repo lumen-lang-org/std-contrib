@@ -35,7 +35,12 @@ export class ProviderApi {
     if (problem != "") {
       return BadRequest(problem);
     }
-    let stored = storeCredential(this.db, { provider: provider, apiKey: body.apiKey, masterKey: this.master, now: stamp() });
+    let stored = storeCredential(this.db, {
+      provider: provider,
+      apiKey: body.apiKey,
+      masterKey: this.master,
+      now: stamp(),
+    });
     if (stored != "") {
       return BadRequest(stored);
     }

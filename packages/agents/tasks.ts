@@ -334,7 +334,11 @@ export function enabledCount(db: Db, owner: string): int {
 
 export function tasksOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "next_at" }];
-  return listOrdered(db, tasksMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  return listOrdered(db, tasksMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
 }
 
 export function claimDue(db: Db, nowMs: number): TaskRow {

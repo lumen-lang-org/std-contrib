@@ -27,7 +27,9 @@ import { Db, DbConfig, targetValue } from "./driver.ts";
 // URI with its own query string.
 function sqTarget(config: DbConfig): string {
   let fileName = config.filename ?? "";
-  if (fileName != "") { return fileName; }
+  if (fileName != "") {
+    return fileName;
+  }
   return config.options ?? "";
 }
 
@@ -49,7 +51,9 @@ function sqConnect(handle: int, config: DbConfig): bool {
 function sqRun(handle: int, sql: string, args: string[]): bool {
   let i: int = 0;
   while (i < args.length) {
-    if (sq_bind(handle, i, args[i]) != 0) { return false; }
+    if (sq_bind(handle, i, args[i]) != 0) {
+      return false;
+    }
     i = i + 1;
   }
   return sq_query(handle, sql, args.length) >= 0;
@@ -60,14 +64,30 @@ function sqRun(handle: int, sql: string, args: string[]): bool {
 // thing that might later have one.
 function sqliteOn(handle: int): Db {
   let d: Db = {
-    connect: (config: DbConfig) => { return sqConnect(handle, config); },
-    connected: () => { return sq_connected(handle) == 1; },
-    close: () => { sq_release(handle); },
-    exec: (sql: string) => { return sq_exec(handle, sql) == 0; },
-    query: (sql: string, args: string[]) => { return sqRun(handle, sql, args); },
-    rows: () => { return sq_rows(handle); },
-    value: (row: int, col: int) => { return sq_value(handle, row, col); },
-    lastError: () => { return sq_error(handle); },
+    connect: (config: DbConfig) => {
+      return sqConnect(handle, config);
+    },
+    connected: () => {
+      return sq_connected(handle) == 1;
+    },
+    close: () => {
+      sq_release(handle);
+    },
+    exec: (sql: string) => {
+      return sq_exec(handle, sql) == 0;
+    },
+    query: (sql: string, args: string[]) => {
+      return sqRun(handle, sql, args);
+    },
+    rows: () => {
+      return sq_rows(handle);
+    },
+    value: (row: int, col: int) => {
+      return sq_value(handle, row, col);
+    },
+    lastError: () => {
+      return sq_error(handle);
+    },
     name: "sqlite",
     placeholder: "?",
     numberedPlaceholders: false,
@@ -119,7 +139,9 @@ export function sqlite(): Db {
 //   let database = sqliteConnection(local);
 export function sqliteConnection(config: DbConfig): Db {
   let handle = sq_acquire();
-  if (handle >= 0) { sqConnect(handle, config); }
+  if (handle >= 0) {
+    sqConnect(handle, config);
+  }
   return sqliteOn(handle);
 }
 

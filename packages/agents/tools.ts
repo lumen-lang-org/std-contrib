@@ -286,7 +286,13 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
     s = s + 1;
   }
 
-  let out: Mounted = { tools: tools, servers: servers, tokens: tokens, problems: problems, deferred: deferred };
+  let out: Mounted = {
+    tools: tools,
+    servers: servers,
+    tokens: tokens,
+    problems: problems,
+    deferred: deferred,
+  };
   return out;
 }
 
@@ -474,7 +480,13 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       now: call.now,
     });
     if (!written.ok) {
-      let refused: FileToolResult = { handled: true, ok: false, text: written.problem, line: 0, changed: "" };
+      let refused: FileToolResult = {
+        handled: true,
+        ok: false,
+        text: written.problem,
+        line: 0,
+        changed: "",
+      };
       return refused;
     }
     let wrote: FileToolResult = {
@@ -505,7 +517,13 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       };
       return broken;
     }
-    let read: FileToolResult = { handled: true, ok: true, text: current.body, line: 0, changed: "" };
+    let read: FileToolResult = {
+      handled: true,
+      ok: true,
+      text: current.body,
+      line: 0,
+      changed: "",
+    };
     return read;
   }
 
@@ -519,7 +537,13 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
     }
     let found = searchArtifacts(db, call.threadId, jsonText(call.args, "query"));
     if (!found.ok) {
-      let refused: FileToolResult = { handled: true, ok: false, text: found.problem, line: 0, changed: "" };
+      let refused: FileToolResult = {
+        handled: true,
+        ok: false,
+        text: found.problem,
+        line: 0,
+        changed: "",
+      };
       return refused;
     }
     let answered: FileToolResult = {
@@ -573,7 +597,13 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
       now: call.now,
     });
     if (!edited.ok) {
-      let refused: FileToolResult = { handled: true, ok: false, text: wireView(edited.problem).text, line: 0, changed: "" };
+      let refused: FileToolResult = {
+        handled: true,
+        ok: false,
+        text: wireView(edited.problem).text,
+        line: 0,
+        changed: "",
+      };
       return refused;
     }
     let changed: FileToolResult = {

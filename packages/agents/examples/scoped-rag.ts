@@ -44,15 +44,55 @@ function main(): void {
     return;
   }
 
-  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
-  let embed: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
+  let chat: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
+  let embed: ModelRow = {
+    id: "e1",
+    label: "Mistral Embed",
+    apiName: "mistral-embed",
+    provider: "mistral",
+    kind: "embedding",
+    dimensions: 1024,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(chat));
   persist(db, modelsMapping(), JSON.stringify(embed));
-  let config: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 400, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let config: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 400,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(config));
-  let prompt: PromptRow = { id: "p1", promptName: "librarian", version: 1, createdAt: "2026-07-26", body: "Answer only from the passages you are given. If they do not say, reply that your documents do not cover it. Two sentences at most." };
+  let prompt: PromptRow = {
+    id: "p1",
+    promptName: "librarian",
+    version: 1,
+    createdAt: "2026-07-26",
+    body: "Answer only from the passages you are given. If they do not say, reply that your documents do not cover it. Two sentences at most.",
+  };
   persist(db, promptsMapping(), JSON.stringify(prompt));
-  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
+  storeCredential(db, {
+    provider: "mistral",
+    apiKey: apiKey,
+    masterKey: master,
+    now: "2026-07-26",
+  });
 
   let embedder = embeddingModel(db, "e1");
   let made = createDocuments(db, embedder);
@@ -82,16 +122,48 @@ function main(): void {
     n = n + 1;
   }
 
-  let engineer: AgentRow = { id: "eng", agentName: "engineer", description: "reads engineering docs", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
-  let people: AgentRow = { id: "hr", agentName: "people", description: "reads HR policies", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
+  let engineer: AgentRow = {
+    id: "eng",
+    agentName: "engineer",
+    description: "reads engineering docs",
+    modelConfigId: "c1",
+    promptId: "p1",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
+  let people: AgentRow = {
+    id: "hr",
+    agentName: "people",
+    description: "reads HR policies",
+    modelConfigId: "c1",
+    promptId: "p1",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
   persist(db, agentsMapping(), JSON.stringify(engineer));
   persist(db, agentsMapping(), JSON.stringify(people));
 
   grantScope(db, "eng", "/engineering");
   grantScope(db, "hr", "/hr");
 
-  let engRetrieval: AgentRetrievalRow = { agentId: "eng", embeddingModelId: "e1", topK: 3, maxDistance: 1.0, enabled: true };
-  let hrRetrieval: AgentRetrievalRow = { agentId: "hr", embeddingModelId: "e1", topK: 3, maxDistance: 1.0, enabled: true };
+  let engRetrieval: AgentRetrievalRow = {
+    agentId: "eng",
+    embeddingModelId: "e1",
+    topK: 3,
+    maxDistance: 1.0,
+    enabled: true,
+  };
+  let hrRetrieval: AgentRetrievalRow = {
+    agentId: "hr",
+    embeddingModelId: "e1",
+    topK: 3,
+    maxDistance: 1.0,
+    enabled: true,
+  };
   persist(db, agentRetrievalMapping(), JSON.stringify(engRetrieval));
   persist(db, agentRetrievalMapping(), JSON.stringify(hrRetrieval));
 

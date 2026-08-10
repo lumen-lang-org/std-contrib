@@ -175,7 +175,13 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     }
     envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
     envSave(db, e.threadId, name, e.image, e.network, "running", e.now, e.now);
-    let fresh: EnvEnsured = { ok: true, container: container, created: true, warmed: false, problem: "" };
+    let fresh: EnvEnsured = {
+      ok: true,
+      container: container,
+      created: true,
+      warmed: false,
+      problem: "",
+    };
     return fresh;
   }
 
@@ -197,7 +203,13 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     }
   }
   envSave(db, row.threadId, row.name, row.image, row.network != 0, "running", row.createdAt, e.now);
-  let back: EnvEnsured = { ok: true, container: container, created: created, warmed: warmed, problem: "" };
+  let back: EnvEnsured = {
+    ok: true,
+    container: container,
+    created: created,
+    warmed: warmed,
+    problem: "",
+  };
   return back;
 }
 
@@ -274,7 +286,11 @@ export function envIdle(db: Db, s: EnvSweep): int {
     return 0;
   }
   let keys: DbOrder[] = [{ column: "id" }];
-  let listed = listOrdered(db, envMapping(), { where: "status = " + placeholderAt(db, 1), args: ["running"], order: keys });
+  let listed = listOrdered(db, envMapping(), {
+    where: "status = " + placeholderAt(db, 1),
+    args: ["running"],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return 0;
   }
@@ -309,7 +325,11 @@ export function envForget(db: Db, threadId: string): void {
 
 export function envList(db: Db, threadId: string): EnvRow[] {
   let keys: DbOrder[] = [{ column: "name" }];
-  let listed = listOrdered(db, envMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
+  let listed = listOrdered(db, envMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     let none: EnvRow[] = [];
     return none;

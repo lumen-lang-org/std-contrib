@@ -30,20 +30,28 @@ function agents(): DbRepository {
 // different Db by building them against one.
 function listAgents(req: Request): Reply {
   let limit = queryParam(req, "limit", "");
-  if (limit == "") { return ok(listWhere(database, agents(), "", [])); }
+  if (limit == "") {
+    return ok(listWhere(database, agents(), "", []));
+  }
   return ok(listWhere(database, agents(), "max_steps <= " + database.placeholder, [limit]));
 }
 
 function findAgent(req: Request): Reply {
   let doc = findById(database, agents(), param(req, "id"));
-  if (doc == "") { return notFound("agent " + param(req, "id")); }
+  if (doc == "") {
+    return notFound("agent " + param(req, "id"));
+  }
   return ok(doc);
 }
 
 function createAgent(req: Request): Reply {
-  if (req.body == "") { return badRequest("a body is required"); }
+  if (req.body == "") {
+    return badRequest("a body is required");
+  }
   let w = persist(database, agents(), req.body);
-  if (!w.ok) { return badRequest(w.error); }
+  if (!w.ok) {
+    return badRequest(w.error);
+  }
   return created(req.body);
 }
 
@@ -81,7 +89,9 @@ function main(): void {
   bound.set("remove", deleteAgent);
 
   let problemText = serve(8091, table, bound);
-  if (problemText != "") { console.error(problemText); }
+  if (problemText != "") {
+    console.error(problemText);
+  }
 }
 
 main();

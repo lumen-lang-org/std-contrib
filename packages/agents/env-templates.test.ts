@@ -36,11 +36,38 @@ test("a Dockerfile template is source dockerfile, and image XOR dockerfile is en
   fresh();
   put("DS", "", "FROM python:3.12-slim\nRUN pip install pandas", 0);
   expect(envTemplatesAll(database)[0].source == "dockerfile");
-  let both: EnvTemplateWrite = { id: "", name: "x", summary: "", tags: "", image: "a:1", dockerfile: "FROM a", featuredRank: 0, now: "t1" };
+  let both: EnvTemplateWrite = {
+    id: "",
+    name: "x",
+    summary: "",
+    tags: "",
+    image: "a:1",
+    dockerfile: "FROM a",
+    featuredRank: 0,
+    now: "t1",
+  };
   expect(saveEnvTemplate(database, both).indexOf("not both") >= 0);
-  let neither: EnvTemplateWrite = { id: "", name: "x", summary: "", tags: "", image: "", dockerfile: "", featuredRank: 0, now: "t1" };
+  let neither: EnvTemplateWrite = {
+    id: "",
+    name: "x",
+    summary: "",
+    tags: "",
+    image: "",
+    dockerfile: "",
+    featuredRank: 0,
+    now: "t1",
+  };
   expect(saveEnvTemplate(database, neither).indexOf("one of the two") >= 0);
-  let fromless: EnvTemplateWrite = { id: "", name: "x", summary: "", tags: "", image: "", dockerfile: "RUN echo hi", featuredRank: 0, now: "t1" };
+  let fromless: EnvTemplateWrite = {
+    id: "",
+    name: "x",
+    summary: "",
+    tags: "",
+    image: "",
+    dockerfile: "RUN echo hi",
+    featuredRank: 0,
+    now: "t1",
+  };
   expect(saveEnvTemplate(database, fromless).indexOf("FROM") >= 0);
 });
 
@@ -61,7 +88,16 @@ test("save with an id updates in place and keeps the original createdAt", () => 
   fresh();
   put("Python", "python:3.12-slim", "", 0);
   let id = envTemplatesAll(database)[0].id;
-  let update: EnvTemplateWrite = { id: id, name: "Python (slim)", summary: "smaller", tags: "python", image: "python:3.12-alpine", dockerfile: "", featuredRank: 0, now: "t2" };
+  let update: EnvTemplateWrite = {
+    id: id,
+    name: "Python (slim)",
+    summary: "smaller",
+    tags: "python",
+    image: "python:3.12-alpine",
+    dockerfile: "",
+    featuredRank: 0,
+    now: "t2",
+  };
   expect(saveEnvTemplate(database, update) == "");
   let all = envTemplatesAll(database);
   expect(all.length == 1);

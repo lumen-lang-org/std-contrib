@@ -18,7 +18,9 @@ export class ThingApi {
   }
 
   @get("/")
-  plain(req: Request): Reply { return Ok("{\"plain\":true}"); }
+  plain(req: Request): Reply {
+    return Ok("{\"plain\":true}");
+  }
 }
 
 test("a path variable, a query param with a default, and a header all bind", () => {

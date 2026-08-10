@@ -368,7 +368,11 @@ export function emptyBot(): TriggerBotRow {
 
 export function botsOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "name" }];
-  return listOrdered(db, triggerBotsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  return listOrdered(db, triggerBotsMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
 }
 
 export function alreadyHave(db: Db, botId: string, updateId: string): bool {
@@ -388,12 +392,20 @@ export function recentRuns(db: Db, botId: string, nowMs: number): int {
 
 export function queuedFor(db: Db, botId: string): string {
   let keys: DbOrder[] = [{ column: "created_at" }];
-  return listOrdered(db, triggerInboxMapping(), { where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2), args: [botId, "queued"], order: keys });
+  return listOrdered(db, triggerInboxMapping(), {
+    where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
+    args: [botId, "queued"],
+    order: keys,
+  });
 }
 
 export function unsentFor(db: Db, botId: string): string {
   let keys: DbOrder[] = [{ column: "updated_at" }];
-  return listOrdered(db, triggerInboxMapping(), { where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2), args: [botId, "done"], order: keys });
+  return listOrdered(db, triggerInboxMapping(), {
+    where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
+    args: [botId, "done"],
+    order: keys,
+  });
 }
 
 export function botById(db: Db, id: string): TriggerBotRow {
@@ -588,7 +600,11 @@ export function replyKeyboard(options: string): string {
 
 export function unsentOutbound(db: Db, botId: string): string {
   let keys: DbOrder[] = [{ column: "created_at" }];
-  return listOrdered(db, triggerOutboxMapping(), { where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2), args: [botId, "queued"], order: keys });
+  return listOrdered(db, triggerOutboxMapping(), {
+    where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
+    args: [botId, "queued"],
+    order: keys,
+  });
 }
 
 export function testingDraft(bot: TriggerBotRow, nowMs: number): bool {

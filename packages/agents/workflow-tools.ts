@@ -563,7 +563,12 @@ function branchEdges(node: WfNode, from: string, to: string): WfEdge[] {
     out.push(e);
     i = i + 1;
   }
-  let elseWay: WfEdge = { id: "e" + crypto.randomUUID().slice(0, 8), from: from, to: to, when: "else" };
+  let elseWay: WfEdge = {
+    id: "e" + crypto.randomUUID().slice(0, 8),
+    from: from,
+    to: to,
+    when: "else",
+  };
   out.push(elseWay);
   return out;
 }
@@ -1024,7 +1029,12 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       ec = ec + 1;
     }
     if (!moved) {
-      let fresh2: WfEdge = { id: "e" + crypto.randomUUID().slice(0, 8), from: node.id, to: target.id, when: branch };
+      let fresh2: WfEdge = {
+        id: "e" + crypto.randomUUID().slice(0, 8),
+        from: node.id,
+        to: target.id,
+        when: branch,
+      };
       edges2.push(fresh2);
     }
     let rewired: WfGraph = { nodes: graph.nodes, edges: edges2, view: graph.view };

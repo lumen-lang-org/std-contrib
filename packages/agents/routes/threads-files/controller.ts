@@ -57,7 +57,15 @@ export class WorkspaceApi {
       return BadRequest("a body is required: {\"name\":\"notes.md\",\"content\":\"...\"}");
     }
     let body: FileUpload = JSON.parse<FileUpload>(req.body);
-    let problem = putFile(this.db, { threadId: id, fileName: body.name, mime: mimeOf(body.name), origin: "uploaded", body: body.content, documentId: "", now: stamp() });
+    let problem = putFile(this.db, {
+      threadId: id,
+      fileName: body.name,
+      mime: mimeOf(body.name),
+      origin: "uploaded",
+      body: body.content,
+      documentId: "",
+      now: stamp(),
+    });
     if (problem != "") {
       return BadRequest(problem);
     }
@@ -111,7 +119,15 @@ export class WorkspaceApi {
       return BadRequest("no document " + body.documentId);
     }
     let content = jsonText(document, "body");
-    let problem = putFile(this.db, { threadId: id, fileName: body.name, mime: mimeOf(body.name), origin: "retrieved", body: content, documentId: body.documentId, now: stamp() });
+    let problem = putFile(this.db, {
+      threadId: id,
+      fileName: body.name,
+      mime: mimeOf(body.name),
+      origin: "retrieved",
+      body: content,
+      documentId: body.documentId,
+      now: stamp(),
+    });
     if (problem != "") {
       return BadRequest(problem);
     }

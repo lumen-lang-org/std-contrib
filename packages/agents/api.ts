@@ -830,7 +830,12 @@ class ThreadApi {
        @RequestParam("offset", "0") offset: int,
        @RequestParam("project", "") project: string): Reply {
     let limit = parseInt(asked) ?? 50;
-    let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset, project: project });
+    let rows = listThreads(this.db, {
+      tags: callerTags(req),
+      limit: limit,
+      offset: offset,
+      project: project,
+    });
     let out: ThreadRowView[] = [];
     let i: int = 0;
     while (i < rows.length) {
@@ -862,7 +867,11 @@ class ThreadApi {
       return NotFound("story " + storyId);
     }
 
-    let id = openThread(this.db, { agentId: agentId, owner: owningTag(callerTags(req)), now: stamp() });
+    let id = openThread(this.db, {
+      agentId: agentId,
+      owner: owningTag(callerTags(req)),
+      now: stamp(),
+    });
     if (id == "") {
       return BadRequest("the thread could not be opened");
     }
@@ -908,7 +917,11 @@ class ThreadApi {
     if (refused != "") {
       return BadRequest(refused);
     }
-    let id = openThread(this.db, { agentId: agentId, owner: owningTag(callerTags(req)), now: stamp() });
+    let id = openThread(this.db, {
+      agentId: agentId,
+      owner: owningTag(callerTags(req)),
+      now: stamp(),
+    });
     if (id == "") {
       return BadRequest("the thread could not be opened");
     }
@@ -1533,10 +1546,46 @@ function seedEnvTemplates(db: Db): void {
   }
   let now = stamp();
   let starters: EnvTemplateWrite[] = [
-    { id: "", name: "Python", summary: "python 3.12, pip and the standard library — the everyday scripting environment", tags: "python,scripting", image: "python:3.12-slim", dockerfile: "", featuredRank: 1, now: now },
-    { id: "", name: "Node.js", summary: "node 20 and npm — for a JavaScript or TypeScript script", tags: "node,javascript", image: "node:20-slim", dockerfile: "", featuredRank: 2, now: now },
-    { id: "", name: "Data science", summary: "python with pandas, numpy and matplotlib installed — for shaping and charting data", tags: "python,data,pandas", image: "", dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir pandas numpy matplotlib", featuredRank: 3, now: now },
-    { id: "", name: "Web scraping", summary: "python with requests, beautifulsoup4 and lxml — fetch a page and pull data out of it", tags: "python,web,scraping", image: "", dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir requests beautifulsoup4 lxml", featuredRank: 0, now: now },
+    {
+      id: "",
+      name: "Python",
+      summary: "python 3.12, pip and the standard library — the everyday scripting environment",
+      tags: "python,scripting",
+      image: "python:3.12-slim",
+      dockerfile: "",
+      featuredRank: 1,
+      now: now,
+    },
+    {
+      id: "",
+      name: "Node.js",
+      summary: "node 20 and npm — for a JavaScript or TypeScript script",
+      tags: "node,javascript",
+      image: "node:20-slim",
+      dockerfile: "",
+      featuredRank: 2,
+      now: now,
+    },
+    {
+      id: "",
+      name: "Data science",
+      summary: "python with pandas, numpy and matplotlib installed — for shaping and charting data",
+      tags: "python,data,pandas",
+      image: "",
+      dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir pandas numpy matplotlib",
+      featuredRank: 3,
+      now: now,
+    },
+    {
+      id: "",
+      name: "Web scraping",
+      summary: "python with requests, beautifulsoup4 and lxml — fetch a page and pull data out of it",
+      tags: "python,web,scraping",
+      image: "",
+      dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir requests beautifulsoup4 lxml",
+      featuredRank: 0,
+      now: now,
+    },
   ];
   let i: int = 0;
   while (i < starters.length) {
@@ -1549,28 +1598,138 @@ function seed(db: Db): void {
   if (countWhere(db, agentsMapping(), "", []) > 0) {
     return;
   }
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
-  let embed: ModelRow = { id: "m3", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true, contextTokens: 0 };
-  let embedSmall: ModelRow = { id: "m4", label: "Nomic Embed Text", apiName: "nomic-embed-text", provider: "ollama", kind: "embedding", dimensions: 768, baseUrl: "http://127.0.0.1:11434", enabled: false, contextTokens: 0 };
+  let opus: ModelRow = {
+    id: "m1",
+    label: "Opus 5",
+    apiName: "claude-opus-5",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let haiku: ModelRow = {
+    id: "m2",
+    label: "Haiku 4.5",
+    apiName: "claude-haiku-4-5-20251001",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let embed: ModelRow = {
+    id: "m3",
+    label: "Mistral Embed",
+    apiName: "mistral-embed",
+    provider: "mistral",
+    kind: "embedding",
+    dimensions: 1024,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let embedSmall: ModelRow = {
+    id: "m4",
+    label: "Nomic Embed Text",
+    apiName: "nomic-embed-text",
+    provider: "ollama",
+    kind: "embedding",
+    dimensions: 768,
+    baseUrl: "http://127.0.0.1:11434",
+    enabled: false,
+    contextTokens: 0,
+  };
   persist(db, modelsMapping(), JSON.stringify(opus));
   persist(db, modelsMapping(), JSON.stringify(haiku));
   persist(db, modelsMapping(), JSON.stringify(embed));
   persist(db, modelsMapping(), JSON.stringify(embedSmall));
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "Careful", selectable: true, rank: 1 };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "", label: "Quick", selectable: true, rank: 2 };
+  let careful: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.2,
+    maxTokens: 8192,
+    topP: 0.95,
+    extra: "{}",
+    thinking: "",
+    label: "Careful",
+    selectable: true,
+    rank: 1,
+  };
+  let quick: ModelConfigRow = {
+    id: "c2",
+    modelId: "m2",
+    temperature: 0.7,
+    maxTokens: 2048,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "Quick",
+    selectable: true,
+    rank: 2,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(careful));
   persist(db, modelConfigsMapping(db), JSON.stringify(quick));
-  let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
-  let p2: PromptRow = { id: "p2", promptName: "lead", version: 2, body: "You lead, briefly.", createdAt: "2026-07-25" };
+  let p1: PromptRow = {
+    id: "p1",
+    promptName: "lead",
+    version: 1,
+    body: "You lead.",
+    createdAt: "2026-07-25",
+  };
+  let p2: PromptRow = {
+    id: "p2",
+    promptName: "lead",
+    version: 2,
+    body: "You lead, briefly.",
+    createdAt: "2026-07-25",
+  };
   persist(db, promptsMapping(), JSON.stringify(p1));
   persist(db, promptsMapping(), JSON.stringify(p2));
-  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "http", endpoint: "http://127.0.0.1:8931/mcp", authKind: "none", authHeader: "", enabled: true };
-  let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", authKind: "none", authHeader: "", enabled: true };
+  let fsSrv: McpServerRow = {
+    id: "s1",
+    serverName: "filesystem",
+    transport: "http",
+    endpoint: "http://127.0.0.1:8931/mcp",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
+  let ghSrv: McpServerRow = {
+    id: "s2",
+    serverName: "github",
+    transport: "http",
+    endpoint: "https://mcp.gh",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
   persist(db, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(db, mcpServersMapping(), JSON.stringify(ghSrv));
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", scriptImageId: "", isDefault: true, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
-  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let lead: AgentRow = {
+    id: "a1",
+    agentName: "lead",
+    description: "delegates",
+    modelConfigId: "c1",
+    promptId: "p2",
+    scriptImageId: "",
+    isDefault: true,
+    enabled: true,
+    updatedAt: "2026-07-25T10:00:00Z",
+  };
+  let scout: AgentRow = {
+    id: "a2",
+    agentName: "scout",
+    description: "searches",
+    modelConfigId: "c2",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "2026-07-25T10:00:00Z",
+  };
   persist(db, agentsMapping(), JSON.stringify(lead));
   persist(db, agentsMapping(), JSON.stringify(scout));
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a1','s1')");
@@ -1695,16 +1854,31 @@ function listenLocked(port: int, mounts: Mount[], token: string): string {
     if (bearerRefused(token, req.path, req.headers.get("authorization") ?? "")) {
       let shut = Respond(401, "{\"error\":\"a bearer token is required\"}", "application/json");
       shut.headers.set("www-authenticate", "Bearer");
-      let refused: HttpResponse = { status: shut.status, body: shut.body, ok: true, headers: shut.headers };
+      let refused: HttpResponse = {
+        status: shut.status,
+        body: shut.body,
+        ok: true,
+        headers: shut.headers,
+      };
       return refused;
     }
     if (identityUnreadable(trustsProxyAuth(), req.headers.get("x-user") ?? "")) {
       let blank = Respond(401, "{\"error\":\"the X-USER document names no uuid\"}", "application/json");
-      let unknown: HttpResponse = { status: blank.status, body: blank.body, ok: true, headers: blank.headers };
+      let unknown: HttpResponse = {
+        status: blank.status,
+        body: blank.body,
+        ok: true,
+        headers: blank.headers,
+      };
       return unknown;
     }
     let answer = dispatchedMounted(mounts, req.method, req.path, req.body, req.headers);
-    let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
+    let out: HttpResponse = {
+      status: answer.status,
+      body: answer.body,
+      ok: true,
+      headers: answer.headers,
+    };
     return out;
   });
   return "";

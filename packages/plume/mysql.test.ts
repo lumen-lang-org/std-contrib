@@ -35,8 +35,17 @@ function testConfig(): DbConfig {
   // which is the escape hatch a config keeps for a target the fields cannot
   // describe.
   let fromEnv = process.env("PLUME_MYSQL_CONNINFO") ?? "";
-  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
-  let named: DbConfig = { host: "127.0.0.1", port: 13306, database: "lumentest", user: "root", password: "lumen" };
+  if (fromEnv != "") {
+    let raw: DbConfig = { options: fromEnv };
+    return raw;
+  }
+  let named: DbConfig = {
+    host: "127.0.0.1",
+    port: 13306,
+    database: "lumentest",
+    user: "root",
+    password: "lumen",
+  };
   return named;
 }
 
@@ -93,9 +102,19 @@ test("a mapping must name its key field", () => {
   let good: DbField[] = [field("id", "id", "text"), field("n", "n", "text")];
   expect(repositoryValid(repository({ table: "t", idField: "id", idColumn: "id", fields: good })));
   // idField names a field the mapping does not declare.
-  expect(!repositoryValid(repository({ table: "t", idField: "missing", idColumn: "id", fields: good })));
+  expect(!repositoryValid(repository({
+    table: "t",
+    idField: "missing",
+    idColumn: "id",
+    fields: good,
+  })));
   let empty: DbField[] = [];
-  expect(!repositoryValid(repository({ table: "t", idField: "id", idColumn: "id", fields: empty })));
+  expect(!repositoryValid(repository({
+    table: "t",
+    idField: "id",
+    idColumn: "id",
+    fields: empty,
+  })));
 });
 
 test("the select list renames columns to fields", () => {
@@ -236,7 +255,11 @@ test("a page is ordered and bounded", () => {
 
 test("an unsafe order column is refused", () => {
   let repo = seeded();
-  expect(pageWhere(database, repo, { orderBy: "x; DROP TABLE plume_test_agents", limit: 10, offset: 0 }) == "[]");
+  expect(pageWhere(database, repo, {
+    orderBy: "x; DROP TABLE plume_test_agents",
+    limit: 10,
+    offset: 0,
+  }) == "[]");
   expect(countWhere(database, repo, "", []) == 3);
 });
 
@@ -445,7 +468,13 @@ test("a failed connection does not put the password in its diagnostic", () => {
   // Named outright rather than through the suite's config: this is about what
   // the driver renders, and PLUME_MYSQL_CONNINFO would supply a raw target with
   // nothing to override.
-  let wrong: DbConfig = { host: "127.0.0.1", port: 13306, database: "lumentest", user: "root", password: "hunter2 swordfish" };
+  let wrong: DbConfig = {
+    host: "127.0.0.1",
+    port: 13306,
+    database: "lumentest",
+    user: "root",
+    password: "hunter2 swordfish",
+  };
   let spare = mysqlConnection(wrong);
   expect(!spare.connected());
   let why = spare.lastError();
@@ -460,7 +489,13 @@ test("a config value carrying a space is quoted, not truncated", () => {
   // the whole value. Truncated at the space it would have complained about a
   // database called "plume", and the rest of the list would have been read as
   // further keys.
-  let spaced: DbConfig = { host: "127.0.0.1", port: 13306, database: "plume no such db", user: "root", password: "lumen" };
+  let spaced: DbConfig = {
+    host: "127.0.0.1",
+    port: 13306,
+    database: "plume no such db",
+    user: "root",
+    password: "lumen",
+  };
   let spare = mysqlConnection(spaced);
   expect(!spare.connected());
   expect(spare.lastError().indexOf("plume no such db") >= 0);

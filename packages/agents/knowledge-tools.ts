@@ -102,7 +102,17 @@ function anyEmbedder(db: Db): ModelRow {
     }
     i = i + 1;
   }
-  let none: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
+  let none: ModelRow = {
+    id: "",
+    label: "",
+    apiName: "",
+    provider: "",
+    kind: "",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: false,
+    contextTokens: 0,
+  };
   return none;
 }
 
@@ -116,7 +126,17 @@ function skillSaid(db: Db, said: string): SkillRow {
     }
     i = i + 1;
   }
-  let none: SkillRow = { id: "", skillName: "", description: "", body: "", source: "", sourceUrl: "", visibility: "", featuredRank: 0, updatedAt: "" };
+  let none: SkillRow = {
+    id: "",
+    skillName: "",
+    description: "",
+    body: "",
+    source: "",
+    sourceUrl: "",
+    visibility: "",
+    featuredRank: 0,
+    updatedAt: "",
+  };
   return none;
 }
 

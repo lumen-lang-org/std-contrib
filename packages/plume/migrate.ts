@@ -85,7 +85,9 @@ export function checksum(text: string): int {
     while (bit < 8) {
       let lsb = crc & 1;
       crc = (crc >> 1) & 2147483647;
-      if (lsb == 1) { crc = crc ^ -306674912; }
+      if (lsb == 1) {
+        crc = crc ^ -306674912;
+      }
       bit = bit + 1;
     }
     i = i + 1;
@@ -101,15 +103,25 @@ export function compareVersions(a: string, b: string): int {
   let pa = a.split(".");
   let pb = b.split(".");
   let n = pa.length;
-  if (pb.length > n) { n = pb.length; }
+  if (pb.length > n) {
+    n = pb.length;
+  }
   let i: int = 0;
   while (i < n) {
     let x: int = 0;
     let y: int = 0;
-    if (i < pa.length) { x = versionPart(pa[i]); }
-    if (i < pb.length) { y = versionPart(pb[i]); }
-    if (x < y) { return -1; }
-    if (x > y) { return 1; }
+    if (i < pa.length) {
+      x = versionPart(pa[i]);
+    }
+    if (i < pb.length) {
+      y = versionPart(pb[i]);
+    }
+    if (x < y) {
+      return -1;
+    }
+    if (x > y) {
+      return 1;
+    }
     i = i + 1;
   }
   return 0;
@@ -120,7 +132,9 @@ function versionPart(s: string): int {
   let i: int = 0;
   while (i < s.length) {
     let c = s.charCodeAt(i);
-    if (c < 48 || c > 57) { return n; }
+    if (c < 48 || c > 57) {
+      return n;
+    }
     n = n * 10 + (c - 48);
     i = i + 1;
   }
@@ -130,16 +144,22 @@ function versionPart(s: string): int {
 // A version must be digits and dots, since it goes into the history table and
 // is compared numerically.
 export function versionValid(v: string): bool {
-  if (v.length == 0) { return false; }
+  if (v.length == 0) {
+    return false;
+  }
   let i: int = 0;
   let lastWasDot = true;
   while (i < v.length) {
     let c = v.charCodeAt(i);
     if (c == 46) {
-      if (lastWasDot) { return false; }
+      if (lastWasDot) {
+        return false;
+      }
       lastWasDot = true;
     } else {
-      if (c < 48 || c > 57) { return false; }
+      if (c < 48 || c > 57) {
+        return false;
+      }
       lastWasDot = false;
     }
     i = i + 1;
@@ -223,7 +243,12 @@ function parsedName(version: string, description: string): ParsedName {
 }
 
 function unparsedName(fileName: string, why: string): ParsedName {
-  let p: ParsedName = { version: "", description: "", valid: false, violation: "\"" + fileName + "\" " + why };
+  let p: ParsedName = {
+    version: "",
+    description: "",
+    valid: false,
+    violation: "\"" + fileName + "\" " + why,
+  };
   return p;
 }
 
@@ -235,7 +260,9 @@ function unparsedName(fileName: string, why: string): ParsedName {
 export function parseMigrationName(fileName: string): ParsedName {
   let stem = fileName;
   let dot = stem.lastIndexOf(".");
-  if (dot > 0) { stem = stem.substring(0, dot); }
+  if (dot > 0) {
+    stem = stem.substring(0, dot);
+  }
 
   let sep = stem.indexOf("__");
   if (sep < 0) {
@@ -253,7 +280,9 @@ export function parseMigrationName(fileName: string): ParsedName {
   }
   // A leading V is Flyway's and is optional: a name starts with its version.
   let digits = head;
-  if (head.startsWith("V")) { digits = head.substring(1, head.length); }
+  if (head.startsWith("V")) {
+    digits = head.substring(1, head.length);
+  }
   if (digits == "") {
     return unparsedName(fileName, "has no version before its __ separator");
   }
@@ -288,11 +317,15 @@ export function migrationsFrom(files: SqlFile[]): Migration[] {
 // an error rather than something to ignore: a migration that was meant to run
 // and was named wrongly would otherwise disappear without a word.
 export function migrationNameViolation(files: SqlFile[]): string {
-  if (files.length == 0) { return "no files to read migrations from"; }
+  if (files.length == 0) {
+    return "no files to read migrations from";
+  }
   let i: int = 0;
   while (i < files.length) {
     let parsed = parseMigrationName(files[i].name);
-    if (!parsed.valid) { return parsed.violation; }
+    if (!parsed.valid) {
+      return parsed.violation;
+    }
     i = i + 1;
   }
   return planValid(migrationsFrom(files));
@@ -322,7 +355,9 @@ export function createHistory(db: Db): DbResult {
 // repeatable one has no version, so its description identifies it, and the
 // empty version keeps the two kinds from colliding.
 function historyKey(m: Migration): string {
-  if (m.version == "") { return ""; }
+  if (m.version == "") {
+    return "";
+  }
   return m.version;
 }
 
@@ -338,19 +373,29 @@ function historyKeyWhere(db: Db): string {
 // because a checksum of any value is a legitimate one, so no sentinel can
 // stand in for "not recorded".
 function historyHas(db: Db, version: string, description: string): bool {
-  if (!db.query("SELECT 1 FROM " + historyTable() + historyKeyWhere(db), [version, description])) { return false; }
+  if (!db.query("SELECT 1 FROM " + historyTable() + historyKeyWhere(db), [version, description])) {
+    return false;
+  }
   return db.rows() > 0;
 }
 
 function recordedChecksum(db: Db, version: string, description: string): int {
-  if (!db.query("SELECT checksum FROM " + historyTable() + historyKeyWhere(db), [version, description])) { return 0; }
-  if (db.rows() == 0) { return 0; }
+  if (!db.query("SELECT checksum FROM " + historyTable() + historyKeyWhere(db), [version, description])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
   return parseIntOr(db.value(0, 0), 0);
 }
 
 function rankOf(db: Db, version: string, description: string): int {
-  if (!db.query("SELECT installed_rank FROM " + historyTable() + historyKeyWhere(db), [version, description])) { return 0; }
-  if (db.rows() == 0) { return 0; }
+  if (!db.query("SELECT installed_rank FROM " + historyTable() + historyKeyWhere(db), [version, description])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
   return parseIntOr(db.value(0, 0), 0);
 }
 
@@ -364,7 +409,9 @@ export function appliedHighWater(db: Db): string {
   let i: int = 0;
   while (i < db.rows()) {
     let v = db.value(i, 0);
-    if (best == "" || compareVersions(v, best) > 0) { best = v; }
+    if (best == "" || compareVersions(v, best) > 0) {
+      best = v;
+    }
     i = i + 1;
   }
   return best;
@@ -374,7 +421,9 @@ function nextRank(db: Db): int {
   if (!db.query("SELECT coalesce(max(installed_rank), 0) FROM " + historyTable(), [])) {
     return 1;
   }
-  if (db.rows() == 0) { return 1; }
+  if (db.rows() == 0) {
+    return 1;
+  }
   return parseIntOr(db.value(0, 0), 0) + 1;
 }
 
@@ -392,26 +441,39 @@ function nextRank(db: Db): int {
 // restricted.
 export function quoted(db: Db, text: string): string {
   let body = text;
-  if (db.backslashEscapes) { body = body.replaceAll("\\", "\\\\"); }
+  if (db.backslashEscapes) {
+    body = body.replaceAll("\\", "\\\\");
+  }
   return "'" + body.replaceAll("'", "''") + "'";
 }
 
 function parseIntOr(text: string, fallback: int): int {
-  if (text.length == 0) { return fallback; }
+  if (text.length == 0) {
+    return fallback;
+  }
   let neg = false;
   let i: int = 0;
-  if (text.charCodeAt(0) == 45) { neg = true; i = 1; }
+  if (text.charCodeAt(0) == 45) {
+    neg = true;
+    i = 1;
+  }
   let n: int = 0;
   let any = false;
   while (i < text.length) {
     let c = text.charCodeAt(i);
-    if (c < 48 || c > 57) { break; }
+    if (c < 48 || c > 57) {
+      break;
+    }
     n = n * 10 + (c - 48);
     any = true;
     i = i + 1;
   }
-  if (!any) { return fallback; }
-  if (neg) { return 0 - n; }
+  if (!any) {
+    return fallback;
+  }
+  if (neg) {
+    return 0 - n;
+  }
   return n;
 }
 
@@ -422,7 +484,9 @@ function parseIntOr(text: string, fallback: int): int {
 // wants to know rather than to do.
 export function migrationInfo(db: Db, plan: Migration[]): MigrationState[] {
   let out: MigrationState[] = [];
-  if (!createHistory(db).ok) { return out; }
+  if (!createHistory(db).ok) {
+    return out;
+  }
   let water = appliedHighWater(db);
   let i: int = 0;
   while (i < plan.length) {
@@ -439,7 +503,11 @@ export function migrationInfo(db: Db, plan: Migration[]): MigrationState[] {
         status = "applied";
       } else {
         // A repeatable step is meant to change; a versioned one is not.
-        if (m.version == "") { status = "pending"; } else { status = "changed"; }
+        if (m.version == "") {
+          status = "pending";
+        } else {
+          status = "changed";
+        }
       }
     } else {
       if (m.version != "" && water != "" && compareVersions(m.version, water) < 0) {
@@ -466,7 +534,9 @@ export function migrationInfo(db: Db, plan: Migration[]): MigrationState[] {
 // database built from that plan will differ from this one.
 export function missingMigrations(db: Db, plan: Migration[]): string[] {
   let out: string[] = [];
-  if (!createHistory(db).ok) { return out; }
+  if (!createHistory(db).ok) {
+    return out;
+  }
   if (!db.query("SELECT version, description FROM " + historyTable() + " ORDER BY installed_rank", [])) {
     return out;
   }
@@ -478,11 +548,17 @@ export function missingMigrations(db: Db, plan: Migration[]): string[] {
     let found = false;
     let j: int = 0;
     while (j < plan.length) {
-      if (historyKey(plan[j]) == v && plan[j].description == d) { found = true; }
+      if (historyKey(plan[j]) == v && plan[j].description == d) {
+        found = true;
+      }
       j = j + 1;
     }
     if (!found) {
-      if (v == "") { out.push("repeatable \"" + d + "\""); } else { out.push(v + " \"" + d + "\""); }
+      if (v == "") {
+        out.push("repeatable \"" + d + "\"");
+      } else {
+        out.push(v + " \"" + d + "\"");
+      }
     }
     i = i + 1;
   }
@@ -493,7 +569,9 @@ export function missingMigrations(db: Db, plan: Migration[]): string[] {
 // the first problem, or an empty string.
 export function validateMigrations(db: Db, plan: Migration[]): string {
   let planned = planValid(plan);
-  if (planned != "") { return planned; }
+  if (planned != "") {
+    return planned;
+  }
   let states = migrationInfo(db, plan);
   let i: int = 0;
   while (i < states.length) {
@@ -531,7 +609,9 @@ export function migrateAllowingOutOfOrder(db: Db, plan: Migration[]): MigrateRes
 
 function migrateWith(db: Db, plan: Migration[], allowOutOfOrder: bool): MigrateResult {
   let violation = validateMigrations(db, plan);
-  if (violation != "") { return migrateErr("", violation); }
+  if (violation != "") {
+    return migrateErr("", violation);
+  }
 
   let order = planOrder(plan);
   let states = migrationInfo(db, plan);
@@ -543,7 +623,10 @@ function migrateWith(db: Db, plan: Migration[], allowOutOfOrder: bool): MigrateR
     let idx = order[n];
     let m = plan[idx];
     let st = states[idx];
-    if (st.status == "applied") { n = n + 1; continue; }
+    if (st.status == "applied") {
+      n = n + 1;
+      continue;
+    }
     if (st.status == "out-of-order" && !allowOutOfOrder) {
       return migrateErr(m.version, "migration " + m.version + " \"" + m.description
         + "\" is below one already applied; pass it through migrateAllowingOutOfOrder to accept that");
@@ -572,7 +655,9 @@ function migrateWith(db: Db, plan: Migration[], allowOutOfOrder: bool): MigrateR
     if (!ran.ok) {
       // Nothing is recorded for a failed step, so a fixed migration re-runs
       // rather than needing a repair.
-      if (opened.ok) { rollbackTransaction(db); }
+      if (opened.ok) {
+        rollbackTransaction(db);
+      }
       return migrateErr(m.version, "migration " + stepLabel(m) + " failed: " + ran.error);
     }
     // A repeatable step that has run before is updated in place rather than
@@ -601,7 +686,9 @@ function migrateWith(db: Db, plan: Migration[], allowOutOfOrder: bool): MigrateR
 }
 
 function stepLabel(m: Migration): string {
-  if (m.version == "") { return "repeatable \"" + m.description + "\""; }
+  if (m.version == "") {
+    return "repeatable \"" + m.description + "\"";
+  }
   return m.version + " \"" + m.description + "\"";
 }
 
@@ -631,18 +718,24 @@ export function planOrder(plan: Migration[]): int[] {
     let j: int = 0;
     while (j < plan.length) {
       if (plan[j].version != "" && out.indexOf(j) < 0) {
-        if (best < 0 || compareVersions(plan[j].version, plan[best].version) < 0) { best = j; }
+        if (best < 0 || compareVersions(plan[j].version, plan[best].version) < 0) {
+          best = j;
+        }
       }
       j = j + 1;
     }
-    if (best < 0) { break; }
+    if (best < 0) {
+      break;
+    }
     out.push(best);
     placed = placed + 1;
   }
   // Then the repeatable ones, in the plan's own order.
   let k: int = 0;
   while (k < plan.length) {
-    if (out.indexOf(k) < 0) { out.push(k); }
+    if (out.indexOf(k) < 0) {
+      out.push(k);
+    }
     k = k + 1;
   }
   return out;
@@ -656,7 +749,9 @@ export function planOrder(plan: Migration[]): int[] {
 // statement that you know what you are doing.
 export function repairChecksums(db: Db, plan: Migration[]): DbResult {
   let created = createHistory(db);
-  if (!created.ok) { return created; }
+  if (!created.ok) {
+    return created;
+  }
   let i: int = 0;
   while (i < plan.length) {
     let m = plan[i];
@@ -664,7 +759,9 @@ export function repairChecksums(db: Db, plan: Migration[]): DbResult {
     let r = execute(db, "UPDATE " + historyTable() + " SET checksum = " + `${sum}`
       + " WHERE version = " + quoted(db, historyKey(m))
       + " AND description = " + quoted(db, m.description));
-    if (!r.ok) { return r; }
+    if (!r.ok) {
+      return r;
+    }
     i = i + 1;
   }
   return created;
@@ -674,10 +771,16 @@ export function repairChecksums(db: Db, plan: Migration[]): DbResult {
 // running it — for adopting plume on a database that already has a schema.
 export function baseline(db: Db, plan: Migration[], version: string): MigrateResult {
   let violation = planValid(plan);
-  if (violation != "") { return migrateErr("", violation); }
-  if (!versionValid(version)) { return migrateErr(version, "baseline version \"" + version + "\" is not a dotted number"); }
+  if (violation != "") {
+    return migrateErr("", violation);
+  }
+  if (!versionValid(version)) {
+    return migrateErr(version, "baseline version \"" + version + "\" is not a dotted number");
+  }
   let created = createHistory(db);
-  if (!created.ok) { return migrateErr(version, created.error); }
+  if (!created.ok) {
+    return migrateErr(version, created.error);
+  }
   let rank = nextRank(db);
   let marked: int = 0;
   let order = planOrder(plan);
@@ -687,7 +790,9 @@ export function baseline(db: Db, plan: Migration[], version: string): MigrateRes
     if (m.version != "" && compareVersions(m.version, version) <= 0) {
       if (!historyHas(db, m.version, m.description)) {
         let r = writeHistory(db, m, rank, false);
-        if (!r.ok) { return migrateErr(m.version, r.error); }
+        if (!r.ok) {
+          return migrateErr(m.version, r.error);
+        }
         rank = rank + 1;
         marked = marked + 1;
       }
@@ -718,6 +823,8 @@ export function migrationApplied(db: Db, version: string): bool {
 // Drop the history, for a test that wants to start over. Named for what it
 // does rather than for what it is for.
 export function forgetMigrations(db: Db): DbResult {
-  if (!safeIdentifier(historyTable())) { return execute(db, "SELECT 1"); }
+  if (!safeIdentifier(historyTable())) {
+    return execute(db, "SELECT 1");
+  }
   return execute(db, "DROP TABLE IF EXISTS " + historyTable());
 }

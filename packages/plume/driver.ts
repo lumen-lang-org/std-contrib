@@ -143,14 +143,28 @@ export type Db = {
 // and SQL inspected without a database. Every call fails; nothing raises.
 export function noDatabase(): Db {
   let d: Db = {
-    connect: (config: DbConfig) => { return false; },
-    connected: () => { return false; },
+    connect: (config: DbConfig) => {
+      return false;
+    },
+    connected: () => {
+      return false;
+    },
     close: () => { },
-    exec: (sql: string) => { return false; },
-    query: (sql: string, args: string[]) => { return false; },
-    rows: () => { return 0; },
-    value: (row: int, col: int) => { return ""; },
-    lastError: () => { return "no database driver is connected"; },
+    exec: (sql: string) => {
+      return false;
+    },
+    query: (sql: string, args: string[]) => {
+      return false;
+    },
+    rows: () => {
+      return 0;
+    },
+    value: (row: int, col: int) => {
+      return "";
+    },
+    lastError: () => {
+      return "no database driver is connected";
+    },
     name: "none",
     placeholder: "$1",
     numberedPlaceholders: true,

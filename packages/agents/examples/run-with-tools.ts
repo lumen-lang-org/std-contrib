@@ -31,24 +31,73 @@ function main(): void {
   dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  let model: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let model: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(model));
 
-  let config: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 400, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let config: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 400,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(config));
 
-  let prompt: PromptRow = { id: "p1", promptName: "parts-desk", version: 1, createdAt: "2026-07-25", body: "You answer questions about parts and stock. Use the tools for anything about stock levels or prices; never guess a number." };
+  let prompt: PromptRow = {
+    id: "p1",
+    promptName: "parts-desk",
+    version: 1,
+    createdAt: "2026-07-25",
+    body: "You answer questions about parts and stock. Use the tools for anything about stock levels or prices; never guess a number.",
+  };
   persist(db, promptsMapping(), JSON.stringify(prompt));
 
-  let server: McpServerRow = { id: "s1", serverName: "parts", transport: "http", endpoint: "http://127.0.0.1:8200", authKind: "none", authHeader: "", enabled: true };
+  let server: McpServerRow = {
+    id: "s1",
+    serverName: "parts",
+    transport: "http",
+    endpoint: "http://127.0.0.1:8200",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
   persist(db, mcpServersMapping(), JSON.stringify(server));
 
-  let agent: AgentRow = { id: "a1", agentName: "parts-desk", description: "answers stock questions", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-25" };
+  let agent: AgentRow = {
+    id: "a1",
+    agentName: "parts-desk",
+    description: "answers stock questions",
+    modelConfigId: "c1",
+    promptId: "p1",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-25",
+  };
   persist(db, agentsMapping(), JSON.stringify(agent));
 
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a1','s1')");
 
-  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-25" });
+  storeCredential(db, {
+    provider: "mistral",
+    apiKey: apiKey,
+    masterKey: master,
+    now: "2026-07-25",
+  });
 
   let mounted = mountTools(db, "a1", master);
   console.log("mounted   " + `${mounted.tools.length}` + " tools from " + `${mounted.servers.length}` + " server(s)");

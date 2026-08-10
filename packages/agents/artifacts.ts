@@ -523,8 +523,18 @@ export function getArtifact(db: Db, threadId: string, path: string): ArtifactRow
 export const BRIEFING_LINES: int = 50;
 
 export function artifactBriefing(db: Db, threadId: string): string {
-  let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }, { column: "slot", direction: "desc" }];
-  let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
+  let keys: DbOrder[] = [{
+    column: "updated_at",
+    direction: "desc",
+  }, {
+    column: "slot",
+    direction: "desc",
+  }];
+  let listed = listOrdered(db, artifactsMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return "";
   }
@@ -554,7 +564,11 @@ export function artifactBriefing(db: Db, threadId: string): string {
 export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let none: ArtifactRow[] = [];
   let keys: DbOrder[] = [{ column: "slot" }];
-  let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
+  let listed = listOrdered(db, artifactsMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return none;
   }

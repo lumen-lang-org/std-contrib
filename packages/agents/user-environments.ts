@@ -114,7 +114,11 @@ export function uenvTag(id: string): string {
 
 export function userEnvsOf(db: Db, owner: string): UserEnvRow[] {
   let keys: DbOrder[] = [{ column: "name" }];
-  let listed = listOrdered(db, userEnvsMapping(), { where: "owner = " + placeholderAt(db, 1), args: [owner], order: keys });
+  let listed = listOrdered(db, userEnvsMapping(), {
+    where: "owner = " + placeholderAt(db, 1),
+    args: [owner],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     let none: UserEnvRow[] = [];
     return none;
@@ -229,12 +233,18 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
       fs.rmSync(stage, true);
     } catch (e) { }
     if (built.status != 0) {
-      return { id: "", problem: "the build failed:\n" + uenvTail(built.stderr == "" ? built.stdout : built.stderr) };
+      return {
+        id: "",
+        problem: "the build failed:\n" + uenvTail(built.stderr == "" ? built.stdout : built.stderr),
+      };
     }
   } else {
     let pulled = uenvDocker(["pull", image]);
     if (pulled.status != 0) {
-      return { id: "", problem: "the image could not be pulled:\n" + uenvTail(pulled.stderr == "" ? pulled.stdout : pulled.stderr) };
+      return {
+        id: "",
+        problem: "the image could not be pulled:\n" + uenvTail(pulled.stderr == "" ? pulled.stdout : pulled.stderr),
+      };
     }
   }
 

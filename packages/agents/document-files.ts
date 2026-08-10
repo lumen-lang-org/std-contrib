@@ -56,7 +56,16 @@ export function documentFilesPlan(db: Db): Migration[] {
 export const FILE_BASE64_MAX: int = 24 * 1024 * 1024;
 
 export function emptyDocumentFile(): DocumentFileRow {
-  let none: DocumentFileRow = { id: "", source: "", scope: "", filename: "", mime: "", bytes: "", size: 0, createdAt: "" };
+  let none: DocumentFileRow = {
+    id: "",
+    source: "",
+    scope: "",
+    filename: "",
+    mime: "",
+    bytes: "",
+    size: 0,
+    createdAt: "",
+  };
   return none;
 }
 

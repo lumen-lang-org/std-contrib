@@ -32,12 +32,30 @@ function seeded(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let a: AgentRow = { id: "a1", agentName: "researcher", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = {
+    id: "a1",
+    agentName: "researcher",
+    description: "d",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 
 function server(id: string, name: string, transport: string, endpoint: string, enabled: bool): void {
-  let s: McpServerRow = { id: id, serverName: name, transport: transport, endpoint: endpoint, authKind: "none", authHeader: "", enabled: enabled };
+  let s: McpServerRow = {
+    id: id,
+    serverName: name,
+    transport: transport,
+    endpoint: endpoint,
+    authKind: "none",
+    authHeader: "",
+    enabled: enabled,
+  };
   persist(database, mcpServersMapping(), JSON.stringify(s));
 }
 
@@ -46,7 +64,17 @@ function link(agentId: string, serverId: string): void {
 }
 
 function skill(id: string, name: string, description: string, body: string): void {
-  let k: SkillRow = { id: id, skillName: name, description: description, body: body, updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let k: SkillRow = {
+    id: id,
+    skillName: name,
+    description: description,
+    body: body,
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   persist(database, skillsMapping(), JSON.stringify(k));
 }
 
@@ -397,9 +425,21 @@ test("run_script is offered only where docker answers, and not offered at all ot
 
 test("the tool names the environments an operator enabled", () => {
   seeded();
-  let img: ScriptImageRow = { id: "img-search", label: "Search", image: "agents-search:1", enabled: true, summary: "python, playwright, ddg and bing fallbacks" };
+  let img: ScriptImageRow = {
+    id: "img-search",
+    label: "Search",
+    image: "agents-search:1",
+    enabled: true,
+    summary: "python, playwright, ddg and bing fallbacks",
+  };
   persist(database, scriptImagesMapping(), JSON.stringify(img));
-  let off: ScriptImageRow = { id: "img-old", label: "Retired", image: "old:1", enabled: false, summary: "" };
+  let off: ScriptImageRow = {
+    id: "img-old",
+    label: "Retired",
+    image: "old:1",
+    enabled: false,
+    summary: "",
+  };
   persist(database, scriptImagesMapping(), JSON.stringify(off));
 
   let names = scriptEnvNames(database);
@@ -485,7 +525,11 @@ test("an agent with no skills is offered nothing and briefed on nothing", () => 
   seeded();
   expect(skillTools(database, "a1").length == 0);
   expect(skillBriefing(database, "a1") == "");
-  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"x\"}" });
+  let answer = callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"x\"}",
+  });
   expect(answer.handled);
   expect(!answer.ok);
 });
@@ -517,7 +561,11 @@ test("use_skill answers the body whole, as the tool result", () => {
   seeded();
   skill("k1", "weekly-report", "layout", "# Weekly\nLead with the number.");
   linkSkill("a1", "k1");
-  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"weekly-report\"}" });
+  let answer = callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"weekly-report\"}",
+  });
   expect(answer.handled);
   expect(answer.ok);
   expect(answer.text == "# Weekly\nLead with the number.");
@@ -529,7 +577,11 @@ test("a skill that ships files says so, naming them and where they land", () => 
   linkSkill("a1", "k1");
   let f: SkillFileRow = { id: "f1", skillId: "k1", path: "enums.py", body: "print('hi')" };
   persist(database, skillFilesMapping(), JSON.stringify(f));
-  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"read-proto-enums\"}" });
+  let answer = callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"read-proto-enums\"}",
+  });
   expect(answer.ok);
   expect(answer.text.indexOf("Run the script.") == 0);
   expect(answer.text.indexOf("/skills/read-proto-enums/") > 0);
@@ -541,7 +593,11 @@ test("a skill the model invented is refused in words it can act on", () => {
   seeded();
   skill("k1", "read-proto-enums", "compute enum values", "body");
   linkSkill("a1", "k1");
-  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"proto-enums\"}" });
+  let answer = callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"proto-enums\"}",
+  });
   expect(answer.handled);
   expect(!answer.ok);
   expect(answer.text.indexOf("proto-enums") >= 0);
@@ -557,7 +613,11 @@ test("a missing \"name\" member is refused by name, not as an empty value", () =
   expect(empty.handled);
   expect(!empty.ok);
   expect(empty.text.indexOf("member named \"name\"") >= 0);
-  let misspelled = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"nam\":\"mine\"}" });
+  let misspelled = callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"nam\":\"mine\"}",
+  });
   expect(!misspelled.ok);
   expect(misspelled.text.indexOf("member named \"name\"") >= 0);
   expect(!callSkillTool(database, { agentId: "a1", name: "read_file", args: "{}" }).handled);
@@ -578,7 +638,11 @@ test("past the cap, the overflow lists names only, and every skill still loads",
   expect(briefing.indexOf("description 51") < 0);
   expect(briefing.indexOf("description 49") >= 0);
   expect(briefing.indexOf("one line each was too many") >= 0);
-  let answer = callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"skill-51\"}" });
+  let answer = callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"skill-51\"}",
+  });
   expect(answer.ok);
   expect(answer.text == "body 51");
 });
@@ -587,19 +651,45 @@ test("editing a skill row is visible to the next use_skill, with nothing reloade
   seeded();
   skill("k1", "mine", "d", "old body");
   linkSkill("a1", "k1");
-  expect(callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"mine\"}" }).text == "old body");
+  expect(callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"mine\"}",
+  }).text == "old body");
   skill("k1", "mine", "d", "new body");
-  expect(callSkillTool(database, { agentId: "a1", name: "use_skill", args: "{\"name\":\"mine\"}" }).text == "new body");
+  expect(callSkillTool(database, {
+    agentId: "a1",
+    name: "use_skill",
+    args: "{\"name\":\"mine\"}",
+  }).text == "new body");
 });
 
 test("a person's own token outranks the deployment's, and absence falls back", () => {
   seeded();
-  let s: McpServerRow = { id: "s9", serverName: "gh", transport: "http", endpoint: "https://mcp.example/mcp", authKind: "bearer", authHeader: "", enabled: true };
+  let s: McpServerRow = {
+    id: "s9",
+    serverName: "gh",
+    transport: "http",
+    endpoint: "https://mcp.example/mcp",
+    authKind: "bearer",
+    authHeader: "",
+    enabled: true,
+  };
   persist(database, mcpServersMapping(), JSON.stringify(s));
   link("a1", "s9");
   let master = "0123456789abcdef0123456789abcdef";
-  storeCredential(database, { provider: "mcp:s9", apiKey: "shared-pat", masterKey: master, now: "t" });
-  storeCredential(database, { provider: userTokenKey("s9", "u-ana"), apiKey: "anas-pat", masterKey: master, now: "t" });
+  storeCredential(database, {
+    provider: "mcp:s9",
+    apiKey: "shared-pat",
+    masterKey: master,
+    now: "t",
+  });
+  storeCredential(database, {
+    provider: userTokenKey("s9", "u-ana"),
+    apiKey: "anas-pat",
+    masterKey: master,
+    now: "t",
+  });
 
   expect(mountTools(database, "a1", master, "u-ana").tokens[0] == "anas-pat");
   expect(mountTools(database, "a1", master, "u-ben").tokens[0] == "shared-pat");
@@ -611,7 +701,11 @@ test("a skill called by its own name is a use_skill call", () => {
   skill("k9", "search-web", "search the web", "Run websearch.py.");
   execute(database, "INSERT INTO agent_skills VALUES ('a1','k9')");
 
-  let direct = callSkillTool(database, { agentId: "a1", name: "search_web", args: "{\"query\":\"x\"}" });
+  let direct = callSkillTool(database, {
+    agentId: "a1",
+    name: "search_web",
+    args: "{\"query\":\"x\"}",
+  });
   expect(direct.handled);
   expect(direct.ok);
   expect(direct.text.indexOf("websearch.py") >= 0);
@@ -642,11 +736,24 @@ function waiting(names: string[]): Mounted {
   let deferred: MountedTool[] = [];
   let i: int = 0;
   while (i < names.length) {
-    let t: MountedTool = { name: names[i], description: "Does " + names[i] + " things.", schema: "{}", server: 0 };
+    let t: MountedTool = {
+      name: names[i],
+      description: "Does " + names[i] + " things.",
+      schema: "{}",
+      server: 0,
+    };
     deferred.push(t);
     i = i + 1;
   }
-  let servers: McpServerRow[] = [{ id: "s1", serverName: "linear", transport: "http", endpoint: "https://mcp.linear.app/mcp", authKind: "oauth", authHeader: "", enabled: true }];
+  let servers: McpServerRow[] = [{
+    id: "s1",
+    serverName: "linear",
+    transport: "http",
+    endpoint: "https://mcp.linear.app/mcp",
+    authKind: "oauth",
+    authHeader: "",
+    enabled: true,
+  }];
   let m: Mounted = { tools: [], servers: servers, tokens: [""], problems: [], deferred: deferred };
   return m;
 }

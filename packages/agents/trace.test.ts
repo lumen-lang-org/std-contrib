@@ -33,7 +33,12 @@ function save(row: TraceConfigRow): void {
 }
 
 function withSecret(): void {
-  storeCredential(database, { provider: "tracing", apiKey: "sk-lf-secret", masterKey: MASTER, now: "2026-07-26T00:00:00Z" });
+  storeCredential(database, {
+    provider: "tracing",
+    apiKey: "sk-lf-secret",
+    masterKey: MASTER,
+    now: "2026-07-26T00:00:00Z",
+  });
 }
 
 test("no row at all is off, and is not an error", () => {

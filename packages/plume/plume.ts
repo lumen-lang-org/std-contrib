@@ -120,12 +120,32 @@ export type Related = {
 };
 
 export function hasOne(rel: Related): DbRelation {
-  let r: DbRelation = { field: rel.field, kind: "one", table: rel.table, localColumn: rel.localColumn, foreignColumn: rel.foreignColumn, columns: rel.columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
+  let r: DbRelation = {
+    field: rel.field,
+    kind: "one",
+    table: rel.table,
+    localColumn: rel.localColumn,
+    foreignColumn: rel.foreignColumn,
+    columns: rel.columns,
+    linkTable: "",
+    linkLocalColumn: "",
+    linkForeignColumn: "",
+  };
   return r;
 }
 
 export function hasMany(rel: Related): DbRelation {
-  let r: DbRelation = { field: rel.field, kind: "many", table: rel.table, localColumn: rel.localColumn, foreignColumn: rel.foreignColumn, columns: rel.columns, linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
+  let r: DbRelation = {
+    field: rel.field,
+    kind: "many",
+    table: rel.table,
+    localColumn: rel.localColumn,
+    foreignColumn: rel.foreignColumn,
+    columns: rel.columns,
+    linkTable: "",
+    linkLocalColumn: "",
+    linkForeignColumn: "",
+  };
   return r;
 }
 
@@ -169,22 +189,44 @@ export type ManyThrough = {
 };
 
 export function hasManyThrough(m: ManyThrough): DbRelation {
-  let r: DbRelation = { field: m.field, kind: "many", table: m.table, localColumn: m.localColumn, foreignColumn: m.foreignColumn, columns: m.columns, linkTable: m.linkTable, linkLocalColumn: m.linkLocalColumn, linkForeignColumn: m.linkForeignColumn };
+  let r: DbRelation = {
+    field: m.field,
+    kind: "many",
+    table: m.table,
+    localColumn: m.localColumn,
+    foreignColumn: m.foreignColumn,
+    columns: m.columns,
+    linkTable: m.linkTable,
+    linkLocalColumn: m.linkLocalColumn,
+    linkForeignColumn: m.linkForeignColumn,
+  };
   return r;
 }
 
 // A relation's names are interpolated into SQL like a mapping's are, and its
 // column list is read the same way a projection is.
 export function relationValid(rel: DbRelation): bool {
-  if (!safeIdentifier(rel.field) || !safeIdentifier(rel.table)) { return false; }
-  if (!safeIdentifier(rel.localColumn) || !safeIdentifier(rel.foreignColumn)) { return false; }
-  if (rel.kind != "one" && rel.kind != "many") { return false; }
+  if (!safeIdentifier(rel.field) || !safeIdentifier(rel.table)) {
+    return false;
+  }
+  if (!safeIdentifier(rel.localColumn) || !safeIdentifier(rel.foreignColumn)) {
+    return false;
+  }
+  if (rel.kind != "one" && rel.kind != "many") {
+    return false;
+  }
   if (rel.linkTable != "") {
     // A to-one through a link table would be a to-many the caller promised
     // has one row, which the database will not honour.
-    if (rel.kind != "many") { return false; }
-    if (!safeIdentifier(rel.linkTable)) { return false; }
-    if (!safeIdentifier(rel.linkLocalColumn) || !safeIdentifier(rel.linkForeignColumn)) { return false; }
+    if (rel.kind != "many") {
+      return false;
+    }
+    if (!safeIdentifier(rel.linkTable)) {
+      return false;
+    }
+    if (!safeIdentifier(rel.linkLocalColumn) || !safeIdentifier(rel.linkForeignColumn)) {
+      return false;
+    }
   }
   return projectionValid(rel.columns);
 }
@@ -201,7 +243,9 @@ function dbErr(message: string): DbResult {
 
 function lastError(db: Db, fallback: string): string {
   let e = db.lastError();
-  if (e == "") { return fallback; }
+  if (e == "") {
+    return fallback;
+  }
   return e;
 }
 
@@ -210,7 +254,9 @@ function lastError(db: Db, fallback: string): string {
 // they are checked instead of trusted. Types allow spaces and parentheses so
 // `timestamp with time zone` and `numeric(10,2)` pass.
 export function safeIdentifier(name: string): bool {
-  if (name.length == 0 || name.length > 63) { return false; }
+  if (name.length == 0 || name.length > 63) {
+    return false;
+  }
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
@@ -218,8 +264,12 @@ export function safeIdentifier(name: string): bool {
     let isUpper = c >= 65 && c <= 90;
     let isDigit = c >= 48 && c <= 57;
     let isUnderscore = c == 95;
-    if (!(isLower || isUpper || isDigit || isUnderscore)) { return false; }
-    if (i == 0 && isDigit) { return false; }
+    if (!(isLower || isUpper || isDigit || isUnderscore)) {
+      return false;
+    }
+    if (i == 0 && isDigit) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
@@ -230,12 +280,16 @@ export function safeIdentifier(name: string): bool {
 // `a = placeholderAt(db, 1) + " AND b > " + placeholderAt(db, 2)` and runs
 // unchanged on all three, which a literal `$1` or `?` would not.
 export function placeholderAt(db: Db, n: int): string {
-  if (!db.numberedPlaceholders) { return db.placeholder; }
+  if (!db.numberedPlaceholders) {
+    return db.placeholder;
+  }
   return "$" + `${n}`;
 }
 
 export function safeSqlType(name: string): bool {
-  if (name.length == 0 || name.length > 63) { return false; }
+  if (name.length == 0 || name.length > 63) {
+    return false;
+  }
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
@@ -243,7 +297,9 @@ export function safeSqlType(name: string): bool {
     let isUpper = c >= 65 && c <= 90;
     let isDigit = c >= 48 && c <= 57;
     let isOk = c == 95 || c == 32 || c == 40 || c == 41 || c == 44;
-    if (!(isLower || isUpper || isDigit || isOk)) { return false; }
+    if (!(isLower || isUpper || isDigit || isOk)) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
@@ -251,14 +307,22 @@ export function safeSqlType(name: string): bool {
 
 // Every name in a mapping, checked once so a query can interpolate freely.
 export function repositoryValid(repo: DbRepository): bool {
-  if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn) || !safeIdentifier(repo.idField)) { return false; }
-  if (repo.fields.length == 0) { return false; }
+  if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn) || !safeIdentifier(repo.idField)) {
+    return false;
+  }
+  if (repo.fields.length == 0) {
+    return false;
+  }
   let sawId: bool = false;
   let i: int = 0;
   while (i < repo.fields.length) {
     let f = repo.fields[i];
-    if (!safeIdentifier(f.field) || !safeIdentifier(f.column) || !safeSqlType(f.sqlType)) { return false; }
-    if (f.field == repo.idField) { sawId = true; }
+    if (!safeIdentifier(f.field) || !safeIdentifier(f.column) || !safeSqlType(f.sqlType)) {
+      return false;
+    }
+    if (f.field == repo.idField) {
+      sawId = true;
+    }
     i = i + 1;
   }
   return sawId;
@@ -271,7 +335,9 @@ export function selectList(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + repo.fields[i].column + " AS \"" + repo.fields[i].field + "\"";
     i = i + 1;
   }
@@ -284,7 +350,9 @@ function recordDefinition(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + "\"" + repo.fields[i].field + "\" " + repo.fields[i].sqlType;
     i = i + 1;
   }
@@ -295,7 +363,9 @@ function columnList(repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + repo.fields[i].column;
     i = i + 1;
   }
@@ -307,7 +377,9 @@ function fieldList(db: Db, repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + q + repo.fields[i].field + q;
     i = i + 1;
   }
@@ -321,7 +393,9 @@ function updateSet(repo: DbRepository): string {
   while (i < repo.fields.length) {
     let col = repo.fields[i].column;
     if (col != repo.idColumn) {
-      if (out != "") { out = out + ", "; }
+      if (out != "") {
+        out = out + ", ";
+      }
       out = out + col + " = EXCLUDED." + col;
     }
     i = i + 1;
@@ -333,7 +407,9 @@ function updateSet(repo: DbRepository): string {
 // producing its own JSON, which every driver can nest inside the parent
 // document. Empty when the relation is malformed, so the caller refuses.
 function relationColumn(db: Db, repo: DbRepository, rel: DbRelation): string {
-  if (!relationValid(rel)) { return ""; }
+  if (!relationValid(rel)) {
+    return "";
+  }
 
   // The far table is aliased, always. Without it a self-referential relation —
   // an agent's sub-agents are agents — is silently empty rather than wrong:
@@ -353,11 +429,13 @@ function relationColumn(db: Db, repo: DbRepository, rel: DbRelation): string {
   // The column list needs no alias: inside `FROM <table> AS plume_far` it is
   // the only table in scope, so `id` is plume_far's. Only the correlation
   // above had to be disambiguated.
-  let columns = rel.columns;
+  let columns = expandDialect(db, rel.columns);
 
   if (db.docStyle == "pairs") {
     let pairs = pairsFromColumns(columns);
-    if (pairs == "") { return ""; }
+    if (pairs == "") {
+      return "";
+    }
     let inner = "";
     if (rel.kind == "one") {
       inner = "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + source + " WHERE " + link;
@@ -367,7 +445,9 @@ function relationColumn(db: Db, repo: DbRepository, rel: DbRelation): string {
     }
     // SQLite would embed the subquery's result as a string without this;
     // MySQL already knows it is JSON and says so by needing nothing.
-    if (db.nestedJsonWrap) { return "json((" + inner + "))"; }
+    if (db.nestedJsonWrap) {
+      return "json((" + inner + "))";
+    }
     return "(" + inner + ")";
   }
   if (rel.kind == "one") {
@@ -386,7 +466,9 @@ function selectListWithRelations(db: Db, repo: DbRepository): string {
   let i: int = 0;
   while (i < repo.relations.length) {
     let col = relationColumn(db, repo, repo.relations[i]);
-    if (col == "") { return ""; }
+    if (col == "") {
+      return "";
+    }
     out = out + ", " + col + " AS \"" + repo.relations[i].field + "\"";
     i = i + 1;
   }
@@ -397,11 +479,15 @@ function selectListWithRelations(db: Db, repo: DbRepository): string {
 function oneSql(db: Db, repo: DbRepository, where: string): string {
   if (db.docStyle == "pairs") {
     let doc = rowJson(db, repo);
-    if (doc == "") { return ""; }
+    if (doc == "") {
+      return "";
+    }
     return "SELECT " + doc + " FROM " + repo.table + " WHERE " + where;
   }
   let cols = selectListWithRelations(db, repo);
-  if (cols == "") { return ""; }
+  if (cols == "") {
+    return "";
+  }
   return "SELECT " + db.rowToJson + "(r) FROM (SELECT " + cols
     + " FROM " + repo.table + " WHERE " + where + ") r";
 }
@@ -413,7 +499,9 @@ function oneSql(db: Db, repo: DbRepository, where: string): string {
 function projectedSql(db: Db, repo: DbRepository, columns: string, where: string): string {
   if (db.docStyle == "pairs") {
     let pairs = pairsFromColumns(columns);
-    if (pairs == "") { return ""; }
+    if (pairs == "") {
+      return "";
+    }
     return "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + repo.table
       + " WHERE " + where;
   }
@@ -439,9 +527,13 @@ export function splitTopLevel(columns: string): string[] {
   while (i < columns.length) {
     let c = columns.charCodeAt(i);
     if (inSingle) {
-      if (c == 39) { inSingle = false; }
+      if (c == 39) {
+        inSingle = false;
+      }
     } else if (inDouble) {
-      if (c == 34) { inDouble = false; }
+      if (c == 34) {
+        inDouble = false;
+      }
     } else if (c == 39) {
       inSingle = true;
     } else if (c == 34) {
@@ -476,9 +568,13 @@ export function asIndexOf(part: string): int {
   while (i + 4 <= part.length) {
     let c = part.charCodeAt(i);
     if (inSingle) {
-      if (c == 39) { inSingle = false; }
+      if (c == 39) {
+        inSingle = false;
+      }
     } else if (inDouble) {
-      if (c == 34) { inDouble = false; }
+      if (c == 34) {
+        inDouble = false;
+      }
     } else if (c == 39) {
       inSingle = true;
     } else if (c == 34) {
@@ -488,7 +584,9 @@ export function asIndexOf(part: string): int {
     } else if (c == 41) {
       depth = depth - 1;
     } else if (depth == 0) {
-      if (part.substring(i, i + 4).toLowerCase() == " as ") { return i; }
+      if (part.substring(i, i + 4).toLowerCase() == " as ") {
+        return i;
+      }
     }
     i = i + 1;
   }
@@ -498,14 +596,18 @@ export function asIndexOf(part: string): int {
 // The alias of one entry, or an empty string when it has none.
 export function aliasOf(part: string): string {
   let at = asIndexOf(part);
-  if (at < 0) { return ""; }
+  if (at < 0) {
+    return "";
+  }
   return part.substring(at + 4, part.length).trim();
 }
 
 // The expression of one entry: everything before its alias.
 export function exprOf(part: string): string {
   let at = asIndexOf(part);
-  if (at < 0) { return part.trim(); }
+  if (at < 0) {
+    return part.trim();
+  }
   return part.substring(0, at).trim();
 }
 
@@ -518,7 +620,9 @@ export function keyFromAlias(alias: string): string {
   if (wasQuoted) {
     name = name.substring(1, name.length - 1);
   }
-  if (!safeIdentifier(name)) { return ""; }
+  if (!safeIdentifier(name)) {
+    return "";
+  }
   // An unquoted alias is not the same key on every database. PostgreSQL folds
   // an unquoted identifier to lower case, so `agent_name AS agentName` names
   // the key "agentname" there and "agentName" on a pairs driver, which builds
@@ -528,7 +632,9 @@ export function keyFromAlias(alias: string): string {
   //
   // Quoting is what makes a mixed-case key mean the same thing everywhere, so
   // a mixed-case alias must carry its quotes.
-  if (!wasQuoted && hasUpperCase(name)) { return ""; }
+  if (!wasQuoted && hasUpperCase(name)) {
+    return "";
+  }
   return name;
 }
 
@@ -537,7 +643,9 @@ function hasUpperCase(name: string): bool {
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
-    if (c >= 65 && c <= 90) { return true; }
+    if (c >= 65 && c <= 90) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -562,7 +670,9 @@ export function projectionValid(columns: string): bool {
 // caller refuses the query rather than sending something it has guessed at.
 export function pairsFromColumns(columns: string): string {
   let parts = splitTopLevel(columns);
-  if (parts.length == 0) { return ""; }
+  if (parts.length == 0) {
+    return "";
+  }
   let out = "";
   let i: int = 0;
   while (i < parts.length) {
@@ -575,14 +685,20 @@ export function pairsFromColumns(columns: string): string {
         // No alias: the expression itself names the key, so it has to be a
         // plain column — and, for the reason keyFromAlias gives, one whose
         // case survives PostgreSQL's folding.
-        if (!safeIdentifier(part) || hasUpperCase(part)) { return ""; }
+        if (!safeIdentifier(part) || hasUpperCase(part)) {
+          return "";
+        }
         key = part;
         expr = part;
       } else {
         key = keyFromAlias(alias);
-        if (key == "" || expr == "") { return ""; }
+        if (key == "" || expr == "") {
+          return "";
+        }
       }
-      if (out != "") { out = out + ", "; }
+      if (out != "") {
+        out = out + ", ";
+      }
       out = out + "'" + key + "', " + expr;
     }
     i = i + 1;
@@ -603,15 +719,23 @@ export function pairsFromColumns(columns: string): string {
 function listSql(db: Db, repo: DbRepository, where: string, tail: string): string {
   if (db.docStyle == "pairs") {
     let doc = rowJson(db, repo);
-    if (doc == "") { return ""; }
+    if (doc == "") {
+      return "";
+    }
     let sql = "SELECT " + doc + " FROM " + repo.table;
-    if (where != "") { sql = sql + " WHERE " + where; }
+    if (where != "") {
+      sql = sql + " WHERE " + where;
+    }
     return sql + tail;
   }
   let cols = selectListWithRelations(db, repo);
-  if (cols == "") { return ""; }
+  if (cols == "") {
+    return "";
+  }
   let inner = "SELECT " + cols + " FROM " + repo.table;
-  if (where != "") { inner = inner + " WHERE " + where; }
+  if (where != "") {
+    inner = inner + " WHERE " + where;
+  }
   return "SELECT " + db.rowToJson + "(" + repo.table + ") FROM (" + inner + tail + ") " + repo.table;
 }
 
@@ -629,9 +753,35 @@ function listSql(db: Db, repo: DbRepository, where: string, tail: string): strin
 //   "id, name, " + boolColumn(db, "enabled") + " AS \"enabled\""
 //
 // On a database with a real boolean this is the column itself.
+// A column list is written once and used against every driver, but a boolean
+// is not spelled the same in each. `{bool:enabled}` in a relation's columns is
+// this column, expanded when the query is built and the driver is known — which
+// is what lets a mapping be a decorated class, where an argument is a literal
+// and cannot call boolColumn(db, ...) itself.
+export function expandDialect(db: Db, columns: string): string {
+  let out = columns;
+  while (true) {
+    let open = out.indexOf("{bool:");
+    if (open < 0) {
+      return out;
+    }
+    let close = out.indexOf("}", open);
+    if (close < 0) {
+      return out;
+    }
+    let name = out.substring(open + 6, close);
+    out = out.substring(0, open) + boolColumn(db, name) + out.substring(close + 1, out.length);
+  }
+  return out;
+}
+
 export function boolColumn(db: Db, column: string): string {
-  if (!safeIdentifier(column)) { return ""; }
-  if (db.boolJson == "") { return column; }
+  if (!safeIdentifier(column)) {
+    return "";
+  }
+  if (db.boolJson == "") {
+    return column;
+  }
   return db.boolJson.replaceAll("{c}", column);
 }
 
@@ -646,7 +796,9 @@ export function boolColumn(db: Db, column: string): string {
 // way the database itself spells it.
 export function floatSqlType(db: Db, sqlType: string): bool {
   let t = dialectType(db, sqlType).trim().toLowerCase();
-  if (t == db.floatType.trim().toLowerCase()) { return true; }
+  if (t == db.floatType.trim().toLowerCase()) {
+    return true;
+  }
   return t == "float8" || t == "float4" || t == "double precision"
     || t == "double" || t == "real" || t == "float";
 }
@@ -677,14 +829,18 @@ function rowJson(db: Db, repo: DbRepository): string {
     let pairs = "";
     let i: int = 0;
     while (i < repo.fields.length) {
-      if (i > 0) { pairs = pairs + ", "; }
+      if (i > 0) {
+        pairs = pairs + ", ";
+      }
       pairs = pairs + "'" + repo.fields[i].field + "', " + jsonValue(db, repo.fields[i]);
       i = i + 1;
     }
     let r: int = 0;
     while (r < repo.relations.length) {
       let col = relationColumn(db, repo, repo.relations[r]);
-      if (col == "") { return ""; }
+      if (col == "") {
+        return "";
+      }
       pairs = pairs + ", '" + repo.relations[r].field + "', " + col;
       r = r + 1;
     }
@@ -696,7 +852,9 @@ function rowJson(db: Db, repo: DbRepository): string {
 // The FROM a document query needs: PostgreSQL reads from an aliased subquery,
 // SQLite straight from the table.
 function jsonFrom(db: Db, repo: DbRepository): string {
-  if (db.readStyle == "extract") { return " FROM " + repo.table; }
+  if (db.readStyle == "extract") {
+    return " FROM " + repo.table;
+  }
   return " FROM (SELECT " + selectList(repo) + " FROM " + repo.table;
 }
 
@@ -708,7 +866,9 @@ function readOne(db: Db, repo: DbRepository): string {
     let picks = "";
     let i: int = 0;
     while (i < repo.fields.length) {
-      if (i > 0) { picks = picks + ", "; }
+      if (i > 0) {
+        picks = picks + ", ";
+      }
       picks = picks + jsonPick(db, "plume_doc.doc", repo.fields[i]);
       i = i + 1;
     }
@@ -735,7 +895,9 @@ function readMany(db: Db, repo: DbRepository): string {
     let picks = "";
     let i: int = 0;
     while (i < repo.fields.length) {
-      if (i > 0) { picks = picks + ", "; }
+      if (i > 0) {
+        picks = picks + ", ";
+      }
       picks = picks + jsonPick(db, "value", repo.fields[i]);
       i = i + 1;
     }
@@ -754,13 +916,17 @@ function upsertClause(db: Db, repo: DbRepository): string {
     // key was violated. A mapping with only a key column has nothing to set,
     // so it re-sets the key to itself, which is MySQL's own no-op idiom.
     let sets = updateSetMysql(repo);
-    if (sets == "") { sets = repo.idColumn + " = " + repo.idColumn; }
+    if (sets == "") {
+      sets = repo.idColumn + " = " + repo.idColumn;
+    }
     return " ON DUPLICATE KEY UPDATE " + sets;
   }
   // SQLite cannot tell an upsert clause from a join condition after an
   // INSERT ... SELECT; `WHERE true` settles it.
   let head = "";
-  if (db.upsertNeedsWhereTrue) { head = " WHERE true"; }
+  if (db.upsertNeedsWhereTrue) {
+    head = " WHERE true";
+  }
   let updates = updateSet(repo);
   if (updates == "") {
     return head + " ON CONFLICT (" + repo.idColumn + ") DO NOTHING";
@@ -776,7 +942,9 @@ function updateSetMysql(repo: DbRepository): string {
   while (i < repo.fields.length) {
     let col = repo.fields[i].column;
     if (col != repo.idColumn) {
-      if (out != "") { out = out + ", "; }
+      if (out != "") {
+        out = out + ", ";
+      }
       out = out + col + " = VALUES(" + col + ")";
     }
     i = i + 1;
@@ -787,7 +955,9 @@ function updateSetMysql(repo: DbRepository): string {
 // One field pulled out of a JSON document held in `source`.
 function jsonPick(db: Db, source: string, f: DbField): string {
   let pick = "json_extract(" + source + ", '$." + f.field + "')";
-  if (db.jsonNeedsUnquote) { return "JSON_UNQUOTE(" + pick + ")"; }
+  if (db.jsonNeedsUnquote) {
+    return "JSON_UNQUOTE(" + pick + ")";
+  }
   return pick;
 }
 
@@ -796,7 +966,9 @@ function jsonTableColumns(db: Db, repo: DbRepository): string {
   let out = "";
   let i: int = 0;
   while (i < repo.fields.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + "`" + repo.fields[i].field + "` " + dialectType(db, repo.fields[i].sqlType)
       + " PATH '$." + repo.fields[i].field + "'";
     i = i + 1;
@@ -856,6 +1028,40 @@ export type DbLink = {
   foreign: string,
 };
 
+// The link description a mapping already carries, by the field it lands on. An
+// entity declaring @hasManyThrough has said where the table is and which column
+// means which side; this is how a write reaches the same description the read
+// uses, without it being written down twice.
+export function linkOf(repo: DbRepository, field: string): ManyThrough {
+  let i: int = 0;
+  while (i < repo.relations.length) {
+    let r = repo.relations[i];
+    if (r.field == field && r.linkTable != "") {
+      return {
+        field: r.field,
+        table: r.table,
+        foreignColumn: r.foreignColumn,
+        linkTable: r.linkTable,
+        linkLocalColumn: r.linkLocalColumn,
+        linkForeignColumn: r.linkForeignColumn,
+        localColumn: r.localColumn,
+        columns: r.columns,
+      };
+    }
+    i = i + 1;
+  }
+  return {
+    field: field,
+    table: "",
+    foreignColumn: "",
+    linkTable: "",
+    linkLocalColumn: "",
+    linkForeignColumn: "",
+    localColumn: "",
+    columns: "",
+  };
+}
+
 export function link(db: Db, m: ManyThrough, pair: DbLink): DbResult {
   return executeWith(db, "INSERT INTO " + m.linkTable
     + " (" + m.linkLocalColumn + ", " + m.linkForeignColumn + ") VALUES ("
@@ -896,9 +1102,15 @@ export function setEvery(db: Db, repo: DbRepository, column: string, value: stri
 // A name the portable set does not cover passes through untouched, so a
 // column can still be declared in the database's own vocabulary.
 export function dialectType(db: Db, sqlType: string): string {
-  if (sqlType == "text") { return db.textType; }
-  if (sqlType == "int") { return db.intType; }
-  if (sqlType == "float8") { return db.floatType; }
+  if (sqlType == "text") {
+    return db.textType;
+  }
+  if (sqlType == "int") {
+    return db.intType;
+  }
+  if (sqlType == "float8") {
+    return db.floatType;
+  }
   return sqlType;
 }
 
@@ -906,12 +1118,16 @@ export function dialectType(db: Db, sqlType: string): string {
 // a migration can hold it instead, so the schema a program expects and the
 // schema a migration builds come from one declaration.
 export function createTableSql(db: Db, repo: DbRepository): string {
-  if (!repositoryValid(repo)) { return ""; }
+  if (!repositoryValid(repo)) {
+    return "";
+  }
   let cols = "";
   let i: int = 0;
   while (i < repo.fields.length) {
     let f = repo.fields[i];
-    if (i > 0) { cols = cols + ", "; }
+    if (i > 0) {
+      cols = cols + ", ";
+    }
     cols = cols + f.column + " " + dialectType(db, f.sqlType);
     if (f.column == repo.idColumn) {
       cols = cols + " PRIMARY KEY";
@@ -931,7 +1147,9 @@ export function createTableSql(db: Db, repo: DbRepository): string {
 // route, since it does not constrain creation order.
 export function createTableSqlWithKeys(db: Db, repo: DbRepository): string {
   let base = createTableSql(db, repo);
-  if (base == "") { return ""; }
+  if (base == "") {
+    return "";
+  }
   let refs = "";
   let i: int = 0;
   while (i < repo.relations.length) {
@@ -939,13 +1157,17 @@ export function createTableSqlWithKeys(db: Db, repo: DbRepository): string {
     // A to-many's column lives on the other table, so its constraint belongs
     // to that table's own mapping, not to this one.
     if (rel.kind == "one") {
-      if (!relationValid(rel)) { return ""; }
+      if (!relationValid(rel)) {
+        return "";
+      }
       refs = refs + ", FOREIGN KEY (" + rel.localColumn + ") REFERENCES "
         + rel.table + " (" + rel.foreignColumn + ")";
     }
     i = i + 1;
   }
-  if (refs == "") { return base; }
+  if (refs == "") {
+    return base;
+  }
   return base.substring(0, base.length - 1) + refs + ")";
 }
 
@@ -960,7 +1182,9 @@ export function createTableSqlWithKeys(db: Db, repo: DbRepository): string {
 // where `createTableSqlWithKeys` is the route instead.
 export function foreignKeys(db: Db, repo: DbRepository): string[] {
   let out: string[] = [];
-  if (!db.canAddForeignKey || !repositoryValid(repo)) { return out; }
+  if (!db.canAddForeignKey || !repositoryValid(repo)) {
+    return out;
+  }
   let i: int = 0;
   while (i < repo.relations.length) {
     let rel = repo.relations[i];
@@ -982,12 +1206,16 @@ export function foreignKeyName(repo: DbRepository, rel: DbRelation): string {
 
 export function createTable(db: Db, repo: DbRepository): DbResult {
   let sql = createTableSql(db, repo);
-  if (sql == "") { return dbErr("invalid mapping for " + repo.table); }
+  if (sql == "") {
+    return dbErr("invalid mapping for " + repo.table);
+  }
   return execute(db, sql);
 }
 
 export function dropTable(db: Db, repo: DbRepository): DbResult {
-  if (!safeIdentifier(repo.table)) { return dbErr("unsafe table name"); }
+  if (!safeIdentifier(repo.table)) {
+    return dbErr("unsafe table name");
+  }
   return execute(db, "DROP TABLE IF EXISTS " + repo.table);
 }
 
@@ -1010,7 +1238,9 @@ export function dropTable(db: Db, repo: DbRepository): DbResult {
 // nulls on the drivers that do not raise on it.
 export function persistViolation(json: string): string {
   let text = json.trim();
-  if (text == "") { return "refusing to persist an empty document"; }
+  if (text == "") {
+    return "refusing to persist an empty document";
+  }
   if (text.startsWith("[")) {
     return "refusing to persist an array as one record; persistMany takes a list";
   }
@@ -1024,9 +1254,13 @@ export function persistViolation(json: string): string {
 }
 
 export function persist(db: Db, repo: DbRepository, json: string): DbResult {
-  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
+  if (!repositoryValid(repo)) {
+    return dbErr("invalid mapping for " + repo.table);
+  }
   let violation = persistViolation(json);
-  if (violation != "") { return dbErr(violation); }
+  if (violation != "") {
+    return dbErr(violation);
+  }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
     + readOne(db, repo) + upsertClause(db, repo);
   if (!db.query(sql, [json])) {
@@ -1038,8 +1272,12 @@ export function persist(db: Db, repo: DbRepository, json: string): DbResult {
 // Insert or replace many, in one statement: the document is a JSON array, read
 // with json_to_recordset.
 export function persistMany(db: Db, repo: DbRepository, jsonArray: string): DbResult {
-  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
-  if (jsonArray == "" || jsonArray == "[]") { return dbOk(0); }
+  if (!repositoryValid(repo)) {
+    return dbErr("invalid mapping for " + repo.table);
+  }
+  if (jsonArray == "" || jsonArray == "[]") {
+    return dbOk(0);
+  }
   let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
     + readMany(db, repo) + upsertClause(db, repo);
   if (!db.query(sql, [jsonArray])) {
@@ -1049,7 +1287,9 @@ export function persistMany(db: Db, repo: DbRepository, jsonArray: string): DbRe
 }
 
 export function deleteById(db: Db, repo: DbRepository, id: string): DbResult {
-  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
+  if (!repositoryValid(repo)) {
+    return dbErr("invalid mapping for " + repo.table);
+  }
   if (!db.query("DELETE FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, [id])) {
     return dbErr(lastError(db, "could not delete from " + repo.table));
   }
@@ -1057,7 +1297,9 @@ export function deleteById(db: Db, repo: DbRepository, id: string): DbResult {
 }
 
 export function deleteWhere(db: Db, repo: DbRepository, where: string, args: string[]): DbResult {
-  if (!repositoryValid(repo)) { return dbErr("invalid mapping for " + repo.table); }
+  if (!repositoryValid(repo)) {
+    return dbErr("invalid mapping for " + repo.table);
+  }
   if (!db.query("DELETE FROM " + repo.table + " WHERE " + where, args)) {
     return dbErr(lastError(db, "could not delete from " + repo.table));
   }
@@ -1069,11 +1311,19 @@ export function deleteWhere(db: Db, repo: DbRepository, where: string, args: str
 // One record as JSON, or "" when absent. Hand the result to JSON.parse<T>: the
 // keys are the mapping's field names, so the compiler checks the shape.
 export function findById(db: Db, repo: DbRepository, id: string): string {
-  if (!repositoryValid(repo)) { return ""; }
+  if (!repositoryValid(repo)) {
+    return "";
+  }
   let sql = oneSql(db, repo, repo.idColumn + " = " + db.placeholder);
-  if (sql == "") { return ""; }
-  if (!db.query(sql, [id])) { return ""; }
-  if (db.rows() == 0) { return ""; }
+  if (sql == "") {
+    return "";
+  }
+  if (!db.query(sql, [id])) {
+    return "";
+  }
+  if (db.rows() == 0) {
+    return "";
+  }
   return db.value(0, 0);
 }
 
@@ -1081,12 +1331,22 @@ export function findById(db: Db, repo: DbRepository, id: string): string {
 // query rather than a generated mapper. Aliases rename — `max_steps AS
 // "maxSteps"` is what MapStruct spells with an annotation.
 export function findProjected(db: Db, repo: DbRepository, columns: string, id: string): string {
-  if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn)) { return ""; }
-  if (!projectionValid(columns)) { return ""; }
+  if (!safeIdentifier(repo.table) || !safeIdentifier(repo.idColumn)) {
+    return "";
+  }
+  if (!projectionValid(columns)) {
+    return "";
+  }
   let sql = projectedSql(db, repo, columns, repo.idColumn + " = " + db.placeholder);
-  if (sql == "") { return ""; }
-  if (!db.query(sql, [id])) { return ""; }
-  if (db.rows() == 0) { return ""; }
+  if (sql == "") {
+    return "";
+  }
+  if (!db.query(sql, [id])) {
+    return "";
+  }
+  if (db.rows() == 0) {
+    return "";
+  }
   return db.value(0, 0);
 }
 
@@ -1094,11 +1354,15 @@ export function findProjected(db: Db, repo: DbRepository, columns: string, id: s
 // database returned them.
 function rowsAsArray(db: Db): string {
   let count = db.rows();
-  if (count == 0) { return "[]"; }
+  if (count == 0) {
+    return "[]";
+  }
   let out = "[";
   let i: int = 0;
   while (i < count) {
-    if (i > 0) { out = out + ","; }
+    if (i > 0) {
+      out = out + ",";
+    }
     out = out + db.value(i, 0);
     i = i + 1;
   }
@@ -1108,10 +1372,16 @@ function rowsAsArray(db: Db): string {
 // Every record as a JSON array. `where` is a fragment carrying one marker per
 // value in `args`, or "" with no args for all rows.
 export function listWhere(db: Db, repo: DbRepository, where: string, args: string[]): string {
-  if (!repositoryValid(repo)) { return "[]"; }
+  if (!repositoryValid(repo)) {
+    return "[]";
+  }
   let sql = listSql(db, repo, where, "");
-  if (sql == "") { return "[]"; }
-  if (!db.query(sql, args)) { return "[]"; }
+  if (sql == "") {
+    return "[]";
+  }
+  if (!db.query(sql, args)) {
+    return "[]";
+  }
   return rowsAsArray(db);
 }
 
@@ -1123,21 +1393,33 @@ export function listWhere(db: Db, repo: DbRepository, where: string, args: strin
 // driver answered `[[{"id":"a1"},{"id":"a2"}]]`, and `[[]]` for no rows. The
 // documented use is `JSON.parse<DTO[]>`, which refuses both.
 export function listProjected(db: Db, repo: DbRepository, columns: string, where: string, args: string[]): string {
-  if (!safeIdentifier(repo.table)) { return "[]"; }
-  if (!projectionValid(columns)) { return "[]"; }
+  if (!safeIdentifier(repo.table)) {
+    return "[]";
+  }
+  if (!projectionValid(columns)) {
+    return "[]";
+  }
   let sql = "";
   if (db.docStyle == "pairs") {
     // The caller's aliases name the keys; the expressions stay as written.
     let pairs = pairsFromColumns(columns);
-    if (pairs == "") { return "[]"; }
+    if (pairs == "") {
+      return "[]";
+    }
     sql = "SELECT " + db.rowToJson + "(" + pairs + ") FROM " + repo.table;
-    if (where != "") { sql = sql + " WHERE " + where; }
+    if (where != "") {
+      sql = sql + " WHERE " + where;
+    }
   } else {
     let inner = "SELECT " + columns + " FROM " + repo.table;
-    if (where != "") { inner = inner + " WHERE " + where; }
+    if (where != "") {
+      inner = inner + " WHERE " + where;
+    }
     sql = "SELECT " + db.rowToJson + "(r) FROM (" + inner + ") r";
   }
-  if (!db.query(sql, args)) { return "[]"; }
+  if (!db.query(sql, args)) {
+    return "[]";
+  }
   return rowsAsArray(db);
 }
 
@@ -1176,14 +1458,22 @@ export type DbOrder = {
 // treat as a refusal — distinguishing "no ordering asked for" from "an
 // ordering I will not send".
 export function orderClause(keys: DbOrder[]): string {
-  if (keys.length == 0) { return ""; }
+  if (keys.length == 0) {
+    return "";
+  }
   let out = "";
   let i: int = 0;
   while (i < keys.length) {
-    if (!safeIdentifier(keys[i].column)) { return "!"; }
-    if (i > 0) { out = out + ", "; }
+    if (!safeIdentifier(keys[i].column)) {
+      return "!";
+    }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + keys[i].column;
-    if ((keys[i].direction ?? "asc") == "desc") { out = out + " DESC"; }
+    if ((keys[i].direction ?? "asc") == "desc") {
+      out = out + " DESC";
+    }
     i = i + 1;
   }
   return " ORDER BY " + out;
@@ -1216,7 +1506,9 @@ export type DbQuery = {
 function queryOrder(q: DbQuery): string {
   let by = q.orderBy ?? "";
   if (by != "") {
-    if (!safeIdentifier(by)) { return "!"; }
+    if (!safeIdentifier(by)) {
+      return "!";
+    }
     return " ORDER BY " + by;
   }
   let none: DbOrder[] = [];
@@ -1230,54 +1522,90 @@ function queryArgs(q: DbQuery): string[] {
 
 // A list in an order you name. `listWhere` is this with no keys.
 export function listOrdered(db: Db, repo: DbRepository, q: DbQuery): string {
-  if (!repositoryValid(repo)) { return "[]"; }
+  if (!repositoryValid(repo)) {
+    return "[]";
+  }
   let order = queryOrder(q);
-  if (order == "!") { return "[]"; }
+  if (order == "!") {
+    return "[]";
+  }
   let sql = listSql(db, repo, q.where ?? "", order);
-  if (sql == "") { return "[]"; }
-  if (!db.query(sql, queryArgs(q))) { return "[]"; }
+  if (sql == "") {
+    return "[]";
+  }
+  if (!db.query(sql, queryArgs(q))) {
+    return "[]";
+  }
   return rowsAsArray(db);
 }
 
 // A page in an order you name, over several keys rather than one column.
 export function pageOrdered(db: Db, repo: DbRepository, q: DbQuery): string {
-  if (!repositoryValid(repo)) { return "[]"; }
+  if (!repositoryValid(repo)) {
+    return "[]";
+  }
   let order = queryOrder(q);
-  if (order == "!") { return "[]"; }
+  if (order == "!") {
+    return "[]";
+  }
   // A page without an order is a page in whatever order the database felt
   // like, which is not a page at all — two requests can overlap or skip rows.
-  if (order == "") { return "[]"; }
+  if (order == "") {
+    return "[]";
+  }
   let window = " LIMIT " + `${q.limit ?? 0}` + " OFFSET " + `${q.offset ?? 0}`;
   let sql = listSql(db, repo, q.where ?? "", order + window);
-  if (sql == "") { return "[]"; }
-  if (!db.query(sql, queryArgs(q))) { return "[]"; }
+  if (sql == "") {
+    return "[]";
+  }
+  if (!db.query(sql, queryArgs(q))) {
+    return "[]";
+  }
   return rowsAsArray(db);
 }
 
 // A page, ordered by a column you name.
 export function pageWhere(db: Db, repo: DbRepository, q: DbQuery): string {
-  if (!repositoryValid(repo)) { return "[]"; }
+  if (!repositoryValid(repo)) {
+    return "[]";
+  }
   let order = queryOrder(q);
   // An unordered page is not a page, the same as above.
-  if (order == "!" || order == "") { return "[]"; }
+  if (order == "!" || order == "") {
+    return "[]";
+  }
   let window = " LIMIT " + `${q.limit ?? 0}` + " OFFSET " + `${q.offset ?? 0}`;
   let sql = listSql(db, repo, q.where ?? "", order + window);
-  if (sql == "") { return "[]"; }
-  if (!db.query(sql, queryArgs(q))) { return "[]"; }
+  if (sql == "") {
+    return "[]";
+  }
+  if (!db.query(sql, queryArgs(q))) {
+    return "[]";
+  }
   return rowsAsArray(db);
 }
 
 export function countWhere(db: Db, repo: DbRepository, where: string, args: string[]): int {
-  if (!safeIdentifier(repo.table)) { return -1; }
+  if (!safeIdentifier(repo.table)) {
+    return -1;
+  }
   let sql = "SELECT count(*) FROM " + repo.table;
-  if (where != "") { sql = sql + " WHERE " + where; }
-  if (!db.query(sql, args)) { return -1; }
-  if (db.rows() == 0) { return 0; }
+  if (where != "") {
+    sql = sql + " WHERE " + where;
+  }
+  if (!db.query(sql, args)) {
+    return -1;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
   return parseInt(db.value(0, 0)) ?? 0;
 }
 
 export function existsById(db: Db, repo: DbRepository, id: string): bool {
-  if (!repositoryValid(repo)) { return false; }
+  if (!repositoryValid(repo)) {
+    return false;
+  }
   if (!db.query("SELECT 1 FROM " + repo.table + " WHERE " + repo.idColumn + " = " + db.placeholder, [id])) {
     return false;
   }
@@ -1315,7 +1643,9 @@ export function pickFields(json: string, keys: string[]): string {
   while (i < keys.length) {
     let piece = jsonMember(json, keys[i]);
     if (piece != "") {
-      if (written > 0) { out = out + ","; }
+      if (written > 0) {
+        out = out + ",";
+      }
       out = out + "\"" + keys[i] + "\":" + piece;
       written = written + 1;
     }
@@ -1329,9 +1659,13 @@ export function pickFields(json: string, keys: string[]): string {
 // does not end it early.
 export function jsonMember(json: string, key: string): string {
   let at = findJsonMember(json, key);
-  if (at < 0) { return ""; }
+  if (at < 0) {
+    return "";
+  }
   let i = at;
-  while (i < json.length && jsonSpace(json.charAt(i))) { i = i + 1; }
+  while (i < json.length && jsonSpace(json.charAt(i))) {
+    i = i + 1;
+  }
   let start = i;
   let depth: int = 0;
   let inString: bool = false;
@@ -1345,17 +1679,29 @@ export function jsonMember(json: string, key: string): string {
         escaped = true;
       } else if (c == "\"") {
         inString = false;
-        if (depth == 0) { return json.slice(start, i + 1); }
+        if (depth == 0) {
+          return json.slice(start, i + 1);
+        }
       }
     } else {
-      if (c == "\"") { inString = true; }
-      else if (c == "{" || c == "[") { depth = depth + 1; }
-      else if (c == "}" || c == "]") {
-        if (depth == 0) { return json.slice(start, i).trim(); }
-        depth = depth - 1;
-        if (depth == 0) { return json.slice(start, i + 1); }
+      if (c == "\"") {
+        inString = true;
       }
-      else if (c == "," && depth == 0) { return json.slice(start, i).trim(); }
+      else if (c == "{" || c == "[") {
+        depth = depth + 1;
+      }
+      else if (c == "}" || c == "]") {
+        if (depth == 0) {
+          return json.slice(start, i).trim();
+        }
+        depth = depth - 1;
+        if (depth == 0) {
+          return json.slice(start, i + 1);
+        }
+      }
+      else if (c == "," && depth == 0) {
+        return json.slice(start, i).trim();
+      }
     }
     i = i + 1;
   }
@@ -1379,8 +1725,12 @@ function findJsonMember(json: string, key: string): int {
   // there is nothing here to find, and saying so outright beats leaving it to
   // fall out of the depth counting below.
   let head: int = 0;
-  while (head < json.length && jsonSpace(json.charAt(head))) { head = head + 1; }
-  if (head >= json.length || json.charAt(head) != "{") { return -1; }
+  while (head < json.length && jsonSpace(json.charAt(head))) {
+    head = head + 1;
+  }
+  if (head >= json.length || json.charAt(head) != "{") {
+    return -1;
+  }
 
   let quotedKey = "\"" + key + "\"";
   let depth: int = 0;
@@ -1390,9 +1740,15 @@ function findJsonMember(json: string, key: string): int {
   while (i < json.length) {
     let c = json.charAt(i);
     if (inString) {
-      if (escaped) { escaped = false; }
-      else if (c == "\\") { escaped = true; }
-      else if (c == "\"") { inString = false; }
+      if (escaped) {
+        escaped = false;
+      }
+      else if (c == "\\") {
+        escaped = true;
+      }
+      else if (c == "\"") {
+        inString = false;
+      }
       i = i + 1;
       continue;
     }
@@ -1403,15 +1759,23 @@ function findJsonMember(json: string, key: string): int {
         // happens to read the same, so the whitespace before it is skipped
         // and the colon itself is still required.
         let j = i + quotedKey.length;
-        while (j < json.length && jsonSpace(json.charAt(j))) { j = j + 1; }
-        if (j < json.length && json.charAt(j) == ":") { return j + 1; }
+        while (j < json.length && jsonSpace(json.charAt(j))) {
+          j = j + 1;
+        }
+        if (j < json.length && json.charAt(j) == ":") {
+          return j + 1;
+        }
       }
       inString = true;
       i = i + 1;
       continue;
     }
-    if (c == "{" || c == "[") { depth = depth + 1; }
-    if (c == "}" || c == "]") { depth = depth - 1; }
+    if (c == "{" || c == "[") {
+      depth = depth + 1;
+    }
+    if (c == "}" || c == "]") {
+      depth = depth - 1;
+    }
     i = i + 1;
   }
   return -1;

@@ -27,7 +27,9 @@ function row(id: string, agentName: string, maxSteps: int): string {
 function seeded(): DbRepository {
   let fromEnv = process.env("PLUME_TEST_CONNINFO") ?? "";
   let cfg: DbConfig = { host: "127.0.0.1", user: "lumen", password: "lumen", database: "lumenvec" };
-  if (fromEnv != "") { cfg = { options: fromEnv }; }
+  if (fromEnv != "") {
+    cfg = { options: fromEnv };
+  }
   connectDatabase(database, cfg);
   let repo = agentsRepo();
   dropTable(database, repo);
@@ -46,13 +48,19 @@ function seeded(): DbRepository {
 // failure of the ordering.
 function firstId(document: string): string {
   let at = document.indexOf("\"id\"");
-  if (at < 0) { return ""; }
+  if (at < 0) {
+    return "";
+  }
   let rest = document.substring(at + 4, document.length);
   let open = rest.indexOf("\"");
-  if (open < 0) { return ""; }
+  if (open < 0) {
+    return "";
+  }
   let value = rest.substring(open + 1, rest.length);
   let end = value.indexOf("\"");
-  if (end < 0) { return ""; }
+  if (end < 0) {
+    return "";
+  }
   return value.substring(0, end);
 }
 
@@ -103,7 +111,11 @@ test("a second key settles a tie", () => {
 test("ordering composes with a filter and its parameters", () => {
   let repo = seeded();
   let keys: DbOrder[] = [{ column: "max_steps", direction: "desc" }];
-  let json = listOrdered(database, repo, { where: "max_steps >= " + database.placeholder, args: ["5"], order: keys });
+  let json = listOrdered(database, repo, {
+    where: "max_steps >= " + database.placeholder,
+    args: ["5"],
+    order: keys,
+  });
   expect(firstId(json) == "a4");
   expect(json.indexOf("writer") < 0);
 });
@@ -143,7 +155,9 @@ test("a page with no order is refused, because it is not a page", () => {
 test("the suite leaves nothing behind", () => {
   let fromEnv = process.env("PLUME_TEST_CONNINFO") ?? "";
   let cfg: DbConfig = { host: "127.0.0.1", user: "lumen", password: "lumen", database: "lumenvec" };
-  if (fromEnv != "") { cfg = { options: fromEnv }; }
+  if (fromEnv != "") {
+    cfg = { options: fromEnv };
+  }
   connectDatabase(database, cfg);
   expect(dropTable(database, agentsRepo()).ok);
   database.close();

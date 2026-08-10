@@ -33,10 +33,28 @@ function agentsRepo(): DbRepository {
     field("teamId", "team_id", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne({ field: "team", table: "fk_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" }),
-    hasMany({ field: "tasks", table: "fk_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, title" }),
+    hasOne({
+      field: "team",
+      table: "fk_teams",
+      localColumn: "team_id",
+      foreignColumn: "id",
+      columns: "id, team_name AS \"teamName\"",
+    }),
+    hasMany({
+      field: "tasks",
+      table: "fk_tasks",
+      localColumn: "id",
+      foreignColumn: "agent_id",
+      columns: "id, title",
+    }),
   ];
-  return repository({ table: "fk_agents", idField: "id", idColumn: "id", fields: fs, relations: rs });
+  return repository({
+    table: "fk_agents",
+    idField: "id",
+    idColumn: "id",
+    fields: fs,
+    relations: rs,
+  });
 }
 
 function clean(): void {
@@ -79,8 +97,20 @@ test("the constraint is named for the table and column it constrains", () => {
 });
 
 test("an invalid relation produces no statement rather than a broken one", () => {
-  let bad: DbRelation[] = [ hasOne({ field: "team", table: "x; DROP TABLE y", localColumn: "team_id", foreignColumn: "id", columns: "id" }) ];
-  let broken = repository({ table: "fk_agents", idField: "id", idColumn: "id", fields: teamsRepo().fields, relations: bad });
+  let bad: DbRelation[] = [ hasOne({
+    field: "team",
+    table: "x; DROP TABLE y",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id",
+  }) ];
+  let broken = repository({
+    table: "fk_agents",
+    idField: "id",
+    idColumn: "id",
+    fields: teamsRepo().fields,
+    relations: bad,
+  });
   expect(createTableSqlWithKeys(database, broken) == "");
   expect(foreignKeys(database, broken).length == 0);
 });

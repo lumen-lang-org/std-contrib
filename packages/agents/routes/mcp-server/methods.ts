@@ -35,11 +35,24 @@ export function mcpExportedTools(): ToolSpec[] {
 
 export function mcpDispatch(db: Db, owner: string, name: string, args: string): FileToolResult {
   let nowMs = Date.now() as number;
-  let scheduled = callTaskTool(db, { owner: owner, agentId: "", modelChoiceId: "", name: name, args: args, nowMs: nowMs });
+  let scheduled = callTaskTool(db, {
+    owner: owner,
+    agentId: "",
+    modelChoiceId: "",
+    name: name,
+    args: args,
+    nowMs: nowMs,
+  });
   if (scheduled.handled) {
     return scheduled;
   }
-  let flowed = callWorkflowTool(db, { owner: owner, agentId: "", name: name, args: args, nowMs: nowMs });
+  let flowed = callWorkflowTool(db, {
+    owner: owner,
+    agentId: "",
+    name: name,
+    args: args,
+    nowMs: nowMs,
+  });
   if (flowed.handled) {
     return flowed;
   }
@@ -52,14 +65,26 @@ export function mcpDispatch(db: Db, owner: string, name: string, args: string): 
     return selfed;
   }
   if (name == "set_banner") {
-    let barred: FileToolResult = { handled: true, ok: false, text: "the site banner is set from the console's own chat, not over MCP.", line: 0, changed: "" };
+    let barred: FileToolResult = {
+      handled: true,
+      ok: false,
+      text: "the site banner is set from the console's own chat, not over MCP.",
+      line: 0,
+      changed: "",
+    };
     return barred;
   }
   let known = callKnowledgeTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
   if (known.handled) {
     return known;
   }
-  let grouped = callProjectTool(db, { owner: owner, threadId: "", name: name, args: args, nowMs: nowMs });
+  let grouped = callProjectTool(db, {
+    owner: owner,
+    threadId: "",
+    name: name,
+    args: args,
+    nowMs: nowMs,
+  });
   if (grouped.handled) {
     return grouped;
   }

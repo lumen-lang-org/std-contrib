@@ -10,7 +10,10 @@ export class SiteAsk {
   @oneOf("turnstile,hcaptcha", "provider must be turnstile or hcaptcha")
   provider: string;
 
-  constructor(siteKey: string, provider: string) { this.siteKey = siteKey; this.provider = provider; }
+  constructor(siteKey: string, provider: string) {
+    this.siteKey = siteKey;
+    this.provider = provider;
+  }
 }
 
 @controller("/captcha")

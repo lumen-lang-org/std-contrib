@@ -56,6 +56,53 @@ function oneLiners(file) {
   return inner.sort((a, b) => b.getStart(file) - a.getStart(file));
 }
 
+// Rule 2: a record does not sit inline in a line that has run long.
+//
+//   return listOrdered(this.db, this.full, { where: "enabled = " + this.db.placeholder, args: ["1"], order: keys });
+//
+// The fields are the argument, and reading them means counting brackets to the
+// end of a line nobody can see the end of. Short records stay inline — the rule
+// is the length of the line, not the presence of braces.
+const WIDTH = 100;
+
+function longRecords(file, text) {
+  const lines = text.split("\n");
+  const found = [];
+  const walk = (node) => {
+    if (node.kind === ts.SyntaxKind.ObjectLiteralExpression && node.properties.length > 0) {
+      const start = file.getLineAndCharacterOfPosition(node.getStart(file));
+      const end = file.getLineAndCharacterOfPosition(node.end - 1);
+      if (start.line === end.line && lines[start.line].length > WIDTH) found.push(node);
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(file);
+  // Outermost first, one per pass: expanding a nested record first would leave
+  // the enclosing one holding offsets that no longer mean anything.
+  const outer = found.filter(
+    (b) => !found.some((o) => o !== b && o.getStart(file) < b.getStart(file) && o.end >= b.end),
+  );
+  return outer.sort((a, b) => b.getStart(file) - a.getStart(file));
+}
+
+function spread(path, text) {
+  const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  const records = longRecords(file, text);
+  if (records.length === 0) return { text, count: 0 };
+
+  let out = text;
+  for (const rec of records) {
+    const start = rec.getStart(file);
+    const pad = indentOf(out, start);
+    const inner = pad + "  ";
+    const body = rec.properties
+      .map((prop) => inner + out.slice(prop.getStart(file), prop.end).trim() + ",")
+      .join("\n");
+    out = out.slice(0, start) + "{\n" + body + "\n" + pad + "}" + out.slice(rec.end);
+  }
+  return { text: out, count: records.length };
+}
+
 function indentOf(text, pos) {
   const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
   const line = text.slice(lineStart, pos);
@@ -88,6 +135,19 @@ for (const root of roots) {
     let count = 0;
     // Re-read until it settles: expanding an outer block can leave an inner one
     // sitting on a line of its own that was previously nested inside it.
+    for (let pass = 0; pass < 12; pass++) {
+      const r = expand(path, text);
+      if (r.count === 0) break;
+      count += r.count;
+      text = r.text;
+    }
+    for (let pass = 0; pass < 12; pass++) {
+      const r = spread(path, text);
+      if (r.count === 0) break;
+      count += r.count;
+      text = r.text;
+    }
+    // A record broken open can leave a block on one line inside it.
     for (let pass = 0; pass < 12; pass++) {
       const r = expand(path, text);
       if (r.count === 0) break;

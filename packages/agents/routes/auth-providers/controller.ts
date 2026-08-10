@@ -29,7 +29,9 @@ export class AuthProviderApi {
   @Get("/")
   list(): Reply {
     let keys: DbOrder[] = [{ column: "label" }];
-    let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), { order: keys }));
+    let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), {
+      order: keys,
+    }));
     let views: AuthProviderView[] = [];
     let i: int = 0;
     while (i < rows.length) {

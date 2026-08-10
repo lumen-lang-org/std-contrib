@@ -22,8 +22,17 @@ function dbConfig(): DbConfig {
   // which is the escape hatch a config keeps for a target the fields cannot
   // describe.
   let fromEnv = process.env("PLUME_MYSQL_CONNINFO") ?? "";
-  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
-  let named: DbConfig = { host: "127.0.0.1", port: 13306, database: "lumentest", user: "root", password: "lumen" };
+  if (fromEnv != "") {
+    let raw: DbConfig = { options: fromEnv };
+    return raw;
+  }
+  let named: DbConfig = {
+    host: "127.0.0.1",
+    port: 13306,
+    database: "lumentest",
+    user: "root",
+    password: "lumen",
+  };
   return named;
 }
 

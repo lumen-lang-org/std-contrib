@@ -3,8 +3,6 @@ import { GUEST_DAILY_RUNS, callerTags, guestQuotaJson, guestTag } from "../../ap
 import { nextUtcMidnightIso, secondsToUtcMidnight } from "../../usage.ts";
 import { AgentService } from "./agent.service.ts";
 
-// The check fifteen handlers used to open with. As a guard it runs before the
-// handler is entered, so a missing agent is one sentence in one place.
 export function agentExists(agents: AgentService, req: Request): Guarded {
   let id = param(req, "id");
   if (!agents.exists(id)) {
@@ -13,7 +11,6 @@ export function agentExists(agents: AgentService, req: Request): Guarded {
   return passes();
 }
 
-// A guest gets a fixed number of runs a day, and is told when it resets.
 export function guestRunsLeft(agents: AgentService, req: Request): Guarded {
   let guest = guestTag(callerTags(req));
   if (guest == "") {

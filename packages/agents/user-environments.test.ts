@@ -86,13 +86,37 @@ test("a failed build refuses the row with the build's last lines", () => {
 test("the shapes an environment refuses before docker is asked", () => {
   fresh();
   dockerFine();
-  let both = createUserEnv(database, { owner: "o1", name: "x", image: "a:1", dockerfile: "FROM a", now: "t1" });
+  let both = createUserEnv(database, {
+    owner: "o1",
+    name: "x",
+    image: "a:1",
+    dockerfile: "FROM a",
+    now: "t1",
+  });
   expect(both.problem.indexOf("not both") >= 0);
-  let neither = createUserEnv(database, { owner: "o1", name: "x", image: "", dockerfile: "", now: "t1" });
+  let neither = createUserEnv(database, {
+    owner: "o1",
+    name: "x",
+    image: "",
+    dockerfile: "",
+    now: "t1",
+  });
   expect(neither.problem.indexOf("one of the two") >= 0);
-  let reserved = createUserEnv(database, { owner: "o1", name: "main", image: "a:1", dockerfile: "", now: "t1" });
+  let reserved = createUserEnv(database, {
+    owner: "o1",
+    name: "main",
+    image: "a:1",
+    dockerfile: "",
+    now: "t1",
+  });
   expect(reserved.problem.indexOf("already means something") >= 0);
-  let fromless = createUserEnv(database, { owner: "o1", name: "x", image: "", dockerfile: "RUN echo hi", now: "t1" });
+  let fromless = createUserEnv(database, {
+    owner: "o1",
+    name: "x",
+    image: "",
+    dockerfile: "RUN echo hi",
+    now: "t1",
+  });
   expect(fromless.problem.indexOf("FROM") >= 0);
   expect(fs.readFileSync(FAKE_LOG) == "");
 });
@@ -100,8 +124,20 @@ test("the shapes an environment refuses before docker is asked", () => {
 test("somebody else's environment is absent, and deleting mine removes only a built image", () => {
   fresh();
   dockerFine();
-  let pulled = createUserEnv(database, { owner: "o1", name: "shared", image: "python:3.12-slim", dockerfile: "", now: "t1" });
-  let built = createUserEnv(database, { owner: "o1", name: "own", image: "", dockerfile: "FROM x", now: "t1" });
+  let pulled = createUserEnv(database, {
+    owner: "o1",
+    name: "shared",
+    image: "python:3.12-slim",
+    dockerfile: "",
+    now: "t1",
+  });
+  let built = createUserEnv(database, {
+    owner: "o1",
+    name: "own",
+    image: "",
+    dockerfile: "FROM x",
+    now: "t1",
+  });
   expect(userEnvById(database, pulled.id, "o2").id == "");
   expect(!forgetUserEnv(database, pulled.id, "o2"));
   fs.writeFileSync(FAKE_LOG, "");
@@ -117,10 +153,22 @@ test("environments per owner are bounded", () => {
   dockerFine();
   let i: int = 0;
   while (i < MAX_USER_ENVS_PER_OWNER) {
-    expect(createUserEnv(database, { owner: "o1", name: "e" + `${i}`, image: "a:1", dockerfile: "", now: "t1" }).id != "");
+    expect(createUserEnv(database, {
+      owner: "o1",
+      name: "e" + `${i}`,
+      image: "a:1",
+      dockerfile: "",
+      now: "t1",
+    }).id != "");
     i = i + 1;
   }
-  let over = createUserEnv(database, { owner: "o1", name: "one-more", image: "a:1", dockerfile: "", now: "t1" });
+  let over = createUserEnv(database, {
+    owner: "o1",
+    name: "one-more",
+    image: "a:1",
+    dockerfile: "",
+    now: "t1",
+  });
   expect(over.id == "");
   expect(over.problem.indexOf("delete one") >= 0);
 });

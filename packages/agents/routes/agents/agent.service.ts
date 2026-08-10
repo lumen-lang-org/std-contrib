@@ -15,65 +15,60 @@ import { WebRagSetup } from "./dtos/web-rag-setup.dto.ts";
 import { AgentRepository } from "./agent.repository.ts";
 import { runResultOf } from "./agent.utils.ts";
 
-// The rules about agents. It says what is wrong in a sentence and never in a
-// status code — deciding that a refusal is a 400 rather than a 409 is the
-// controller's job, which is what keeps this callable from a tool or a test.
 export class AgentService {
-  repo: AgentRepository;
+  repository: AgentRepository;
   master: string;
 
   constructor(db: Db, master: string) {
-    this.repo = new AgentRepository(db);
+    this.repository = new AgentRepository(db);
     this.master = master;
   }
 
   listing(enabledOnly: bool): string {
-    return this.repo.listing(enabledOnly);
+    return this.repository.listing(enabledOnly);
   }
 
   one(id: string): string {
-    return this.repo.one(id);
+    return this.repository.one(id);
   }
 
   exists(id: string): bool {
-    return this.repo.exists(id);
+    return this.repository.exists(id);
   }
 
   scopes(id: string): string[] {
-    return this.repo.scopes(id);
+    return this.repository.scopes(id);
   }
 
   webRag(id: string): AgentWebRagRow {
-    return this.repo.webRag(id);
+    return this.repository.webRag(id);
   }
 
   runs(id: string, tags: string[], limit: int): string {
-    return this.repo.runs(id, tags, limit);
+    return this.repository.runs(id, tags, limit);
   }
 
   forget(id: string): void {
-    this.repo.forget(id);
+    this.repository.forget(id);
   }
 
   runsToday(guest: string, at: number): int {
-    return runsSince(this.repo.db, guest, utcDayStartText(at));
+    return runsSince(this.repository.db, guest, utcDayStartText(at));
   }
 
-  // A POST creates. The shape of the body is the DTO's business; that the id is
-  // free, and that the config and prompt it points at exist, is this one's.
   create(body: AgentBody): Outcome {
-    if (this.repo.exists(body.id)) {
+    if (this.repository.exists(body.id)) {
       return refusing("\"" + body.id + "\" already exists; a POST creates, and changing a row is a PUT");
     }
     let wrong = this.pointsAtSomething(body);
     if (wrong != "") {
       return refusing(wrong);
     }
-    let written = this.repo.save(JSON.stringify(body));
+    let written = this.repository.save(JSON.stringify(body));
     if (!written.ok) {
       return refusing(written.error);
     }
-    return produced(this.repo.one(body.id));
+    return produced(this.repository.one(body.id));
   }
 
   update(id: string, body: AgentBody): Outcome {
@@ -85,105 +80,103 @@ export class AgentService {
       return refusing(wrong);
     }
     if (body.isDefault) {
-      this.repo.clearDefaults();
+      this.repository.clearDefaults();
     }
-    let written = this.repo.save(JSON.stringify(body));
+    let written = this.repository.save(JSON.stringify(body));
     if (!written.ok) {
       return refusing(written.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
   pointsAtSomething(body: AgentBody): string {
-    if (!this.repo.hasModelConfig(body.modelConfigId)) {
+    if (!this.repository.hasModelConfig(body.modelConfigId)) {
       return "no model config " + body.modelConfigId;
     }
-    if (!this.repo.hasPrompt(body.promptId)) {
+    if (!this.repository.hasPrompt(body.promptId)) {
       return "no prompt " + body.promptId;
     }
     return "";
   }
 
   attachServer(id: string, serverId: string): Outcome {
-    if (!this.repo.hasServer(serverId)) {
+    if (!this.repository.hasServer(serverId)) {
       return refusing("no server " + serverId);
     }
-    let linked = this.repo.linkServer(id, serverId);
+    let linked = this.repository.linkServer(id, serverId);
     if (!linked.ok) {
       return refusing(linked.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
   detachServer(id: string, serverId: string): Outcome {
-    let gone = this.repo.unlinkServer(id, serverId);
+    let gone = this.repository.unlinkServer(id, serverId);
     if (!gone.ok) {
       return refusing(gone.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
   attachChild(id: string, childId: string): Outcome {
-    if (!this.repo.exists(childId)) {
+    if (!this.repository.exists(childId)) {
       return refusing("no agent " + childId);
     }
     if (childId == id) {
       return refusing("an agent cannot be its own sub-agent");
     }
-    let linked = this.repo.linkChild(id, childId);
+    let linked = this.repository.linkChild(id, childId);
     if (!linked.ok) {
       return refusing(linked.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
   detachChild(id: string, childId: string): Outcome {
-    let gone = this.repo.unlinkChild(id, childId);
+    let gone = this.repository.unlinkChild(id, childId);
     if (!gone.ok) {
       return refusing(gone.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
   attachSkill(id: string, skillId: string): Outcome {
-    if (!this.repo.hasSkill(skillId)) {
+    if (!this.repository.hasSkill(skillId)) {
       return refusing("no skill " + skillId);
     }
-    let linked = this.repo.linkSkill(id, skillId);
+    let linked = this.repository.linkSkill(id, skillId);
     if (!linked.ok) {
       return refusing(linked.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
   detachSkill(id: string, skillId: string): Outcome {
-    let gone = this.repo.unlinkSkill(id, skillId);
+    let gone = this.repository.unlinkSkill(id, skillId);
     if (!gone.ok) {
       return refusing(gone.error);
     }
-    return produced(this.repo.one(id));
+    return produced(this.repository.one(id));
   }
 
-  // Both answer with the scopes as they now stand, so the caller never has to
-  // ask again to find out what it just changed.
   grant(id: string, scope: string): Outcome {
-    let fault = this.repo.grant(id, scope);
+    let fault = this.repository.grant(id, scope);
     if (fault != "") {
       return refusing(fault);
     }
-    return produced(JSON.stringify(this.repo.scopes(id)));
+    return produced(JSON.stringify(this.repository.scopes(id)));
   }
 
   revoke(id: string, scope: string): Outcome {
-    let fault = this.repo.revoke(id, scope);
+    let fault = this.repository.revoke(id, scope);
     if (fault != "") {
       return refusing(fault);
     }
-    return produced(JSON.stringify(this.repo.scopes(id)));
+    return produced(JSON.stringify(this.repository.scopes(id)));
   }
 
   setRetrieval(id: string, body: RetrievalSetup): Outcome {
-    if (!this.repo.embeddingUsable(body.embeddingModelId)) {
+    if (!this.repository.embeddingUsable(body.embeddingModelId)) {
       return refusing("no usable embedding model " + body.embeddingModelId);
     }
     let row: AgentRetrievalRow = {
@@ -193,18 +186,16 @@ export class AgentService {
       maxDistance: body.maxDistance,
       enabled: body.enabled,
     };
-    let written = this.repo.saveRetrieval(row);
+    let written = this.repository.saveRetrieval(row);
     if (!written.ok) {
       return refusing(written.error);
     }
-    return produced(this.repo.retrieval(id));
+    return produced(this.repository.retrieval(id));
   }
 
-  // The numeric bounds are the DTO's. What is left needs the database: a
-  // generated query is asked of a model, so that model has to exist and chat.
   setWebRag(id: string, body: WebRagSetup): Outcome {
     if (body.queryMode == "generated") {
-      let document = this.repo.model(body.queryModelId);
+      let document = this.repository.model(body.queryModelId);
       if (document == "") {
         return refusing("queryMode generated needs an existing chat model as queryModelId");
       }
@@ -221,20 +212,18 @@ export class AgentService {
       queryMode: body.queryMode,
       queryModelId: body.queryModelId,
     };
-    let written = this.repo.saveWebRag(row);
+    let written = this.repository.saveWebRag(row);
     if (!written.ok) {
       return refusing(written.error);
     }
-    return produced(this.repo.storedWebRag(id));
+    return produced(this.repository.storedWebRag(id));
   }
 
-  // Running an agent is one story: trace it, run it, file the run, and send the
-  // spans if anything is listening.
   run(id: string, text: string, owner: string): RunResult {
-    let tracer = tracerFor(this.repo.db, this.master);
-    let answered = runAgentTraced(this.repo.db, id, text, this.master, tracer);
+    let tracer = tracerFor(this.repository.db, this.master);
+    let answered = runAgentTraced(this.repository.db, id, text, this.master, tracer);
 
-    let runId = recordRun(this.repo.db, {
+    let runId = recordRun(this.repository.db, {
       agentId: id, threadId: "", owner: owner,
       question: text, run: answered, modelChoiceId: "", routeNote: "",
     });
@@ -250,8 +239,6 @@ export class AgentService {
   }
 }
 
-// api.test.ts and the agent tools delete an agent without a controller in the
-// picture, so the aggregate delete stays reachable as a function.
 export function forgetAgent(db: Db, agentId: string): void {
   new AgentRepository(db).forget(agentId);
 }

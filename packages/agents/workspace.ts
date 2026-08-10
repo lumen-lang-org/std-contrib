@@ -122,7 +122,11 @@ export function getFile(db: Db, threadId: string, fileName: string): WorkspaceFi
 export function listFiles(db: Db, threadId: string): WorkspaceFileRow[] {
   let none: WorkspaceFileRow[] = [];
   let keys: DbOrder[] = [{ column: "file_name" }];
-  let listed = listOrdered(db, workspaceFilesMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys  });
+  let listed = listOrdered(db, workspaceFilesMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return none;
   }
@@ -141,7 +145,11 @@ export function deleteFile(db: Db, threadId: string, fileName: string): string {
 export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName: string, scope: string, apiKey: string, now: string): Upload {
   let file = getFile(db, threadId, fileName);
   if (file.id == "") {
-    let missing: Upload = { ok: false, chunks: 0, error: "no file \"" + fileName + "\" in this thread" };
+    let missing: Upload = {
+      ok: false,
+      chunks: 0,
+      error: "no file \"" + fileName + "\" in this thread",
+    };
     return missing;
   }
   let source = sourceOf(fileName);
@@ -149,7 +157,15 @@ export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName:
   if (!stored.ok) {
     return stored;
   }
-  putFile(db, { threadId: threadId, fileName: fileName, mime: file.mime, origin: file.origin, body: file.body, documentId: source, now: now });
+  putFile(db, {
+    threadId: threadId,
+    fileName: fileName,
+    mime: file.mime,
+    origin: file.origin,
+    body: file.body,
+    documentId: source,
+    now: now,
+  });
   return stored;
 }
 
@@ -255,21 +271,53 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
       }
       let current = getVersion(db, artifact.id, artifact.currentVersion);
       if (current.id != "") {
-        let read: FileToolResult = { handled: true, ok: true, text: current.body, line: 0, changed: "" };
+        let read: FileToolResult = {
+          handled: true,
+          ok: true,
+          text: current.body,
+          line: 0,
+          changed: "",
+        };
         return read;
       }
     }
-    let missing: FileToolResult = { handled: true, ok: false, text: "There is no file named \"" + argsName + "\". Use list_files to see what is here.", line: 0, changed: "" };
+    let missing: FileToolResult = {
+      handled: true,
+      ok: false,
+      text: "There is no file named \"" + argsName + "\". Use list_files to see what is here.",
+      line: 0,
+      changed: "",
+    };
     return missing;
   }
 
   if (name == "write_file") {
-    let problem = putFile(db, { threadId: threadId, fileName: argsName, mime: mimeOf(argsName), origin: "generated", body: argsContent, documentId: "", now: now });
+    let problem = putFile(db, {
+      threadId: threadId,
+      fileName: argsName,
+      mime: mimeOf(argsName),
+      origin: "generated",
+      body: argsContent,
+      documentId: "",
+      now: now,
+    });
     if (problem != "") {
-      let refused: FileToolResult = { handled: true, ok: false, text: problem, line: 0, changed: "" };
+      let refused: FileToolResult = {
+        handled: true,
+        ok: false,
+        text: problem,
+        line: 0,
+        changed: "",
+      };
       return refused;
     }
-    let wrote: FileToolResult = { handled: true, ok: true, text: "Wrote " + argsName + " (" + `${argsContent.length}` + " bytes).", line: 0, changed: "" };
+    let wrote: FileToolResult = {
+      handled: true,
+      ok: true,
+      text: "Wrote " + argsName + " (" + `${argsContent.length}` + " bytes).",
+      line: 0,
+      changed: "",
+    };
     return wrote;
   }
 

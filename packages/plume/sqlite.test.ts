@@ -90,9 +90,19 @@ test("a mapping must name its key field", () => {
   let good: DbField[] = [field("id", "id", "text"), field("n", "n", "text")];
   expect(repositoryValid(repository({ table: "t", idField: "id", idColumn: "id", fields: good })));
   // idField names a field the mapping does not declare.
-  expect(!repositoryValid(repository({ table: "t", idField: "missing", idColumn: "id", fields: good })));
+  expect(!repositoryValid(repository({
+    table: "t",
+    idField: "missing",
+    idColumn: "id",
+    fields: good,
+  })));
   let empty: DbField[] = [];
-  expect(!repositoryValid(repository({ table: "t", idField: "id", idColumn: "id", fields: empty })));
+  expect(!repositoryValid(repository({
+    table: "t",
+    idField: "id",
+    idColumn: "id",
+    fields: empty,
+  })));
 });
 
 test("the select list renames columns to fields", () => {
@@ -233,7 +243,11 @@ test("a page is ordered and bounded", () => {
 
 test("an unsafe order column is refused", () => {
   let repo = seeded();
-  expect(pageWhere(database, repo, { orderBy: "x; DROP TABLE plume_test_agents", limit: 10, offset: 0 }) == "[]");
+  expect(pageWhere(database, repo, {
+    orderBy: "x; DROP TABLE plume_test_agents",
+    limit: 10,
+    offset: 0,
+  }) == "[]");
   expect(countWhere(database, repo, "", []) == 3);
 });
 

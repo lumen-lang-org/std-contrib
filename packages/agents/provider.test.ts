@@ -2,17 +2,48 @@ import { ModelRow, ModelConfigRow } from "./schema.ts";
 import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationProblem, streamProblem, streamDetail, assistantThinking, replyText } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
-  let m: ModelRow = { id: "m", label: "L", apiName: apiName, provider: provider, kind: "chat", dimensions: 0, baseUrl: "", enabled: enabled, contextTokens: 0 };
+  let m: ModelRow = {
+    id: "m",
+    label: "L",
+    apiName: apiName,
+    provider: provider,
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: enabled,
+    contextTokens: 0,
+  };
   return m;
 }
 
 function gateway(provider: string, baseUrl: string): ModelRow {
-  let m: ModelRow = { id: "m", label: "L", apiName: "x", provider: provider, kind: "chat", dimensions: 0, baseUrl: baseUrl, enabled: true, contextTokens: 0 };
+  let m: ModelRow = {
+    id: "m",
+    label: "L",
+    apiName: "x",
+    provider: provider,
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: baseUrl,
+    enabled: true,
+    contextTokens: 0,
+  };
   return m;
 }
 
 function config(): ModelConfigRow {
-  let c: ModelConfigRow = { id: "c", modelId: "m", temperature: 0.2, maxTokens: 64, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let c: ModelConfigRow = {
+    id: "c",
+    modelId: "m",
+    temperature: 0.2,
+    maxTokens: 64,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   return c;
 }
 

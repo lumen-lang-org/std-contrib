@@ -122,12 +122,20 @@ export function refuseEnvKey(row: EnvKeyRow, value: string): string {
 
 export function envKeysOf(db: Db, owner: string, imageId: string): string {
   let keys: DbOrder[] = [{ column: "name" }];
-  return listOrdered(db, envKeysMapping(), { where: "owner = " + db.placeholder + " AND image_id = " + placeholderAt(db, 2), args: [owner, imageId], order: keys });
+  return listOrdered(db, envKeysMapping(), {
+    where: "owner = " + db.placeholder + " AND image_id = " + placeholderAt(db, 2),
+    args: [owner, imageId],
+    order: keys,
+  });
 }
 
 export function envKeysOwnedBy(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "image_id" }, { column: "name" }];
-  return listOrdered(db, envKeysMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  return listOrdered(db, envKeysMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
 }
 
 export function envKeyById(db: Db, id: string, owner: string): EnvKeyRow {
@@ -182,11 +190,17 @@ export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
     return { id: "", problem: wrong };
   }
   if (envKeyByName(db, row.name, row.owner, row.imageId).id != "") {
-    return { id: "", problem: "there is already a key called \"" + row.name + "\" in this environment — delete it first, or pick another name" };
+    return {
+      id: "",
+      problem: "there is already a key called \"" + row.name + "\" in this environment — delete it first, or pick another name",
+    };
   }
   let held = JSON.parse<EnvKeyRow[]>(envKeysOf(db, row.owner, row.imageId));
   if (held.length >= envKeyPerEnv()) {
-    return { id: "", problem: "that is " + `${envKeyPerEnv()}` + " keys in this environment already — delete one before adding another" };
+    return {
+      id: "",
+      problem: "that is " + `${envKeyPerEnv()}` + " keys in this environment already — delete one before adding another",
+    };
   }
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,

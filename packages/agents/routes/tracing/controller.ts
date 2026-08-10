@@ -101,7 +101,12 @@ export class TraceApi {
       return BadRequest("a body is required");
     }
     let body: TraceSecret = JSON.parse<TraceSecret>(req.body);
-    let stored = storeCredential(this.db, { provider: "tracing", apiKey: body.secretKey, masterKey: this.master, now: stamp() });
+    let stored = storeCredential(this.db, {
+      provider: "tracing",
+      apiKey: body.secretKey,
+      masterKey: this.master,
+      now: stamp(),
+    });
     if (stored != "") {
       return BadRequest(stored);
     }

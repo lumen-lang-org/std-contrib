@@ -234,12 +234,24 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
 export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): WorkflowDone {
   let parsed = parseGraph(row.graph);
   if (!parsed.ok) {
-    let refused: WorkflowDone = { ok: false, runId: "", threadId: "", answer: "", error: parsed.error };
+    let refused: WorkflowDone = {
+      ok: false,
+      runId: "",
+      threadId: "",
+      answer: "",
+      error: parsed.error,
+    };
     return refused;
   }
   let agentDoc = findById(db, agentsMapping(), row.agentId);
   if (agentDoc == "") {
-    let refused: WorkflowDone = { ok: false, runId: "", threadId: "", answer: "", error: "no agent " + row.agentId + " to run as" };
+    let refused: WorkflowDone = {
+      ok: false,
+      runId: "",
+      threadId: "",
+      answer: "",
+      error: "no agent " + row.agentId + " to run as",
+    };
     return refused;
   }
   let agent: AgentRow = JSON.parse<AgentRow>(agentDoc);
@@ -249,7 +261,13 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
     ? carried
     : openThread(db, { agentId: row.agentId, owner: ask.owner, now: `${ask.nowMs}` });
   if (threadId == "") {
-    let refused: WorkflowDone = { ok: false, runId: "", threadId: "", answer: "", error: "the conversation could not be opened" };
+    let refused: WorkflowDone = {
+      ok: false,
+      runId: "",
+      threadId: "",
+      answer: "",
+      error: "the conversation could not be opened",
+    };
     return refused;
   }
 
@@ -270,7 +288,16 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
       i = i + 1;
     }
     if (at.id != "") {
-      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "", threadId: "" };
+      let underway: WfStep = {
+        nodeId: at.id,
+        type: at.type,
+        status: "RUNNING",
+        ms: 0,
+        input: "",
+        output: "",
+        error: "",
+        threadId: "",
+      };
       all.push(underway);
     }
     let progress: WorkflowRunRow = {
@@ -343,7 +370,14 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
         return withInput(stepFailed("nobody can answer - this run was not started by a chat"), asking);
       }
       queueOutboundWith(db, bot, chat, runId, asking, node.cases ?? "", Date.now() as number);
-      let paused: StepResult = { ok: true, output: asking, branch: "", error: "", input: asking, suspend: true };
+      let paused: StepResult = {
+        ok: true,
+        output: asking,
+        branch: "",
+        error: "",
+        input: asking,
+        suspend: true,
+      };
       return paused;
     }
     if (node.type == "TELEGRAM_REPLY") {
@@ -424,12 +458,24 @@ export type ResumeAsk = {
 export function resumeWorkflow(db: Db, row: WorkflowRow, held: ResumeAsk): WorkflowDone {
   let parsed = parseGraph(held.graph);
   if (!parsed.ok) {
-    let refused: WorkflowDone = { ok: false, runId: held.runId, threadId: held.threadId, answer: "", error: parsed.error };
+    let refused: WorkflowDone = {
+      ok: false,
+      runId: held.runId,
+      threadId: held.threadId,
+      answer: "",
+      error: parsed.error,
+    };
     return refused;
   }
   let agentDoc = findById(db, agentsMapping(), row.agentId);
   if (agentDoc == "") {
-    let refused: WorkflowDone = { ok: false, runId: held.runId, threadId: held.threadId, answer: "", error: "no agent " + row.agentId + " to run as" };
+    let refused: WorkflowDone = {
+      ok: false,
+      runId: held.runId,
+      threadId: held.threadId,
+      answer: "",
+      error: "no agent " + row.agentId + " to run as",
+    };
     return refused;
   }
   let agent: AgentRow = JSON.parse<AgentRow>(agentDoc);
@@ -453,7 +499,16 @@ export function resumeWorkflow(db: Db, row: WorkflowRow, held: ResumeAsk): Workf
       g = g + 1;
     }
     if (at.id != "") {
-      let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "", threadId: "" };
+      let underway: WfStep = {
+        nodeId: at.id,
+        type: at.type,
+        status: "RUNNING",
+        ms: 0,
+        input: "",
+        output: "",
+        error: "",
+        threadId: "",
+      };
       all.push(underway);
     }
     let live: WorkflowRunRow = {

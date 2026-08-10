@@ -84,7 +84,10 @@ export class SkillApi {
   list(@RequestParam("featured", "") featured: string): Reply {
     if (featured == "1") {
       let ranked: DbOrder[] = [{ column: "featured_rank" }];
-      return Ok(listOrdered(this.db, skillsMapping(), { where: "visibility = 'public' AND featured_rank > 0", order: ranked }));
+      return Ok(listOrdered(this.db, skillsMapping(), {
+        where: "visibility = 'public' AND featured_rank > 0",
+        order: ranked,
+      }));
     }
     let keys: DbOrder[] = [{ column: "skill_name" }];
     return Ok(listOrdered(this.db, skillsMapping(), { order: keys }));
@@ -212,7 +215,11 @@ export class SkillApi {
       return NotFound("skill " + id);
     }
     let keys: DbOrder[] = [{ column: "path" }];
-    return Ok(listOrdered(this.db, skillFilesMapping(), { where: "skill_id = " + placeholderAt(this.db, 1), args: [id], order: keys }));
+    return Ok(listOrdered(this.db, skillFilesMapping(), {
+      where: "skill_id = " + placeholderAt(this.db, 1),
+      args: [id],
+      order: keys,
+    }));
   }
 
   @Post("/:id/files")

@@ -31,10 +31,18 @@ function agentRoutes(): Route[] {
 // dispatcher built rather than only the status it produced.
 function boundHandlers(): Map<string, Handler> {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[\"a1\",\"a2\"]"); });
-  hs.set("create", (req: Request) => { return Created(req.body); });
-  hs.set("find", (req: Request) => { return Ok("{\"id\":" + JSON.stringify(param(req, "id")) + "}"); });
-  hs.set("remove", (req: Request) => { return NoContent(); });
+  hs.set("list", (req: Request) => {
+    return Ok("[\"a1\",\"a2\"]");
+  });
+  hs.set("create", (req: Request) => {
+    return Created(req.body);
+  });
+  hs.set("find", (req: Request) => {
+    return Ok("{\"id\":" + JSON.stringify(param(req, "id")) + "}");
+  });
+  hs.set("remove", (req: Request) => {
+    return NoContent();
+  });
   return hs;
 }
 
@@ -99,7 +107,9 @@ test("an error body is JSON, not a sentence", () => {
 
 test("a table whose handler nothing bound is refused before listening", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[]"); });
+  hs.set("list", (req: Request) => {
+    return Ok("[]");
+  });
   let problemText = bindingProblem(agentRoutes(), hs);
   // It names the route and the handler, so the fix is obvious.
   expect(problemText.indexOf("create") >= 0);
@@ -112,7 +122,9 @@ test("a fully bound table reports no problem", () => {
 
 test("a structurally broken table is caught by the same check", () => {
   let hs = new Map<string, Handler>();
-  hs.set("h", (req: Request) => { return Ok("[]"); });
+  hs.set("h", (req: Request) => {
+    return Ok("[]");
+  });
   expect(bindingProblem(routes([route("GET", "agents", "h")]), hs).indexOf("does not start with /") >= 0);
 });
 
@@ -120,7 +132,9 @@ test("an unbound handler at dispatch time is 500, not a crash", () => {
   // bindingProblem should have caught this at startup; if it somehow did not,
   // one bad route must not take the server down.
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[]"); });
+  hs.set("list", (req: Request) => {
+    return Ok("[]");
+  });
   let r = dispatch(agentRoutes(), hs, "GET", "/agents/a1", "", noHeaders());
   expect(r.status == 500);
 });
@@ -129,7 +143,9 @@ test("an unbound handler at dispatch time is 500, not a crash", () => {
 
 test("a query parameter is read, with a fallback", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok(queryParam(req, "limit", "10")); });
+  hs.set("list", (req: Request) => {
+    return Ok(queryParam(req, "limit", "10"));
+  });
   let table = routes([route("GET", "/agents", "list")]);
   expect(dispatch(table, hs, "GET", "/agents?limit=50", "", noHeaders()).body == "50");
   expect(dispatch(table, hs, "GET", "/agents", "", noHeaders()).body == "10");
@@ -139,7 +155,9 @@ test("a query parameter is read, with a fallback", () => {
 
 test("a header is found however the client capitalised it", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok(header(req, "Content-Type")); });
+  hs.set("list", (req: Request) => {
+    return Ok(header(req, "Content-Type"));
+  });
   let table = routes([route("GET", "/agents", "list")]);
   let sent = new Map<string, string>();
   // The server lowercases what it receives, so this is what a handler sees.
@@ -149,14 +167,18 @@ test("a header is found however the client capitalised it", () => {
 
 test("a missing header reads as empty, not as a failure", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[" + header(req, "x-absent") + "]"); });
+  hs.set("list", (req: Request) => {
+    return Ok("[" + header(req, "x-absent") + "]");
+  });
   let table = routes([route("GET", "/agents", "list")]);
   expect(dispatch(table, hs, "GET", "/agents", "", noHeaders()).body == "[]");
 });
 
 test("a bearer token is read off the Authorization header", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[" + bearerToken(req) + "]"); });
+  hs.set("list", (req: Request) => {
+    return Ok("[" + bearerToken(req) + "]");
+  });
   let table = routes([route("GET", "/agents", "list")]);
 
   let withToken = new Map<string, string>();
@@ -177,7 +199,9 @@ test("a bearer token is read off the Authorization header", () => {
 
 test("the method reaches the handler already normalised", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok(req.method); });
+  hs.set("list", (req: Request) => {
+    return Ok(req.method);
+  });
   let table = routes([route("GET", "/agents", "list")]);
   expect(dispatch(table, hs, "get", "/agents", "", noHeaders()).body == "GET");
 });
@@ -191,7 +215,9 @@ test("the method reaches the handler already normalised", () => {
 
 test("a handler that returns normally is untouched by the guard", () => {
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[]"); });
+  hs.set("list", (req: Request) => {
+    return Ok("[]");
+  });
   let table = routes([route("GET", "/things", "list")]);
   let reply = dispatched(table, hs, "GET", "/things", "", noHeaders());
   expect(reply.status == 200);
@@ -202,7 +228,9 @@ test("the guard does not swallow a 404 or a 405", () => {
   // Those are answers, not failures, and turning them into 400 would lose the
   // Allow header a client needs.
   let hs = new Map<string, Handler>();
-  hs.set("list", (req: Request) => { return Ok("[]"); });
+  hs.set("list", (req: Request) => {
+    return Ok("[]");
+  });
   let table = routes([route("GET", "/things", "list")]);
   expect(dispatched(table, hs, "GET", "/nope", "", noHeaders()).status == 404);
   expect(dispatched(table, hs, "DELETE", "/things", "", noHeaders()).status == 405);

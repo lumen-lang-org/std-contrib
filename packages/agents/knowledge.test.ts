@@ -23,11 +23,41 @@ function fresh(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let chat: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(chat));
-  let embedder: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true, contextTokens: 0 };
+  let embedder: ModelRow = {
+    id: "e1",
+    label: "Mistral Embed",
+    apiName: "mistral-embed",
+    provider: "mistral",
+    kind: "embedding",
+    dimensions: 1024,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(embedder));
-  let unsized: ModelRow = { id: "e2", label: "Nameless Embed", apiName: "x", provider: "mistral", kind: "embedding", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let unsized: ModelRow = {
+    id: "e2",
+    label: "Nameless Embed",
+    apiName: "x",
+    provider: "mistral",
+    kind: "embedding",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(unsized));
 }
 
@@ -58,7 +88,12 @@ test("a corpus cannot be created without a width", () => {
 test("indexing with a chat model is refused before a request is made", () => {
   fresh();
   let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true}");
-  expect(indexDocument(database, chat, { id: "d1", source: "s", scope: "/x", body: "body" }, "sk-fake").indexOf("not an embedding model") >= 0);
+  expect(indexDocument(database, chat, {
+    id: "d1",
+    source: "s",
+    scope: "/x",
+    body: "body",
+  }, "sk-fake").indexOf("not an embedding model") >= 0);
 });
 
 test("searching with a chat model is refused too", () => {
@@ -82,7 +117,12 @@ test("k is bounded, so a search cannot ask for everything", () => {
 test("a document id must be a plain name", () => {
   fresh();
   let m = embeddingModel(database, "e1");
-  expect(indexDocument(database, m, { id: "a b; DROP TABLE documents", source: "s", scope: "/x", body: "body" }, "sk-fake").indexOf("plain name") >= 0);
+  expect(indexDocument(database, m, {
+    id: "a b; DROP TABLE documents",
+    source: "s",
+    scope: "/x",
+    body: "body",
+  }, "sk-fake").indexOf("plain name") >= 0);
 });
 
 test("context is labelled with where each chunk came from", () => {

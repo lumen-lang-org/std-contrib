@@ -140,7 +140,17 @@ export type ThreadOpen = {
 
 export function openThread(db: Db, open: ThreadOpen): string {
   let id = crypto.randomUUID();
-  let row: ThreadRow = { id: id, agentId: open.agentId, owner: open.owner, modelChoiceId: "", routeKey: "", title: "", replayable: false, projectId: "", createdAt: open.now };
+  let row: ThreadRow = {
+    id: id,
+    agentId: open.agentId,
+    owner: open.owner,
+    modelChoiceId: "",
+    routeKey: "",
+    title: "",
+    replayable: false,
+    projectId: "",
+    createdAt: open.now,
+  };
   let written = persist(db, threadsMapping(), JSON.stringify(row));
   if (!written.ok) {
     return "";
@@ -213,7 +223,13 @@ export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
     }
     args = both;
   }
-  let mine = pageOrdered(db, threadsMapping(), { where: clause, args: args, order: newest, limit: page.limit, offset: page.offset });
+  let mine = pageOrdered(db, threadsMapping(), {
+    where: clause,
+    args: args,
+    order: newest,
+    limit: page.limit,
+    offset: page.offset,
+  });
   if (mine == "" || mine == "[]") {
     return out;
   }
@@ -241,7 +257,14 @@ export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
     if (title.length > 80) {
       title = title.slice(0, 77) + "...";
     }
-    let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt, title: title, replayable: rows[i].replayable, projectId: rows[i].projectId };
+    let listing: ThreadListing = {
+      id: rows[i].id,
+      agentId: rows[i].agentId,
+      createdAt: rows[i].createdAt,
+      title: title,
+      replayable: rows[i].replayable,
+      projectId: rows[i].projectId,
+    };
     out.push(listing);
     i = i + 1;
   }
@@ -294,7 +317,11 @@ export function readableThread(db: Db, threadId: string, tags: string[]): string
 export function threadTurns(db: Db, threadId: string): Turn[] {
   let out: Turn[] = [];
   let keys: DbOrder[] = [{ column: "seq" }];
-  let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
+  let listed = listOrdered(db, threadTurnsMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return out;
   }
@@ -584,7 +611,13 @@ export function isReplayable(db: Db, threadId: string): bool {
 export function listReplayable(db: Db, limit: int): ThreadListing[] {
   let out: ThreadListing[] = [];
   let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
-  let held = pageOrdered(db, threadsMapping(), { where: "replayable = " + placeholderAt(db, 1), args: ["1"], order: keys, limit: limit, offset: 0 });
+  let held = pageOrdered(db, threadsMapping(), {
+    where: "replayable = " + placeholderAt(db, 1),
+    args: ["1"],
+    order: keys,
+    limit: limit,
+    offset: 0,
+  });
   if (held == "" || held == "[]") {
     return out;
   }
@@ -766,7 +799,11 @@ export function routeChoice(db: Db, run: RouteRun): ChosenModel {
   let decided = routeTurn(router, pair.model, pair.config, ask, apiKey);
   rememberRouteKey(db, run.threadId, decided.key);
 
-  let routed: ChosenModel = { choiceId: chosen.choiceId, configId: decided.configId, note: decided.note };
+  let routed: ChosenModel = {
+    choiceId: chosen.choiceId,
+    configId: decided.configId,
+    note: decided.note,
+  };
   return routed;
 }
 
@@ -795,7 +832,10 @@ function titleClip(text: string, max: int): string {
 }
 
 function noName(why: string): Naming {
-  let out: Naming = { title: "", note: titleClip("the conversation could not be named (" + titleOneLine(why) + ")", TITLE_NOTE_MAX) };
+  let out: Naming = {
+    title: "",
+    note: titleClip("the conversation could not be named (" + titleOneLine(why) + ")", TITLE_NOTE_MAX),
+  };
   return out;
 }
 
@@ -931,7 +971,13 @@ const SUMMARY_PROMPT: string = "You are compressing the beginning of a conversat
   + "drop the pleasantries. Do not add anything that was not said. Write only the paragraph.";
 
 export function summaryText(db: Db, threadId: string): ThreadSummaryRow {
-  let none: ThreadSummaryRow = { id: "", threadId: threadId, throughSeq: 0, text: "", updatedAt: "" };
+  let none: ThreadSummaryRow = {
+    id: "",
+    threadId: threadId,
+    throughSeq: 0,
+    text: "",
+    updatedAt: "",
+  };
   let held = listWhereThread(db, threadId);
   if (held == "" || held == "[]") {
     return none;
@@ -944,7 +990,10 @@ export function summaryText(db: Db, threadId: string): ThreadSummaryRow {
 }
 
 function listWhereThread(db: Db, threadId: string): string {
-  return listOrdered(db, threadSummariesMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId] });
+  return listOrdered(db, threadSummariesMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+  });
 }
 
 export type CompactAsk = {
@@ -1156,7 +1205,14 @@ export type ThreadAsk = {
 };
 
 export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): ThreadReply {
-  let plain: ThreadAsk = { userText: userText, master: master, tracer: tracer, pick: inheritedPick(), think: false, scope: "" };
+  let plain: ThreadAsk = {
+    userText: userText,
+    master: master,
+    tracer: tracer,
+    pick: inheritedPick(),
+    think: false,
+    scope: "",
+  };
   return runInThreadWith(db, threadId, plain);
 }
 
@@ -1169,9 +1225,29 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
     let noThread: Turn[] = [];
     let path: string[] = [];
     let noChunks: string[] = [];
-    let refused = runAgentAt(db, "", userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: noThread, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: ask.think, scope: ask.scope });
+    let refused = runAgentAt(db, "", userText, master, {
+      depth: 0,
+      path: path,
+      tracer: tracer,
+      parentSpan: "",
+      prior: noThread,
+      threadId: "",
+      excludeChunks: noChunks,
+      modelConfigId: "",
+      baseSeq: TURN_SEQ_NONE,
+      owner: "",
+      think: ask.think,
+      scope: ask.scope,
+    });
     let noNotes: string[] = [];
-    let bare: ThreadReply = { run: refused, text: refused.text, baseSeq: TURN_SEQ_NONE, notes: noNotes, modelChoiceId: "", routeNote: "" };
+    let bare: ThreadReply = {
+      run: refused,
+      text: refused.text,
+      baseSeq: TURN_SEQ_NONE,
+      notes: noNotes,
+      modelChoiceId: "",
+      routeNote: "",
+    };
     return bare;
   }
 
@@ -1185,7 +1261,13 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
   }
 
   let held = threadTurns(db, threadId);
-  chosen = routeChoice(db, { threadId: threadId, chosen: chosen, userText: userText, tail: held, master: master });
+  chosen = routeChoice(db, {
+    threadId: threadId,
+    chosen: chosen,
+    userText: userText,
+    tail: held,
+    master: master,
+  });
 
   forgetRound(db, threadId, held.length);
   forgetThoughts(db, threadId, held.length);
@@ -1204,7 +1286,20 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
   let firstReplayed = held.length - replayed.length;
   let alreadyShown = chunksShownSince(db, threadId, firstReplayed);
   let path: string[] = [];
-  let run = runAgentAt(db, agentId, userText, master, { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: replayed, threadId: threadId, excludeChunks: alreadyShown, modelConfigId: chosen.configId, baseSeq: held.length, owner: threadOwner(db, threadId), think: ask.think, scope: ask.scope });
+  let run = runAgentAt(db, agentId, userText, master, {
+    depth: 0,
+    path: path,
+    tracer: tracer,
+    parentSpan: "",
+    prior: replayed,
+    threadId: threadId,
+    excludeChunks: alreadyShown,
+    modelConfigId: chosen.configId,
+    baseSeq: held.length,
+    owner: threadOwner(db, threadId),
+    think: ask.think,
+    scope: ask.scope,
+  });
 
   let added: Turn[] = [];
   let i: int = replayed.length;
@@ -1294,7 +1389,11 @@ export function threadMessages(db: Db, threadId: string): Turn[] {
 export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {
   let out: ThreadTurnRow[] = [];
   let keys: DbOrder[] = [{ column: "seq" }];
-  let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
+  let listed = listOrdered(db, threadTurnsMapping(), {
+    where: "thread_id = " + placeholderAt(db, 1),
+    args: [threadId],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return out;
   }

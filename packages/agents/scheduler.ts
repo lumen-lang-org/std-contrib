@@ -220,7 +220,11 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
   if ((msg.fileName ?? "") != "" && (msg.fileBody ?? "") != "") {
     let home = ask.threadId ?? "";
     if (home == "") {
-      home = openThread(db, { agentId: flow.agentId, owner: msg.owner, now: `${Date.now() as number}` });
+      home = openThread(db, {
+        agentId: flow.agentId,
+        owner: msg.owner,
+        now: `${Date.now() as number}`,
+      });
     }
     if (home != "") {
       let path = "/" + (msg.fileName ?? "document");

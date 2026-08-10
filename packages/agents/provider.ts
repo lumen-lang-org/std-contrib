@@ -122,15 +122,30 @@ type EmbedAsk = {
 export function embedText(model: ModelRow, text: string, apiKey: string): Embedding {
   let endpoint = endpointFor(model, "embeddings");
   if (endpoint == "") {
-    let unknown: Embedding = { ok: false, vector: "", dimensions: 0, error: "no embedding endpoint for \"" + model.provider + "\"" };
+    let unknown: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "no embedding endpoint for \"" + model.provider + "\"",
+    };
     return unknown;
   }
   if (!model.enabled) {
-    let off: Embedding = { ok: false, vector: "", dimensions: 0, error: model.label + " is disabled" };
+    let off: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: model.label + " is disabled",
+    };
     return off;
   }
   if (apiKey == "") {
-    let keyless: Embedding = { ok: false, vector: "", dimensions: 0, error: "no API key for " + model.provider };
+    let keyless: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "no API key for " + model.provider,
+    };
     return keyless;
   }
 
@@ -152,11 +167,21 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
     let predict: PredictAsk = { instances: instances, parameters: parameters };
     let answered = http.request(model.baseUrl, "POST", JSON.stringify(predict), authHeaders(model.provider, carried.key));
     if (!answered.ok) {
-      let dead: Embedding = { ok: false, vector: "", dimensions: 0, error: "no answer from " + model.baseUrl };
+      let dead: Embedding = {
+        ok: false,
+        vector: "",
+        dimensions: 0,
+        error: "no answer from " + model.baseUrl,
+      };
       return dead;
     }
     if (answered.status != 200) {
-      let refused: Embedding = { ok: false, vector: "", dimensions: 0, error: "HTTP " + `${answered.status}` + " " + answered.body.substring(0, 120) };
+      let refused: Embedding = {
+        ok: false,
+        vector: "",
+        dimensions: 0,
+        error: "HTTP " + `${answered.status}` + " " + answered.body.substring(0, 120),
+      };
       return refused;
     }
     return vertexVectorFrom(answered.body);
@@ -166,11 +191,21 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
   let ask: EmbedAsk = { model: model.apiName, input: input };
   let res = http.request(endpoint, "POST", JSON.stringify(ask), authHeaders(model.provider, carried.key));
   if (!res.ok) {
-    let dead: Embedding = { ok: false, vector: "", dimensions: 0, error: "no answer from " + endpoint };
+    let dead: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "no answer from " + endpoint,
+    };
     return dead;
   }
   if (res.status != 200) {
-    let refused: Embedding = { ok: false, vector: "", dimensions: 0, error: "HTTP " + `${res.status}` + " " + res.body.substring(0, 120) };
+    let refused: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "HTTP " + `${res.status}` + " " + res.body.substring(0, 120),
+    };
     return refused;
   }
   return vectorFrom(res.body);
@@ -179,14 +214,24 @@ export function embedText(model: ModelRow, text: string, apiKey: string): Embedd
 function vertexVectorFrom(body: string): Embedding {
   let at = body.indexOf("\"values\"");
   if (at < 0) {
-    let missing: Embedding = { ok: false, vector: "", dimensions: 0, error: "no values in the predict reply" };
+    let missing: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "no values in the predict reply",
+    };
     return missing;
   }
   let rest = body.substring(at, body.length);
   let open = rest.indexOf("[");
   let close = rest.indexOf("]");
   if (open < 0 || close < 0 || close < open) {
-    let malformed: Embedding = { ok: false, vector: "", dimensions: 0, error: "the embedding is not an array" };
+    let malformed: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "the embedding is not an array",
+    };
     return malformed;
   }
   let pretty = rest.substring(open, close + 1);
@@ -216,14 +261,24 @@ function vertexVectorFrom(body: string): Embedding {
 export function vectorFrom(body: string): Embedding {
   let at = body.indexOf("\"embedding\"");
   if (at < 0) {
-    let missing: Embedding = { ok: false, vector: "", dimensions: 0, error: "no embedding in the reply" };
+    let missing: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "no embedding in the reply",
+    };
     return missing;
   }
   let rest = body.substring(at, body.length);
   let open = rest.indexOf("[");
   let close = rest.indexOf("]");
   if (open < 0 || close < 0 || close < open) {
-    let malformed: Embedding = { ok: false, vector: "", dimensions: 0, error: "the embedding is not an array" };
+    let malformed: Embedding = {
+      ok: false,
+      vector: "",
+      dimensions: 0,
+      error: "the embedding is not an array",
+    };
     return malformed;
   }
   let literal = rest.substring(open, close + 1);
@@ -514,7 +569,11 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
           if (!first) {
             out = out + ",";
           }
-          let result: ToolResultBlock = { type: "tool_result", tool_use_id: turns[i].callId, content: turns[i].text };
+          let result: ToolResultBlock = {
+            type: "tool_result",
+            tool_use_id: turns[i].callId,
+            content: turns[i].text,
+          };
           out = out + JSON.stringify(result);
           first = false;
           i = i + 1;
@@ -523,7 +582,12 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
         written = written + 1;
         continue;
       }
-      let answered: ToolMessage = { role: "tool", tool_call_id: turn.callId, name: turn.toolName, content: turn.text };
+      let answered: ToolMessage = {
+        role: "tool",
+        tool_call_id: turn.callId,
+        name: turn.toolName,
+        content: turn.text,
+      };
       out = out + JSON.stringify(answered);
       written = written + 1;
       i = i + 1;
@@ -800,21 +864,53 @@ export function sseData(line: string): string {
 export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string, onThinking: Thinking, shouldHalt: Halt): Completion {
   let endpoint = chatEndpointFor(model);
   if (endpoint == "") {
-    let nowhere: Completion = { ok: false, text: "", status: 0, error: "no chat endpoint for \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
+    let nowhere: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: "no chat endpoint for \"" + model.provider + "\"",
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return nowhere;
   }
   if (!model.enabled) {
-    let off: Completion = { ok: false, text: "", status: 0, error: model.label + " is disabled", inputTokens: 0, outputTokens: 0, counted: false };
+    let off: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: model.label + " is disabled",
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return off;
   }
   if (apiKey == "") {
-    let keyless: Completion = { ok: false, text: "", status: 0, error: "no API key for " + model.provider, inputTokens: 0, outputTokens: 0, counted: false };
+    let keyless: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: "no API key for " + model.provider,
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return keyless;
   }
 
   let carried = wireKey(model.provider, apiKey);
   if (!carried.ok) {
-    let unminted: Completion = { ok: false, text: "", status: 0, error: carried.error, inputTokens: 0, outputTokens: 0, counted: false };
+    let unminted: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: carried.error,
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return unminted;
   }
   let body = requestBody(model, config, systemPrompt, turns, tools);
@@ -834,7 +930,15 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     }
     s.close();
     console.error(streamDetail(model, status, drained));
-    let refused: Completion = { ok: false, text: drained, status: status, error: streamProblem(model, status, drained), inputTokens: 0, outputTokens: 0, counted: false };
+    let refused: Completion = {
+      ok: false,
+      text: drained,
+      status: status,
+      error: streamProblem(model, status, drained),
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return refused;
   }
 
@@ -852,7 +956,15 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       sinceAsked = 0;
       if (shouldHalt()) {
         s.close();
-        let halted: Completion = { ok: false, text: "", status: status, error: "stopped mid-stream at the caller's request", inputTokens: inTokens, outputTokens: outTokens, counted: false };
+        let halted: Completion = {
+          ok: false,
+          text: "",
+          status: status,
+          error: "stopped mid-stream at the caller's request",
+          inputTokens: inTokens,
+          outputTokens: outTokens,
+          counted: false,
+        };
         return halted;
       }
     }
@@ -921,30 +1033,78 @@ export function complete(model: ModelRow, config: ModelConfigRow, systemPrompt: 
 export function completeTurns(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[], apiKey: string): Completion {
   let endpoint = chatEndpointFor(model);
   if (endpoint == "") {
-    let unknown: Completion = { ok: false, text: "", status: 0, error: "no endpoint for provider \"" + model.provider + "\"", inputTokens: 0, outputTokens: 0, counted: false };
+    let unknown: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: "no endpoint for provider \"" + model.provider + "\"",
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return unknown;
   }
   if (!model.enabled) {
-    let off: Completion = { ok: false, text: "", status: 0, error: model.label + " is disabled", inputTokens: 0, outputTokens: 0, counted: false };
+    let off: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: model.label + " is disabled",
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return off;
   }
   if (apiKey == "") {
-    let keyless: Completion = { ok: false, text: "", status: 0, error: "no API key for " + model.provider, inputTokens: 0, outputTokens: 0, counted: false };
+    let keyless: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: "no API key for " + model.provider,
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return keyless;
   }
 
   let carried = wireKey(model.provider, apiKey);
   if (!carried.ok) {
-    let unminted: Completion = { ok: false, text: "", status: 0, error: carried.error, inputTokens: 0, outputTokens: 0, counted: false };
+    let unminted: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: carried.error,
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return unminted;
   }
   let res = http.request(endpoint, "POST", requestBody(model, config, systemPrompt, turns, tools), authHeaders(model.provider, carried.key));
   if (!res.ok) {
-    let dead: Completion = { ok: false, text: "", status: 0, error: "no answer from " + endpoint, inputTokens: 0, outputTokens: 0, counted: false };
+    let dead: Completion = {
+      ok: false,
+      text: "",
+      status: 0,
+      error: "no answer from " + endpoint,
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return dead;
   }
   if (res.status != 200) {
-    let refused: Completion = { ok: false, text: res.body, status: res.status, error: "HTTP " + `${res.status}`, inputTokens: 0, outputTokens: 0, counted: false };
+    let refused: Completion = {
+      ok: false,
+      text: res.body,
+      status: res.status,
+      error: "HTTP " + `${res.status}`,
+      inputTokens: 0,
+      outputTokens: 0,
+      counted: false,
+    };
     return refused;
   }
   let counts = usageFrom(model.provider, res.body);

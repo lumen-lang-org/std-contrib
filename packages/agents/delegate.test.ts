@@ -26,7 +26,17 @@ function testKey(): string {
 }
 
 function agent(id: string, name: string, description: string): void {
-  let a: AgentRow = { id: id, agentName: name, description: description, modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = {
+    id: id,
+    agentName: name,
+    description: description,
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 
@@ -52,11 +62,38 @@ function seeded(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
-  let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let m: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(m));
-  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let c: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 32,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));
-  let p: PromptRow = { id: "p1", promptName: "terse", version: 1, body: "Be brief.", createdAt: "t" };
+  let p: PromptRow = {
+    id: "p1",
+    promptName: "terse",
+    version: 1,
+    body: "Be brief.",
+    createdAt: "t",
+  };
   persist(database, promptsMapping(), JSON.stringify(p));
 }
 
@@ -72,13 +109,33 @@ test("a name a provider would refuse is made safe rather than rejected", () => {
 });
 
 test("a child is described by its own row", () => {
-  let a: AgentRow = { id: "a2", agentName: "scout", description: "searches the archive", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = {
+    id: "a2",
+    agentName: "scout",
+    description: "searches the archive",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   expect(delegateDescription(a).indexOf("scout") >= 0);
   expect(delegateDescription(a).indexOf("searches the archive") >= 0);
 });
 
 test("a child with no description still says what it is", () => {
-  let bare: AgentRow = { id: "a3", agentName: "scout", description: "", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let bare: AgentRow = {
+    id: "a3",
+    agentName: "scout",
+    description: "",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   expect(delegateDescription(bare).indexOf("scout") >= 0);
 });
 
@@ -111,14 +168,31 @@ test("an agent with no children has none", () => {
 
 test("a cycle is named, not descended into", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   agent("a1", "lead", "delegates");
   agent("a2", "scout", "searches");
   delegates("a1", "a2");
   delegates("a2", "a1");
 
   let above: string[] = ["a1"];
-  let child = runAgentAt(database, "a2", "anything", testKey(), { depth: 1, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false });
+  let child = runAgentAt(database, "a2", "anything", testKey(), {
+    depth: 1,
+    path: above,
+    tracer: noTracer(),
+    parentSpan: "",
+    prior: fresh(),
+    threadId: "",
+    excludeChunks: fresh2(),
+    modelConfigId: "",
+    baseSeq: TURN_SEQ_NONE,
+    owner: "",
+    think: false,
+  });
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
   expect(child.notes[0].indexOf("already in this chain") >= 0);
@@ -129,7 +203,12 @@ test("a cycle is named, not descended into", () => {
 
 test("an agent that would delegate to itself is refused", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   agent("a1", "lead", "delegates");
   delegates("a1", "a1");
   let r = runAgent(database, "a1", "anything", testKey());
@@ -139,13 +218,30 @@ test("an agent that would delegate to itself is refused", () => {
 
 test("past the depth limit an agent runs alone rather than not at all", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   agent("a1", "lead", "delegates");
   agent("a2", "scout", "searches");
   delegates("a1", "a2");
 
   let above: string[] = ["x1", "x2", "x3"];
-  let deep = runAgentAt(database, "a1", "anything", testKey(), { depth: 3, path: above, tracer: noTracer(), parentSpan: "", prior: fresh(), threadId: "", excludeChunks: fresh2(), modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false });
+  let deep = runAgentAt(database, "a1", "anything", testKey(), {
+    depth: 3,
+    path: above,
+    tracer: noTracer(),
+    parentSpan: "",
+    prior: fresh(),
+    threadId: "",
+    excludeChunks: fresh2(),
+    modelConfigId: "",
+    baseSeq: TURN_SEQ_NONE,
+    owner: "",
+    think: false,
+  });
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
   expect(deep.agentName == "lead");
@@ -153,9 +249,24 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
 
 test("a disabled child is not offered, and the run says why", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   agent("a1", "lead", "delegates");
-  let off: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: false, updatedAt: "t" };
+  let off: AgentRow = {
+    id: "a2",
+    agentName: "scout",
+    description: "searches",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: false,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(off));
   delegates("a1", "a2");
 
@@ -167,7 +278,12 @@ test("a disabled child is not offered, and the run says why", () => {
 
 test("a child that does not exist is simply not there", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   agent("a1", "lead", "delegates");
   delegates("a1", "gone");
   let r = runAgent(database, "a1", "anything", testKey());

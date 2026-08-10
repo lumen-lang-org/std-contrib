@@ -6,7 +6,13 @@ import { PromptRow, promptsMapping } from "../../schema.ts";
 
 function maxVersion(db: Db, name: string): int {
   let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
-  let page = pageOrdered(db, promptsMapping(), { where: "prompt_name = " + db.placeholder, args: [name], order: newest, limit: 1, offset: 0 });
+  let page = pageOrdered(db, promptsMapping(), {
+    where: "prompt_name = " + db.placeholder,
+    args: [name],
+    order: newest,
+    limit: 1,
+    offset: 0,
+  });
   if (page == "" || page == "[]") {
     return 0;
   }
@@ -32,7 +38,11 @@ export class PromptApi {
       return Ok(listOrdered(this.db, promptsMapping(), { order: keys }));
     }
     let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
-    return Ok(listOrdered(this.db, promptsMapping(), { where: "prompt_name = " + this.db.placeholder, args: [name], order: newest }));
+    return Ok(listOrdered(this.db, promptsMapping(), {
+      where: "prompt_name = " + this.db.placeholder,
+      args: [name],
+      order: newest,
+    }));
   }
 
   @Post("/")
@@ -55,7 +65,13 @@ export class PromptApi {
       return BadRequest("prompt \"" + id + "\" already exists; a new version is a new row, so leave \"id\" out or send an unused one");
     }
     let next = 1 + maxVersion(this.db, body.promptName);
-    let row: PromptRow = { id: id, promptName: body.promptName, version: next, body: body.body, createdAt: body.createdAt };
+    let row: PromptRow = {
+      id: id,
+      promptName: body.promptName,
+      version: next,
+      body: body.body,
+      createdAt: body.createdAt,
+    };
     let written = persist(this.db, promptsMapping(), JSON.stringify(row));
     if (!written.ok) {
       return BadRequest(written.error);

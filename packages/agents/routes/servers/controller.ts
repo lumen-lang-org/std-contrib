@@ -272,7 +272,9 @@ export class ServerApi {
   connections(req: Request): Reply {
     let owner = owningTag(callerTags(req));
     let keys: DbOrder[] = [{ column: "server_name" }];
-    let rows = JSON.parse<McpServerRow[]>(listOrdered(this.db, mcpServersMapping(), { order: keys }));
+    let rows = JSON.parse<McpServerRow[]>(listOrdered(this.db, mcpServersMapping(), {
+      order: keys,
+    }));
     let views: ConnectionView[] = [];
     let i: int = 0;
     while (i < rows.length) {

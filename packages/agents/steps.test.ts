@@ -61,7 +61,14 @@ test("a failed close keeps what the call answered, capped and uncut through a ch
   while (long.length <= RESULT_PREVIEW) {
     long = long + "eé";
   }
-  let close: StepClose = { ok: false, endedAt: "1350", millis: 350, line: 0, changed: "", result: long };
+  let close: StepClose = {
+    ok: false,
+    endedAt: "1350",
+    millis: 350,
+    line: 0,
+    changed: "",
+    result: long,
+  };
   endStepAt(database, dispatched, close);
 
   let live = stepsOfRound(database, "t1", 4);

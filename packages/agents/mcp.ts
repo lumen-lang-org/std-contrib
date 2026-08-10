@@ -165,7 +165,11 @@ export function authHeaders(server: McpServerRow, token: string): Map<string, st
 
 export function initialize(server: McpServerRow, token: string): McpCall {
   if (server.transport != "http") {
-    let unsupported: McpCall = { ok: false, text: "", error: "transport \"" + server.transport + "\" needs a subprocess, which this cannot spawn" };
+    let unsupported: McpCall = {
+      ok: false,
+      text: "",
+      error: "transport \"" + server.transport + "\" needs a subprocess, which this cannot spawn",
+    };
     return unsupported;
   }
   if (!server.enabled) {
@@ -186,7 +190,10 @@ export function toolListing(server: McpServerRow, token: string): ToolListing {
     return { tools: out, problem: "this server is switched off" };
   }
   if (server.transport != "http") {
-    return { tools: out, problem: "this speaks http; \"" + server.transport + "\" needs a subprocess it cannot spawn" };
+    return {
+      tools: out,
+      problem: "this speaks http; \"" + server.transport + "\" needs a subprocess it cannot spawn",
+    };
   }
   let listed = rpcWith(server.endpoint, authHeaders(server, token), 2, "tools/list", "");
   if (!listed.ok) {

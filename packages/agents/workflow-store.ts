@@ -238,7 +238,11 @@ export function emptyWorkflow(): WorkflowRow {
 
 export function workflowsOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }];
-  return listOrdered(db, workflowsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  return listOrdered(db, workflowsMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
 }
 
 export function enabledWorkflowCount(db: Db, owner: string): int {
@@ -257,7 +261,11 @@ export function enabledWorkflowCount(db: Db, owner: string): int {
 
 export function workflowRunsOf(db: Db, workflowId: string, owner: string): string {
   let keys: DbOrder[] = [{ column: "started_at", direction: "desc" }];
-  return listOrdered(db, workflowRunsMapping(), { where: "workflow_id = " + db.placeholder + " AND owner = " + placeholderAt(db, 2), args: [workflowId, owner], order: keys });
+  return listOrdered(db, workflowRunsMapping(), {
+    where: "workflow_id = " + db.placeholder + " AND owner = " + placeholderAt(db, 2),
+    args: [workflowId, owner],
+    order: keys,
+  });
 }
 
 export function nextWorkflowFire(row: WorkflowRow, afterMs: number): Scheduled {

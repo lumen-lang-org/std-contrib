@@ -60,7 +60,12 @@ function createTableSqlV1(db: Db): string {
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
-  return createTableSql(db, repository({ table: "secrets", idField: "id", idColumn: "id", fields: fs }));
+  return createTableSql(db, repository({
+    table: "secrets",
+    idField: "id",
+    idColumn: "id",
+    fields: fs,
+  }));
 }
 
 function refOf(id: string): string {
@@ -89,7 +94,11 @@ export function refuseSecret(row: SecretRow): string {
 
 export function secretsOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "name" }];
-  return listOrdered(db, secretsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  return listOrdered(db, secretsMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
 }
 
 export function secretById(db: Db, id: string, owner: string): SecretRow {
@@ -148,14 +157,23 @@ export function createSecret(db: Db, ask: SecretWrite): SecretMade {
     return { id: "", problem: wrong };
   }
   if (ask.value.length > MAX_SECRET_VALUE) {
-    return { id: "", problem: "that value is " + `${ask.value.length}` + " characters — the most a secret may hold is " + `${MAX_SECRET_VALUE}` };
+    return {
+      id: "",
+      problem: "that value is " + `${ask.value.length}` + " characters — the most a secret may hold is " + `${MAX_SECRET_VALUE}`,
+    };
   }
   if (secretByName(db, row.name, ask.owner).id != "") {
-    return { id: "", problem: "there is already a secret called \"" + row.name + "\" — delete it first, or pick another name" };
+    return {
+      id: "",
+      problem: "there is already a secret called \"" + row.name + "\" — delete it first, or pick another name",
+    };
   }
   let rows = JSON.parse<SecretRow[]>(secretsOf(db, ask.owner));
   if (rows.length >= MAX_SECRETS_PER_OWNER) {
-    return { id: "", problem: "that is " + `${MAX_SECRETS_PER_OWNER}` + " secrets already — delete one before adding another" };
+    return {
+      id: "",
+      problem: "that is " + `${MAX_SECRETS_PER_OWNER}` + " secrets already — delete one before adding another",
+    };
   }
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,

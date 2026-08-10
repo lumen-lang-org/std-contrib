@@ -56,7 +56,13 @@ function agentsTable(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("promptId", "prompt_id", "text"),
   ];
-  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fields, relations: [] });
+  return repository({
+    table: "agents",
+    idField: "id",
+    idColumn: "id",
+    fields: fields,
+    relations: [],
+  });
 }
 
 test("every field of the record becomes a key of the shape", () => {
@@ -210,13 +216,25 @@ test("a shape that drops a column the table stores can say so when asked", () =>
 
 test("a description from a future protocol is refused rather than misread", () => {
   let d = agentEdit();
-  let ahead: Description = { protocol: 2, kind: d.kind, name: d.name, args: d.args, fields: d.fields };
+  let ahead: Description = {
+    protocol: 2,
+    kind: d.kind,
+    name: d.name,
+    args: d.args,
+    fields: d.fields,
+  };
   expect(shapeViolation(ahead).includes("protocol 1"));
 });
 
 test("@dto on something that is not a class is refused", () => {
   let d = agentEdit();
-  let fn: Description = { protocol: 1, kind: "function", name: d.name, args: d.args, fields: d.fields };
+  let fn: Description = {
+    protocol: 1,
+    kind: "function",
+    name: d.name,
+    args: d.args,
+    fields: d.fields,
+  };
   expect(shapeViolation(fn).includes("not on a function"));
 });
 
@@ -229,7 +247,13 @@ test("@dto with an argument is refused rather than having the argument dropped",
   // `@dto("agents")` used to compile and mean `@dto`. A decorator that accepts
   // what it will not read teaches the next reader that it reads it.
   let d = agentEdit();
-  let with_arg: Description = { protocol: 1, kind: d.kind, name: d.name, args: ["agents"], fields: d.fields };
+  let with_arg: Description = {
+    protocol: 1,
+    kind: d.kind,
+    name: d.name,
+    args: ["agents"],
+    fields: d.fields,
+  };
   let violation = shapeViolation(with_arg);
   expect(violation.includes("agents"));
   expect(violation.includes("no arguments"));

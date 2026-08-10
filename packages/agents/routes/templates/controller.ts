@@ -21,9 +21,16 @@ export class TemplateApi {
   list(@RequestParam("kind", "") kind: string): Reply {
     let keys: DbOrder[] = [{ column: "featured_rank" }, { column: "label" }];
     if (kind != "") {
-      return Ok(listOrdered(this.db, templatesMapping(), { where: "visibility = 'public' AND kind = " + placeholderAt(this.db, 1), args: [kind], order: keys }));
+      return Ok(listOrdered(this.db, templatesMapping(), {
+        where: "visibility = 'public' AND kind = " + placeholderAt(this.db, 1),
+        args: [kind],
+        order: keys,
+      }));
     }
-    return Ok(listOrdered(this.db, templatesMapping(), { where: "visibility = 'public'", order: keys }));
+    return Ok(listOrdered(this.db, templatesMapping(), {
+      where: "visibility = 'public'",
+      order: keys,
+    }));
   }
 
   @Get("/:id")
@@ -74,7 +81,11 @@ export class TemplateApi {
   @Get("/:id/files")
   files(@PathVariable("id") id: string): Reply {
     let keys: DbOrder[] = [{ column: "path" }];
-    return Ok(listOrdered(this.db, templateFilesMapping(), { where: "template_id = " + placeholderAt(this.db, 1), args: [id], order: keys }));
+    return Ok(listOrdered(this.db, templateFilesMapping(), {
+      where: "template_id = " + placeholderAt(this.db, 1),
+      args: [id],
+      order: keys,
+    }));
   }
 
   @Post("/:id/files")

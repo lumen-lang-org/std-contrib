@@ -33,7 +33,12 @@ function createTableSqlV1(db: Db): string {
     field("tools", "tools", "text"),
     field("listedAt", "listed_at", "text"),
   ];
-  return createTableSql(db, repository({ table: "mcp_tool_roster", idField: "id", idColumn: "id", fields: fs }));
+  return createTableSql(db, repository({
+    table: "mcp_tool_roster",
+    idField: "id",
+    idColumn: "id",
+    fields: fs,
+  }));
 }
 
 export type Roster = {
@@ -61,7 +66,11 @@ export function rememberRoster(db: Db, serverId: string, tools: McpTool[], now: 
     return;
   }
   let kept = tools.length > MAX_REMEMBERED_TOOLS ? tools.slice(0, MAX_REMEMBERED_TOOLS) : tools;
-  let row: McpRosterRow = { id: serverId, tools: JSON.stringify(kept.map(rosterTool)), listedAt: now };
+  let row: McpRosterRow = {
+    id: serverId,
+    tools: JSON.stringify(kept.map(rosterTool)),
+    listedAt: now,
+  };
   persist(db, mcpRosterMapping(), JSON.stringify(row));
 }
 
@@ -91,7 +100,11 @@ type RosterSwitch = {
 export function rosterWithSwitches(tools: string, declined: string[]): string {
   let rows: RosterTool[] = JSON.parse<RosterTool[]>(tools);
   return JSON.stringify(rows.map((row: RosterTool): RosterSwitch => {
-    let out: RosterSwitch = { name: row.name, description: row.description, on: !declined.includes(row.name) };
+    let out: RosterSwitch = {
+      name: row.name,
+      description: row.description,
+      on: !declined.includes(row.name),
+    };
     return out;
   }));
 }

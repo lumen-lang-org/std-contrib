@@ -376,7 +376,13 @@ test("envOwned lists a person's containers with their conversations' titles, and
   withThreads();
   dockerFine();
   envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, now: "1000" });
-  envEnsure(database, { threadId: "t2", name: "office", image: "img:2", network: true, now: "2000" });
+  envEnsure(database, {
+    threadId: "t2",
+    name: "office",
+    image: "img:2",
+    network: true,
+    now: "2000",
+  });
   envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, now: "3000" });
   let mine = envOwned(database, "o1");
   expect(mine.length == 2);
@@ -394,7 +400,13 @@ test("envDrop takes the container and row, and the workspace volume with the las
   withThreads();
   dockerFine();
   envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, now: "1000" });
-  envEnsure(database, { threadId: "t1", name: "office", image: "img:2", network: true, now: "1000" });
+  envEnsure(database, {
+    threadId: "t1",
+    name: "office",
+    image: "img:2",
+    network: true,
+    now: "1000",
+  });
   fs.writeFileSync(FAKE_LOG, "");
   expect(envDrop(database, "t1", "main"));
   let logged = fs.readFileSync(FAKE_LOG);

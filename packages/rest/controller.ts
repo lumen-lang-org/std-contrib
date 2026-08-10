@@ -85,7 +85,9 @@ export function methodArg(m: ControllerMethod, name: string, index: int): string
   let i: int = 0;
   while (i < m.decorators.length) {
     if (m.decorators[i].name == name) {
-      if (index < m.decorators[i].args.length) { return m.decorators[i].args[index]; }
+      if (index < m.decorators[i].args.length) {
+        return m.decorators[i].args[index];
+      }
       return "";
     }
     i = i + 1;
@@ -96,7 +98,9 @@ export function methodArg(m: ControllerMethod, name: string, index: int): string
 export function methodHas(m: ControllerMethod, name: string): bool {
   let i: int = 0;
   while (i < m.decorators.length) {
-    if (m.decorators[i].name == name) { return true; }
+    if (m.decorators[i].name == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -106,31 +110,69 @@ export function methodHas(m: ControllerMethod, name: string): bool {
 // The vocabulary is fixed here rather than in the compiler, which is the point
 // of the design: adding `@patch` is editing this list, not the language.
 export function httpMethodOf(m: ControllerMethod): string {
-  if (methodHas(m, "get") || methodHas(m, "Get")) { return "GET"; }
-  if (methodHas(m, "post") || methodHas(m, "Post")) { return "POST"; }
-  if (methodHas(m, "put") || methodHas(m, "Put")) { return "PUT"; }
-  if (methodHas(m, "patch") || methodHas(m, "Patch")) { return "PATCH"; }
-  if (methodHas(m, "delete") || methodHas(m, "Delete") || methodHas(m, "del")) { return "DELETE"; }
-  if (methodHas(m, "head") || methodHas(m, "Head")) { return "HEAD"; }
+  if (methodHas(m, "get") || methodHas(m, "Get")) {
+    return "GET";
+  }
+  if (methodHas(m, "post") || methodHas(m, "Post")) {
+    return "POST";
+  }
+  if (methodHas(m, "put") || methodHas(m, "Put")) {
+    return "PUT";
+  }
+  if (methodHas(m, "patch") || methodHas(m, "Patch")) {
+    return "PATCH";
+  }
+  if (methodHas(m, "delete") || methodHas(m, "Delete") || methodHas(m, "del")) {
+    return "DELETE";
+  }
+  if (methodHas(m, "head") || methodHas(m, "Head")) {
+    return "HEAD";
+  }
   return "";
 }
 
 // `@Get` is the convention; `@get` and `@del` keep working because code was
 // written against them, and a convention that breaks the old spelling is a rule.
 export function routeDecoratorName(m: ControllerMethod): string {
-  if (methodHas(m, "Get")) { return "Get"; }
-  if (methodHas(m, "Post")) { return "Post"; }
-  if (methodHas(m, "Put")) { return "Put"; }
-  if (methodHas(m, "Patch")) { return "Patch"; }
-  if (methodHas(m, "Delete")) { return "Delete"; }
-  if (methodHas(m, "Head")) { return "Head"; }
-  if (methodHas(m, "get")) { return "get"; }
-  if (methodHas(m, "post")) { return "post"; }
-  if (methodHas(m, "put")) { return "put"; }
-  if (methodHas(m, "patch")) { return "patch"; }
-  if (methodHas(m, "delete")) { return "delete"; }
-  if (methodHas(m, "del")) { return "del"; }
-  if (methodHas(m, "head")) { return "head"; }
+  if (methodHas(m, "Get")) {
+    return "Get";
+  }
+  if (methodHas(m, "Post")) {
+    return "Post";
+  }
+  if (methodHas(m, "Put")) {
+    return "Put";
+  }
+  if (methodHas(m, "Patch")) {
+    return "Patch";
+  }
+  if (methodHas(m, "Delete")) {
+    return "Delete";
+  }
+  if (methodHas(m, "Head")) {
+    return "Head";
+  }
+  if (methodHas(m, "get")) {
+    return "get";
+  }
+  if (methodHas(m, "post")) {
+    return "post";
+  }
+  if (methodHas(m, "put")) {
+    return "put";
+  }
+  if (methodHas(m, "patch")) {
+    return "patch";
+  }
+  if (methodHas(m, "delete")) {
+    return "delete";
+  }
+  if (methodHas(m, "del")) {
+    return "del";
+  }
+  if (methodHas(m, "head")) {
+    return "head";
+  }
   return "";
 }
 
@@ -139,12 +181,20 @@ export function routeDecoratorName(m: ControllerMethod): string {
 // path is what its bare route serves.
 export function joinPaths(prefix: string, tail: string): string {
   let head = prefix;
-  while (head.endsWith("/")) { head = head.substring(0, head.length - 1); }
+  while (head.endsWith("/")) {
+    head = head.substring(0, head.length - 1);
+  }
   let rest = tail;
-  while (rest.startsWith("/")) { rest = rest.substring(1, rest.length); }
-  if (head == "") { head = ""; }
+  while (rest.startsWith("/")) {
+    rest = rest.substring(1, rest.length);
+  }
+  if (head == "") {
+    head = "";
+  }
   if (rest == "") {
-    if (head == "") { return "/"; }
+    if (head == "") {
+      return "/";
+    }
     return head;
   }
   return head + "/" + rest;
@@ -155,7 +205,9 @@ export function joinPaths(prefix: string, tail: string): string {
 export function controller(d: Description): Route[] {
   let out: Route[] = [];
   let prefix = "";
-  if (d.args.length > 0) { prefix = d.args[0]; }
+  if (d.args.length > 0) {
+    prefix = d.args[0];
+  }
 
   let i: int = 0;
   while (i < d.methods.length) {
@@ -192,12 +244,24 @@ export function controllerProblem(d: Description): string {
     if (httpMethodOf(m) != "") {
       routed = routed + 1;
       let verbs: int = 0;
-      if (methodHas(m, "get")) { verbs = verbs + 1; }
-      if (methodHas(m, "post")) { verbs = verbs + 1; }
-      if (methodHas(m, "put")) { verbs = verbs + 1; }
-      if (methodHas(m, "patch")) { verbs = verbs + 1; }
-      if (methodHas(m, "del")) { verbs = verbs + 1; }
-      if (methodHas(m, "head")) { verbs = verbs + 1; }
+      if (methodHas(m, "get")) {
+        verbs = verbs + 1;
+      }
+      if (methodHas(m, "post")) {
+        verbs = verbs + 1;
+      }
+      if (methodHas(m, "put")) {
+        verbs = verbs + 1;
+      }
+      if (methodHas(m, "patch")) {
+        verbs = verbs + 1;
+      }
+      if (methodHas(m, "del")) {
+        verbs = verbs + 1;
+      }
+      if (methodHas(m, "head")) {
+        verbs = verbs + 1;
+      }
       if (verbs > 1) {
         return d.name + "." + m.name + " carries " + `${verbs}`
           + " route decorators, and a method answers one method and path";
@@ -213,7 +277,9 @@ export function controllerProblem(d: Description): string {
 
 
 function decoratorArg(dec: ControllerDecoratorUse, index: int, fallback: string): string {
-  if (index < dec.args.length && dec.args[index] != "") { return dec.args[index]; }
+  if (index < dec.args.length && dec.args[index] != "") {
+    return dec.args[index];
+  }
   return fallback;
 }
 
@@ -243,19 +309,25 @@ function bindingFor(p: ControllerParam): string {
       return "header(req, " + quoted(named) + ")";
     }
     if (dec.name == "RequestBody" || dec.name == "body") {
-      if (p.type == "string") { return "req.body"; }
+      if (p.type == "string") {
+        return "req.body";
+      }
       return "JSON.parse<" + p.type + ">(req.body)";
     }
     // A resolver: the parameter is whatever the named function makes of the
     // request. This is how a handler asks for who the caller is without being
     // handed the raw header and the rule for trusting it.
     if (dec.name == "Resolve" || dec.name == "From" || dec.name == "from") {
-      if (named == "") { return ""; }
+      if (named == "") {
+        return "";
+      }
       return named + "(req)";
     }
     i = i + 1;
   }
-  if (p.type == "Request") { return "req"; }
+  if (p.type == "Request") {
+    return "req";
+  }
   return "";
 }
 
@@ -266,7 +338,9 @@ function bindingFor(p: ControllerParam): string {
 function ownMethodArity(d: Description, name: string): int {
   let i: int = 0;
   while (i < d.methods.length) {
-    if (d.methods[i].name == name) { return d.methods[i].params.length; }
+    if (d.methods[i].name == name) {
+      return d.methods[i].params.length;
+    }
     i = i + 1;
   }
   return -1;
@@ -275,7 +349,9 @@ function ownMethodArity(d: Description, name: string): int {
 function paramHas(p: ControllerParam, name: string): bool {
   let i: int = 0;
   while (i < p.decorators.length) {
-    if (p.decorators[i].name == name) { return true; }
+    if (p.decorators[i].name == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;

@@ -30,14 +30,39 @@ function main(): void {
   dropTable(db, promptsMapping()); dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  let small: ModelRow = { id: "m3", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let small: ModelRow = {
+    id: "m3",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(small));
-  let conf: ModelConfigRow = { id: "c3", modelId: "m3", temperature: 0.3, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let conf: ModelConfigRow = {
+    id: "c3",
+    modelId: "m3",
+    temperature: 0.3,
+    maxTokens: 32,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(conf));
 
   let fromEnv = process.env("MISTRAL_API_KEY") ?? "";
   if (fromEnv != "") {
-    let stored = storeCredential(db, { provider: "mistral", apiKey: fromEnv, masterKey: master, now: "2026-07-25" });
+    let stored = storeCredential(db, {
+      provider: "mistral",
+      apiKey: fromEnv,
+      masterKey: master,
+      now: "2026-07-25",
+    });
     if (stored != "") {
       console.error(stored);
       return;
@@ -51,7 +76,18 @@ function main(): void {
 
   let model: ModelRow = JSON.parse<ModelRow>(findById(db, modelsMapping(), "m3"));
   let view: ConfigView = JSON.parse<ConfigView>(findById(db, modelConfigsMapping(db), "c3"));
-  let config: ModelConfigRow = { id: view.id, modelId: view.modelId, temperature: view.temperature, maxTokens: view.maxTokens, topP: view.topP, extra: view.extra, thinking: view.thinking, label: view.label, selectable: view.selectable, rank: view.rank };
+  let config: ModelConfigRow = {
+    id: view.id,
+    modelId: view.modelId,
+    temperature: view.temperature,
+    maxTokens: view.maxTokens,
+    topP: view.topP,
+    extra: view.extra,
+    thinking: view.thinking,
+    label: view.label,
+    selectable: view.selectable,
+    rank: view.rank,
+  };
 
   let answer = complete(model, config, "Answer in one word.", "What is 2+40?", credentialFor(db, "mistral", master));
   console.log("call        ok=" + `${answer.ok}` + " status=" + `${answer.status}` + " " + answer.error);

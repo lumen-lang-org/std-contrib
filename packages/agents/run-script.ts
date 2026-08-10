@@ -887,7 +887,13 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     return scriptBail(container, stage,
       "no environment answers to '" + envName + "' — it is one of your own environments' names, or one of the deployment's, and neither has it");
   }
-  let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: image, network: true, now: run.now };
+  let ensure: EnvEnsure = {
+    threadId: run.threadId,
+    name: envName,
+    image: image,
+    network: true,
+    now: run.now,
+  };
   let ensured = envEnsure(db, ensure);
   if (!ensured.ok) {
     return scriptBail(container, stage, ensured.problem);

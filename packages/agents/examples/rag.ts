@@ -32,7 +32,16 @@ function main(): void {
   }
   let stored = credentialFor(db, "mistral", master);
 
-  let embedRow: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
+  let embedRow: ModelRow = {
+    id: "e1",
+    label: "Mistral Embed",
+    apiName: "mistral-embed",
+    provider: "mistral",
+    kind: "embedding",
+    dimensions: 1024,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(embedRow));
 
   let embedder = embeddingModel(db, "e1");
@@ -47,9 +56,24 @@ function main(): void {
     return;
   }
 
-  indexDocument(db, embedder, { id: "d1", source: "plume", scope: "/specs/plume", body: "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name." }, stored);
-  indexDocument(db, embedder, { id: "d2", source: "plume", scope: "/specs/plume", body: "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order." }, stored);
-  indexDocument(db, embedder, { id: "d3", source: "rest", scope: "/specs/rest", body: "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds." }, stored);
+  indexDocument(db, embedder, {
+    id: "d1",
+    source: "plume",
+    scope: "/specs/plume",
+    body: "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name.",
+  }, stored);
+  indexDocument(db, embedder, {
+    id: "d2",
+    source: "plume",
+    scope: "/specs/plume",
+    body: "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order.",
+  }, stored);
+  indexDocument(db, embedder, {
+    id: "d3",
+    source: "rest",
+    scope: "/specs/rest",
+    body: "The rest package refuses to listen when a route names a handler nothing bound, so a missing handler is a startup failure naming the route rather than a 500 a user finds.",
+  }, stored);
   console.log("indexed 3 documents");
 
   let question = "Why does plume refuse an unordered page?";
@@ -67,13 +91,49 @@ function main(): void {
     i = i + 1;
   }
 
-  let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let chat: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(chat));
-  let conf: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 120, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let conf: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 120,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(conf));
-  let grounded: PromptRow = { id: "p1", promptName: "grounded", version: 1, body: "Answer from the context only, in one sentence.", createdAt: "2026-07-25" };
+  let grounded: PromptRow = {
+    id: "p1",
+    promptName: "grounded",
+    version: 1,
+    body: "Answer from the context only, in one sentence.",
+    createdAt: "2026-07-25",
+  };
   persist(db, promptsMapping(), JSON.stringify(grounded));
-  let librarian: AgentRow = { id: "a1", agentName: "librarian", description: "answers from the corpus", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-25" };
+  let librarian: AgentRow = {
+    id: "a1",
+    agentName: "librarian",
+    description: "answers from the corpus",
+    modelConfigId: "c1",
+    promptId: "p1",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-25",
+  };
   persist(db, agentsMapping(), JSON.stringify(librarian));
 
   let answered = runAgent(db, "a1", asContext(found.found) + "\nQuestion: " + question, master);

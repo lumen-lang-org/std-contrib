@@ -214,7 +214,12 @@ export function installProblem(db: Db, m: Manifest): string {
 }
 
 function receipt(db: Db, pluginId: string, kind: string, itemId: string): void {
-  let row: PluginItemRow = { id: crypto.randomUUID(), pluginId: pluginId, kind: kind, itemId: itemId };
+  let row: PluginItemRow = {
+    id: crypto.randomUUID(),
+    pluginId: pluginId,
+    kind: kind,
+    itemId: itemId,
+  };
   persist(db, pluginItemsMapping(), JSON.stringify(row));
 }
 

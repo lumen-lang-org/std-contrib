@@ -29,17 +29,29 @@ import { Db, DbConfig, targetValue } from "./driver.ts";
 function myTarget(config: DbConfig): string {
   let out = "";
   let hostName = config.host ?? "";
-  if (hostName != "") { out = out + " host=" + targetValue(hostName); }
+  if (hostName != "") {
+    out = out + " host=" + targetValue(hostName);
+  }
   let portNumber = config.port ?? 0;
-  if (portNumber > 0) { out = out + " port=" + targetValue(`${portNumber}`); }
+  if (portNumber > 0) {
+    out = out + " port=" + targetValue(`${portNumber}`);
+  }
   let userName = config.user ?? "";
-  if (userName != "") { out = out + " user=" + targetValue(userName); }
+  if (userName != "") {
+    out = out + " user=" + targetValue(userName);
+  }
   let secret = config.password ?? "";
-  if (secret != "") { out = out + " password=" + targetValue(secret); }
+  if (secret != "") {
+    out = out + " password=" + targetValue(secret);
+  }
   let dbName = config.database ?? "";
-  if (dbName != "") { out = out + " dbname=" + targetValue(dbName); }
+  if (dbName != "") {
+    out = out + " dbname=" + targetValue(dbName);
+  }
   let extra = config.options ?? "";
-  if (extra != "") { out = out + " " + extra; }
+  if (extra != "") {
+    out = out + " " + extra;
+  }
   return out.trim();
 }
 
@@ -63,7 +75,9 @@ function myConnect(handle: int, config: DbConfig): bool {
 function myRun(handle: int, sql: string, args: string[]): bool {
   let i: int = 0;
   while (i < args.length) {
-    if (my_bind(handle, i, args[i]) != 0) { return false; }
+    if (my_bind(handle, i, args[i]) != 0) {
+      return false;
+    }
     i = i + 1;
   }
   return my_query(handle, sql, args.length) >= 0;
@@ -74,14 +88,30 @@ function myRun(handle: int, sql: string, args: string[]): bool {
 // thing that might later have one.
 function mysqlOn(handle: int): Db {
   let d: Db = {
-    connect: (config: DbConfig) => { return myConnect(handle, config); },
-    connected: () => { return my_connected(handle) == 1; },
-    close: () => { my_release(handle); },
-    exec: (sql: string) => { return my_exec(handle, sql) == 0; },
-    query: (sql: string, args: string[]) => { return myRun(handle, sql, args); },
-    rows: () => { return my_rows(handle); },
-    value: (row: int, col: int) => { return my_value(handle, row, col); },
-    lastError: () => { return my_error(handle); },
+    connect: (config: DbConfig) => {
+      return myConnect(handle, config);
+    },
+    connected: () => {
+      return my_connected(handle) == 1;
+    },
+    close: () => {
+      my_release(handle);
+    },
+    exec: (sql: string) => {
+      return my_exec(handle, sql) == 0;
+    },
+    query: (sql: string, args: string[]) => {
+      return myRun(handle, sql, args);
+    },
+    rows: () => {
+      return my_rows(handle);
+    },
+    value: (row: int, col: int) => {
+      return my_value(handle, row, col);
+    },
+    lastError: () => {
+      return my_error(handle);
+    },
     name: "mysql",
     placeholder: "?",
     numberedPlaceholders: false,
@@ -124,7 +154,9 @@ export function mysql(): Db {
 //   let database = mysqlConnection(config);
 export function mysqlConnection(config: DbConfig): Db {
   let handle = my_acquire();
-  if (handle >= 0) { myConnect(handle, config); }
+  if (handle >= 0) {
+    myConnect(handle, config);
+  }
   return mysqlOn(handle);
 }
 

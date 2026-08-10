@@ -138,7 +138,9 @@ export type Description = {
 function fieldHas(f: DtoFieldDescription, name: string): bool {
   let i: int = 0;
   while (i < f.decorators.length) {
-    if (f.decorators[i].name == name) { return true; }
+    if (f.decorators[i].name == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -177,14 +179,18 @@ export type Projection = {
 // built program at all.
 export function dto(d: Description): Projection {
   let violation = shapeViolation(d);
-  if (violation != "") { throw violation; }
+  if (violation != "") {
+    throw violation;
+  }
   let fields: string[] = [];
   let extras: string[] = [];
   let i: int = 0;
   while (i < d.fields.length) {
     let f = d.fields[i];
     fields.push(f.name);
-    if (fieldHas(f, "extra")) { extras.push(f.name); }
+    if (fieldHas(f, "extra")) {
+      extras.push(f.name);
+    }
     i = i + 1;
   }
   let p: Projection = { name: d.name, fields: fields, extras: extras };
@@ -334,16 +340,22 @@ export function documentViolation(p: Projection, document: string): string {
 // requests and could be hoisted to startup; the third cannot.
 export function writeViolation(p: Projection, repo: DbRepository, document: string): string {
   let names = columnViolation(p, repo);
-  if (names != "") { return names; }
+  if (names != "") {
+    return names;
+  }
   let covers = coverageViolation(p, repo);
-  if (covers != "") { return covers; }
+  if (covers != "") {
+    return covers;
+  }
   return documentViolation(p, document);
 }
 
 function listHas(names: string[], name: string): bool {
   let i: int = 0;
   while (i < names.length) {
-    if (names[i] == name) { return true; }
+    if (names[i] == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -352,7 +364,9 @@ function listHas(names: string[], name: string): bool {
 function repoHasField(repo: DbRepository, name: string): bool {
   let i: int = 0;
   while (i < repo.fields.length) {
-    if (repo.fields[i].field == name) { return true; }
+    if (repo.fields[i].field == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;

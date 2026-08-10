@@ -78,7 +78,15 @@ function spent(owner: string, word: string, bytes: int, input: int, output: int)
     threadId: id, path: "/" + word + ".md", title: word, content: body,
     note: "", origin: "uploaded", mustCreate: true, turnSeq: TURN_SEQ_NONE, now: "1700000000000",
   });
-  recordRun(database, { agentId: "a1", threadId: id, owner: owner, question: "about " + word, run: spentRun(input, output), modelChoiceId: "", routeNote: "" });
+  recordRun(database, {
+    agentId: "a1",
+    threadId: id,
+    owner: owner,
+    question: "about " + word,
+    run: spentRun(input, output),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   return id;
 }
 

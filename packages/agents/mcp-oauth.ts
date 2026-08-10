@@ -292,7 +292,11 @@ export function registerClient(registerUrl: string, redirectUri: string, clientN
   }
   let id = jsonText(res.body, "client_id");
   if (id == "") {
-    return { clientId: "", clientSecret: "", problem: registerUrl + " answered without a client_id" };
+    return {
+      clientId: "",
+      clientSecret: "",
+      problem: registerUrl + " answered without a client_id",
+    };
   }
   return { clientId: id, clientSecret: jsonText(res.body, "client_secret"), problem: "" };
 }

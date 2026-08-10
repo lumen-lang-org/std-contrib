@@ -1,5 +1,5 @@
-import { EntityDescription, entity } from "../../plume/entity.ts";
-import { DbRepository } from "../../plume/plume.ts";
+import { EntityDescription, entity } from "../../../../plume/entity.ts";
+import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("prompts")
 export class Prompt {

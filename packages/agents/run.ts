@@ -119,7 +119,20 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: noTracer(), parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false, scope: "" };
+  let top: RunContext = {
+    depth: 0,
+    path: path,
+    tracer: noTracer(),
+    parentSpan: "",
+    prior: fresh,
+    threadId: "",
+    excludeChunks: noChunks,
+    modelConfigId: "",
+    baseSeq: TURN_SEQ_NONE,
+    owner: "",
+    think: false,
+    scope: "",
+  };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -127,7 +140,20 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
-  let top: RunContext = { depth: 0, path: path, tracer: tracer, parentSpan: "", prior: fresh, threadId: "", excludeChunks: noChunks, modelConfigId: "", baseSeq: TURN_SEQ_NONE, owner: "", think: false, scope: "" };
+  let top: RunContext = {
+    depth: 0,
+    path: path,
+    tracer: tracer,
+    parentSpan: "",
+    prior: fresh,
+    threadId: "",
+    excludeChunks: noChunks,
+    modelConfigId: "",
+    baseSeq: TURN_SEQ_NONE,
+    owner: "",
+    think: false,
+    scope: "",
+  };
   return runAgentAt(db, agentId, userText, master, top);
 }
 
@@ -379,7 +405,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       }
     }
     if (on) {
-      trace = endSpan(trace, webSpan, { input: webQuery, output: `${webFound.length}` + " passages" });
+      trace = endSpan(trace, webSpan, {
+        input: webQuery,
+        output: `${webFound.length}` + " passages",
+      });
     }
   }
 
@@ -438,7 +467,15 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   system = system + "\n\n" + TEXT_CARD;
 
-  let last: Completion = { ok: false, text: "", status: 0, error: "", inputTokens: 0, outputTokens: 0, counted: false };
+  let last: Completion = {
+    ok: false,
+    text: "",
+    status: 0,
+    error: "",
+    inputTokens: 0,
+    outputTokens: 0,
+    counted: false,
+  };
   let inputTokens: int = 0;
   let outputTokens: int = 0;
   let rounds: int = 0;
@@ -929,7 +966,17 @@ function childFor(children: AgentRow[], name: string): AgentRow {
     }
     i = i + 1;
   }
-  let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", scriptImageId: "", isDefault: false, enabled: false, updatedAt: "" };
+  let none: AgentRow = {
+    id: "",
+    agentName: "",
+    description: "",
+    modelConfigId: "",
+    promptId: "",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: false,
+    updatedAt: "",
+  };
   return none;
 }
 

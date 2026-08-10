@@ -142,9 +142,13 @@ test("two controllers claiming one path is a startup failure", () => {
 @controller("/root")
 class RootVerbs {
   @get("/")
-  status(req: Request): Reply { return Ok("\"from-get\""); }
+  status(req: Request): Reply {
+    return Ok("\"from-get\"");
+  }
   @put("/")
-  configure(req: Request): Reply { return Ok("\"from-put\""); }
+  configure(req: Request): Reply {
+    return Ok("\"from-put\"");
+  }
 }
 
 test("a PUT on the controller's own root reaches the PUT handler", () => {
@@ -159,15 +163,26 @@ test("a PUT on the controller's own root reaches the PUT handler", () => {
 class ShapeApi {
   db: string;
   master: string;
-  constructor(db: string, master: string) { this.db = db; this.master = master; }
+  constructor(db: string, master: string) {
+    this.db = db;
+    this.master = master;
+  }
   @get("/")
-  status(req: Request): Reply { return Ok("\"s-get\""); }
+  status(req: Request): Reply {
+    return Ok("\"s-get\"");
+  }
   @put("/")
-  configure(req: Request): Reply { return Ok("\"s-put\""); }
+  configure(req: Request): Reply {
+    return Ok("\"s-put\"");
+  }
   @put("/key")
-  setKey(req: Request): Reply { return Ok("\"s-key\""); }
+  setKey(req: Request): Reply {
+    return Ok("\"s-key\"");
+  }
   @del("/key")
-  clearKey(req: Request): Reply { return Ok("\"s-unkey\""); }
+  clearKey(req: Request): Reply {
+    return Ok("\"s-unkey\"");
+  }
 }
 
 test("the tracing shape dispatches every verb to its own method", () => {

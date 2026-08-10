@@ -30,8 +30,17 @@ function connectionConfig(): DbConfig {
   // which is the escape hatch a config keeps for a target the fields cannot
   // describe.
   let fromEnv = process.env("PLUME_MYSQL_CONNINFO") ?? "";
-  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
-  let named: DbConfig = { host: "127.0.0.1", port: 13306, database: "lumentest", user: "root", password: "lumen" };
+  if (fromEnv != "") {
+    let raw: DbConfig = { options: fromEnv };
+    return raw;
+  }
+  let named: DbConfig = {
+    host: "127.0.0.1",
+    port: 13306,
+    database: "lumentest",
+    user: "root",
+    password: "lumen",
+  };
   return named;
 }
 
@@ -56,10 +65,28 @@ function agentsRepo(): DbRepository {
     field("teamId", "team_id", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne({ field: "team", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" }),
-    hasMany({ field: "tasks", table: "rel_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, agent_id AS \"agentId\", title" }),
+    hasOne({
+      field: "team",
+      table: "rel_teams",
+      localColumn: "team_id",
+      foreignColumn: "id",
+      columns: "id, team_name AS \"teamName\"",
+    }),
+    hasMany({
+      field: "tasks",
+      table: "rel_tasks",
+      localColumn: "id",
+      foreignColumn: "agent_id",
+      columns: "id, agent_id AS \"agentId\", title",
+    }),
   ];
-  return repository({ table: "rel_agents", idField: "id", idColumn: "id", fields: fs, relations: rs });
+  return repository({
+    table: "rel_agents",
+    idField: "id",
+    idColumn: "id",
+    fields: fs,
+    relations: rs,
+  });
 }
 
 // The same mapping without relations, to show they are what changed.
@@ -97,7 +124,13 @@ function seeded(): DbRepository {
 // --- offline ---------------------------------------------------------------
 
 test("a relation states both sides and how to shape what comes back", () => {
-  let r = hasOne({ field: "team", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" });
+  let r = hasOne({
+    field: "team",
+    table: "rel_teams",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id, team_name AS \"teamName\"",
+  });
   expect(r.field == "team");
   expect(r.kind == "one");
   expect(r.table == "rel_teams");
@@ -107,15 +140,49 @@ test("a relation states both sides and how to shape what comes back", () => {
 });
 
 test("a many relation differs only in kind", () => {
-  expect(hasMany({ field: "tasks", table: "rel_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, title" }).kind == "many");
+  expect(hasMany({
+    field: "tasks",
+    table: "rel_tasks",
+    localColumn: "id",
+    foreignColumn: "agent_id",
+    columns: "id, title",
+  }).kind == "many");
 });
 
 test("a relation with an unsafe name or select list is refused", () => {
-  expect(!relationValid(hasOne({ field: "team", table: "x; DROP TABLE y", localColumn: "team_id", foreignColumn: "id", columns: "id" })));
-  expect(!relationValid(hasOne({ field: "team", table: "rel_teams", localColumn: "team_id; --", foreignColumn: "id", columns: "id" })));
-  expect(!relationValid(hasOne({ field: "t", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id AS \"a'b\"" })));
+  expect(!relationValid(hasOne({
+    field: "team",
+    table: "x; DROP TABLE y",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id",
+  })));
+  expect(!relationValid(hasOne({
+    field: "team",
+    table: "rel_teams",
+    localColumn: "team_id; --",
+    foreignColumn: "id",
+    columns: "id",
+  })));
+  expect(!relationValid(hasOne({
+    field: "t",
+    table: "rel_teams",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id AS \"a'b\"",
+  })));
   // A kind that is neither is not a relation.
-  let odd: DbRelation = { field: "t", kind: "some", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id", linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
+  let odd: DbRelation = {
+    field: "t",
+    kind: "some",
+    table: "rel_teams",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id",
+    linkTable: "",
+    linkLocalColumn: "",
+    linkForeignColumn: "",
+  };
   expect(!relationValid(odd));
 });
 
@@ -189,8 +256,20 @@ test("a filter still applies to the parent, not to the relation", () => {
 
 test("a malformed relation refuses the read rather than sending it", () => {
   let repo = seeded();
-  let bad: DbRelation[] = [ hasOne({ field: "team", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id AS \"a'b\"" }) ];
-  let broken = repository({ table: "rel_agents", idField: "id", idColumn: "id", fields: agentsFlat().fields, relations: bad });
+  let bad: DbRelation[] = [ hasOne({
+    field: "team",
+    table: "rel_teams",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id AS \"a'b\"",
+  }) ];
+  let broken = repository({
+    table: "rel_agents",
+    idField: "id",
+    idColumn: "id",
+    fields: agentsFlat().fields,
+    relations: bad,
+  });
   expect(findById(database, broken, "a1") == "");
   expect(listWhere(database, broken, "", []) == "[]");
   // And the table is untouched.

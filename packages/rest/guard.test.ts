@@ -13,23 +13,33 @@ export function needsPostgres(req: Request): Guarded {
 @bindings
 export class DocumentApi {
   kind: string;
-  constructor(kind: string) { this.kind = kind; }
+  constructor(kind: string) {
+    this.kind = kind;
+  }
 
   @get("/")
   @Guard(needsPostgres)
-  list(req: Request): Reply { return Ok("[\"a\"]"); }
+  list(req: Request): Reply {
+    return Ok("[\"a\"]");
+  }
 
   @get("/open")
-  open(req: Request): Reply { return Ok("{\"open\":true}"); }
+  open(req: Request): Reply {
+    return Ok("{\"open\":true}");
+  }
 
   ready(): Guarded {
-    if (this.kind != "postgres") { return stops(BadRequest("this deployment cannot answer that")); }
+    if (this.kind != "postgres") {
+      return stops(BadRequest("this deployment cannot answer that"));
+    }
     return passes();
   }
 
   @get("/own")
   @Guard(ready)
-  own(req: Request): Reply { return Ok("{\"own\":true}"); }
+  own(req: Request): Reply {
+    return Ok("{\"own\":true}");
+  }
 }
 
 test("a guard lets a capable server through", () => {
@@ -75,7 +85,9 @@ export function roleAtLeast(req: Request, role: string): Guarded {
 export class RoledApi {
   @get("/")
   @Guard(roleAtLeast("signed-in"))
-  mine(req: Request): Reply { return Ok("{\"mine\":true}"); }
+  mine(req: Request): Reply {
+    return Ok("{\"mine\":true}");
+  }
 }
 
 test("a guard written as a call carries its argument", () => {

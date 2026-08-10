@@ -128,7 +128,12 @@ function traceRow(endpoint: string): TraceConfigRow {
 test("a model's base URL cannot be moved while its provider's key is stored", () => {
   fresh();
   persist(database, modelsMapping(), JSON.stringify(modelRow("m1", "mistral", "chat", "")));
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
 
   let moved = modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "http://attacker.example/v1"));
   expect(moved != "");
@@ -138,7 +143,12 @@ test("a model's base URL cannot be moved while its provider's key is stored", ()
 
 test("a model created against a foreign base URL is refused just as a moved one is", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   let created = modelDestinationProblem(database, modelRow("m9", "mistral", "chat", "http://attacker.example/v1"));
   expect(created != "");
   expect(created.indexOf("attacker.example") >= 0);
@@ -147,7 +157,12 @@ test("a model created against a foreign base URL is refused just as a moved one 
 test("a model whose provider changes is refused, because that changes the key too", () => {
   fresh();
   persist(database, modelsMapping(), JSON.stringify(modelRow("m1", "mistral", "chat", "")));
-  storeCredential(database, { provider: "openai", apiKey: "sk-fake-openai-0002", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "openai",
+    apiKey: "sk-fake-openai-0002",
+    masterKey: testKey(),
+    now: "t",
+  });
   let switched = modelDestinationProblem(database, modelRow("m1", "openai", "chat", ""));
   expect(switched != "");
 });
@@ -155,7 +170,12 @@ test("a model whose provider changes is refused, because that changes the key to
 test("an edit that leaves the address alone is allowed", () => {
   fresh();
   persist(database, modelsMapping(), JSON.stringify(modelRow("m1", "mistral", "chat", "")));
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   let renamed: ModelRow = {
     id: "m1", label: "A better label", apiName: "mistral-small-latest", provider: "mistral",
     kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
@@ -165,7 +185,12 @@ test("an edit that leaves the address alone is allowed", () => {
 test("a path change on the same host is not a move", () => {
   fresh();
   persist(database, modelsMapping(), JSON.stringify(modelRow("m1", "mistral", "chat", "https://gw.internal/v1")));
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "https://gw.internal/v2")) == "");
   expect(modelDestinationProblem(database, modelRow("m1", "mistral", "chat", "https://gw.attacker/v1")) != "");
 });
@@ -186,7 +211,12 @@ test("a base URL that is not an address is refused where it is written", () => {
 test("an MCP server's endpoint cannot be moved while its token is stored", () => {
   fresh();
   persist(database, mcpServersMapping(), JSON.stringify(mcpRow("s1", "https://mcp.example/mcp")));
-  storeCredential(database, { provider: "mcp:s1", apiKey: "mcp-fake-token", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mcp:s1",
+    apiKey: "mcp-fake-token",
+    masterKey: testKey(),
+    now: "t",
+  });
 
   let moved = serverDestinationProblem(database, mcpRow("s1", "http://attacker.example/mcp"));
   expect(moved != "");
@@ -197,14 +227,24 @@ test("an MCP server's endpoint cannot be moved while its token is stored", () =>
 test("an MCP server keeping its endpoint is written without complaint", () => {
   fresh();
   persist(database, mcpServersMapping(), JSON.stringify(mcpRow("s1", "https://mcp.example/mcp")));
-  storeCredential(database, { provider: "mcp:s1", apiKey: "mcp-fake-token", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mcp:s1",
+    apiKey: "mcp-fake-token",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(serverDestinationProblem(database, mcpRow("s1", "https://mcp.example/mcp")) == "");
 });
 
 test("the trace collector cannot be moved while its secret is stored", () => {
   fresh();
   persist(database, traceConfigMapping(), JSON.stringify(traceRow("https://cloud.langfuse.com")));
-  storeCredential(database, { provider: "tracing", apiKey: "sk-lf-fake", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "tracing",
+    apiKey: "sk-lf-fake",
+    masterKey: testKey(),
+    now: "t",
+  });
 
   let moved = traceDestinationProblem(database, traceRow("http://attacker.example"));
   expect(moved != "");
@@ -215,14 +255,24 @@ test("the trace collector cannot be moved while its secret is stored", () => {
 test("an address that cannot be read is treated as somewhere else", () => {
   fresh();
   persist(database, traceConfigMapping(), JSON.stringify(traceRow("https://cloud.langfuse.com")));
-  storeCredential(database, { provider: "tracing", apiKey: "sk-lf-fake", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "tracing",
+    apiKey: "sk-lf-fake",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(traceDestinationProblem(database, traceRow("cloud.langfuse.com")) != "");
 });
 
 test("deleting an MCP server deletes its stored token", () => {
   fresh();
   persist(database, mcpServersMapping(), JSON.stringify(mcpRow("s1", "https://mcp.example/mcp")));
-  storeCredential(database, { provider: "mcp:s1", apiKey: "mcp-fake-token", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mcp:s1",
+    apiKey: "mcp-fake-token",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(credentialFor(database, "mcp:s1", testKey()) == "mcp-fake-token");
 
   forgetServer(database, "s1");
@@ -233,13 +283,39 @@ test("deleting an MCP server deletes its stored token", () => {
 
 test("deleting an agent takes its scopes, its retrieval row and its parents' links", () => {
   fresh();
-  let a1: AgentRow = { id: "a1", agentName: "lead", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: true, enabled: true, updatedAt: "t" };
-  let a2: AgentRow = { id: "a2", agentName: "scout", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let a1: AgentRow = {
+    id: "a1",
+    agentName: "lead",
+    description: "d",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: true,
+    enabled: true,
+    updatedAt: "t",
+  };
+  let a2: AgentRow = {
+    id: "a2",
+    agentName: "scout",
+    description: "d",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(a1));
   persist(database, agentsMapping(), JSON.stringify(a2));
   execute(database, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
   grantScope(database, "a2", "/specs");
-  let retrieval: AgentRetrievalRow = { agentId: "a2", embeddingModelId: "e1", topK: 5, maxDistance: 1.0, enabled: true };
+  let retrieval: AgentRetrievalRow = {
+    agentId: "a2",
+    embeddingModelId: "e1",
+    topK: 5,
+    maxDistance: 1.0,
+    enabled: true,
+  };
   persist(database, agentRetrievalMapping(), JSON.stringify(retrieval));
 
   forgetAgent(database, "a2");
@@ -260,18 +336,78 @@ test("a migration that fails stops the server rather than being logged", () => {
 });
 
 test("a skill is refused at the door for each way of being unusable, by name", () => {
-  let good: SkillRow = { id: "k1", skillName: "read-proto-enums", description: "compute enum values", body: "run enums.py", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let good: SkillRow = {
+    id: "k1",
+    skillName: "read-proto-enums",
+    description: "compute enum values",
+    body: "run enums.py",
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   expect(skillProblem(good) == "");
 
-  let unnamed: SkillRow = { id: "k1", skillName: " ", description: "d", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let unnamed: SkillRow = {
+    id: "k1",
+    skillName: " ",
+    description: "d",
+    body: "b",
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   expect(skillProblem(unnamed).indexOf("needs a name") >= 0);
-  let pathy: SkillRow = { id: "k1", skillName: "a/b", description: "d", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let pathy: SkillRow = {
+    id: "k1",
+    skillName: "a/b",
+    description: "d",
+    body: "b",
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   expect(skillProblem(pathy).indexOf("container path") >= 0);
-  let mute: SkillRow = { id: "k1", skillName: "ok", description: " ", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let mute: SkillRow = {
+    id: "k1",
+    skillName: "ok",
+    description: " ",
+    body: "b",
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   expect(skillProblem(mute).indexOf("cannot be chosen") >= 0);
-  let tall: SkillRow = { id: "k1", skillName: "ok", description: "two\nlines", body: "b", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let tall: SkillRow = {
+    id: "k1",
+    skillName: "ok",
+    description: "two\nlines",
+    body: "b",
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   expect(skillProblem(tall).indexOf("one line") >= 0);
-  let empty: SkillRow = { id: "k1", skillName: "ok", description: "d", body: "  ", updatedAt: "t", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let empty: SkillRow = {
+    id: "k1",
+    skillName: "ok",
+    description: "d",
+    body: "  ",
+    updatedAt: "t",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   expect(skillProblem(empty).indexOf("not an instruction") >= 0);
 });
 
@@ -308,7 +444,15 @@ function emptyRun(text: string): AgentRun {
 
 function threadFor(owner: string, word: string): string {
   let id = openThread(database, { agentId: "a1", owner: owner, now: "1700000000000" });
-  putFile(database, { threadId: id, fileName: word + ".md", mime: "text/markdown", origin: "uploaded", body: "the " + word + " notes", documentId: "", now: "1700000000000" });
+  putFile(database, {
+    threadId: id,
+    fileName: word + ".md",
+    mime: "text/markdown",
+    origin: "uploaded",
+    body: "the " + word + " notes",
+    documentId: "",
+    now: "1700000000000",
+  });
   putArtifact(database, {
     threadId: id, path: "/" + word + ".html", title: word, content: "<p>" + word + "</p>",
     note: "", origin: "uploaded", mustCreate: true, turnSeq: TURN_SEQ_NONE, now: "1700000000000",
@@ -317,7 +461,15 @@ function threadFor(owner: string, word: string): string {
     threadId: id, seq: 0, depth: 0, rotation: 0, idx: 0, kind: "tool",
     name: "read_file", target: "", args: "{}", now: "1700000000000",
   });
-  recordRun(database, { agentId: "a1", threadId: id, owner: owner, question: "about " + word, run: emptyRun(word), modelChoiceId: "", routeNote: "" });
+  recordRun(database, {
+    agentId: "a1",
+    threadId: id,
+    owner: owner,
+    question: "about " + word,
+    run: emptyRun(word),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   return id;
 }
 
@@ -363,7 +515,12 @@ test("no row can hold the unknown tag", () => {
   let hers = threadFor("u-alice", "lyon");
   expect(ownedThread(database, hers, [UNKNOWN_TAG]) == "");
   expect(threadFor("", "unowned") != "");
-  expect(listThreads(database, { tags: [UNKNOWN_TAG], limit: 50, offset: 0, project: "" }).length == 0);
+  expect(listThreads(database, {
+    tags: [UNKNOWN_TAG],
+    limit: 50,
+    offset: 0,
+    project: "",
+  }).length == 0);
 });
 
 test("two tags cannot reach each other's threads, files, artifacts, steps or runs", () => {
@@ -636,7 +793,17 @@ test("a config the menu or a router points at cannot be deleted out from under i
   expect(configInUse(database, "cfg-quick").indexOf("take the choice off the menu") >= 0);
   expect(configInUse(database, "c-router").indexOf("repoint the router") >= 0);
 
-  let a9: AgentRow = { id: "a9", agentName: "lead", description: "d", modelConfigId: "c-agents", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let a9: AgentRow = {
+    id: "a9",
+    agentName: "lead",
+    description: "d",
+    modelConfigId: "c-agents",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(a9));
   expect(configInUse(database, "c-agents").indexOf("used by an agent") >= 0);
 

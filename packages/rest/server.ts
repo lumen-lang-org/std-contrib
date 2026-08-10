@@ -68,14 +68,20 @@ export function Json(status: int, body: string): Reply {
   return Respond(status, body, "application/json");
 }
 
-export function Ok(body: string): Reply { return Json(200, body); }
-export function Created(body: string): Reply { return Json(201, body); }
+export function Ok(body: string): Reply {
+  return Json(200, body);
+}
+export function Created(body: string): Reply {
+  return Json(201, body);
+}
 
 export function JsonOf<T>(status: int, value: T): Reply {
   return Respond(status, JSON.stringify(value), "application/json");
 }
 
-export function OkJson<T>(value: T): Reply { return JsonOf(200, value); }
+export function OkJson<T>(value: T): Reply {
+  return JsonOf(200, value);
+}
 
 export type Guarded = { stop: bool, reply: Reply };
 
@@ -95,33 +101,47 @@ export function stops(r: Reply): Guarded {
 // in every controller.
 export type Outcome = { fault: string, document: string };
 
-export function refusing(said: string): Outcome { return { fault: said, document: "" }; }
+export function refusing(said: string): Outcome {
+  return { fault: said, document: "" };
+}
 
-export function produced(document: string): Outcome { return { fault: "", document: document }; }
+export function produced(document: string): Outcome {
+  return { fault: "", document: document };
+}
 
 export function answered(o: Outcome): Reply {
-  if (o.fault != "") { return BadRequest(o.fault); }
+  if (o.fault != "") {
+    return BadRequest(o.fault);
+  }
   return Ok(o.document);
 }
 
 export function validatedBody(rules: Rule[], body: string): Guarded {
   let wrong = faults(rules, body);
-  if (wrong.length == 0) { return passes(); }
+  if (wrong.length == 0) {
+    return passes();
+  }
   return stops(Json(400, "{\"errors\":" + faultsJson(wrong) + "}"));
 }
 
 export function validationRefusal(rules: Rule[], body: string): string {
   let wrong = faults(rules, body);
-  if (wrong.length == 0) { return ""; }
+  if (wrong.length == 0) {
+    return "";
+  }
   return faultsJson(wrong);
 }
 
-export function CreatedJson<T>(value: T): Reply { return JsonOf(201, value); }
+export function CreatedJson<T>(value: T): Reply {
+  return JsonOf(201, value);
+}
 
 // The work was taken but is not done — a queued job, not a finished one.
 // Answering 201 for something merely accepted tells a client the resource
 // exists when it does not yet.
-export function Accepted(body: string): Reply { return Json(202, body); }
+export function Accepted(body: string): Reply {
+  return Json(202, body);
+}
 
 export function NoContent(): Reply {
   return Respond(204, "", "application/json");
@@ -149,7 +169,9 @@ export function param(req: Request, name: string): string {
 
 export function queryParam(req: Request, name: string, fallback: string): string {
   let v = req.query.get(name) ?? "";
-  if (v == "") { return fallback; }
+  if (v == "") {
+    return fallback;
+  }
   return v;
 }
 
@@ -165,8 +187,12 @@ export function header(req: Request, name: string): string {
 export function bearerToken(req: Request): string {
   let auth = header(req, "authorization");
   let prefix = "Bearer ";
-  if (auth.length <= prefix.length) { return ""; }
-  if (auth.substring(0, prefix.length).toLowerCase() != prefix.toLowerCase()) { return ""; }
+  if (auth.length <= prefix.length) {
+    return "";
+  }
+  if (auth.substring(0, prefix.length).toLowerCase() != prefix.toLowerCase()) {
+    return "";
+  }
   return auth.substring(prefix.length, auth.length).trim();
 }
 
@@ -195,7 +221,9 @@ function unboundHandler(req: Request): Reply {
 // from a 500 in production.
 export function bindingProblem(table: Route[], handlers: Map<string, Handler>): string {
   let structural = tableProblem(table);
-  if (structural != "") { return structural; }
+  if (structural != "") {
+    return structural;
+  }
   let i: int = 0;
   while (i < table.length) {
     if (!handlers.has(table[i].handler)) {
@@ -276,14 +304,21 @@ export function dispatched(table: Route[], handlers: Map<string, Handler>, metho
 // empty string if it never returns at all.
 export function serve(port: int, table: Route[], handlers: Map<string, Handler>): string {
   let problemText = bindingProblem(table, handlers);
-  if (problemText != "") { return problemText; }
+  if (problemText != "") {
+    return problemText;
+  }
 
   // The buffered form: a handler is given the request and returns the
   // response. The streaming form exists too (spec 452) and is what a
   // long-running agent reply would want; a REST table does not.
   http.createServer(port, (req): HttpResponse => {
     let answer = dispatched(table, handlers, req.method, req.path, req.body, req.headers);
-    let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
+    let out: HttpResponse = {
+      status: answer.status,
+      body: answer.body,
+      ok: true,
+      headers: answer.headers,
+    };
     return out;
   });
   return "";
@@ -314,7 +349,9 @@ export function mount<T>(c: T): Mount {
     controller: Class.nameOf(c),
     routes: Class.decorator(c, "controller"),
     call: (handler: string, req: Request) => {
-      try { return Class.invoke(c, handler, req); }
+      try {
+        return Class.invoke(c, handler, req);
+      }
       catch (e) {
         let bad: Reply = BadRequest("the request could not be handled: " + e.message);
         return bad;
@@ -353,7 +390,9 @@ export function mountProblem(mounts: Mount[]): string {
   let i: int = 0;
   while (i < mounts.length) {
     let structural = tableProblem(mounts[i].routes);
-    if (structural != "") { return mounts[i].controller + ": " + structural; }
+    if (structural != "") {
+      return mounts[i].controller + ": " + structural;
+    }
     i = i + 1;
   }
   let seen = new Map<string, string>();
@@ -389,7 +428,9 @@ export function dispatchMounted(mounts: Mount[], method: string, target: string,
       };
       return mounts[i].call(m.handler, req);
     }
-    if (m.pathMatched) { pathSeen = true; }
+    if (m.pathMatched) {
+      pathSeen = true;
+    }
     i = i + 1;
   }
   if (pathSeen) {
@@ -402,7 +443,9 @@ export function dispatchMounted(mounts: Mount[], method: string, target: string,
       let each = allowedMethods(mounts[j].routes, target);
       let n: int = 0;
       while (n < each.length) {
-        if (allowed.indexOf(each[n]) < 0) { allowed.push(each[n]); }
+        if (allowed.indexOf(each[n]) < 0) {
+          allowed.push(each[n]);
+        }
         n = n + 1;
       }
       j = j + 1;
@@ -428,11 +471,18 @@ export function dispatchedMounted(mounts: Mount[], method: string, target: strin
 // wrong, or an empty string if it never returns at all.
 export function listen(port: int, mounts: Mount[]): string {
   let problemText = mountProblem(mounts);
-  if (problemText != "") { return problemText; }
+  if (problemText != "") {
+    return problemText;
+  }
 
   http.createServer(port, (req): HttpResponse => {
     let answer = dispatchedMounted(mounts, req.method, req.path, req.body, req.headers);
-    let out: HttpResponse = { status: answer.status, body: answer.body, ok: true, headers: answer.headers };
+    let out: HttpResponse = {
+      status: answer.status,
+      body: answer.body,
+      ok: true,
+      headers: answer.headers,
+    };
     return out;
   });
   return "";

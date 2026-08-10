@@ -39,31 +39,112 @@ function main(): void {
   }
   migrate(db, plan);
 
-  let model: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let model: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(model));
-  let config: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 500, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let config: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 500,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(config));
 
-  let leadPrompt: PromptRow = { id: "p1", promptName: "lead", version: 2, createdAt: "2026-07-26", body: "You are a purchasing lead. You have no data of your own: for anything about stock or prices, ask the parts desk agent. Ask ONCE, in a single question carrying everything you need — the part, the warehouse, the quantity — and then reason from the answer yourself. Answer in one short paragraph." };
+  let leadPrompt: PromptRow = {
+    id: "p1",
+    promptName: "lead",
+    version: 2,
+    createdAt: "2026-07-26",
+    body: "You are a purchasing lead. You have no data of your own: for anything about stock or prices, ask the parts desk agent. Ask ONCE, in a single question carrying everything you need — the part, the warehouse, the quantity — and then reason from the answer yourself. Answer in one short paragraph.",
+  };
   persist(db, promptsMapping(), JSON.stringify(leadPrompt));
-  let deskPrompt: PromptRow = { id: "p2", promptName: "parts-desk", version: 1, createdAt: "2026-07-26", body: "You answer questions about parts and stock using the tools. Never guess a number." };
+  let deskPrompt: PromptRow = {
+    id: "p2",
+    promptName: "parts-desk",
+    version: 1,
+    createdAt: "2026-07-26",
+    body: "You answer questions about parts and stock using the tools. Never guess a number.",
+  };
   persist(db, promptsMapping(), JSON.stringify(deskPrompt));
 
-  let judgePrompt: PromptRow = { id: "p3", promptName: "judge", version: 1, createdAt: "2026-07-26", body: "You grade answers. You are given a question, a reference answer and an answer to grade. Reply with JSON only and nothing else: {\"score\": <0 to 1>, \"reason\": \"<one sentence>\"}. Score 1 when the facts and numbers match the reference, 0 when they contradict it, and in between when something asked for is missing." };
+  let judgePrompt: PromptRow = {
+    id: "p3",
+    promptName: "judge",
+    version: 1,
+    createdAt: "2026-07-26",
+    body: "You grade answers. You are given a question, a reference answer and an answer to grade. Reply with JSON only and nothing else: {\"score\": <0 to 1>, \"reason\": \"<one sentence>\"}. Score 1 when the facts and numbers match the reference, 0 when they contradict it, and in between when something asked for is missing.",
+  };
   persist(db, promptsMapping(), JSON.stringify(judgePrompt));
 
-  let server: McpServerRow = { id: "s1", serverName: "parts", transport: "http", endpoint: "http://127.0.0.1:8200", authKind: "none", authHeader: "", enabled: true };
+  let server: McpServerRow = {
+    id: "s1",
+    serverName: "parts",
+    transport: "http",
+    endpoint: "http://127.0.0.1:8200",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
   persist(db, mcpServersMapping(), JSON.stringify(server));
 
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "purchasing lead", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
-  let desk: AgentRow = { id: "a2", agentName: "parts-desk", description: "knows stock levels and prices for every part", modelConfigId: "c1", promptId: "p2", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
-  let judge: AgentRow = { id: "judge1", agentName: "judge", description: "grades answers", modelConfigId: "c1", promptId: "p3", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
+  let lead: AgentRow = {
+    id: "a1",
+    agentName: "lead",
+    description: "purchasing lead",
+    modelConfigId: "c1",
+    promptId: "p1",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
+  let desk: AgentRow = {
+    id: "a2",
+    agentName: "parts-desk",
+    description: "knows stock levels and prices for every part",
+    modelConfigId: "c1",
+    promptId: "p2",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
+  let judge: AgentRow = {
+    id: "judge1",
+    agentName: "judge",
+    description: "grades answers",
+    modelConfigId: "c1",
+    promptId: "p3",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
   persist(db, agentsMapping(), JSON.stringify(lead));
   persist(db, agentsMapping(), JSON.stringify(desk));
   persist(db, agentsMapping(), JSON.stringify(judge));
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a2','s1')");
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
-  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
+  storeCredential(db, {
+    provider: "mistral",
+    apiKey: apiKey,
+    masterKey: master,
+    now: "2026-07-26",
+  });
 
   let traceRow: TraceConfigRow = {
     id: "default", backend: "langfuse", endpoint: collector,
@@ -71,7 +152,12 @@ function main(): void {
     serviceName: "lumen-agents", environment: "evals", enabled: true,
   };
   persist(db, traceConfigMapping(), JSON.stringify(traceRow));
-  storeCredential(db, { provider: "tracing", apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo", masterKey: master, now: "2026-07-26" });
+  storeCredential(db, {
+    provider: "tracing",
+    apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-lumen-demo",
+    masterKey: master,
+    now: "2026-07-26",
+  });
 
   console.log("dataset   " + dataset);
   console.log("run       " + runName);

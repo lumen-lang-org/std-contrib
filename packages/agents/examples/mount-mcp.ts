@@ -15,7 +15,15 @@ function main(): void {
   dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  let demo: McpServerRow = { id: "s1", serverName: "demo-mcp", transport: "http", endpoint: "http://127.0.0.1:8200", authKind: "none", authHeader: "", enabled: true };
+  let demo: McpServerRow = {
+    id: "s1",
+    serverName: "demo-mcp",
+    transport: "http",
+    endpoint: "http://127.0.0.1:8200",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
   persist(db, mcpServersMapping(), JSON.stringify(demo));
 
   let mounted: McpServerRow = JSON.parse<McpServerRow>(findById(db, mcpServersMapping(), "s1"));

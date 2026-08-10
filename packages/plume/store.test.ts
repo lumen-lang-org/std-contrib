@@ -67,7 +67,11 @@ test("a filter still takes its parameters", () => {
 test("ordering comes through too", () => {
   let agents = seeded();
   let keys: DbOrder[] = [{ column: "max_steps" }];
-  expect(agents.listOrdered({ order: keys }).indexOf("writer") < agents.listOrdered({ order: keys }).indexOf("researcher"));
+  expect(agents.listOrdered({
+    order: keys,
+  }).indexOf("writer") < agents.listOrdered({
+    order: keys,
+  }).indexOf("researcher"));
   expect(agents.pageOrdered({ order: keys, limit: 1, offset: 0 }).indexOf("writer") >= 0);
 });
 
@@ -83,7 +87,12 @@ test("writing through a store", () => {
 
 test("two stores over one connection stay separate", () => {
   let agents = seeded();
-  let others = store(database, repository({ table: "store_others", idField: "id", idColumn: "id", fields: agentsMapping().fields }));
+  let others = store(database, repository({
+    table: "store_others",
+    idField: "id",
+    idColumn: "id",
+    fields: agentsMapping().fields,
+  }));
   others.dropTable();
   others.createTable();
   others.persist(agentJson("b1", "other", 1));

@@ -123,7 +123,9 @@ function configSaid(db: Db, said: string): ModelConfigRow {
   if (doc != "") {
     return JSON.parse<ModelConfigRow>(doc);
   }
-  let rows = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), { order: labelOrder() }));
+  let rows = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), {
+    order: labelOrder(),
+  }));
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].label.toLowerCase() == said.toLowerCase()) {
@@ -152,7 +154,9 @@ function defaultConfig(db: Db): string {
     }
     i = i + 1;
   }
-  let configs = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), { order: labelOrder() }));
+  let configs = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), {
+    order: labelOrder(),
+  }));
   i = 0;
   while (i < configs.length) {
     if (configs[i].selectable) {
@@ -174,7 +178,13 @@ function promptOf(db: Db, promptId: string): PromptRow {
 
 function writePromptVersion(db: Db, promptName: string, body: string, nowMs: number): string {
   let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
-  let page = pageOrdered(db, promptsMapping(), { where: "prompt_name = " + db.placeholder, args: [promptName], order: newest, limit: 1, offset: 0 });
+  let page = pageOrdered(db, promptsMapping(), {
+    where: "prompt_name = " + db.placeholder,
+    args: [promptName],
+    order: newest,
+    limit: 1,
+    offset: 0,
+  });
   let at = 0;
   if (page != "" && page != "[]") {
     let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);

@@ -209,7 +209,15 @@ test("a thread whose only content is an uploaded file is not swept", () => {
   let uploaded = openThread(database, { agentId: "a1", owner: "", now: old });
   let spoken = openThread(database, { agentId: "a1", owner: "", now: old });
   let young = openThread(database, { agentId: "a1", owner: "", now: "3000000000000" });
-  putFile(database, { threadId: uploaded, fileName: "notes.md", mime: "text/markdown", origin: "uploaded", body: "dropped in, not yet asked about", documentId: "", now: old });
+  putFile(database, {
+    threadId: uploaded,
+    fileName: "notes.md",
+    mime: "text/markdown",
+    origin: "uploaded",
+    body: "dropped in, not yet asked about",
+    documentId: "",
+    now: old,
+  });
   let said: Turn[] = [userTurn("how many A-114 are in Lyon?")];
   expect(appendTurns(database, spoken, said, 0) == "");
 
@@ -307,24 +315,112 @@ function seededMenu(): void {
   }
   migrate(database, plan);
 
-  let own: ModelRow = { id: "m-own", label: "The agent's own", apiName: "own-1", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
-  let picked: ModelRow = { id: "m-picked", label: "Thinking", apiName: "picked-1", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let own: ModelRow = {
+    id: "m-own",
+    label: "The agent's own",
+    apiName: "own-1",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let picked: ModelRow = {
+    id: "m-picked",
+    label: "Thinking",
+    apiName: "picked-1",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(own));
   persist(database, modelsMapping(), JSON.stringify(picked));
 
-  let cOwn: ModelConfigRow = { id: "c-own", modelId: "m-own", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "Standard", selectable: true, rank: 1 };
-  let cPicked: ModelConfigRow = { id: "c-picked", modelId: "m-picked", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "8192", label: "Thinking", selectable: true, rank: 2 };
+  let cOwn: ModelConfigRow = {
+    id: "c-own",
+    modelId: "m-own",
+    temperature: 0.0,
+    maxTokens: 32,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "Standard",
+    selectable: true,
+    rank: 1,
+  };
+  let cPicked: ModelConfigRow = {
+    id: "c-picked",
+    modelId: "m-picked",
+    temperature: 0.0,
+    maxTokens: 32,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "8192",
+    label: "Thinking",
+    selectable: true,
+    rank: 2,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(cOwn));
   persist(database, modelConfigsMapping(database), JSON.stringify(cPicked));
 
-  let p: PromptRow = { id: "p1", promptName: "terse", version: 1, body: "Be brief.", createdAt: "t" };
+  let p: PromptRow = {
+    id: "p1",
+    promptName: "terse",
+    version: 1,
+    body: "Be brief.",
+    createdAt: "t",
+  };
   persist(database, promptsMapping(), JSON.stringify(p));
-  let a: AgentRow = { id: "a1", agentName: "docflow", description: "d", modelConfigId: "c-own", promptId: "p1", scriptImageId: "", isDefault: true, enabled: true, updatedAt: "t" };
+  let a: AgentRow = {
+    id: "a1",
+    agentName: "docflow",
+    description: "d",
+    modelConfigId: "c-own",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: true,
+    enabled: true,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(a));
 
-  let standard: ModelChoiceRow = { id: "ch-own", label: "Standard", description: "the everyday one", kind: "config", configId: "c-own", routerId: "", tier: "", enabled: true, rank: 1 };
-  let thinking: ModelChoiceRow = { id: "ch-picked", label: "Thinking", description: "slower, more careful", kind: "config", configId: "c-picked", routerId: "", tier: "premium", enabled: true, rank: 2 };
-  let auto: ModelChoiceRow = { id: "ch-auto", label: "Auto", description: "picks for you", kind: "router", configId: "", routerId: "r1", tier: "", enabled: true, rank: 0 };
+  let standard: ModelChoiceRow = {
+    id: "ch-own",
+    label: "Standard",
+    description: "the everyday one",
+    kind: "config",
+    configId: "c-own",
+    routerId: "",
+    tier: "",
+    enabled: true,
+    rank: 1,
+  };
+  let thinking: ModelChoiceRow = {
+    id: "ch-picked",
+    label: "Thinking",
+    description: "slower, more careful",
+    kind: "config",
+    configId: "c-picked",
+    routerId: "",
+    tier: "premium",
+    enabled: true,
+    rank: 2,
+  };
+  let auto: ModelChoiceRow = {
+    id: "ch-auto",
+    label: "Auto",
+    description: "picks for you",
+    kind: "router",
+    configId: "",
+    routerId: "r1",
+    tier: "",
+    enabled: true,
+    rank: 0,
+  };
   persist(database, modelChoicesMapping(), JSON.stringify(standard));
   persist(database, modelChoicesMapping(), JSON.stringify(thinking));
   persist(database, modelChoicesMapping(), JSON.stringify(auto));
@@ -350,11 +446,23 @@ function testKey(): string {
 
 function ask(threadId: string, choiceId: string): ThreadReply {
   let said: ModelPick = { choiceId: choiceId, sent: true };
-  return runInThreadWith(database, threadId, { userText: "how many A-114 are in Lyon?", master: testKey(), tracer: noTracer(), pick: said, think: false });
+  return runInThreadWith(database, threadId, {
+    userText: "how many A-114 are in Lyon?",
+    master: testKey(),
+    tracer: noTracer(),
+    pick: said,
+    think: false,
+  });
 }
 
 function asks(threadId: string): ThreadReply {
-  return runInThreadWith(database, threadId, { userText: "how many A-114 are in Lyon?", master: testKey(), tracer: noTracer(), pick: inheritedPick(), think: false });
+  return runInThreadWith(database, threadId, {
+    userText: "how many A-114 are in Lyon?",
+    master: testKey(),
+    tracer: noTracer(),
+    pick: inheritedPick(),
+    think: false,
+  });
 }
 
 test("a message's choice answers that turn and the thread remembers it", () => {
@@ -531,7 +639,18 @@ test("a title is one line, unquoted, unprefixed and unpunctuated", () => {
 });
 
 test("the naming call is capped whatever config it lands on", () => {
-  let roomy: ModelConfigRow = { id: "c-big", modelId: "m1", temperature: 0.0, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "8192", label: "Thinking", selectable: true, rank: 1 };
+  let roomy: ModelConfigRow = {
+    id: "c-big",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 8192,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "8192",
+    label: "Thinking",
+    selectable: true,
+    rank: 1,
+  };
   let capped = withinTitleBudget(roomy);
   expect(capped.maxTokens == TITLE_MAX_TOKENS);
   expect(capped.thinking == "");
@@ -608,9 +727,24 @@ test("the sidebar prefers the name, and keeps every fallback it had", () => {
   expect(appendTurns(database, named, asked, 0) == "");
   expect(appendTurns(database, spoken, asked, 0) == "");
   expect(nameThread(database, named, "Lyon stock levels") == "");
-  putArtifact(database, { threadId: uploaded, path: "/plan.md", title: "Plan", content: "a plan", note: "", origin: "uploaded", mustCreate: true, turnSeq: TURN_SEQ_NONE, now: "1000000000001" });
+  putArtifact(database, {
+    threadId: uploaded,
+    path: "/plan.md",
+    title: "Plan",
+    content: "a plan",
+    note: "",
+    origin: "uploaded",
+    mustCreate: true,
+    turnSeq: TURN_SEQ_NONE,
+    now: "1000000000001",
+  });
 
-  let rows: ThreadListing[] = listThreads(database, { tags: [], limit: 50, offset: 0, project: "" });
+  let rows: ThreadListing[] = listThreads(database, {
+    tags: [],
+    limit: 50,
+    offset: 0,
+    project: "",
+  });
   expect(rows.length == 3);
   let i: int = 0;
   while (i < rows.length) {
@@ -653,19 +787,31 @@ test("a naming call that cannot be made leaves the thread untitled and says so",
   seedRouter(twoCandidates(), "turn", false);
   let id = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
 
-  let note = titleThread(database, { threadId: id, userText: "how many A-114 are in Lyon?", master: testKey() });
+  let note = titleThread(database, {
+    threadId: id,
+    userText: "how many A-114 are in Lyon?",
+    master: testKey(),
+  });
   expect(note != "");
   expect(note.indexOf("could not be named") >= 0);
   expect(note.indexOf("mistral") >= 0);
   expect(threadTitle(database, id) == "");
 
   expect(nameThread(database, id, "Lyon stock levels") == "");
-  expect(titleThread(database, { threadId: id, userText: "how many A-114 are in Lyon?", master: testKey() }) == "");
+  expect(titleThread(database, {
+    threadId: id,
+    userText: "how many A-114 are in Lyon?",
+    master: testKey(),
+  }) == "");
   expect(threadTitle(database, id) == "Lyon stock levels");
 
   execute(database, "DELETE FROM model_choices");
   let bare = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
-  expect(titleThread(database, { threadId: bare, userText: "how many A-114 are in Lyon?", master: testKey() }) == "");
+  expect(titleThread(database, {
+    threadId: bare,
+    userText: "how many A-114 are in Lyon?",
+    master: testKey(),
+  }) == "");
   expect(threadTitle(database, bare) == "");
 });
 
@@ -808,7 +954,11 @@ test("a conversation nobody offered cannot be remixed, however the id was found"
   expect(tried.threadId == "");
   expect(tried.problem.indexOf("not offered") >= 0);
 
-  let missing = remixThread(database, { sourceId: "no-such-thread", owner: "bob", now: "1000000000001" });
+  let missing = remixThread(database, {
+    sourceId: "no-such-thread",
+    owner: "bob",
+    now: "1000000000001",
+  });
   expect(missing.threadId == "");
   expect(missing.problem.indexOf("no conversation") >= 0);
 });

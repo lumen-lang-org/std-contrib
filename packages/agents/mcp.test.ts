@@ -2,7 +2,15 @@ import { McpServerRow } from "./schema.ts";
 import { McpCall, RpcFailure, initialize, rpcFailure } from "./mcp.ts";
 
 function server(transport: string, endpoint: string, enabled: bool): McpServerRow {
-  let s: McpServerRow = { id: "s", serverName: "demo", transport: transport, endpoint: endpoint, authKind: "none", authHeader: "", enabled: enabled };
+  let s: McpServerRow = {
+    id: "s",
+    serverName: "demo",
+    transport: transport,
+    endpoint: endpoint,
+    authKind: "none",
+    authHeader: "",
+    enabled: enabled,
+  };
   return s;
 }
 

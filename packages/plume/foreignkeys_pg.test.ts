@@ -21,8 +21,16 @@ function connectionConfig(): DbConfig {
   // whole, which is the escape hatch a config keeps for a target the fields
   // cannot describe.
   let fromEnv = process.env("PLUME_TEST_CONNINFO") ?? "";
-  if (fromEnv != "") { let raw: DbConfig = { options: fromEnv }; return raw; }
-  let named: DbConfig = { host: "127.0.0.1", database: "lumenvec", user: "lumen", password: "lumen" };
+  if (fromEnv != "") {
+    let raw: DbConfig = { options: fromEnv };
+    return raw;
+  }
+  let named: DbConfig = {
+    host: "127.0.0.1",
+    database: "lumenvec",
+    user: "lumen",
+    password: "lumen",
+  };
   return named;
 }
 
@@ -38,10 +46,28 @@ function agentsRepo(): DbRepository {
     field("teamId", "team_id", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne({ field: "team", table: "fk_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" }),
-    hasMany({ field: "tasks", table: "fk_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, title" }),
+    hasOne({
+      field: "team",
+      table: "fk_teams",
+      localColumn: "team_id",
+      foreignColumn: "id",
+      columns: "id, team_name AS \"teamName\"",
+    }),
+    hasMany({
+      field: "tasks",
+      table: "fk_tasks",
+      localColumn: "id",
+      foreignColumn: "agent_id",
+      columns: "id, title",
+    }),
   ];
-  return repository({ table: "fk_agents", idField: "id", idColumn: "id", fields: fs, relations: rs });
+  return repository({
+    table: "fk_agents",
+    idField: "id",
+    idColumn: "id",
+    fields: fs,
+    relations: rs,
+  });
 }
 
 function clean(): void {
@@ -84,8 +110,20 @@ test("the constraint is named for the table and column it constrains", () => {
 });
 
 test("an invalid relation produces no statement rather than a broken one", () => {
-  let bad: DbRelation[] = [ hasOne({ field: "team", table: "x; DROP TABLE y", localColumn: "team_id", foreignColumn: "id", columns: "id" }) ];
-  let broken = repository({ table: "fk_agents", idField: "id", idColumn: "id", fields: teamsRepo().fields, relations: bad });
+  let bad: DbRelation[] = [ hasOne({
+    field: "team",
+    table: "x; DROP TABLE y",
+    localColumn: "team_id",
+    foreignColumn: "id",
+    columns: "id",
+  }) ];
+  let broken = repository({
+    table: "fk_agents",
+    idField: "id",
+    idColumn: "id",
+    fields: teamsRepo().fields,
+    relations: bad,
+  });
   expect(createTableSqlWithKeys(database, broken) == "");
   expect(foreignKeys(database, broken).length == 0);
 });

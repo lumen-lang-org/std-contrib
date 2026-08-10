@@ -3,7 +3,9 @@ import { Request, Reply, Mount, Ok, dispatchedMounted, header } from "./server.t
 
 export function whoAsked(req: Request): string {
   let said = header(req, "x-user").trim();
-  if (said == "") { return "nobody"; }
+  if (said == "") {
+    return "nobody";
+  }
   return said;
 }
 

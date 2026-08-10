@@ -87,7 +87,9 @@ export function segments(pathText: string): string[] {
   let parts = pathText.split("/");
   let i: int = 0;
   while (i < parts.length) {
-    if (parts[i] != "") { out.push(parts[i]); }
+    if (parts[i] != "") {
+      out.push(parts[i]);
+    }
     i = i + 1;
   }
   return out;
@@ -110,7 +112,11 @@ export function decodeComponent(text: string): string {
         continue;
       }
     }
-    if (c == 43) { out = out + " "; i = i + 1; continue; }
+    if (c == 43) {
+      out = out + " ";
+      i = i + 1;
+      continue;
+    }
     out = out + text.substring(i, i + 1);
     i = i + 1;
   }
@@ -118,9 +124,15 @@ export function decodeComponent(text: string): string {
 }
 
 function hexDigit(c: int): int {
-  if (c >= 48 && c <= 57) { return c - 48; }
-  if (c >= 97 && c <= 102) { return c - 87; }
-  if (c >= 65 && c <= 70) { return c - 55; }
+  if (c >= 48 && c <= 57) {
+    return c - 48;
+  }
+  if (c >= 97 && c <= 102) {
+    return c - 87;
+  }
+  if (c >= 65 && c <= 70) {
+    return c - 55;
+  }
   return -1;
 }
 
@@ -128,7 +140,9 @@ function hexDigit(c: int): int {
 // which is how a flag reads: `?verbose` means verbose.
 export function parseQuery(queryText: string): Map<string, string> {
   let out = new Map<string, string>();
-  if (queryText == "") { return out; }
+  if (queryText == "") {
+    return out;
+  }
   let pairs = queryText.split("&");
   let i: int = 0;
   while (i < pairs.length) {
@@ -169,9 +183,13 @@ function noMatch(pathMatched: bool): Match {
 // is that this router does not match a wildcard there, and this says so by
 // looking at one position only.
 function wildcardAt(parts: string[]): int {
-  if (parts.length == 0) { return -1; }
+  if (parts.length == 0) {
+    return -1;
+  }
   let last = parts.length - 1;
-  if (!parts[last].startsWith("*")) { return -1; }
+  if (!parts[last].startsWith("*")) {
+    return -1;
+  }
   return last;
 }
 
@@ -193,7 +211,9 @@ function joinTail(pathParts: string[], from: int): string {
   let out = "";
   let i: int = from;
   while (i < pathParts.length) {
-    if (i > from) { out = out + "/"; }
+    if (i > from) {
+      out = out + "/";
+    }
     out = out + decodeComponent(pathParts[i]);
     i = i + 1;
   }
@@ -218,9 +238,13 @@ function matchSegments(patternParts: string[], pathParts: string[], into: Map<st
     // `*name` stands for one or more segments, never zero. Requiring one keeps
     // `/p/:t` and `/p/:t/*rest` disjoint — no path matches both — so neither
     // can quietly hide the other and their order stops mattering.
-    if (pathParts.length <= fixed) { return false; }
+    if (pathParts.length <= fixed) {
+      return false;
+    }
   } else {
-    if (patternParts.length != pathParts.length) { return false; }
+    if (patternParts.length != pathParts.length) {
+      return false;
+    }
   }
 
   let i: int = 0;
@@ -228,16 +252,22 @@ function matchSegments(patternParts: string[], pathParts: string[], into: Map<st
     let p = patternParts[i];
     if (p.startsWith(":")) {
       let key = p.substring(1, p.length);
-      if (key == "") { return false; }
+      if (key == "") {
+        return false;
+      }
       into.set(key, decodeComponent(pathParts[i]));
     } else {
-      if (p != pathParts[i]) { return false; }
+      if (p != pathParts[i]) {
+        return false;
+      }
     }
     i = i + 1;
   }
   if (at >= 0) {
     let key = patternParts[at].substring(1, patternParts[at].length);
-    if (key == "") { return false; }
+    if (key == "") {
+      return false;
+    }
     into.set(key, joinTail(pathParts, fixed));
   }
   return true;
@@ -288,8 +318,12 @@ export function match(table: Route[], method: string, target: string): Match {
           query: parseQuery(split[1]),
           pathMatched: true,
         };
-        if (wildcardAt(patternParts) < 0) { return m; }
-        if (!viaWildcard.found) { viaWildcard = m; }
+        if (wildcardAt(patternParts) < 0) {
+          return m;
+        }
+        if (!viaWildcard.found) {
+          viaWildcard = m;
+        }
       } else {
         // The path is claimed either way, so 405 is owed whether the route that
         // claimed it was exact or a catch-all.
@@ -298,7 +332,9 @@ export function match(table: Route[], method: string, target: string): Match {
     }
     i = i + 1;
   }
-  if (viaWildcard.found) { return viaWildcard; }
+  if (viaWildcard.found) {
+    return viaWildcard;
+  }
   return noMatch(sawPath);
 }
 
@@ -316,7 +352,9 @@ export function allowedMethods(table: Route[], target: string): string[] {
   while (i < table.length) {
     let params = new Map<string, string>();
     if (matchSegments(segments(table[i].pattern), pathParts, params)) {
-      if (out.indexOf(table[i].method) < 0) { out.push(table[i].method); }
+      if (out.indexOf(table[i].method) < 0) {
+        out.push(table[i].method);
+      }
     }
     i = i + 1;
   }
@@ -329,7 +367,9 @@ export function allowedMethods(table: Route[], target: string): string[] {
 // request: a route that can never match is a mistake worth failing on, not one
 // to discover from a 404 in production.
 export function tableProblem(table: Route[]): string {
-  if (table.length == 0) { return "the route table is empty"; }
+  if (table.length == 0) {
+    return "the route table is empty";
+  }
   let i: int = 0;
   while (i < table.length) {
     let r = table[i];
@@ -409,8 +449,12 @@ function shadows(a: string, b: string): bool {
     // It does steal the one length they share — but the question here is
     // whether `b` is wholly unreachable, not whether the two overlap, and an
     // overlap is a legal thing to write.
-    if (wb >= 0) { return false; }
-    if (pa.length != pb.length) { return false; }
+    if (wb >= 0) {
+      return false;
+    }
+    if (pa.length != pb.length) {
+      return false;
+    }
     return prefixCovers(pa, pb, pa.length);
   }
 
@@ -418,14 +462,18 @@ function shadows(a: string, b: string): bool {
   // two patterns look like, because `match` only falls back to a catch-all once
   // nothing else has matched — `b` wins on its own paths regardless of table
   // order. Refusing this at startup would be refusing a table that works.
-  if (wb < 0) { return false; }
+  if (wb < 0) {
+    return false;
+  }
 
   // Two catch-alls, and now order does decide. `a` takes everything from `wa`
   // on, so only the segments before the wildcard can rule the shadow out. A `b`
   // whose own wildcard starts earlier matches shorter paths than `a` ever will,
   // so it keeps a life of its own; otherwise `b` reaches past `a`'s prefix by
   // construction and the prefix is the whole question.
-  if (wb < wa) { return false; }
+  if (wb < wa) {
+    return false;
+  }
   return prefixCovers(pa, pb, wa);
 }
 
@@ -435,7 +483,9 @@ function prefixCovers(pa: string[], pb: string[], upto: int): bool {
   let i: int = 0;
   while (i < upto) {
     if (!pa[i].startsWith(":")) {
-      if (pa[i] != pb[i]) { return false; }
+      if (pa[i] != pb[i]) {
+        return false;
+      }
     }
     i = i + 1;
   }

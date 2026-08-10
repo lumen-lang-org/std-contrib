@@ -97,7 +97,13 @@ export function runsFull(db: Db): DbRepository {
     hasMany({ field: "steps", table: "run_steps", localColumn: "id", foreignColumn: "run_id", columns: "step_index AS \"stepIndex\", tool, server, args, result, "
             + boolColumn(db, "ok") + " AS \"ok\"" }),
   ];
-  return repository({ table: "runs", idField: "id", idColumn: "id", fields: runsMapping().fields, relations: rs });
+  return repository({
+    table: "runs",
+    idField: "id",
+    idColumn: "id",
+    fields: runsMapping().fields,
+    relations: rs,
+  });
 }
 
 export function runLogPlan(db: Db): Migration[] {
@@ -195,7 +201,13 @@ export function runsOf(db: Db, agentId: string, tags: string[], limit: int): str
       i = i + 1;
     }
   }
-  return pageOrdered(db, runsMapping(), { where: where, args: args, order: keys, limit: limit, offset: 0 });
+  return pageOrdered(db, runsMapping(), {
+    where: where,
+    args: args,
+    order: keys,
+    limit: limit,
+    offset: 0,
+  });
 }
 
 export function ownedRun(db: Db, runId: string, tags: string[]): string {

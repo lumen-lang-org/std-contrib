@@ -126,7 +126,11 @@ export function hasScope(granted: string[], required: string): bool {
 
 export function apiKeysOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "created_at" }];
-  let listed = listOrdered(db, apiKeysMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  let listed = listOrdered(db, apiKeysMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return "[]";
   }
@@ -141,7 +145,10 @@ export function apiKeysOf(db: Db, owner: string): string {
 }
 
 function keysOwnedCount(db: Db, owner: string): int {
-  let listed = listOrdered(db, apiKeysMapping(), { where: "owner = " + db.placeholder, args: [owner] });
+  let listed = listOrdered(db, apiKeysMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+  });
   if (listed == "" || listed == "[]") {
     return 0;
   }
@@ -258,7 +265,12 @@ export function verifyApiKey(db: Db, secret: string): ApiKeyAuth {
     return miss;
   }
   let row = rows[0];
-  let auth: ApiKeyAuth = { ok: true, owner: row.owner, keyId: row.id, scopes: scopeList(row.scopes) };
+  let auth: ApiKeyAuth = {
+    ok: true,
+    owner: row.owner,
+    keyId: row.id,
+    scopes: scopeList(row.scopes),
+  };
   return auth;
 }
 

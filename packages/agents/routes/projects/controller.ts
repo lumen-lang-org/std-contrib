@@ -103,7 +103,11 @@ export class ProjectApi {
         return OkJson(held);
       }
     }
-    let opened = openThread(this.db, { agentId: PROJECT_FILES_KEY, owner: mine.owner, now: stamp() });
+    let opened = openThread(this.db, {
+      agentId: PROJECT_FILES_KEY,
+      owner: mine.owner,
+      now: stamp(),
+    });
     if (opened == "") {
       return BadRequest("the files thread could not be opened");
     }

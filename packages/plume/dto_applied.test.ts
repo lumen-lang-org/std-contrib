@@ -170,7 +170,9 @@ test("the shape says the document did not cover it, before the write happens", (
   expect(violation.includes("promptId"));
   // Which is what a write route does with it: ask, then write, or answer the
   // sentence to the client that sent the short document.
-  if (violation == "") { persist(database, entityAgent, narrowTo(dtoAgentEdit, sent)); }
+  if (violation == "") {
+    persist(database, entityAgent, narrowTo(dtoAgentEdit, sent));
+  }
   let row = findById(database, entityAgent, "a1");
   expect(jsonMember(row, "promptId") == "\"p1\"");
   expect(jsonMember(row, "agentName") == "\"Support\"");

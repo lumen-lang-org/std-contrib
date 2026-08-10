@@ -22,16 +22,47 @@ function main(): void {
   dropTable(db, modelConfigsMapping(db)); dropTable(db, modelsMapping());
   migrate(db, schemaPlan(db));
 
-  let small: ModelRow = { id: "m3", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let small: ModelRow = {
+    id: "m3",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(small));
-  let conf: ModelConfigRow = { id: "c3", modelId: "m3", temperature: 0.3, maxTokens: 64, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let conf: ModelConfigRow = {
+    id: "c3",
+    modelId: "m3",
+    temperature: 0.3,
+    maxTokens: 64,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(conf));
 
   console.log("raw model  [" + findById(db, modelsMapping(), "m3") + "]");
   console.log("raw config [" + findById(db, modelConfigsMapping(db), "c3") + "]");
   let model: ModelRow = JSON.parse<ModelRow>(findById(db, modelsMapping(), "m3"));
   let view: ConfigView = JSON.parse<ConfigView>(findById(db, modelConfigsMapping(db), "c3"));
-  let config: ModelConfigRow = { id: view.id, modelId: view.modelId, temperature: view.temperature, maxTokens: view.maxTokens, topP: view.topP, extra: view.extra, thinking: view.thinking, label: view.label, selectable: view.selectable, rank: view.rank };
+  let config: ModelConfigRow = {
+    id: view.id,
+    modelId: view.modelId,
+    temperature: view.temperature,
+    maxTokens: view.maxTokens,
+    topP: view.topP,
+    extra: view.extra,
+    thinking: view.thinking,
+    label: view.label,
+    selectable: view.selectable,
+    rank: view.rank,
+  };
   console.log("model     " + model.label + " -> " + model.apiName + " @ " + chatEndpoint(model.provider));
 
   let key = process.env("MISTRAL_API_KEY") ?? "";

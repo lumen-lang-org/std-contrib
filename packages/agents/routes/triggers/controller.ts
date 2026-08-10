@@ -63,7 +63,12 @@ export class TriggerApi {
 
     let id = crypto.randomUUID();
     let ref = "telegram:" + id;
-    let refused = storeCredential(this.db, { provider: ref, apiKey: token, masterKey: this.master, now: stamp() });
+    let refused = storeCredential(this.db, {
+      provider: ref,
+      apiKey: token,
+      masterKey: this.master,
+      now: stamp(),
+    });
     if (refused != "") {
       return BadRequest(refused);
     }

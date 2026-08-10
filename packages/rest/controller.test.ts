@@ -13,7 +13,12 @@ function on(name: string, args: string[]): ControllerDecoratorUse {
 
 function controllerMethod(name: string, decorators: ControllerDecoratorUse[]): ControllerMethod {
   let none: ControllerParam[] = [];
-  let m: ControllerMethod = { name: name, returns: "Response", params: none, decorators: decorators };
+  let m: ControllerMethod = {
+    name: name,
+    returns: "Response",
+    params: none,
+    decorators: decorators,
+  };
   return m;
 }
 
@@ -63,7 +68,9 @@ test("a method with no route decorator serves nothing", () => {
   let i: int = 0;
   let sawHelper = false;
   while (i < table.length) {
-    if (table[i].handler == "helper") { sawHelper = true; }
+    if (table[i].handler == "helper") {
+      sawHelper = true;
+    }
     i = i + 1;
   }
   expect(!sawHelper);
@@ -164,9 +171,15 @@ test("two controllers can share a prefix without colliding", () => {
   let a = controller(d);
   let b = controller(teams);
   let i: int = 0;
-  while (i < a.length) { both.push(a[i]); i = i + 1; }
+  while (i < a.length) {
+    both.push(a[i]);
+    i = i + 1;
+  }
   let j: int = 0;
-  while (j < b.length) { both.push(b[j]); j = j + 1; }
+  while (j < b.length) {
+    both.push(b[j]);
+    j = j + 1;
+  }
   expect(tableProblem(both) == "");
   expect(match(both, "GET", "/teams").handler == "list");
   expect(match(both, "GET", "/agents").handler == "list");
@@ -190,13 +203,39 @@ test("@delete and @del both mean DELETE", () => {
 
 test("the binding plan names an expression per parameter, not a kind", () => {
   let d = agentController();
-  let idParam: ControllerParam = { name: "id", type: "string", decorators: [on("PathVariable", ["id"])] };
-  let limitParam: ControllerParam = { name: "limit", type: "int", decorators: [on("RequestParam", ["limit", "20"])] };
-  let whoParam: ControllerParam = { name: "who", type: "string", decorators: [on("RequestHeader", ["x-user"])] };
+  let idParam: ControllerParam = {
+    name: "id",
+    type: "string",
+    decorators: [on("PathVariable", ["id"])],
+  };
+  let limitParam: ControllerParam = {
+    name: "limit",
+    type: "int",
+    decorators: [on("RequestParam", ["limit", "20"])],
+  };
+  let whoParam: ControllerParam = {
+    name: "who",
+    type: "string",
+    decorators: [on("RequestHeader", ["x-user"])],
+  };
   let methods: ControllerMethod[] = [
-    { name: "find", returns: "Reply", params: [idParam, limitParam, whoParam], decorators: [on("get", ["/:id"])] },
+    {
+      name: "find",
+      returns: "Reply",
+      params: [idParam, limitParam, whoParam],
+      decorators: [on("get", ["/:id"])],
+    },
   ];
-  let plan = bindings({ protocol: 1, kind: "class", name: "A", args: ["/a"], file: "f", line: 1, fields: d.fields, methods: methods });
+  let plan = bindings({
+    protocol: 1,
+    kind: "class",
+    name: "A",
+    args: ["/a"],
+    file: "f",
+    line: 1,
+    fields: d.fields,
+    methods: methods,
+  });
   expect(plan.length == 1);
   expect(plan[0].handler == "find");
   expect(plan[0].args[0] == "param(req, \"id\")");
@@ -209,9 +248,23 @@ test("a bare Request parameter binds to the request, and a body to its type", ()
   let reqParam: ControllerParam = { name: "req", type: "Request", decorators: [] };
   let askParam: ControllerParam = { name: "ask", type: "Ask", decorators: [on("RequestBody", [])] };
   let methods: ControllerMethod[] = [
-    { name: "save", returns: "Reply", params: [reqParam, askParam], decorators: [on("put", ["/"])] },
+    {
+      name: "save",
+      returns: "Reply",
+      params: [reqParam, askParam],
+      decorators: [on("put", ["/"])],
+    },
   ];
-  let plan = bindings({ protocol: 1, kind: "class", name: "A", args: ["/a"], file: "f", line: 1, fields: d.fields, methods: methods });
+  let plan = bindings({
+    protocol: 1,
+    kind: "class",
+    name: "A",
+    args: ["/a"],
+    file: "f",
+    line: 1,
+    fields: d.fields,
+    methods: methods,
+  });
   expect(plan[0].args[0] == "req");
   expect(plan[0].args[1] == "JSON.parse<Ask>(req.body)");
 });
@@ -219,9 +272,23 @@ test("a bare Request parameter binds to the request, and a body to its type", ()
 test("a guard becomes a call the dispatcher can run", () => {
   let d = agentController();
   let methods: ControllerMethod[] = [
-    { name: "list", returns: "Reply", params: [], decorators: [on("get", ["/"]), on("Guard", ["roleAtLeast", "owner"])] },
+    {
+      name: "list",
+      returns: "Reply",
+      params: [],
+      decorators: [on("get", ["/"]), on("Guard", ["roleAtLeast", "owner"])],
+    },
   ];
-  let plan = bindings({ protocol: 1, kind: "class", name: "A", args: ["/a"], file: "f", line: 1, fields: d.fields, methods: methods });
+  let plan = bindings({
+    protocol: 1,
+    kind: "class",
+    name: "A",
+    args: ["/a"],
+    file: "f",
+    line: 1,
+    fields: d.fields,
+    methods: methods,
+  });
   expect(plan[0].guards.length == 1);
   expect(plan[0].guards[0] == "roleAtLeast(req, \"owner\")");
 });

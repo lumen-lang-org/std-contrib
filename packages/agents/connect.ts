@@ -117,7 +117,12 @@ function renew(db: Db, server: McpServerRow, key: string, master: string): strin
   }
   storeCredential(db, { provider: key, apiKey: got.accessToken, masterKey: master, now: stamp() });
   if (got.refreshToken != "") {
-    storeCredential(db, { provider: refreshKey(key), apiKey: got.refreshToken, masterKey: master, now: stamp() });
+    storeCredential(db, {
+      provider: refreshKey(key),
+      apiKey: got.refreshToken,
+      masterKey: master,
+      now: stamp(),
+    });
   }
   writeGrant(db, key, server.id, ownerOfKey(server.id, key), got, true);
   return got.accessToken;
@@ -345,14 +350,22 @@ export function completeConnect(db: Db, master: string, state: string, code: str
   }
   let pendingDoc = findById(db, mcpPendingMapping(), state);
   if (pendingDoc == "") {
-    return { serverId: "", serverName: "", problem: "that sign-in has expired; press Connect again" };
+    return {
+      serverId: "",
+      serverName: "",
+      problem: "that sign-in has expired; press Connect again",
+    };
   }
   let pending: McpPendingRow = JSON.parse<McpPendingRow>(pendingDoc);
   deleteById(db, mcpPendingMapping(), state);
 
   let started = parseFloat(pending.startedAt) ?? 0.0;
   if (started == 0.0 || (Date.now() as float) - started > PENDING_MS) {
-    return { serverId: "", serverName: "", problem: "that sign-in has expired; press Connect again" };
+    return {
+      serverId: "",
+      serverName: "",
+      problem: "that sign-in has expired; press Connect again",
+    };
   }
 
   let serverDoc = findById(db, mcpServersMapping(), pending.serverId);
@@ -420,7 +433,12 @@ function agentServerLink(): DbRepository {
     field("agentId", "agent_id", "text"),
     field("serverId", "server_id", "text"),
   ];
-  return repository({ table: "agent_mcp_servers", idField: "agentId", idColumn: "agent_id", fields: fs });
+  return repository({
+    table: "agent_mcp_servers",
+    idField: "agentId",
+    idColumn: "agent_id",
+    fields: fs,
+  });
 }
 
 function enable(db: Db, serverId: string): void {

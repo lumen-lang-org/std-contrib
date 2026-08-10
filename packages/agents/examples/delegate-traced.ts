@@ -38,27 +38,92 @@ function main(): void {
   }
   migrate(db, plan);
 
-  let model: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
+  let model: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+  };
   persist(db, modelsMapping(), JSON.stringify(model));
-  let config: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 500, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let config: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 500,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(db, modelConfigsMapping(db), JSON.stringify(config));
 
-  let leadPrompt: PromptRow = { id: "p1", promptName: "lead", version: 1, createdAt: "2026-07-26", body: "You are a purchasing lead. You have no data of your own: for anything about stock or prices, ask the parts desk agent and use what it tells you. Answer in one short paragraph." };
+  let leadPrompt: PromptRow = {
+    id: "p1",
+    promptName: "lead",
+    version: 1,
+    createdAt: "2026-07-26",
+    body: "You are a purchasing lead. You have no data of your own: for anything about stock or prices, ask the parts desk agent and use what it tells you. Answer in one short paragraph.",
+  };
   persist(db, promptsMapping(), JSON.stringify(leadPrompt));
-  let deskPrompt: PromptRow = { id: "p2", promptName: "parts-desk", version: 1, createdAt: "2026-07-26", body: "You answer questions about parts and stock using the tools. Never guess a number." };
+  let deskPrompt: PromptRow = {
+    id: "p2",
+    promptName: "parts-desk",
+    version: 1,
+    createdAt: "2026-07-26",
+    body: "You answer questions about parts and stock using the tools. Never guess a number.",
+  };
   persist(db, promptsMapping(), JSON.stringify(deskPrompt));
 
-  let server: McpServerRow = { id: "s1", serverName: "parts", transport: "http", endpoint: "http://127.0.0.1:8200", authKind: "none", authHeader: "", enabled: true };
+  let server: McpServerRow = {
+    id: "s1",
+    serverName: "parts",
+    transport: "http",
+    endpoint: "http://127.0.0.1:8200",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
   persist(db, mcpServersMapping(), JSON.stringify(server));
 
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "purchasing lead", modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
-  let desk: AgentRow = { id: "a2", agentName: "parts-desk", description: "knows stock levels and prices for every part", modelConfigId: "c1", promptId: "p2", enabled: true, isDefault: false, scriptImageId: "", updatedAt: "2026-07-26" };
+  let lead: AgentRow = {
+    id: "a1",
+    agentName: "lead",
+    description: "purchasing lead",
+    modelConfigId: "c1",
+    promptId: "p1",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
+  let desk: AgentRow = {
+    id: "a2",
+    agentName: "parts-desk",
+    description: "knows stock levels and prices for every part",
+    modelConfigId: "c1",
+    promptId: "p2",
+    enabled: true,
+    isDefault: false,
+    scriptImageId: "",
+    updatedAt: "2026-07-26",
+  };
   persist(db, agentsMapping(), JSON.stringify(lead));
   persist(db, agentsMapping(), JSON.stringify(desk));
   execute(db, "INSERT INTO agent_mcp_servers VALUES ('a2','s1')");
   execute(db, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
 
-  storeCredential(db, { provider: "mistral", apiKey: apiKey, masterKey: master, now: "2026-07-26" });
+  storeCredential(db, {
+    provider: "mistral",
+    apiKey: apiKey,
+    masterKey: master,
+    now: "2026-07-26",
+  });
 
   let traceRow: TraceConfigRow = {
     id: "default",
@@ -70,7 +135,12 @@ function main(): void {
     enabled: true,
   };
   persist(db, traceConfigMapping(), JSON.stringify(traceRow));
-  storeCredential(db, { provider: "tracing", apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-demo", masterKey: master, now: "2026-07-26" });
+  storeCredential(db, {
+    provider: "tracing",
+    apiKey: process.env("LANGFUSE_SECRET_KEY") ?? "sk-lf-demo",
+    masterKey: master,
+    now: "2026-07-26",
+  });
 
   let tracer = tracerFor(db, master);
   console.log("tracing   " + `${tracing(tracer)}` + " -> " + collector);

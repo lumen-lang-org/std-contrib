@@ -1,8 +1,5 @@
 import { validated, Rule } from "../../../../validation/validation.ts";
 
-// The whole of what a caller may send about an agent — every column, so the
-// service can write it without the handler passing the raw body alongside.
-// The rules are here so no handler has to remember to run them.
 @validated
 export class AgentBody {
   @required("an \"id\" is required")

@@ -224,7 +224,11 @@ export function ensureGeoFeed(db: Db, country: string): void {
 export function storiesFor(db: Db, feedId: string): DiscoverRow[] {
   let keys: DbOrder[] = [{ column: "rank" }];
   return JSON.parse<DiscoverRow[]>(
-    listOrdered(db, discoverStoriesMapping(), { where: "feed_id = " + db.placeholder, args: [feedId], order: keys }));
+    listOrdered(db, discoverStoriesMapping(), {
+      where: "feed_id = " + db.placeholder,
+      args: [feedId],
+      order: keys,
+    }));
 }
 
 export function storyById(db: Db, id: string): DiscoverRow {
@@ -973,7 +977,10 @@ export function carriedOver(kept: Map<string, string>, id: string, body: string)
 
 export function unreadableStories(db: Db, limit: int): DiscoverRow[] {
   let keys: DbOrder[] = [{ column: "made_at" }];
-  let rows = JSON.parse<DiscoverRow[]>(listOrdered(db, discoverStoriesMapping(), { where: "body <> '' AND body_md = ''", order: keys }));
+  let rows = JSON.parse<DiscoverRow[]>(listOrdered(db, discoverStoriesMapping(), {
+    where: "body <> '' AND body_md = ''",
+    order: keys,
+  }));
   if (rows.length <= limit) {
     return rows;
   }

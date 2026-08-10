@@ -209,12 +209,20 @@ export function judgePrompt(question: string, expected: string, answer: string):
 export function readVerdict(text: string): Verdict {
   let raw = jsonRaw(text, "score");
   if (raw == "") {
-    let unusable: Verdict = { score: 0.0, reason: "the judge did not answer with a score: " + text.slice(0, 120), ok: false };
+    let unusable: Verdict = {
+      score: 0.0,
+      reason: "the judge did not answer with a score: " + text.slice(0, 120),
+      ok: false,
+    };
     return unusable;
   }
   let parsed = parseFloat(raw);
   if (parsed == null) {
-    let unreadable: Verdict = { score: 0.0, reason: "the judge's score was not a number: " + raw, ok: false };
+    let unreadable: Verdict = {
+      score: 0.0,
+      reason: "the judge's score was not a number: " + raw,
+      ok: false,
+    };
     return unreadable;
   }
   let value: number = parsed;
@@ -235,7 +243,11 @@ export function judgeAnswer(db: Db, judgeAgentId: string, item: EvalItem, answer
   }
   let asked = runAgentTraced(db, judgeAgentId, judgePrompt(item.question, item.expected, answer), master, judgeTracer());
   if (!asked.ok) {
-    let broken: Verdict = { score: 0.0, reason: "the judge could not run: " + asked.error, ok: false };
+    let broken: Verdict = {
+      score: 0.0,
+      reason: "the judge could not run: " + asked.error,
+      ok: false,
+    };
     return broken;
   }
   return readVerdict(asked.text);
@@ -244,7 +256,11 @@ export function judgeAnswer(db: Db, judgeAgentId: string, item: EvalItem, answer
 export function compareNumbers(item: EvalItem, answer: string): Verdict {
   let wanted = numbersIn(item.expected);
   if (wanted.length == 0) {
-    let unscored: Verdict = { score: 0.0, reason: "no judge configured, and the reference answer has no numbers to compare", ok: false };
+    let unscored: Verdict = {
+      score: 0.0,
+      reason: "no judge configured, and the reference answer has no numbers to compare",
+      ok: false,
+    };
     return unscored;
   }
   let found: int = 0;

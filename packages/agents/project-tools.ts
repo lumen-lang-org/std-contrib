@@ -83,7 +83,14 @@ function projectSaid(db: Db, owner: string, said: string): ProjectRow {
 }
 
 function empty(): ProjectRow {
-  let none: ProjectRow = { id: "", owner: "", name: "", instructions: "", filesThreadId: "", createdAt: "" };
+  let none: ProjectRow = {
+    id: "",
+    owner: "",
+    name: "",
+    instructions: "",
+    filesThreadId: "",
+    createdAt: "",
+  };
   return none;
 }
 

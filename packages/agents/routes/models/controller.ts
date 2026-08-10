@@ -155,7 +155,18 @@ export class ModelApi {
       return OkJson(probe);
     }
 
-    let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" , thinking: "", label: "", selectable: false, rank: 0 };
+    let config: ModelConfigRow = {
+      id: "probe",
+      modelId: model.id,
+      temperature: 0,
+      maxTokens: 16,
+      topP: 1,
+      extra: "",
+      thinking: "",
+      label: "",
+      selectable: false,
+      rank: 0,
+    };
     let said = complete(model, config, "Reply with the single word: ok", "ping", key);
     if (!said.ok) {
       let failed: ModelTestFailed = { ok: false, error: said.error };

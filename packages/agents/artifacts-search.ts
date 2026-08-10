@@ -168,7 +168,14 @@ export function searchArtifacts(db: Db, threadId: string, query: string): Artifa
 
     if (searchLineHas(paths[a], query)) {
       let snip = searchSnippet(paths[a]);
-      let hit: ArtifactHit = { path: paths[a], slot: slots[a], version: versions[a], line: 0, text: snip.text, cut: snip.cut };
+      let hit: ArtifactHit = {
+        path: paths[a],
+        slot: slots[a],
+        version: versions[a],
+        line: 0,
+        text: snip.text,
+        cut: snip.cut,
+      };
       if (hits.length >= SEARCH_HITS_MAX) {
         capped = true;
       } else {
@@ -178,7 +185,14 @@ export function searchArtifacts(db: Db, threadId: string, query: string): Artifa
     }
     if (titles[a] != "" && searchLineHas(titles[a], query)) {
       let snip = searchSnippet(titles[a]);
-      let hit: ArtifactHit = { path: paths[a], slot: slots[a], version: versions[a], line: 0, text: snip.text, cut: snip.cut };
+      let hit: ArtifactHit = {
+        path: paths[a],
+        slot: slots[a],
+        version: versions[a],
+        line: 0,
+        text: snip.text,
+        cut: snip.cut,
+      };
       if (mine >= SEARCH_ARTIFACT_HITS_MAX || hits.length >= SEARCH_HITS_MAX) {
         capped = true;
       } else {
@@ -199,7 +213,14 @@ export function searchArtifacts(db: Db, threadId: string, query: string): Artifa
           break;
         }
         let snip = searchSnippet(text);
-        let hit: ArtifactHit = { path: paths[a], slot: slots[a], version: versions[a], line: line, text: snip.text, cut: snip.cut };
+        let hit: ArtifactHit = {
+          path: paths[a],
+          slot: slots[a],
+          version: versions[a],
+          line: line,
+          text: snip.text,
+          cut: snip.cut,
+        };
         hits.push(hit);
         mine = mine + 1;
       }
@@ -212,7 +233,13 @@ export function searchArtifacts(db: Db, threadId: string, query: string): Artifa
     a = a + 1;
   }
 
-  let out: ArtifactSearch = { ok: true, hits: hits, searched: searched, capped: capped, problem: "" };
+  let out: ArtifactSearch = {
+    ok: true,
+    hits: hits,
+    searched: searched,
+    capped: capped,
+    problem: "",
+  };
   return out;
 }
 

@@ -71,44 +71,190 @@ function seeded(): void {
   wipe();
   migrate(database, schemaPlan(database));
 
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let opus: ModelRow = {
+    id: "m1",
+    label: "Opus 5",
+    apiName: "claude-opus-5",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let haiku: ModelRow = {
+    id: "m2",
+    label: "Haiku 4.5",
+    apiName: "claude-haiku-4-5-20251001",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
 
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "Careful", selectable: true, rank: 1 };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let careful: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.2,
+    maxTokens: 8192,
+    topP: 0.95,
+    extra: "{}",
+    thinking: "",
+    label: "Careful",
+    selectable: true,
+    rank: 1,
+  };
+  let quick: ModelConfigRow = {
+    id: "c2",
+    modelId: "m2",
+    temperature: 0.7,
+    maxTokens: 2048,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(careful));
   persist(database, modelConfigsMapping(database), JSON.stringify(quick));
 
-  let p1: PromptRow = { id: "p1", promptName: "lead", version: 1, body: "You lead.", createdAt: "2026-07-25" };
-  let p2: PromptRow = { id: "p2", promptName: "lead", version: 2, body: "You lead, briefly.", createdAt: "2026-07-25" };
-  let p3: PromptRow = { id: "p3", promptName: "scout", version: 1, body: "You search.", createdAt: "2026-07-25" };
+  let p1: PromptRow = {
+    id: "p1",
+    promptName: "lead",
+    version: 1,
+    body: "You lead.",
+    createdAt: "2026-07-25",
+  };
+  let p2: PromptRow = {
+    id: "p2",
+    promptName: "lead",
+    version: 2,
+    body: "You lead, briefly.",
+    createdAt: "2026-07-25",
+  };
+  let p3: PromptRow = {
+    id: "p3",
+    promptName: "scout",
+    version: 1,
+    body: "You search.",
+    createdAt: "2026-07-25",
+  };
   persist(database, promptsMapping(), JSON.stringify(p1));
   persist(database, promptsMapping(), JSON.stringify(p2));
   persist(database, promptsMapping(), JSON.stringify(p3));
 
-  let fsSrv: McpServerRow = { id: "s1", serverName: "filesystem", transport: "stdio", endpoint: "mcp-fs", authKind: "none", authHeader: "", enabled: true };
-  let ghSrv: McpServerRow = { id: "s2", serverName: "github", transport: "http", endpoint: "https://mcp.gh", authKind: "none", authHeader: "", enabled: true };
+  let fsSrv: McpServerRow = {
+    id: "s1",
+    serverName: "filesystem",
+    transport: "stdio",
+    endpoint: "mcp-fs",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
+  let ghSrv: McpServerRow = {
+    id: "s2",
+    serverName: "github",
+    transport: "http",
+    endpoint: "https://mcp.gh",
+    authKind: "none",
+    authHeader: "",
+    enabled: true,
+  };
   persist(database, mcpServersMapping(), JSON.stringify(fsSrv));
   persist(database, mcpServersMapping(), JSON.stringify(ghSrv));
 
-  let lead: AgentRow = { id: "a1", agentName: "lead", description: "delegates", modelConfigId: "c1", promptId: "p2", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
-  let scout: AgentRow = { id: "a2", agentName: "scout", description: "searches", modelConfigId: "c2", promptId: "p3", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "2026-07-25T10:00:00Z" };
+  let lead: AgentRow = {
+    id: "a1",
+    agentName: "lead",
+    description: "delegates",
+    modelConfigId: "c1",
+    promptId: "p2",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "2026-07-25T10:00:00Z",
+  };
+  let scout: AgentRow = {
+    id: "a2",
+    agentName: "scout",
+    description: "searches",
+    modelConfigId: "c2",
+    promptId: "p3",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "2026-07-25T10:00:00Z",
+  };
   persist(database, agentsMapping(), JSON.stringify(lead));
   persist(database, agentsMapping(), JSON.stringify(scout));
 
   execute(database, "INSERT INTO agent_mcp_servers VALUES ('a1','s1'),('a1','s2'),('a2','s1')");
   execute(database, "INSERT INTO agent_sub_agents VALUES ('a1','a2')");
 
-  let recipe: SkillRow = { id: "k1", skillName: "weekly-report", description: "How to lay out the weekly report", body: "# Weekly report\nLead with the number.", updatedAt: "2026-07-25T10:00:00Z", visibility: "private", featuredRank: 0 , source: "local", sourceUrl: "" };
+  let recipe: SkillRow = {
+    id: "k1",
+    skillName: "weekly-report",
+    description: "How to lay out the weekly report",
+    body: "# Weekly report\nLead with the number.",
+    updatedAt: "2026-07-25T10:00:00Z",
+    visibility: "private",
+    featuredRank: 0,
+    source: "local",
+    sourceUrl: "",
+  };
   persist(database, skillsMapping(), JSON.stringify(recipe));
   execute(database, "INSERT INTO agent_skills VALUES ('a1','k1')");
 
-  let auto: ModelChoiceRow = { id: "ch-auto", label: "Auto", description: "Picks for you", kind: "router", configId: "", routerId: "r1", tier: "", enabled: true, rank: 1 };
-  let fast: ModelChoiceRow = { id: "ch-fast", label: "Fast", description: "Short answers, quickly", kind: "config", configId: "c2", routerId: "", tier: "", enabled: true, rank: 2 };
-  let deep: ModelChoiceRow = { id: "ch-deep", label: "Thinking", description: "Takes its time", kind: "config", configId: "c1", routerId: "", tier: "premium", enabled: true, rank: 3 };
-  let retired: ModelChoiceRow = { id: "ch-old", label: "Legacy", description: "Was offered once", kind: "config", configId: "c1", routerId: "", tier: "", enabled: false, rank: 4 };
+  let auto: ModelChoiceRow = {
+    id: "ch-auto",
+    label: "Auto",
+    description: "Picks for you",
+    kind: "router",
+    configId: "",
+    routerId: "r1",
+    tier: "",
+    enabled: true,
+    rank: 1,
+  };
+  let fast: ModelChoiceRow = {
+    id: "ch-fast",
+    label: "Fast",
+    description: "Short answers, quickly",
+    kind: "config",
+    configId: "c2",
+    routerId: "",
+    tier: "",
+    enabled: true,
+    rank: 2,
+  };
+  let deep: ModelChoiceRow = {
+    id: "ch-deep",
+    label: "Thinking",
+    description: "Takes its time",
+    kind: "config",
+    configId: "c1",
+    routerId: "",
+    tier: "premium",
+    enabled: true,
+    rank: 3,
+  };
+  let retired: ModelChoiceRow = {
+    id: "ch-old",
+    label: "Legacy",
+    description: "Was offered once",
+    kind: "config",
+    configId: "c1",
+    routerId: "",
+    tier: "",
+    enabled: false,
+    rank: 4,
+  };
   persist(database, modelChoicesMapping(), JSON.stringify(auto));
   persist(database, modelChoicesMapping(), JSON.stringify(fast));
   persist(database, modelChoicesMapping(), JSON.stringify(deep));
@@ -322,11 +468,42 @@ function runMenu(): bool {
 function liveShaped(flashEnabled: bool): bool {
   wipe();
   migrate(database, schemaPlan(database));
-  let flash: ModelRow = { id: "m-gemini-flash", label: "Gemini 2.5 Flash", apiName: "gemini-2.5-flash", provider: "vertex", kind: "chat", dimensions: 0, baseUrl: "https://example.invalid/openapi", enabled: flashEnabled, contextTokens: 0 };
-  let pro: ModelRow = { id: "m-gemini-pro", label: "Gemini 2.5 Pro", apiName: "gemini-2.5-pro", provider: "vertex", kind: "chat", dimensions: 0, baseUrl: "https://example.invalid/openapi", enabled: true, contextTokens: 0 };
+  let flash: ModelRow = {
+    id: "m-gemini-flash",
+    label: "Gemini 2.5 Flash",
+    apiName: "gemini-2.5-flash",
+    provider: "vertex",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "https://example.invalid/openapi",
+    enabled: flashEnabled,
+    contextTokens: 0,
+  };
+  let pro: ModelRow = {
+    id: "m-gemini-pro",
+    label: "Gemini 2.5 Pro",
+    apiName: "gemini-2.5-pro",
+    provider: "vertex",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "https://example.invalid/openapi",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(flash));
   persist(database, modelsMapping(), JSON.stringify(pro));
-  let onPro: ModelConfigRow = { id: "c-gemini-pro", modelId: "m-gemini-pro", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let onPro: ModelConfigRow = {
+    id: "c-gemini-pro",
+    modelId: "m-gemini-pro",
+    temperature: 0.2,
+    maxTokens: 8192,
+    topP: 0.95,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(onPro));
   return runSeed() && runMenu();
 }
@@ -383,9 +560,31 @@ test("the thinking config asks for an effort the provider will actually send", (
   expect(think.model.provider == "vertex");
   expect(think.thinking == "high");
 
-  let asRow: ModelConfigRow = { id: think.id, modelId: think.modelId, temperature: think.temperature, maxTokens: think.maxTokens, topP: think.topP, extra: think.extra, thinking: think.thinking, label: think.label, selectable: think.selectable, rank: think.rank };
+  let asRow: ModelConfigRow = {
+    id: think.id,
+    modelId: think.modelId,
+    temperature: think.temperature,
+    maxTokens: think.maxTokens,
+    topP: think.topP,
+    extra: think.extra,
+    thinking: think.thinking,
+    label: think.label,
+    selectable: think.selectable,
+    rank: think.rank,
+  };
   expect(thinkingJson("vertex", asRow) == ",\"reasoning_effort\":\"high\"");
-  let budgeted: ModelConfigRow = { id: "c-x", modelId: "m-gemini-pro", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "8192", label: "", selectable: false, rank: 0 };
+  let budgeted: ModelConfigRow = {
+    id: "c-x",
+    modelId: "m-gemini-pro",
+    temperature: 0.2,
+    maxTokens: 8192,
+    topP: 0.95,
+    extra: "{}",
+    thinking: "8192",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   expect(thinkingJson("vertex", budgeted) == "");
 });
 
@@ -460,27 +659,132 @@ function communityShaped(second: bool): bool {
   wipe();
   migrate(database, schemaPlan(database));
 
-  let llama: ModelRow = { id: "m-llama", label: "Llama 3.1", apiName: "llama3.1", provider: "ollama", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434", enabled: true, contextTokens: 0 };
+  let llama: ModelRow = {
+    id: "m-llama",
+    label: "Llama 3.1",
+    apiName: "llama3.1",
+    provider: "ollama",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "http://127.0.0.1:11434",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(llama));
-  let onLlama: ModelConfigRow = { id: "cfg-llama", modelId: "m-llama", temperature: 0.3, maxTokens: 4096, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let onLlama: ModelConfigRow = {
+    id: "cfg-llama",
+    modelId: "m-llama",
+    temperature: 0.3,
+    maxTokens: 4096,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(onLlama));
 
   if (second) {
-    let mistral: ModelRow = { id: "m-small", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+    let mistral: ModelRow = {
+      id: "m-small",
+      label: "Mistral Small",
+      apiName: "mistral-small-latest",
+      provider: "mistral",
+      kind: "chat",
+      dimensions: 0,
+      baseUrl: "",
+      enabled: true,
+      contextTokens: 0,
+    };
     persist(database, modelsMapping(), JSON.stringify(mistral));
-    let onMistral: ModelConfigRow = { id: "cfg-small", modelId: "m-small", temperature: 0.3, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+    let onMistral: ModelConfigRow = {
+      id: "cfg-small",
+      modelId: "m-small",
+      temperature: 0.3,
+      maxTokens: 8192,
+      topP: 1.0,
+      extra: "{}",
+      thinking: "",
+      label: "",
+      selectable: false,
+      rank: 0,
+    };
     persist(database, modelConfigsMapping(database), JSON.stringify(onMistral));
   }
 
-  let embed: ModelRow = { id: "m-embed", label: "Nomic Embed", apiName: "nomic-embed-text", provider: "ollama", kind: "embedding", dimensions: 768, baseUrl: "http://127.0.0.1:11434", enabled: true, contextTokens: 0 };
-  let retired: ModelRow = { id: "m-retired", label: "Mistral Retired", apiName: "mistral-tiny", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
-  let fake: ModelRow = { id: "m-fake", label: "Double", apiName: "double-1", provider: "double", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:8932", enabled: true, contextTokens: 0 };
+  let embed: ModelRow = {
+    id: "m-embed",
+    label: "Nomic Embed",
+    apiName: "nomic-embed-text",
+    provider: "ollama",
+    kind: "embedding",
+    dimensions: 768,
+    baseUrl: "http://127.0.0.1:11434",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let retired: ModelRow = {
+    id: "m-retired",
+    label: "Mistral Retired",
+    apiName: "mistral-tiny",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: false,
+    contextTokens: 0,
+  };
+  let fake: ModelRow = {
+    id: "m-fake",
+    label: "Double",
+    apiName: "double-1",
+    provider: "double",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "http://127.0.0.1:8932",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(embed));
   persist(database, modelsMapping(), JSON.stringify(retired));
   persist(database, modelsMapping(), JSON.stringify(fake));
-  let onEmbed: ModelConfigRow = { id: "cfg-embed", modelId: "m-embed", temperature: 0.0, maxTokens: 512, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
-  let onRetired: ModelConfigRow = { id: "cfg-retired", modelId: "m-retired", temperature: 0.3, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
-  let onFake: ModelConfigRow = { id: "cfg-fake", modelId: "m-fake", temperature: 0.0, maxTokens: 1024, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let onEmbed: ModelConfigRow = {
+    id: "cfg-embed",
+    modelId: "m-embed",
+    temperature: 0.0,
+    maxTokens: 512,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
+  let onRetired: ModelConfigRow = {
+    id: "cfg-retired",
+    modelId: "m-retired",
+    temperature: 0.3,
+    maxTokens: 2048,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
+  let onFake: ModelConfigRow = {
+    id: "cfg-fake",
+    modelId: "m-fake",
+    temperature: 0.0,
+    maxTokens: 1024,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(onEmbed));
   persist(database, modelConfigsMapping(database), JSON.stringify(onRetired));
   persist(database, modelConfigsMapping(database), JSON.stringify(onFake));
@@ -579,9 +883,30 @@ test("the derived seed leaves a curated menu alone", () => {
 
 test("a derived row lands after a curated menu rather than inside it", () => {
   expect(liveShaped(true));
-  let opus: ModelRow = { id: "m-opus", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let opus: ModelRow = {
+    id: "m-opus",
+    label: "Opus 5",
+    apiName: "claude-opus-5",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(opus));
-  let onOpus: ModelConfigRow = { id: "cfg-opus", modelId: "m-opus", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let onOpus: ModelConfigRow = {
+    id: "cfg-opus",
+    modelId: "m-opus",
+    temperature: 0.2,
+    maxTokens: 8192,
+    topP: 0.95,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(onOpus));
   expect(runSeed());
 
@@ -599,12 +924,54 @@ test("a derived row lands after a curated menu rather than inside it", () => {
 function freshInstall(): bool {
   wipe();
   migrate(database, schemaPlan(database));
-  let opus: ModelRow = { id: "m1", label: "Opus 5", apiName: "claude-opus-5", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
-  let haiku: ModelRow = { id: "m2", label: "Haiku 4.5", apiName: "claude-haiku-4-5-20251001", provider: "anthropic", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let opus: ModelRow = {
+    id: "m1",
+    label: "Opus 5",
+    apiName: "claude-opus-5",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
+  let haiku: ModelRow = {
+    id: "m2",
+    label: "Haiku 4.5",
+    apiName: "claude-haiku-4-5-20251001",
+    provider: "anthropic",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(opus));
   persist(database, modelsMapping(), JSON.stringify(haiku));
-  let careful: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.2, maxTokens: 8192, topP: 0.95, extra: "{}", thinking: "", label: "Careful", selectable: true, rank: 1 };
-  let quick: ModelConfigRow = { id: "c2", modelId: "m2", temperature: 0.7, maxTokens: 2048, topP: 1.0, extra: "{}", thinking: "", label: "Quick", selectable: true, rank: 2 };
+  let careful: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.2,
+    maxTokens: 8192,
+    topP: 0.95,
+    extra: "{}",
+    thinking: "",
+    label: "Careful",
+    selectable: true,
+    rank: 1,
+  };
+  let quick: ModelConfigRow = {
+    id: "c2",
+    modelId: "m2",
+    temperature: 0.7,
+    maxTokens: 2048,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "Quick",
+    selectable: true,
+    rank: 2,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(careful));
   persist(database, modelConfigsMapping(database), JSON.stringify(quick));
   return runMenu();
@@ -640,9 +1007,30 @@ test("a menu row the operator retired is not resurrected at the next boot", () =
 test("a model added after the install is on the menu at the next boot", () => {
   expect(communityShaped(false));
   expect(enabledChoices(database).length == 1);
-  let mistral: ModelRow = { id: "m-small", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let mistral: ModelRow = {
+    id: "m-small",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(mistral));
-  let onMistral: ModelConfigRow = { id: "cfg-small", modelId: "m-small", temperature: 0.3, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let onMistral: ModelConfigRow = {
+    id: "cfg-small",
+    modelId: "m-small",
+    temperature: 0.3,
+    maxTokens: 8192,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(onMistral));
   expect(runMenu());
 
@@ -663,10 +1051,42 @@ test("a model added after the install is on the menu at the next boot", () => {
 function twoBudgetsOneModel(): bool {
   wipe();
   migrate(database, schemaPlan(database));
-  let solo: ModelRow = { id: "m-solo", label: "Local Llama", apiName: "llama-local", provider: "ollama", kind: "chat", dimensions: 0, baseUrl: "http://127.0.0.1:11434", enabled: true, contextTokens: 0 };
+  let solo: ModelRow = {
+    id: "m-solo",
+    label: "Local Llama",
+    apiName: "llama-local",
+    provider: "ollama",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "http://127.0.0.1:11434",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(solo));
-  let small: ModelConfigRow = { id: "cfg-a", modelId: "m-solo", temperature: 0.3, maxTokens: 4096, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
-  let big: ModelConfigRow = { id: "cfg-b", modelId: "m-solo", temperature: 0.3, maxTokens: 8192, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let small: ModelConfigRow = {
+    id: "cfg-a",
+    modelId: "m-solo",
+    temperature: 0.3,
+    maxTokens: 4096,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
+  let big: ModelConfigRow = {
+    id: "cfg-b",
+    modelId: "m-solo",
+    temperature: 0.3,
+    maxTokens: 8192,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(small));
   persist(database, modelConfigsMapping(database), JSON.stringify(big));
   return runSeed() && runMenu();

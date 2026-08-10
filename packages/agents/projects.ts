@@ -51,11 +51,22 @@ export function projectsPlan(db: Db): Migration[] {
 
 export function projectsOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
-  return listOrdered(db, projectsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
+  return listOrdered(db, projectsMapping(), {
+    where: "owner = " + db.placeholder,
+    args: [owner],
+    order: keys,
+  });
 }
 
 export function emptyProject(): ProjectRow {
-  let none: ProjectRow = { id: "", owner: "", name: "", instructions: "", filesThreadId: "", createdAt: "" };
+  let none: ProjectRow = {
+    id: "",
+    owner: "",
+    name: "",
+    instructions: "",
+    filesThreadId: "",
+    createdAt: "",
+  };
   return none;
 }
 

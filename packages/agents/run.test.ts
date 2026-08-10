@@ -35,13 +35,50 @@ function seeded(): void {
   execute(database, "DROP TABLE IF EXISTS plugin_items");
   migrate(database, schemaPlan(database));
 
-  let m: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
+  let m: ModelRow = {
+    id: "m1",
+    label: "Mistral Small",
+    apiName: "mistral-small-latest",
+    provider: "mistral",
+    kind: "chat",
+    dimensions: 0,
+    baseUrl: "",
+    enabled: true,
+    contextTokens: 0,
+  };
   persist(database, modelsMapping(), JSON.stringify(m));
-  let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.0, maxTokens: 32, topP: 1.0, extra: "{}", thinking: "", label: "", selectable: false, rank: 0 };
+  let c: ModelConfigRow = {
+    id: "c1",
+    modelId: "m1",
+    temperature: 0.0,
+    maxTokens: 32,
+    topP: 1.0,
+    extra: "{}",
+    thinking: "",
+    label: "",
+    selectable: false,
+    rank: 0,
+  };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));
-  let p: PromptRow = { id: "p1", promptName: "terse", version: 3, body: "Be brief.", createdAt: "t" };
+  let p: PromptRow = {
+    id: "p1",
+    promptName: "terse",
+    version: 3,
+    body: "Be brief.",
+    createdAt: "t",
+  };
   persist(database, promptsMapping(), JSON.stringify(p));
-  let a: AgentRow = { id: "a1", agentName: "calculator", description: "d", modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };
+  let a: AgentRow = {
+    id: "a1",
+    agentName: "calculator",
+    description: "d",
+    modelConfigId: "c1",
+    promptId: "p1",
+    scriptImageId: "",
+    isDefault: false,
+    enabled: true,
+    updatedAt: "t",
+  };
   persist(database, agentsMapping(), JSON.stringify(a));
 }
 
@@ -81,7 +118,12 @@ test("a config pointing at nothing is reported", () => {
 
 test("a disabled model stops the call, even with a credential", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   execute(database, "UPDATE models SET enabled = 0 WHERE id = 'm1'");
   let r = runAgent(database, "a1", "hi", testKey());
   expect(!r.ok);
@@ -96,7 +138,12 @@ test("the run reports which prompt version and model answered", () => {
 
 test("no refusal carries the master key or a credential", () => {
   seeded();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-should-never-appear", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-should-never-appear",
+    masterKey: testKey(),
+    now: "t",
+  });
   execute(database, "UPDATE models SET enabled = 0 WHERE id = 'm1'");
   let r = runAgent(database, "a1", "hi", testKey());
   expect(r.error.indexOf("sk-should-never-appear") < 0);

@@ -36,13 +36,23 @@ test("a missing or wrong-length master key is refused, saying which", () => {
 
 test("a stored credential comes back", () => {
   fresh();
-  expect(storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" }) == "");
+  expect(storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  }) == "");
   expect(credentialFor(database, "mistral", testKey()) == "sk-fake-mistral-0001");
 });
 
 test("the plaintext is nowhere in the table", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   let row: CredentialRow = JSON.parse<CredentialRow>(findById(database, credentialsMapping(), "cred-mistral"));
   expect(row.envelope.indexOf("sk-fake") < 0);
   expect(row.envelope != "sk-fake-mistral-0001");
@@ -51,42 +61,87 @@ test("the plaintext is nowhere in the table", () => {
 
 test("two providers keep separate credentials", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
-  storeCredential(database, { provider: "anthropic", apiKey: "sk-fake-anthropic-0002", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
+  storeCredential(database, {
+    provider: "anthropic",
+    apiKey: "sk-fake-anthropic-0002",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(credentialFor(database, "mistral", testKey()) == "sk-fake-mistral-0001");
   expect(credentialFor(database, "anthropic", testKey()) == "sk-fake-anthropic-0002");
 });
 
 test("storing again replaces rather than duplicating", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-first", masterKey: testKey(), now: "t" });
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-second", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-first",
+    masterKey: testKey(),
+    now: "t",
+  });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-second",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(countWhere(database, credentialsMapping(), "", []) == 1);
   expect(credentialFor(database, "mistral", testKey()) == "sk-fake-second");
 });
 
 test("an empty key is not a credential", () => {
   fresh();
-  expect(storeCredential(database, { provider: "mistral", apiKey: "", masterKey: testKey(), now: "t" }).indexOf("empty") >= 0);
+  expect(storeCredential(database, {
+    provider: "mistral",
+    apiKey: "",
+    masterKey: testKey(),
+    now: "t",
+  }).indexOf("empty") >= 0);
   expect(countWhere(database, credentialsMapping(), "", []) == 0);
 });
 
 test("storing refuses outright without a usable master key", () => {
   fresh();
-  expect(storeCredential(database, { provider: "mistral", apiKey: "sk-fake", masterKey: "", now: "t" }).indexOf("not set") >= 0);
-  expect(storeCredential(database, { provider: "mistral", apiKey: "sk-fake", masterKey: "nope", now: "t" }).indexOf("32") >= 0);
+  expect(storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake",
+    masterKey: "",
+    now: "t",
+  }).indexOf("not set") >= 0);
+  expect(storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake",
+    masterKey: "nope",
+    now: "t",
+  }).indexOf("32") >= 0);
   expect(countWhere(database, credentialsMapping(), "", []) == 0);
 });
 
 test("the wrong master key opens nothing", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(credentialFor(database, "mistral", "fedcba9876543210fedcba9876543210") == "");
 });
 
 test("a row altered in the database refuses to open", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   let row: CredentialRow = JSON.parse<CredentialRow>(findById(database, credentialsMapping(), "cred-mistral"));
   let head = row.envelope.substring(0, 20);
   let ch = row.envelope.substring(20, 21);
@@ -103,7 +158,12 @@ test("a provider with no credential reads as empty, not as an error", () => {
 
 test("every failure to open looks the same", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(credentialFor(database, "openai", testKey()) == "");
   expect(credentialFor(database, "mistral", "fedcba9876543210fedcba9876543210") == "");
   expect(credentialFor(database, "mistral", "bad") == "");
@@ -111,8 +171,18 @@ test("every failure to open looks the same", () => {
 
 test("listing names providers and never envelopes", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
-  storeCredential(database, { provider: "anthropic", apiKey: "sk-fake-anthropic-0002", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
+  storeCredential(database, {
+    provider: "anthropic",
+    apiKey: "sk-fake-anthropic-0002",
+    masterKey: testKey(),
+    now: "t",
+  });
   let names = providersWithCredentials(database);
   expect(names.length == 2);
   expect(names.indexOf("mistral") >= 0);
@@ -121,7 +191,12 @@ test("listing names providers and never envelopes", () => {
 
 test("a credential can be asked after without being opened", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(hasCredential(database, "mistral"));
   expect(!hasCredential(database, "openai"));
   expect(hasCredential(database, "mistral"));
@@ -129,7 +204,12 @@ test("a credential can be asked after without being opened", () => {
 
 test("forgetting a credential says whether there was one", () => {
   fresh();
-  storeCredential(database, { provider: "mistral", apiKey: "sk-fake-mistral-0001", masterKey: testKey(), now: "t" });
+  storeCredential(database, {
+    provider: "mistral",
+    apiKey: "sk-fake-mistral-0001",
+    masterKey: testKey(),
+    now: "t",
+  });
   expect(forgetCredential(database, "mistral"));
   expect(credentialFor(database, "mistral", testKey()) == "");
   expect(countWhere(database, credentialsMapping(), "", []) == 0);

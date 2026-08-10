@@ -65,7 +65,11 @@ export function tracerFor(db: Db, master: string): Tracer {
     return noTracer();
   }
 
-  let creds: BackendCredentials = { endpoint: row.endpoint, identity: row.publicKey, secret: secret };
+  let creds: BackendCredentials = {
+    endpoint: row.endpoint,
+    identity: row.publicKey,
+    secret: secret,
+  };
   let backend = backendNamed(name, creds);
   if (backend.name == "none") {
     return noTracer();

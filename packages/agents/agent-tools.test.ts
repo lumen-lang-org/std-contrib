@@ -33,7 +33,13 @@ function seed(): void {
   let c: ModelConfigRow = { id: "c1", modelId: "m1", temperature: 0.5, maxTokens: 800,
     topP: 1.0, extra: "", thinking: "", label: "DeepSeek Flash", selectable: true, rank: 1 };
   persist(database, modelConfigsMapping(database), JSON.stringify(c));
-  let p: PromptRow = { id: "p1", promptName: "helper", version: 1, body: "You help.", createdAt: "1" };
+  let p: PromptRow = {
+    id: "p1",
+    promptName: "helper",
+    version: 1,
+    body: "You help.",
+    createdAt: "1",
+  };
   persist(database, promptsMapping(), JSON.stringify(p));
   let a: AgentRow = { id: "a1", agentName: "helper", description: "helps",
     modelConfigId: "c1", promptId: "p1", enabled: true, isDefault: true,

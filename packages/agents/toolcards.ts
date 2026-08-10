@@ -67,5 +67,7 @@ export function cardClaims(db: Db, toolName: string): bool {
 }
 
 export function allToolCards(db: Db): ToolCardRow[] {
-  return JSON.parse<ToolCardRow[]>(listOrdered(db, toolCardsMapping(), { order: [{ column: "tool_name" }] }));
+  return JSON.parse<ToolCardRow[]>(listOrdered(db, toolCardsMapping(), {
+    order: [{ column: "tool_name" }],
+  }));
 }

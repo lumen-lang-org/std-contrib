@@ -44,13 +44,19 @@ function seeded(): DbRepository {
 // failure of the ordering.
 function firstId(document: string): string {
   let at = document.indexOf("\"id\"");
-  if (at < 0) { return ""; }
+  if (at < 0) {
+    return "";
+  }
   let rest = document.substring(at + 4, document.length);
   let open = rest.indexOf("\"");
-  if (open < 0) { return ""; }
+  if (open < 0) {
+    return "";
+  }
   let value = rest.substring(open + 1, rest.length);
   let end = value.indexOf("\"");
-  if (end < 0) { return ""; }
+  if (end < 0) {
+    return "";
+  }
   return value.substring(0, end);
 }
 
@@ -101,7 +107,11 @@ test("a second key settles a tie", () => {
 test("ordering composes with a filter and its parameters", () => {
   let repo = seeded();
   let keys: DbOrder[] = [{ column: "max_steps", direction: "desc" }];
-  let json = listOrdered(database, repo, { where: "max_steps >= " + database.placeholder, args: ["5"], order: keys });
+  let json = listOrdered(database, repo, {
+    where: "max_steps >= " + database.placeholder,
+    args: ["5"],
+    order: keys,
+  });
   expect(firstId(json) == "a4");
   expect(json.indexOf("writer") < 0);
 });

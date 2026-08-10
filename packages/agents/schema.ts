@@ -1,7 +1,8 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRelation, DbRepository, ManyThrough, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { promptRepository } from "./entities/prompt.entity.ts";
+import { agentRepository } from "./routes/agents/entities/agent.entity.ts";
+import { promptRepository } from "./routes/prompts/entities/prompt.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -195,9 +196,21 @@ export function modelConfigsMapping(db: Db): DbRepository {
     field("rank", "menu_rank", "int"),
   ];
   let rs: DbRelation[] = [
-    hasOne({ field: "model", table: "models", localColumn: "model_id", foreignColumn: "id", columns: "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\"" }),
+    hasOne({
+      field: "model",
+      table: "models",
+      localColumn: "model_id",
+      foreignColumn: "id",
+      columns: "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\"",
+    }),
   ];
-  return repository({ table: "model_configs", idField: "id", idColumn: "id", fields: fs, relations: rs });
+  return repository({
+    table: "model_configs",
+    idField: "id",
+    idColumn: "id",
+    fields: fs,
+    relations: rs,
+  });
 }
 
 export function modelChoicesMapping(): DbRepository {
@@ -232,7 +245,11 @@ export function modelRoutersMapping(): DbRepository {
 export function enabledChoices(db: Db): ModelChoiceRow[] {
   let out: ModelChoiceRow[] = [];
   let keys: DbOrder[] = [{ column: "menu_rank" }, { column: "label" }];
-  let listed = listOrdered(db, modelChoicesMapping(), { where: "enabled = " + placeholderAt(db, 1), args: ["1"], order: keys });
+  let listed = listOrdered(db, modelChoicesMapping(), {
+    where: "enabled = " + placeholderAt(db, 1),
+    args: ["1"],
+    order: keys,
+  });
   if (listed == "" || listed == "[]") {
     return out;
   }
@@ -258,7 +275,12 @@ export function configForChoice(db: Db, choiceId: string): string {
 }
 
 export function modelConfigRows(db: Db): DbRepository {
-  return repository({ table: "model_configs", idField: "id", idColumn: "id", fields: modelConfigsMapping(db).fields });
+  return repository({
+    table: "model_configs",
+    idField: "id",
+    idColumn: "id",
+    fields: modelConfigsMapping(db).fields,
+  });
 }
 
 export type ConfigAndModel = {
@@ -618,18 +640,7 @@ export function officeRendersMapping(): DbRepository {
 }
 
 export function agentsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("agentName", "agent_name", "text"),
-    field("description", "description", "text"),
-    field("modelConfigId", "model_config_id", "text"),
-    field("promptId", "prompt_id", "text"),
-    field("enabled", "enabled", "bool"),
-    field("scriptImageId", "script_image_id", "text"),
-    field("isDefault", "is_default", "bool"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fs });
+  return agentRepository();
 }
 
 // The three link tables an agent owns, named so they can be written as well as
@@ -674,14 +685,7 @@ export function agentScopesLink(): ManyThrough {
 }
 
 export function agentsFull(db: Db): DbRepository {
-  let rs: DbRelation[] = [
-    hasOne({ field: "prompt", table: "prompts", localColumn: "prompt_id", foreignColumn: "id", columns: "id, prompt_name AS \"promptName\", version, body" }),
-    hasOne({ field: "config", table: "model_configs", localColumn: "model_config_id", foreignColumn: "id", columns: "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking" }),
-    hasManyThrough(agentServersLink(db)),
-    hasManyThrough(agentSubAgentsLink(db)),
-    hasManyThrough(agentSkillsLink()),
-  ];
-  return repository({ table: "agents", idField: "id", idColumn: "id", fields: agentsMapping().fields, relations: rs });
+  return agentRepository();
 }
 
 function leaveExisting(db: Db, idColumn: string): string {

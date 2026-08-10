@@ -135,7 +135,12 @@ export function ensureBuilt(source: string): ScriptBuild {
   let dir = scriptDir(hash);
   let wasm = scriptWasmPath(hash);
   if (source.trim() == "") {
-    let none: ScriptBuild = { ok: false, path: "", error: "there is no script to compile", fresh: false };
+    let none: ScriptBuild = {
+      ok: false,
+      path: "",
+      error: "there is no script to compile",
+      fresh: false,
+    };
     return none;
   }
   if (source.length > MAX_SOURCE) {

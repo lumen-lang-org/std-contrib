@@ -47,7 +47,14 @@ function sampleRun(withSteps: int): AgentRun {
   let steps: AgentStep[] = [];
   let i: int = 0;
   while (i < withSteps) {
-    let s: AgentStep = { index: i, tool: "warehouse_stock", server: "parts", args: "{\"part\":\"A-114\"}", result: "37 units", ok: true };
+    let s: AgentStep = {
+      index: i,
+      tool: "warehouse_stock",
+      server: "parts",
+      args: "{\"part\":\"A-114\"}",
+      result: "37 units",
+      ok: true,
+    };
     steps.push(s);
     i = i + 1;
   }
@@ -68,7 +75,15 @@ function sampleRun(withSteps: int): AgentRun {
 
 test("a run is written with its steps and read back whole", () => {
   seeded();
-  let id = recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "how many A-114?", run: sampleRun(2), modelChoiceId: "", routeNote: "" });
+  let id = recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "how many A-114?",
+    run: sampleRun(2),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   expect(id != "");
 
   let document = findById(database, runsFull(database), id);
@@ -106,7 +121,15 @@ test("a run records which choice was in force and what the routing decided", () 
 
 test("a run with no steps is a row and nothing else", () => {
   seeded();
-  let id = recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "hello", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
+  let id = recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "hello",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   expect(id != "");
   let document = findById(database, runsFull(database), id);
   expect(document.indexOf("\"steps\":[]") >= 0 || document.indexOf("\"steps\":null") >= 0);
@@ -114,14 +137,38 @@ test("a run with no steps is a row and nothing else", () => {
 
 test("two runs get two ids", () => {
   seeded();
-  let first = recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "one", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
-  let second = recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "two", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
+  let first = recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "one",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
+  let second = recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "two",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   expect(first != second);
 });
 
 test("the list is the transcript side only — no steps in it", () => {
   seeded();
-  recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "with tools", run: sampleRun(3), modelChoiceId: "", routeNote: "" });
+  recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "with tools",
+    run: sampleRun(3),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   let listed = runsOf(database, "a1", noTags, 10);
   expect(listed.indexOf("\"question\":\"with tools\"") >= 0);
   expect(listed.indexOf("stepIndex") < 0);
@@ -130,8 +177,24 @@ test("the list is the transcript side only — no steps in it", () => {
 
 test("an agent's list holds only that agent's runs", () => {
   seeded();
-  recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "mine", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
-  recordRun(database, { agentId: "a2", threadId: "", owner: "", question: "theirs", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
+  recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "mine",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
+  recordRun(database, {
+    agentId: "a2",
+    threadId: "",
+    owner: "",
+    question: "theirs",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   let listed = runsOf(database, "a1", noTags, 10);
   expect(listed.indexOf("\"question\":\"mine\"") >= 0);
   expect(listed.indexOf("\"question\":\"theirs\"") < 0);
@@ -139,8 +202,24 @@ test("an agent's list holds only that agent's runs", () => {
 
 test("a tag's run list holds only that tag's runs, on the agent they share", () => {
   seeded();
-  recordRun(database, { agentId: "a1", threadId: "t1", owner: "alice", question: "mine", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
-  recordRun(database, { agentId: "a1", threadId: "t2", owner: "bob", question: "theirs", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
+  recordRun(database, {
+    agentId: "a1",
+    threadId: "t1",
+    owner: "alice",
+    question: "mine",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
+  recordRun(database, {
+    agentId: "a1",
+    threadId: "t2",
+    owner: "bob",
+    question: "theirs",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
 
   let hers = runsOf(database, "a1", ["alice"], 10);
   expect(hers.indexOf("\"question\":\"mine\"") >= 0);
@@ -150,12 +229,28 @@ test("a tag's run list holds only that tag's runs, on the agent they share", () 
 
 test("a run id is not authorisation to read the run", () => {
   seeded();
-  let hers = recordRun(database, { agentId: "a1", threadId: "t1", owner: "alice", question: "mine", run: sampleRun(2), modelChoiceId: "", routeNote: "" });
+  let hers = recordRun(database, {
+    agentId: "a1",
+    threadId: "t1",
+    owner: "alice",
+    question: "mine",
+    run: sampleRun(2),
+    modelChoiceId: "",
+    routeNote: "",
+  });
 
   expect(ownedRun(database, hers, ["alice"]) != "");
   expect(ownedRun(database, hers, ["bob"]) == "");
   expect(ownedRun(database, hers, noTags) != "");
-  let legacy = recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "older", run: sampleRun(0), modelChoiceId: "", routeNote: "" });
+  let legacy = recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "older",
+    run: sampleRun(0),
+    modelChoiceId: "",
+    routeNote: "",
+  });
   expect(ownedRun(database, legacy, ["alice"]) == "");
 });
 
@@ -175,7 +270,15 @@ test("a failed run is logged like any other", () => {
     context: context, steps: steps, stopReason: "refused", rounds: 0, notes: notes,
     calledTools: noNames, calledAgents: noNames, retrieved: noPassages, spans: spans,
   };
-  let id = recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "anything", run: bad, modelChoiceId: "", routeNote: "" });
+  let id = recordRun(database, {
+    agentId: "a1",
+    threadId: "",
+    owner: "",
+    question: "anything",
+    run: bad,
+    modelChoiceId: "",
+    routeNote: "",
+  });
   expect(id != "");
   let document = findById(database, runsFull(database), id);
   expect(document.indexOf("no usable credential") >= 0);
