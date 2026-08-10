@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, countWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, asc, countWhere, deleteWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, param, queryParam } from "../../../rest/server.ts";
 import { utf8Length } from "../../artifacts.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { scriptEnvNameProblem } from "../../run-script.ts";

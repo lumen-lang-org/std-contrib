@@ -2,11 +2,30 @@ import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, accepted, badRequest, created, noContent, notFound, ok, param } from "../../../rest/server.ts";
-import { askedChoice, callerTags, choiceProblem, guestTag, stamp } from "../../api-core.ts";
+import { callerTags, choiceProblem, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
-import { jsonFlag, jsonText } from "../../scan.ts";
 import { agentsMapping } from "../../schema.ts";
 import { MAX_PER_OWNER, TaskRow, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, withNextAt } from "../../tasks.ts";
+
+export type TaskCreateAsk = {
+  agentId?: string,
+  modelChoiceId?: string,
+  title?: string,
+  instruction?: string,
+  schedule?: string,
+  tz?: string,
+  at?: string,
+};
+
+export type TaskChangeAsk = {
+  agentId?: string,
+  modelChoiceId?: string,
+  title?: string,
+  instruction?: string,
+  schedule?: string,
+  tz?: string,
+  enabled?: bool,
+};
 
 @controller("/tasks")
 export class TaskApi {
@@ -32,9 +51,10 @@ export class TaskApi {
       return badRequest("a body is required: {\"agentId\":\"a1\",\"instruction\":\"...\",\"schedule\":\"every weekday at 08:00\"}");
     }
 
-    let agentId = jsonText(req.body, "agentId");
+    let ask: TaskCreateAsk = JSON.parse<TaskCreateAsk>(req.body);
+    let agentId = ask.agentId ?? "";
     if (!existsById(this.db, agentsMapping(), agentId)) { return badRequest("no agent " + agentId); }
-    let chosen = askedChoice(req.body);
+    let chosen = ask.modelChoiceId ?? "";
     let refusedChoice = choiceProblem(this.db, chosen);
     if (refusedChoice != "") { return badRequest(refusedChoice); }
 
@@ -42,8 +62,8 @@ export class TaskApi {
       return badRequest("that is " + `${MAX_PER_OWNER}` + " tasks already — pause one before adding another");
     }
 
-    let said = jsonText(req.body, "schedule");
-    let zone = jsonText(req.body, "tz");
+    let said = ask.schedule ?? "";
+    let zone = ask.tz ?? "";
     let kind = said == "" || isOnce(said) ? "once" : "every";
     let expr = "";
     let at = "";
@@ -56,7 +76,7 @@ export class TaskApi {
       if (!once.ok) { return badRequest(once.error); }
       at = once.at;
     } else {
-      at = jsonText(req.body, "at");
+      at = ask.at ?? "";
       if (stampMs(at) <= (Date.now() as number)) {
         return badRequest("a one-off task needs an instant in the future: {\"at\":\"<epoch ms>\"}");
       }
@@ -68,8 +88,8 @@ export class TaskApi {
       owner: owner,
       agentId: agentId,
       modelChoiceId: chosen,
-      title: jsonText(req.body, "title"),
-      instruction: jsonText(req.body, "instruction"),
+      title: ask.title ?? "",
+      instruction: ask.instruction ?? "",
       kind: kind,
       cronExpr: expr,
       tz: zone,
@@ -104,7 +124,8 @@ export class TaskApi {
     if (mine.id == "") { return notFound("task " + param(req, "id")); }
     if (req.body == "") { return badRequest("a body is required"); }
 
-    let said = jsonText(req.body, "schedule");
+    let ask: TaskChangeAsk = JSON.parse<TaskChangeAsk>(req.body);
+    let said = ask.schedule ?? "";
     let expr = mine.cronExpr;
     let kind = mine.kind;
     let when = mine.nextAt;
@@ -120,10 +141,10 @@ export class TaskApi {
       kind = "every";
       expr = compiled.expr;
     }
-    let title = jsonText(req.body, "title");
-    let instruction = jsonText(req.body, "instruction");
-    let tz = jsonText(req.body, "tz");
-    let on = jsonFlag(req.body, "enabled", mine.enabled);
+    let title = ask.title ?? "";
+    let instruction = ask.instruction ?? "";
+    let tz = ask.tz ?? "";
+    let on = ask.enabled ?? mine.enabled;
 
     let edited: TaskRow = {
       id: mine.id, owner: mine.owner, agentId: mine.agentId,

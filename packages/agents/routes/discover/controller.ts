@@ -1,11 +1,13 @@
 import { Db } from "../../../plume/driver.ts";
 import { asc, deleteById, listOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, notFound, ok, okJson, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { DiscoverFeed, allFeeds, discoverFeedsMapping, discoverStoriesMapping, discoverText, discoverTextMapping, ensureGeoFeed, feedById, geoCode, setDiscoverText, storiesFor, storyById } from "../../discover.ts";
 import { jsonText } from "../../scan.ts";
 import { DeletedView, DiscoverFeedView, DiscoverStoryView, PlaceView, PromptView, StoryDetailView } from "./types.ts";
+
+const PROMPT_CHARS_MAX: int = 20000;
 
 @controller("/discover")
 export class DiscoverApi {
@@ -24,7 +26,9 @@ export class DiscoverApi {
       let cleared: PromptView = { prompt: "", usingDefault: true };
       return okJson(cleared);
     }
-    if (asked.length > 20000) { return badRequest("a prompt over 20000 characters is refused"); }
+    if (asked.length > PROMPT_CHARS_MAX) {
+      return badRequest("a prompt over " + `${PROMPT_CHARS_MAX}` + " characters is refused");
+    }
     let problem = setDiscoverText(this.db, "digest-prompt", asked, stamp());
     if (problem != "") { return badRequest(problem); }
     let v: PromptView = { prompt: asked, usingDefault: false };

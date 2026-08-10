@@ -1,12 +1,19 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, existsById, findById, listOrdered } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
-import { jsonText } from "../../scan.ts";
 import { McpServerRow, SkillRow, mcpServersMapping, pluginsMapping, skillsMapping } from "../../schema.ts";
 import { ManifestConnectorView, ManifestSkillView, ManifestView, PluginItemView } from "./types.ts";
+
+type PluginSource = { sourceUrl?: string };
+
+function sourceUrlOf(body: string): string {
+  if (body.trim() == "") { return ""; }
+  let ask: PluginSource = JSON.parse<PluginSource>(body);
+  return ask.sourceUrl ?? "";
+}
 
 function manifestView(m: Manifest, clash: string): ManifestView {
   let skills: ManifestSkillView[] = [];
@@ -84,7 +91,7 @@ export class PluginApi {
 
   @post("/inspect")
   inspect(req: Request): Reply {
-    let url = jsonText(req.body, "sourceUrl");
+    let url = sourceUrlOf(req.body);
     if (url.trim() == "") { return badRequest("a plugin is installed from a manifest URL"); }
     let got = fetchManifest(url);
     if (got.problem != "") { return badRequest(got.problem); }
@@ -96,7 +103,7 @@ export class PluginApi {
 
   @post("/install")
   add(req: Request): Reply {
-    let url = jsonText(req.body, "sourceUrl");
+    let url = sourceUrlOf(req.body);
     if (url.trim() == "") { return badRequest("a plugin is installed from a manifest URL"); }
     let got = fetchManifest(url);
     if (got.problem != "") { return badRequest(got.problem); }

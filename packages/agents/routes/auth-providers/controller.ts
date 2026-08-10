@@ -1,13 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { credentialFor, forgetCredential, hasCredential, masterKey, storeCredential } from "../../credentials.ts";
+import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
 import { createProblem, jsonId } from "../../payload.ts";
-import { jsonText } from "../../scan.ts";
 import { AuthProviderRow, authProvidersMapping } from "../../schema.ts";
-import { AuthProviderResolvedView, AuthProviderSecretStored, AuthProviderView } from "./types.ts";
+import { AuthProviderResolvedView, AuthProviderSecretAsk, AuthProviderSecretStored, AuthProviderView } from "./types.ts";
 
 export function authProviderProblem(row: AuthProviderRow): string {
   if (row.id.trim() == "") { return "a provider needs an id — it is what the callback URL carries"; }
@@ -106,7 +105,9 @@ export class AuthProviderApi {
     if (!existsById(this.db, authProvidersMapping(), param(req, "id"))) {
       return notFound("auth provider " + param(req, "id"));
     }
-    let secret = jsonText(req.body, "clientSecret");
+    if (req.body == "") { return badRequest("a client secret is required"); }
+    let ask: AuthProviderSecretAsk = JSON.parse<AuthProviderSecretAsk>(req.body);
+    let secret = ask.clientSecret ?? "";
     if (secret == "") { return badRequest("a client secret is required"); }
     let stored = storeCredential(this.db, { provider: "oauth:" + param(req, "id"),
       apiKey: secret, masterKey: this.master, now: stamp() });

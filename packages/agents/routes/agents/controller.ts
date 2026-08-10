@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem, queryParam, reply } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, param, queryParam, reply } from "../../../rest/server.ts";
 import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../tracing/tracing.ts";
 import { GUEST_DAILY_RUNS, callerTags, guestQuotaJson, guestTag } from "../../api-core.ts";
 import { AgentRetrievalRow, agentRetrievalMapping, agentScopes, embeddingModel, grantScope, revokeScope } from "../../knowledge.ts";
@@ -11,9 +11,9 @@ import { runAgentTraced } from "../../run.ts";
 import { recordRun, runsOf } from "../../runlog.ts";
 import { AgentRow, ModelRow, agentsFull, agentsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping, promptsMapping, skillsMapping } from "../../schema.ts";
 import { tracerFor } from "../../trace.ts";
-import { nextUtcMidnightIso, runsSince, utcDayStartText } from "../../usage.ts";
+import { nextUtcMidnightIso, runsSince, secondsToUtcMidnight, utcDayStartText } from "../../usage.ts";
 import { AgentWebRagRow, agentWebRagMapping, webRagFor } from "../../webrag.ts";
-import { ChildLink, RetrievalSetup, ScopeGrant, ServerLink, SkillLink } from "./types.ts";
+import { ChildLink, RetrievalSetup, RunBody, ScopeGrant, ServerLink, SkillLink } from "./types.ts";
 
 function agentNameProblem(name: string): string {
   if (name.trim() == "") { return "an agent needs a name"; }

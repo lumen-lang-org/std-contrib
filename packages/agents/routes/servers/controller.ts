@@ -1,10 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { accessTokenFor, connectionOf, forgetConnector, setToolOn, suppliedClientId, toolsOff, userTokenKey } from "../../connect.ts";
-import { DestinationMove, destinationProblem, forgetCredential, hasCredential, masterKey, storeCredential } from "../../credentials.ts";
+import { DestinationMove, destinationProblem, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
 import { forgetRoster, rememberRoster, rosterOf, rosterWithSwitches } from "../../mcp-roster.ts";
 import { toolListing } from "../../mcp.ts";
 import { owningTag } from "../../owner.ts";

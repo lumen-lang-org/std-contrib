@@ -1,14 +1,16 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param, problem, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param, queryParam } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { ArtifactRow, TURN_SEQ_NONE, TurnArtifact, artifactsByTurn, artifactsForTurn, artifactsMapping, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
 import { normalScope } from "../../knowledge.ts";
 import { OfficeRenderAsk, officeRender } from "../../office-render.ts";
-import { jsonList, jsonText } from "../../scan.ts";
+import { jsonList } from "../../scan.ts";
 import { ownedThread } from "../../threads.ts";
-import { ArtifactCreated, ArtifactPdfView, ArtifactPost, ArtifactRotated, ArtifactVersionView, ArtifactView, TemplateStarted, TurnArtifactView } from "./types.ts";
+import { ArtifactCreated, ArtifactPdfView, ArtifactPost, ArtifactRotated, ArtifactVersionView, ArtifactView, TemplatePost, TemplateStarted, TurnArtifactView } from "./types.ts";
+
+const TEMPLATE_BODY_HELP = "a body is required: {\"templateId\":\"tpl-...\"}";
 
 function artifactAtSlot(db: Db, threadId: string, slot: int): ArtifactRow {
   let absent: ArtifactRow = {
@@ -97,8 +99,10 @@ export class ArtifactApi {
     if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
       return notFound("thread " + param(req, "id"));
     }
-    let templateId = jsonText(req.body, "templateId");
-    if (templateId == "") { return badRequest("a body is required: {\"templateId\":\"tpl-...\"}"); }
+    if (req.body == "") { return badRequest(TEMPLATE_BODY_HELP); }
+    let asked: TemplatePost = JSON.parse<TemplatePost>(req.body);
+    let templateId = asked.templateId;
+    if (templateId == "") { return badRequest(TEMPLATE_BODY_HELP); }
     let held = findById(this.db, templatesMapping(), templateId);
     if (held == "") { return notFound("template " + templateId); }
     let tpl: TemplateRow = JSON.parse<TemplateRow>(held);

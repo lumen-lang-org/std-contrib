@@ -1,10 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
 import { asc, deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, notFound, ok, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, notFound, ok } from "../../../rest/server.ts";
 import { stamp, toolCardProblem } from "../../api-core.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping } from "../../plugincards.ts";
-import { install } from "../../plugins.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
 import { ToolCardRow, toolCardsMapping } from "../../toolcards.ts";
 import { CardInput, CaseInput } from "./types.ts";

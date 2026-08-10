@@ -4,6 +4,7 @@ import { Reply, Request, badRequest, header, noContent, ok } from "../../../rest
 import { callerTags, guestTag } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";
 import { secretsOf } from "../../secrets.ts";
+import { SecretCreateAsk } from "./types.ts";
 
 @controller("/secrets")
 export class SecretApi {
@@ -29,13 +30,14 @@ export class SecretApi {
     if (req.body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"value\":\"...\",\"destination\":\"https://api.example.com\",\"header\":\"Authorization\",\"category\":\"Payments\"}");
     }
+    let ask: SecretCreateAsk = JSON.parse<SecretCreateAsk>(req.body);
     let made = createSecret(this.db, {
       owner: owner,
-      name: jsonText(req.body, "name"),
-      value: jsonText(req.body, "value"),
-      destination: jsonText(req.body, "destination"),
-      header: jsonText(req.body, "header"),
-      category: jsonText(req.body, "category"),
+      name: ask.name ?? "",
+      value: ask.value ?? "",
+      destination: ask.destination ?? "",
+      header: ask.header ?? "",
+      category: ask.category ?? "",
       master: this.master,
       now: stamp(),
     });

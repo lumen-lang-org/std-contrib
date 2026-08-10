@@ -60,3 +60,5 @@ export type ArtifactRotated = {
   previewToken: string,
   replaced: int,
 };
+
+export type TemplatePost = { templateId: string };

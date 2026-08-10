@@ -1,22 +1,20 @@
-import { ApiKeyRow, apiKeysOf, apiKeysPlan, forgetApiKey, hasScope, mintApiKey, touchApiKey, verifyApiKey } from "./api-keys.ts";
-import { presentedKey, upstreamBase } from "./search-gateway.ts";
-import { urlEncode } from "./mcp-oauth.ts";
+import { apiKeysPlan } from "./api-keys.ts";
 import { controller } from "../rest/controller.ts";
-import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, accepted, noContent, notFound, badRequest, problem, param, queryParam, header } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, okJson, createdJson, noContent, notFound, badRequest, problem, param, queryParam } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, DbRepository, asc, desc, safeIdentifier, placeholderAt, connectDatabase, persist, findById, listOrdered, listWhere, pageOrdered, existsById, deleteById, execute, executeWith, countWhere, jsonMember } from "../plume/plume.ts";
-import { migrate, appliedHighWater } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, enabledChoices, promptsMapping, mcpServersMapping, agentsMapping, agentsFull, scriptImagesMapping, skillsMapping, skillFilesMapping, AuthProviderRow, authProvidersMapping, PluginRow, PluginItemRow, pluginsMapping, pluginItemsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel, readSetting, writeSetting } from "./schema.ts";
-import { DestinationMove, destinationOf, masterKey, masterKeyProblem, storeCredential, credentialFor, providersWithCredentials, hasCredential, forgetCredential, destinationProblem } from "./credentials.ts";
-import { AgentRun, runAgent, runAgentTraced } from "./run.ts";
-import { ToolSpec, chatEndpoint, embeddingEndpoint, endpointFor, complete, embedText, replyText, userTurn } from "./provider.ts";
-import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "./runlog.ts";
-import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
-import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
-import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw, jsonFlag } from "./scan.ts";
-import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, boolJson, choiceProblem, forwardProduct, toolCardProblem } from "./api-core.ts";
+import { DbOrder, asc, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
+import { migrate } from "../plume/migrate.ts";
+import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel } from "./schema.ts";
+import { masterKey, masterKeyProblem } from "./credentials.ts";
+import { AgentRun } from "./run.ts";
+import { userTurn } from "./provider.ts";
+import { runLogPlan, recordRun } from "./runlog.ts";
+import { tracePlan, tracerFor } from "./trace.ts";
+import { jsonId, createProblem } from "./payload.ts";
+import { jsonList, jsonText, jsonFind, jsonRaw } from "./scan.ts";
+import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceProblem } from "./api-core.ts";
 import { HealthApi } from "./routes/healthz/controller.ts";
 import { CardPluginApi } from "./routes/card-plugins/controller.ts";
 import { ToolCardApi } from "./routes/tool-cards/controller.ts";
@@ -58,44 +56,32 @@ import { LibraryApi } from "./routes/library/controller.ts";
 import { RunApi } from "./routes/runs/controller.ts";
 import { UsageApi } from "./routes/usage/controller.ts";
 import { BannerApi } from "./routes/banner/controller.ts";
-import { toolListing } from "./mcp.ts";
-import { taskTools, callTaskTool } from "./task-tools.ts";
-import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
-import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
-import { agentTools, callAgentTool } from "./agent-tools.ts";
-import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
-import { projectTools, callProjectTool } from "./project-tools.ts";
-import { forgetRoster, mcpRosterPlan, rememberRoster, rosterOf, rosterWithSwitches } from "./mcp-roster.ts";
-import { userTokenKey, accessTokenFor, beginConnect, completeConnect, connectionOf, disconnect, forgetConnector, forgetSuppliedClient, setSuppliedClient, suppliedClientId, toolsOff, setToolOn } from "./connect.ts";
-import { Manifest, manifestFrom, manifestUrl, fetchManifest, installProblem, install, uninstall, itemsOf } from "./plugins.ts";
-import { ModelPick, ThreadListing, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, rememberRouteKey, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread} from "./threads.ts";
-import { trustsProxyAuth, tagsFromHeader, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
-import { ownerUsage, usageJson, runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
-import { FileToolResult, workspacePlan, putFile, getFile, listFiles, deleteFile, promoteFile, mimeOf } from "./workspace.ts";
-import { ArtifactRow, ArtifactCard, TurnArtifact, TURN_SEQ_NONE, artifactPlan, artifactsMapping, imageMediaType, putArtifact, listArtifacts, libraryFor, getArtifact, findByToken, getVersion, deleteArtifact, artifactsForTurn, artifactsByTurn, utf8Length } from "./artifacts.ts";
-import { scriptEnvNameProblem, scriptImage } from "./run-script.ts";
-import { OfficeRenderAsk, officeRender, officeRenderExt } from "./office-render.ts";
+import { mcpRosterPlan } from "./mcp-roster.ts";
+import { ModelPick, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread } from "./threads.ts";
+import { trustsProxyAuth, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
+import { runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } from "./usage.ts";
+import { workspacePlan } from "./workspace.ts";
+import { TURN_SEQ_NONE, artifactPlan } from "./artifacts.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
-import { EnvSweep, ENV_IDLE_MS, envPlan, envDockerUp, envIdle, envOwned, envDrop, envImagePresent } from "./environments.ts";
+import { EnvSweep, ENV_IDLE_MS, envPlan, envIdle } from "./environments.ts";
 import { WireRef, wireView } from "./artifacts-fence.ts";
-import { IndexJobRow, indexingPlan, enqueue, pendingJobs, JOB_QUEUED } from "./indexing.ts";
-import { SourceListing, listSources, ScopeNode, AgentRetrievalRow, agentRetrievalMapping, knowledgePlan, embeddingModel, createDocuments, uploadDocument, scopeCounts, normalScope, agentScopes, grantScope, revokeScope, documentsMapping } from "./knowledge.ts";
-import { AgentWebRagRow, agentWebRagMapping, webRagFor, webRagPlan } from "./webrag.ts";
-import { ToolCardRow, allToolCards, toolCardsMapping, toolCardsPlan } from "./toolcards.ts";
-import { DiscoverFeed, DiscoverRow, DiscoverTopic, allFeeds, asArticleContext, digest, discoverFeedsMapping, discoverPlan, discoverStoriesMapping, discoverText, discoverTextMapping, setDiscoverText, ensureGeoFeed, feedById, geoCode, refreshFeed, storiesFor, storyById } from "./discover.ts";
-import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping, cardPluginsPlan } from "./plugincards.ts";
-import { TaskRow, MAX_PER_OWNER, compile, emptyTask, enabledCount, isOnce, nextFire, onceInstant, refuse, stampMs, tasksMapping, tasksOf, tasksPlan, withNextAt } from "./tasks.ts";
-import { ensureBuilt } from "./script-wasm.ts";
-import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, workflowRunsOf, timingOf, withWorkflowNextAt, workflowsMapping, workflowsOf, workflowsPlan } from "./workflow-store.ts";
-import { TriggerBotRow, botsOf, emptyBot, queuedFor, triggerBotsMapping, triggersPlan } from "./triggers.ts";
-import { createSecret, forgetSecret, graphSecretProblem, secretsMapping, secretsOf, secretsPlan } from "./secrets.ts";
-import { EnvKeyRow, createEnvKey, envKeysMapping, envKeysOf, envKeysOwnedBy, envKeysPlan, forgetEnvKey } from "./env-keys.ts";
-import { UserEnvRow, createUserEnv, forgetUserEnv, userEnvById, userEnvsMapping, userEnvsOf, userEnvsPlan } from "./user-environments.ts";
-import { SandboxLimits, applySandboxLimits, defaultLimits, sandboxLimits, saveSandboxLimits } from "./sandbox-limits.ts";
-import { EnvTemplateRow, EnvTemplateWrite, emptyEnvTemplate, envTemplateById, envTemplatesAll, envTemplatesMapping, envTemplatesPlan, forgetEnvTemplate, saveEnvTemplate } from "./env-templates.ts";
-import { PROJECT_FILES_KEY, ProjectRow, assignProject, emptyProject, projectsMapping, projectsOf, projectsPlan, releaseThreads, rememberFilesThread } from "./projects.ts";
-import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, documentFilesPlan, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
-import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans, tracerWithSession } from "../tracing/tracing.ts";
+import { indexingPlan } from "./indexing.ts";
+import { knowledgePlan } from "./knowledge.ts";
+import { webRagPlan } from "./webrag.ts";
+import { toolCardsPlan } from "./toolcards.ts";
+import { allFeeds, asArticleContext, discoverPlan, feedById, refreshFeed, storyById } from "./discover.ts";
+import { cardPluginsPlan } from "./plugincards.ts";
+import { tasksPlan } from "./tasks.ts";
+import { workflowsPlan } from "./workflow-store.ts";
+import { triggersPlan } from "./triggers.ts";
+import { secretsPlan } from "./secrets.ts";
+import { envKeysPlan } from "./env-keys.ts";
+import { userEnvsPlan } from "./user-environments.ts";
+import { applySandboxLimits } from "./sandbox-limits.ts";
+import { EnvTemplateWrite, envTemplatesMapping, envTemplatesPlan, saveEnvTemplate } from "./env-templates.ts";
+import { assignProject, projectsMapping, projectsPlan } from "./projects.ts";
+import { documentFilesPlan } from "./document-files.ts";
+import { flush, traceId, tracing, tracerWithMoreSpans, tracerWithSession } from "../tracing/tracing.ts";
 
 type ModelChange = { modelConfigId: string };
 type PromptChange = { promptId: string };
@@ -543,6 +529,136 @@ export function askedPick(body: string): ModelPick {
 }
 
 
+type ReplayableThreadView = {
+  id: string,
+  agentId: string,
+  createdAt: string,
+  title: string,
+  replayable: bool,
+};
+
+type ReplayableSetView = {
+  id: string,
+  replayable: bool,
+};
+
+type RemixedView = {
+  id: string,
+  files: int,
+};
+
+type ThreadRowView = {
+  id: string,
+  agentId: string,
+  createdAt: string,
+  title: string,
+  replayable: bool,
+  projectId: string,
+};
+
+type ThreadFromStoryView = {
+  id: string,
+  agentId: string,
+  modelChoiceId: string,
+  title: string,
+};
+
+type ThreadOpenedView = {
+  id: string,
+  agentId: string,
+  modelChoiceId: string,
+  projectId: string,
+};
+
+type ThoughtView = {
+  seq: int,
+  rotation: int,
+  depth: int,
+  text: string,
+};
+
+type StepView = {
+  seq: int,
+  depth: int,
+  rotation: int,
+  idx: int,
+  kind: string,
+  name: string,
+  target: string,
+  args: string,
+  running: bool,
+  ok: bool,
+  millis: int,
+  result: string,
+};
+
+type RoundView = {
+  seq: int,
+  running: bool,
+  partial: string,
+  thoughts: ThoughtView[],
+  steps: StepView[],
+};
+
+type CancelAskedView = {
+  asked: bool,
+};
+
+type RefView = {
+  slot: int,
+  version: int,
+  path: string,
+};
+
+type AnsweredView = {
+  runId: string,
+  ok: bool,
+  text: string,
+  refs: RefView[],
+  seq: int,
+  modelChoiceId: string,
+  routeNote: string,
+  toolCalls: int,
+  steps: StepView[],
+  thoughts: ThoughtView[],
+  inputTokens: int,
+  outputTokens: int,
+  traceId: string,
+  error: string,
+};
+
+type GuestAnsweredView = {
+  runId: string,
+  ok: bool,
+  text: string,
+  refs: RefView[],
+  seq: int,
+  modelChoiceId: string,
+  routeNote: string,
+  toolCalls: int,
+  steps: StepView[],
+  thoughts: ThoughtView[],
+  inputTokens: int,
+  outputTokens: int,
+  traceId: string,
+  error: string,
+  guestRemaining: int,
+};
+
+type MessageView = {
+  role: string,
+  seq: int,
+  text: string,
+  refs: RefView[],
+};
+
+type TranscriptView = {
+  modelChoiceId: string,
+  title: string,
+  mine: bool,
+  messages: MessageView[],
+};
+
 @controller("/threads")
 class ThreadApi {
   db: Db;
@@ -557,18 +673,17 @@ class ThreadApi {
   replayable(req: Request): Reply {
     let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
     let rows = listReplayable(this.db, limit);
-    let out = "[";
+    let out: ReplayableThreadView[] = [];
     let i: int = 0;
     while (i < rows.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
-        + ",\"agentId\":" + JSON.stringify(rows[i].agentId)
-        + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt)
-        + ",\"title\":" + JSON.stringify(rows[i].title)
-        + ",\"replayable\":true}";
+      let one: ReplayableThreadView = {
+        id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt,
+        title: rows[i].title, replayable: true,
+      };
+      out.push(one);
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(out);
   }
 
   @put("/:id/replayable")
@@ -580,8 +695,8 @@ class ThreadApi {
     let on = jsonRaw(req.body, "replayable") == "true";
     let wrong = markReplayable(this.db, param(req, "id"), on);
     if (wrong != "") { return badRequest(wrong); }
-    return ok("{\"id\":" + JSON.stringify(param(req, "id"))
-      + ",\"replayable\":" + (on ? "true" : "false") + "}");
+    let v: ReplayableSetView = { id: param(req, "id"), replayable: on };
+    return okJson(v);
   }
 
   @post("/:id/remix")
@@ -589,8 +704,8 @@ class ThreadApi {
     let made = remixThread(this.db, { sourceId: param(req, "id"),
       owner: owningTag(callerTags(req)), now: stamp() });
     if (made.threadId == "") { return notFound(made.problem); }
-    return created("{\"id\":" + JSON.stringify(made.threadId)
-      + ",\"files\":" + `${made.files}` + "}");
+    let v: RemixedView = { id: made.threadId, files: made.files };
+    return createdJson(v);
   }
 
   @get("/")
@@ -598,19 +713,17 @@ class ThreadApi {
     let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
     let offset = parseInt(queryParam(req, "offset", "0")) ?? 0;
     let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset, project: queryParam(req, "project", "") });
-    let out = "[";
+    let out: ThreadRowView[] = [];
     let i: int = 0;
     while (i < rows.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
-        + ",\"agentId\":" + JSON.stringify(rows[i].agentId)
-        + ",\"createdAt\":" + JSON.stringify(rows[i].createdAt)
-        + ",\"title\":" + JSON.stringify(rows[i].title)
-        + ",\"replayable\":" + (rows[i].replayable ? "true" : "false")
-        + ",\"projectId\":" + JSON.stringify(rows[i].projectId) + "}";
+      let one: ThreadRowView = {
+        id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt,
+        title: rows[i].title, replayable: rows[i].replayable, projectId: rows[i].projectId,
+      };
+      out.push(one);
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(out);
   }
 
   @post("/from-story")
@@ -646,10 +759,10 @@ class ThreadApi {
 
     nameThread(this.db, id, story.headline);
 
-    return created("{\"id\":" + JSON.stringify(id)
-      + ",\"agentId\":" + JSON.stringify(agentId)
-      + ",\"modelChoiceId\":" + JSON.stringify(chosen)
-      + ",\"title\":" + JSON.stringify(story.headline) + "}");
+    let v: ThreadFromStoryView = {
+      id: id, agentId: agentId, modelChoiceId: chosen, title: story.headline,
+    };
+    return createdJson(v);
   }
 
   @post("/")
@@ -679,9 +792,10 @@ class ThreadApi {
         filed = "";
       }
     }
-    return created("{\"id\":" + JSON.stringify(id) + ",\"agentId\":" + JSON.stringify(agentId)
-      + ",\"modelChoiceId\":" + JSON.stringify(kept)
-      + ",\"projectId\":" + JSON.stringify(filed) + "}");
+    let v: ThreadOpenedView = {
+      id: id, agentId: agentId, modelChoiceId: kept, projectId: filed,
+    };
+    return createdJson(v);
   }
 
   @get("/:id/steps")
@@ -706,11 +820,11 @@ class ThreadApi {
     }
     let partialText = "";
     if (asked != "all") { partialText = partialOf(this.db, param(req, "id"), round); }
-    return ok("{\"seq\":" + `${round}`
-      + ",\"running\":" + boolJson(roundRunning(live))
-      + ",\"partial\":" + JSON.stringify(partialText)
-      + ",\"thoughts\":" + thoughtsJson(thoughts)
-      + ",\"steps\":" + stepsJson(live) + "}");
+    let v: RoundView = {
+      seq: round, running: roundRunning(live), partial: partialText,
+      thoughts: thoughtViews(thoughts), steps: stepViews(live),
+    };
+    return okJson(v);
   }
 
   @post("/:id/cancel")
@@ -720,7 +834,8 @@ class ThreadApi {
     }
     let problem = askCancel(this.db, param(req, "id"));
     if (problem != "") { return badRequest(problem); }
-    return ok("{\"asked\":true}");
+    let v: CancelAskedView = { asked: true };
+    return okJson(v);
   }
 
   @post("/:id/messages")
@@ -779,28 +894,44 @@ class ThreadApi {
     if (tracing(tracer) && run.spans.length > 0) {
       if (flush(tracerWithMoreSpans(tracer, run.spans)).ok) { traced = traceId(tracer); }
     }
-    let guestLeft = "";
-    if (guest != "") {
-      let left = GUEST_DAILY_RUNS - runsSince(this.db, guest, utcDayStartText(Date.now()));
-      if (left < 0) { left = 0; }
-      guestLeft = ",\"guestRemaining\":" + `${left}`;
-    }
-
     let view = wireView(answered.text);
-    return ok("{\"runId\":" + JSON.stringify(runId)
-      + ",\"ok\":" + `${run.ok}`
-      + ",\"text\":" + JSON.stringify(view.text)
-      + ",\"refs\":" + refsJson(view.refs)
-      + ",\"seq\":" + `${answered.baseSeq}`
-      + ",\"modelChoiceId\":" + JSON.stringify(answered.modelChoiceId)
-      + ",\"routeNote\":" + JSON.stringify(answered.routeNote)
-      + ",\"toolCalls\":" + `${run.steps.length}`
-      + ",\"steps\":" + stepsJson(stepsOfRound(this.db, param(req, "id"), answered.baseSeq))
-      + ",\"thoughts\":" + thoughtsJson(thoughtsOfRound(this.db, param(req, "id"), answered.baseSeq))
-      + ",\"inputTokens\":" + `${run.inputTokens}`
-      + ",\"outputTokens\":" + `${run.outputTokens}`
-      + ",\"traceId\":" + JSON.stringify(traced)
-      + ",\"error\":" + JSON.stringify(run.error) + guestLeft + "}");
+    let said: AnsweredView = {
+      runId: runId,
+      ok: run.ok,
+      text: view.text,
+      refs: refViews(view.refs),
+      seq: answered.baseSeq,
+      modelChoiceId: answered.modelChoiceId,
+      routeNote: answered.routeNote,
+      toolCalls: run.steps.length,
+      steps: stepViews(stepsOfRound(this.db, param(req, "id"), answered.baseSeq)),
+      thoughts: thoughtViews(thoughtsOfRound(this.db, param(req, "id"), answered.baseSeq)),
+      inputTokens: run.inputTokens,
+      outputTokens: run.outputTokens,
+      traceId: traced,
+      error: run.error,
+    };
+    if (guest == "") { return okJson(said); }
+    let left = GUEST_DAILY_RUNS - runsSince(this.db, guest, utcDayStartText(Date.now()));
+    if (left < 0) { left = 0; }
+    let counted: GuestAnsweredView = {
+      runId: said.runId,
+      ok: said.ok,
+      text: said.text,
+      refs: said.refs,
+      seq: said.seq,
+      modelChoiceId: said.modelChoiceId,
+      routeNote: said.routeNote,
+      toolCalls: said.toolCalls,
+      steps: said.steps,
+      thoughts: said.thoughts,
+      inputTokens: said.inputTokens,
+      outputTokens: said.outputTokens,
+      traceId: said.traceId,
+      error: said.error,
+      guestRemaining: left,
+    };
+    return okJson(counted);
   }
 
   @get("/:id")
@@ -810,29 +941,31 @@ class ThreadApi {
     }
     let mine = ownedThread(this.db, param(req, "id"), callerTags(req)) != "";
     let said: ThreadTurnRow[] = threadMessageRows(this.db, param(req, "id"));
-    let out = "[";
+    let out: MessageView[] = [];
     let i: int = 0;
     while (i < said.length) {
-      if (i > 0) { out = out + ","; }
       if (said[i].role == "assistant") {
         let view = wireView(said[i].text);
-        out = out + "{\"role\":" + JSON.stringify(said[i].role)
-          + ",\"seq\":" + `${said[i].seq}`
-          + ",\"text\":" + JSON.stringify(view.text)
-          + ",\"refs\":" + refsJson(view.refs) + "}";
+        let one: MessageView = {
+          role: said[i].role, seq: said[i].seq, text: view.text, refs: refViews(view.refs),
+        };
+        out.push(one);
       } else {
         let none: WireRef[] = [];
-        out = out + "{\"role\":" + JSON.stringify(said[i].role)
-          + ",\"seq\":" + `${said[i].seq}`
-          + ",\"text\":" + JSON.stringify(said[i].text)
-          + ",\"refs\":" + refsJson(none) + "}";
+        let one: MessageView = {
+          role: said[i].role, seq: said[i].seq, text: said[i].text, refs: refViews(none),
+        };
+        out.push(one);
       }
       i = i + 1;
     }
-    return ok("{\"modelChoiceId\":" + JSON.stringify(threadChoice(this.db, param(req, "id")))
-      + ",\"title\":" + JSON.stringify(threadTitle(this.db, param(req, "id")))
-      + ",\"mine\":" + (mine ? "true" : "false")
-      + ",\"messages\":" + out + "]}");
+    let v: TranscriptView = {
+      modelChoiceId: threadChoice(this.db, param(req, "id")),
+      title: threadTitle(this.db, param(req, "id")),
+      mine: mine,
+      messages: out,
+    };
+    return okJson(v);
   }
 }
 
@@ -855,17 +988,15 @@ function withNotes(run: AgentRun, more: string[]): AgentRun {
   return out;
 }
 
-function refsJson(refs: WireRef[]): string {
-  let out = "[";
+function refViews(refs: WireRef[]): RefView[] {
+  let out: RefView[] = [];
   let i: int = 0;
   while (i < refs.length) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"slot\":" + `${refs[i].slot}`
-      + ",\"version\":" + `${refs[i].version}`
-      + ",\"path\":" + JSON.stringify(refs[i].path) + "}";
+    let one: RefView = { slot: refs[i].slot, version: refs[i].version, path: refs[i].path };
+    out.push(one);
     i = i + 1;
   }
-  return out + "]";
+  return out;
 }
 
 
@@ -923,40 +1054,42 @@ function apiToken(): string {
 
 
 
-function thoughtsJson(thoughts: Thought[]): string {
-  let out = "[";
+function thoughtViews(thoughts: Thought[]): ThoughtView[] {
+  let out: ThoughtView[] = [];
   let i: int = 0;
   while (i < thoughts.length) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"seq\":" + `${thoughts[i].seq}`
-      + ",\"rotation\":" + `${thoughts[i].rotation}`
-      + ",\"depth\":" + `${thoughts[i].depth}`
-      + ",\"text\":" + JSON.stringify(thoughts[i].text) + "}";
+    let one: ThoughtView = {
+      seq: thoughts[i].seq, rotation: thoughts[i].rotation,
+      depth: thoughts[i].depth, text: thoughts[i].text,
+    };
+    out.push(one);
     i = i + 1;
   }
-  return out + "]";
+  return out;
 }
 
-function stepsJson(live: LiveStep[]): string {
-  let out = "[";
+function stepViews(live: LiveStep[]): StepView[] {
+  let out: StepView[] = [];
   let i: int = 0;
   while (i < live.length) {
-    if (i > 0) { out = out + ","; }
-    out = out + "{\"seq\":" + `${live[i].seq}`
-      + ",\"depth\":" + `${live[i].depth}`
-      + ",\"rotation\":" + `${live[i].rotation}`
-      + ",\"idx\":" + `${live[i].idx}`
-      + ",\"kind\":" + JSON.stringify(live[i].kind)
-      + ",\"name\":" + JSON.stringify(live[i].name)
-      + ",\"target\":" + JSON.stringify(live[i].target)
-      + ",\"args\":" + JSON.stringify(live[i].args)
-      + ",\"running\":" + boolJson(live[i].endedAt == "")
-      + ",\"ok\":" + boolJson(live[i].ok)
-      + ",\"millis\":" + `${stepMillis(live[i])}`
-      + ",\"result\":" + JSON.stringify(live[i].result) + "}";
+    let one: StepView = {
+      seq: live[i].seq,
+      depth: live[i].depth,
+      rotation: live[i].rotation,
+      idx: live[i].idx,
+      kind: live[i].kind,
+      name: live[i].name,
+      target: live[i].target,
+      args: live[i].args,
+      running: live[i].endedAt == "",
+      ok: live[i].ok,
+      millis: stepMillis(live[i]),
+      result: live[i].result,
+    };
+    out.push(one);
     i = i + 1;
   }
-  return out + "]";
+  return out;
 }
 
 
