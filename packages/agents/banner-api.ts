@@ -1,8 +1,8 @@
-// What the /banner routes decide. The class stays in api.ts: `export class`
-// makes a Lumen module unimportable.
+// The /banner routes: the controller and what it decides.
 
 import { Db } from "../plume/driver.ts";
-import { Reply, ok, badRequest } from "../rest/server.ts";
+import { controller } from "../rest/controller.ts";
+import { Request, Reply, ok, badRequest } from "../rest/server.ts";
 import { readSetting, writeSetting } from "./schema.ts";
 import { jsonText } from "./scan.ts";
 import { utf8Length } from "./artifacts.ts";
@@ -36,4 +36,27 @@ export function bannerChange(db: Db, body: string): Reply {
   let problem = writeSetting(db, "banner", text);
   if (problem != "") { return badRequest(problem); }
   return ok(bannerJson(text));
+}
+
+@controller("/banner")
+export class BannerApi {
+  db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
+
+  // Public in the same sense the healthz is: it is one string the operator
+  // wrote for everyone to read, and a guest sees the banner too.
+  @get("/")
+  show(req: Request): Reply {
+    return bannerShow(this.db);
+  }
+
+  // Writing goes through the gateway's authenticated tier like every other
+  // operator surface.
+  @put("/")
+  change(req: Request): Reply {
+    return bannerChange(this.db, req.body);
+  }
 }
