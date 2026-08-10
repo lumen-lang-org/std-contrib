@@ -375,6 +375,23 @@ function baseAttrs(t: Tracer, span: TraceSpan, input: string, output: string, le
     if (statusMessage != "") {
       attrs = [...attrs, attrString("langfuse.observation.status_message", statusMessage)];
     }
+    // The session and the person, which is what turns a heap of traces into
+    // something you can navigate. Langfuse groups by session, so a caller that
+    // sets one gets every turn of a conversation on one page and every trace
+    // linkable back to the thread it came from.
+    //
+    // These are the reason `sessionId` and `userId` are on the Tracer at all.
+    // They were carried on the struct from the beginning and NEVER PUT ON THE
+    // WIRE, so a caller could set them, read them back, write a passing test,
+    // and still send traces that grouped under nothing. Empty stays absent
+    // rather than sending "", which Langfuse would take as a session whose id
+    // is the empty string and group unrelated turns beneath it.
+    if (t.sessionId != "") {
+      attrs = [...attrs, attrString("langfuse.session.id", t.sessionId)];
+    }
+    if (t.userId != "") {
+      attrs = [...attrs, attrString("langfuse.user.id", t.userId)];
+    }
   }
 
   // OpenInference names attributes by what they mean rather than by who reads

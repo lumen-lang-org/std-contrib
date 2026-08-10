@@ -931,8 +931,26 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     return unminted;
   }
   let body = requestBody(model, config, systemPrompt, turns, tools);
-  // The one difference from the buffered request: ask for the stream.
-  let streamed = body.slice(0, body.length - 1) + ",\"stream\":true}";
+  // Two differences from the buffered request: ask for the stream, and ask to
+  // be told what it cost.
+  //
+  // The second one is not optional decoration. An OpenAI-compatible API sends
+  // NO usage block in a stream unless `stream_options.include_usage` is set,
+  // so without this line the reader below finds no usage, every completion
+  // reports `counted: false`, and the zero travels all the way out: the run row
+  // stores 0 input and 0 output tokens, the collector shows a generation with
+  // no tokens, and every screen built on either reports a spend nobody can
+  // explain. Measured on this deployment before it was added: 2,585
+  // generations, 133 of them with a token count, and not one with a cost.
+  //
+  // Only on the streamed path, and the streamed path is the OpenAI-compatible
+  // one — Anthropic is answered buffered (see the note below), where usage
+  // arrives unasked. A provider that does not know the field ignores it, which
+  // is the shape of every OpenAI-compatible API this talks to; one that
+  // REFUSES it would refuse the whole request, so a provider that stops
+  // answering after this change is telling you exactly which line to remove.
+  let streamed = body.slice(0, body.length - 1)
+    + ",\"stream\":true,\"stream_options\":{\"include_usage\":true}}";
   let s = http.stream(endpoint, "POST", streamed, authHeaders(model.provider, carried.key));
 
   let status = s.status();
@@ -980,7 +998,22 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       }
     }
     let line = s.readLine();
-    if (s.done()) { break; }
+    // The line is READ BEFORE the stream is asked whether it is finished, so
+    // it has to be processed before the loop leaves. Breaking on `done()` here
+    // threw away whatever had just been read, and what an OpenAI-compatible
+    // API puts in that last event is the usage block: prompt_tokens and
+    // completion_tokens arrived on every streamed turn this engine ever made
+    // and were dropped one line before they were parsed. That is why 2,452 of
+    // 2,585 generations recorded no tokens, why no generation ever recorded a
+    // cost, and why the spend panel had nothing to attribute.
+    //
+    // An empty line is SSE's own event separator, so it is skipped rather than
+    // treated as the end; the loop leaves when the stream is done AND has
+    // nothing more to hand over.
+    if (line == "") {
+      if (s.done()) { break; }
+      continue;
+    }
     let data = sseData(line);
     if (data == "" || data == "[DONE]") { continue; }
 
@@ -1020,8 +1053,15 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     if (reason != "") { finish = reason; }
     let usage = jsonRaw(data, "usage");
     if (usage != "") {
-      inTokens = parseInt(jsonText(usage, "prompt_tokens"), 10) ?? inTokens;
-      outTokens = parseInt(jsonText(usage, "completion_tokens"), 10) ?? outTokens;
+      // `jsonRaw` and not `jsonText`, which is the same trap the tool-call
+      // fragments fell into a few lines up: jsonText reads STRING members, and
+      // a token count is a number, so it answered "" for every field and
+      // parseInt turned that into null. `?? inTokens` then kept the zero it
+      // started with, so a stream that reported its usage perfectly well was
+      // recorded as having used nothing. The buffered path next door has used
+      // jsonRaw since it was written.
+      inTokens = parseInt(jsonRaw(usage, "prompt_tokens"), 10) ?? inTokens;
+      outTokens = parseInt(jsonRaw(usage, "completion_tokens"), 10) ?? outTokens;
     }
   }
   s.close();
