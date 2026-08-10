@@ -7,6 +7,7 @@ import { beginConnect, completeConnect, disconnect, forgetSuppliedClient, setSup
 import { owningTag } from "../../owner.ts";
 import { McpServerRow, mcpServersMapping } from "../../schema.ts";
 import { SuppliedClientAsk } from "./types.ts";
+import { connectPageHtml } from "./page.ts";
 
 function callbackUri(): string {
   let origin = (process.env("AGENTS_PUBLIC_ORIGIN") ?? "").trim();
@@ -16,23 +17,7 @@ function callbackUri(): string {
 }
 
 function connectPage(worked: bool, detail: string): Reply {
-  let title = worked ? "Connected" : "Not connected";
-  let line = worked
-    ? "You can close this window."
-    : jsonSafe(detail);
-  let body = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
-    + title + "</title><style>"
-    + "body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;"
-    + "height:100vh;background:#fafafa;color:#17171a}"
-    + "div{text-align:center;max-width:32rem;padding:0 1.5rem}"
-    + "h1{font-size:17px;margin:0 0 .35rem}p{margin:0;color:#6b6b70}"
-    + "</style></head><body><div><h1>" + title + (worked ? " to " + jsonSafe(detail) : "")
-    + "</h1><p>" + line + "</p></div>"
-    + "<script>try{if(window.opener){window.opener.postMessage("
-    + "{joule:\"connector\",ok:" + (worked ? "true" : "false") + "},window.location.origin)}}catch(e){}"
-    + "setTimeout(function(){window.close()}," + (worked ? "900" : "4000") + ")</script>"
-    + "</body></html>";
-  return reply(200, body, "text/html; charset=utf-8");
+  return reply(200, connectPageHtml(worked, detail), "text/html; charset=utf-8");
 }
 
 @controller("/connect")
