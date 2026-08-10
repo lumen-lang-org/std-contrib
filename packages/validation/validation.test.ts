@@ -1,6 +1,6 @@
-import { checked, Rule, Fault, faults, faultsJson } from "./guard.ts";
+import { validated, Rule, Fault, faults, faultsJson } from "./validation.ts";
 
-@checked
+@validated
 class Ask {
   @required("a site key is needed")
   @maxLength(200, "that is not a site key")
@@ -21,7 +21,7 @@ class Ask {
 }
 
 function rules(): Rule[] {
-  return Class.decorator(new Ask("k", "s", 1), "checked");
+  return Class.decorator(new Ask("k", "s", 1), "validated");
 }
 
 test("the annotations become rules, with their messages", () => {
@@ -72,4 +72,21 @@ test("a rule with no message of its own still says something useful", () => {
 test("faults are a list a client can read", () => {
   let f = faults(rules(), "{\"secret\":\"s\",\"tries\":3}");
   expect(faultsJson(f) == "[{\"field\":\"siteKey\",\"said\":\"a site key is needed\"}]");
+});
+
+@validated
+class Pick {
+  @oneOf("turnstile,hcaptcha,recaptcha", "provider must be turnstile, hcaptcha or recaptcha")
+  provider: string;
+  constructor(provider: string) { this.provider = provider; }
+}
+
+test("oneOf holds a list and refuses anything outside it", () => {
+  let r: Rule[] = Class.decorator(new Pick("turnstile"), "validated");
+  expect(r[0].allowed == "turnstile,hcaptcha,recaptcha");
+  expect(faults(r, "{\"provider\":\"hcaptcha\"}").length == 0);
+  expect(faults(r, "{\"provider\":\"\"}").length == 0);
+  let bad = faults(r, "{\"provider\":\"nope\"}");
+  expect(bad.length == 1);
+  expect(bad[0].said == "provider must be turnstile, hcaptcha or recaptcha");
 });
