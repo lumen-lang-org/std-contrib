@@ -95,6 +95,18 @@
       "version": "0.1.0",
       "summary": "Codebase symbol index (cidx): map/find/refs/search/rank, persistent cache, 8 languages \u2014 AI navigation, no vector DB.",
       "path": "packages/code-index"
+    },
+    {
+      "name": "press",
+      "version": "0.1.0",
+      "summary": "Templates for pages: EJS-style tags, escaped by default.",
+      "path": "packages/press"
+    },
+    {
+      "name": "validation",
+      "version": "0.1.0",
+      "summary": "Rules written on the fields they govern; faults come back as a list.",
+      "path": "packages/validation"
     }
   ]
 }
