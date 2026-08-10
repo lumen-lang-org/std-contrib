@@ -1,12 +1,12 @@
 import { controller, bindings } from "./controller.ts";
 import { Bound } from "./plan.ts";
-import { Request, Reply, Mount, Guarded, Ok, BadRequest, passes, stops, dispatchedMounted, header } from "./server.ts";
+import { Request, Reply, Mount, Guarded, Ok, BadRequest, resolve, reject, dispatchedMounted, header } from "./server.ts";
 
 export function needsPostgres(req: Request): Guarded {
   if (header(req, "x-db") != "postgres") {
-    return stops(BadRequest("documents need PostgreSQL (pgvector)"));
+    return reject(BadRequest("documents need PostgreSQL (pgvector)"));
   }
-  return passes();
+  return resolve();
 }
 
 @controller("/documents")
@@ -30,9 +30,9 @@ export class DocumentApi {
 
   ready(): Guarded {
     if (this.kind != "postgres") {
-      return stops(BadRequest("this deployment cannot answer that"));
+      return reject(BadRequest("this deployment cannot answer that"));
     }
-    return passes();
+    return resolve();
   }
 
   @get("/own")
@@ -75,9 +75,9 @@ test("a guard that is a method reaches the controller's own state", () => {
 
 export function roleAtLeast(req: Request, role: string): Guarded {
   if (role == "signed-in" && header(req, "x-user").trim() == "") {
-    return stops(BadRequest("signing in is what makes this yours"));
+    return reject(BadRequest("signing in is what makes this yours"));
   }
-  return passes();
+  return resolve();
 }
 
 @controller("/roled")

@@ -83,14 +83,14 @@ export function OkJson<T>(value: T): Reply {
   return JsonOf(200, value);
 }
 
-export type Guarded = { stop: bool, reply: Reply };
+export type Guarded = { rejected: bool, reply: Reply };
 
-export function passes(): Guarded {
-  return { stop: false, reply: Respond(200, "", "application/json") };
+export function resolve(): Guarded {
+  return { rejected: false, reply: Respond(200, "", "application/json") };
 }
 
-export function stops(r: Reply): Guarded {
-  return { stop: true, reply: r };
+export function reject(refusal: Reply): Guarded {
+  return { rejected: true, reply: refusal };
 }
 
 // The `@Valid` form of a rule check, shaped like every other guard so the
@@ -119,9 +119,9 @@ export function answered(o: Outcome): Reply {
 export function validatedBody(rules: Rule[], body: string): Guarded {
   let wrong = faults(rules, body);
   if (wrong.length == 0) {
-    return passes();
+    return resolve();
   }
-  return stops(Json(400, "{\"errors\":" + faultsJson(wrong) + "}"));
+  return reject(Json(400, "{\"errors\":" + faultsJson(wrong) + "}"));
 }
 
 export function validationRefusal(rules: Rule[], body: string): string {
