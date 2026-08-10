@@ -33,6 +33,10 @@ import { storeCredential, credentialFor, forgetCredential } from "./credentials.
 // twenty keys in one environment is a deployment's worth of integrations, not
 // a person's.
 export const MAX_ENV_KEYS_PER_ENV: int = 20;
+// The operator's override, deployment-wide, 0 meaning "the default above".
+let envKeyPerEnvChosen: int = 0;
+export function envKeyLimitOverride(perEnv: int): void { envKeyPerEnvChosen = perEnv; }
+function envKeyPerEnv(): int { return envKeyPerEnvChosen > 0 ? envKeyPerEnvChosen : MAX_ENV_KEYS_PER_ENV; }
 export const MAX_ENV_KEY_NAME: int = 64;
 // The same ceiling secrets use. A value longer than this is a file, and a file
 // belongs in the workspace, not in the process environment.
@@ -234,8 +238,8 @@ export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
     return { id: "", problem: "there is already a key called \"" + row.name + "\" in this environment — delete it first, or pick another name" };
   }
   let held = JSON.parse<EnvKeyRow[]>(envKeysOf(db, row.owner, row.imageId));
-  if (held.length >= MAX_ENV_KEYS_PER_ENV) {
-    return { id: "", problem: "that is " + `${MAX_ENV_KEYS_PER_ENV}` + " keys in this environment already — delete one before adding another" };
+  if (held.length >= envKeyPerEnv()) {
+    return { id: "", problem: "that is " + `${envKeyPerEnv()}` + " keys in this environment already — delete one before adding another" };
   }
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,

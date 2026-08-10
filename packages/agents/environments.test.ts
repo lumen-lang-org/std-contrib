@@ -15,7 +15,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget } from "./environments.ts";
+import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, EnvOwnedRow } from "./environments.ts";
 
 let database: Db = sqlite();
 
@@ -135,7 +135,7 @@ test("first use creates the container and the row, named main by default", () =>
   // because the order of these flags is the order docker applies them.
   let asked = argvLines();
   expect(asked.length == 2);
-  expect(asked[0] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1g --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[0] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
   expect(asked[1].indexOf("exec agents-env-t1-main sh -c") == 0);
   expect(asked[1].indexOf("/workspace") > 0);
 
@@ -293,7 +293,7 @@ test("container names are docker-legal whatever the thread id holds", () => {
   // The volume name is sanitised by the same rule and off the same thread id,
   // so an unspellable thread cannot produce a container docker accepts and a
   // volume it refuses.
-  expect(asked[0] == "run -d --name agents-env-t-1-x-main -v agents-ws-t-1-x:/workspace --memory 1g --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[0] == "run -d --name agents-env-t-1-x-main -v agents-ws-t-1-x:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
 });
 
 test("a docker failure is a problem sentence, not a thrown error and not a row", () => {
@@ -332,7 +332,7 @@ test("a pruned container is recreated from the row's image, reported as created"
   expect(asked[0] == "inspect -f {{.State.Running}} agents-env-t1-main");
   expect(asked[1] == "start agents-env-t1-main");
   expect(asked[2] == "rm -f agents-env-t1-main");
-  expect(asked[3] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1g --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[3] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
   expect(asked[4].indexOf("exec agents-env-t1-main sh -c") == 0);
 
   expect(envList(database, "t1")[0].status == "running");
@@ -380,7 +380,7 @@ test("a container is created with its guard rails: caps dropped, no new privileg
   let made = argvLines()[0];
 
   // Resources: a runaway script cannot take the host's memory, cores or pids.
-  expect(made.indexOf("--memory 1g") > 0);
+  expect(made.indexOf("--memory 1024m") > 0);
   expect(made.indexOf("--cpus 2") > 0);
   expect(made.indexOf("--pids-limit 256") > 0);
   // A browser needs shared memory; 64MB renders blank rather than failing.
@@ -452,4 +452,64 @@ test("an image with its own entrypoint still becomes an environment", () => {
   expect(made.indexOf("--entrypoint sleep nuralyio/docflow-validator:latest infinity") > 0);
   // And the words after the image are the sleep's, not a program's arguments.
   expect(made.endsWith("infinity"));
+});
+
+// --- managing what somebody's conversations hold --------------------------------
+
+// The join in envOwned reads the threads table, which this suite does not
+// otherwise have. Three columns are all it reads, so three columns are what
+// the fixture makes — the real table's shape is threads.ts's business.
+function withThreads(): void {
+  execute(database, "DROP TABLE IF EXISTS threads");
+  execute(database, "CREATE TABLE threads (id text PRIMARY KEY, owner text, title text)");
+  execute(database, "INSERT INTO threads VALUES ('t1','o1','Scrape the tenders site')");
+  execute(database, "INSERT INTO threads VALUES ('t2','o1','Weather digest')");
+  execute(database, "INSERT INTO threads VALUES ('t9','o2','Somebody else''s')");
+}
+
+test("envOwned lists a person's containers with their conversations' titles, and nobody else's", () => {
+  fresh();
+  withThreads();
+  dockerFine();
+  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, now: "1000" });
+  envEnsure(database, { threadId: "t2", name: "office", image: "img:2", network: true, now: "2000" });
+  envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, now: "3000" });
+  let mine = envOwned(database, "o1");
+  expect(mine.length == 2);
+  // Titles are the point of the join: a thread id identifies nothing to a person.
+  expect(mine[0].threadTitle == "Weather digest" || mine[1].threadTitle == "Weather digest");
+  let i: int = 0;
+  while (i < mine.length) { expect(mine[i].threadId != "t9"); i = i + 1; }
+  expect(envOwned(database, "o3").length == 0);
+});
+
+test("envDrop takes the container and row, and the workspace volume with the last one", () => {
+  fresh();
+  withThreads();
+  dockerFine();
+  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, now: "1000" });
+  envEnsure(database, { threadId: "t1", name: "office", image: "img:2", network: true, now: "1000" });
+  fs.writeFileSync(FAKE_LOG, "");
+  expect(envDrop(database, "t1", "main"));
+  let logged = fs.readFileSync(FAKE_LOG);
+  expect(logged.indexOf("rm -f " + envContainerName("t1", "main")) >= 0);
+  // The other environment still mounts the volume, so the volume stays.
+  expect(logged.indexOf("volume rm") < 0);
+  expect(envList(database, "t1").length == 1);
+  // The last one out turns off the lights.
+  expect(envDrop(database, "t1", "office"));
+  expect(fs.readFileSync(FAKE_LOG).indexOf("volume rm -f agents-ws-t1") >= 0);
+  expect(envList(database, "t1").length == 0);
+  // Gone is gone: a second drop is false, for the route to turn into a 404.
+  expect(!envDrop(database, "t1", "office"));
+});
+
+test("envImagePresent asks the daemon and believes the answer", () => {
+  fresh();
+  dockerFine();
+  expect(envImagePresent("img:1"));
+  expect(!envImagePresent(""));
+  // A daemon that does not hold the image answers nonzero, and that is a no.
+  fakeDocker("#!/bin/sh\necho \"$@\" >> " + FAKE_LOG + "\nexit 1\n");
+  expect(!envImagePresent("img:ghost"));
 });
