@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, ok, param } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, noContent, notFound, ok } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { EnvTemplateWrite, envTemplatesAll, forgetEnvTemplate, saveEnvTemplate } from "../../env-templates.ts";
 import { owningTag } from "../../owner.ts";
@@ -37,9 +37,9 @@ export class EnvTemplateApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!forgetEnvTemplate(this.db, param(req, "id"))) {
-      return notFound("template " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!forgetEnvTemplate(this.db, id)) {
+      return notFound("template " + id);
     }
     return noContent();
   }

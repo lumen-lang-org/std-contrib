@@ -1,6 +1,6 @@
 import { apiKeysPlan } from "./api-keys.ts";
 import { controller } from "../rest/controller.ts";
-import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, okJson, createdJson, noContent, notFound, badRequest, problem, param, queryParam } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, okJson, createdJson, noContent, notFound, badRequest, problem } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
@@ -94,7 +94,7 @@ class ConfigApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     let keys: DbOrder[] = [asc("id")];
     return ok(listOrdered(this.db, modelConfigsMapping(this.db), "", [], keys));
   }
@@ -112,11 +112,11 @@ class ConfigApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    let stored = findById(this.db, modelConfigRows(this.db), param(req, "id"));
-    if (stored == "") { return notFound("model config " + param(req, "id")); }
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    let stored = findById(this.db, modelConfigRows(this.db), id);
+    if (stored == "") { return notFound("model config " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
-    if (bodyText(req.body, "id", param(req, "id")) != param(req, "id")) {
+    if (bodyText(req.body, "id", id) != id) {
       return badRequest("the id in the body must match the path");
     }
     let row = mergedConfig(JSON.parse<ModelConfigRow>(stored), req.body);
@@ -124,17 +124,17 @@ class ConfigApi {
     if (wrong != "") { return badRequest(wrong); }
     let written = persist(this.db, modelConfigsMapping(this.db), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, modelConfigsMapping(this.db), param(req, "id")));
+    return ok(findById(this.db, modelConfigsMapping(this.db), id));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, modelConfigsMapping(this.db), param(req, "id"))) {
-      return notFound("model config " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, modelConfigsMapping(this.db), id)) {
+      return notFound("model config " + id);
     }
-    let used = configInUse(this.db, param(req, "id"));
+    let used = configInUse(this.db, id);
     if (used != "") { return badRequest(used); }
-    deleteById(this.db, modelConfigsMapping(this.db), param(req, "id"));
+    deleteById(this.db, modelConfigsMapping(this.db), id);
     return noContent();
   }
 }
@@ -242,7 +242,7 @@ class ChoiceApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     let keys: DbOrder[] = [asc("menu_rank"), asc("label")];
     return ok(listOrdered(this.db, modelChoicesMapping(), "", [], keys));
   }
@@ -260,11 +260,11 @@ class ChoiceApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    let stored = findById(this.db, modelChoicesMapping(), param(req, "id"));
-    if (stored == "") { return notFound("model choice " + param(req, "id")); }
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    let stored = findById(this.db, modelChoicesMapping(), id);
+    if (stored == "") { return notFound("model choice " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
-    if (bodyText(req.body, "id", param(req, "id")) != param(req, "id")) {
+    if (bodyText(req.body, "id", id) != id) {
       return badRequest("the id in the body must match the path");
     }
     let row = mergedChoice(JSON.parse<ModelChoiceRow>(stored), req.body);
@@ -272,17 +272,17 @@ class ChoiceApi {
     if (wrong != "") { return badRequest(wrong); }
     let written = persist(this.db, modelChoicesMapping(), JSON.stringify(row));
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, modelChoicesMapping(), param(req, "id")));
+    return ok(findById(this.db, modelChoicesMapping(), id));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, modelChoicesMapping(), param(req, "id"))) {
-      return notFound("model choice " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, modelChoicesMapping(), id)) {
+      return notFound("model choice " + id);
     }
-    let used = choiceInUse(this.db, param(req, "id"));
+    let used = choiceInUse(this.db, id);
     if (used != "") { return badRequest(used); }
-    deleteById(this.db, modelChoicesMapping(), param(req, "id"));
+    deleteById(this.db, modelChoicesMapping(), id);
     return noContent();
   }
 }
@@ -443,14 +443,14 @@ class RouterApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     return ok(routersJson(allRouters(this.db)));
   }
 
   @get("/:id")
-  find(req: Request): Reply {
-    let document = findById(this.db, modelRoutersMapping(), param(req, "id"));
-    if (document == "") { return notFound("model router " + param(req, "id")); }
+  find(@PathVariable("id") id: string): Reply {
+    let document = findById(this.db, modelRoutersMapping(), id);
+    if (document == "") { return notFound("model router " + id); }
     return ok(routerJson(JSON.parse<ModelRouterRow>(document)));
   }
 
@@ -469,11 +469,11 @@ class RouterApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    let stored = findById(this.db, modelRoutersMapping(), param(req, "id"));
-    if (stored == "") { return notFound("model router " + param(req, "id")); }
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    let stored = findById(this.db, modelRoutersMapping(), id);
+    if (stored == "") { return notFound("model router " + id); }
     if (req.body == "") { return badRequest("a body is required"); }
-    if (bodyText(req.body, "id", param(req, "id")) != param(req, "id")) {
+    if (bodyText(req.body, "id", id) != id) {
       return badRequest("the id in the body must match the path");
     }
     let blob = preEncodedCandidates(req.body);
@@ -483,17 +483,17 @@ class RouterApi {
     if (wrong != "") { return badRequest(wrong); }
     let written = persist(this.db, modelRoutersMapping(), JSON.stringify(withCanonicalCandidates(row)));
     if (!written.ok) { return badRequest(written.error); }
-    return ok(routerJson(JSON.parse<ModelRouterRow>(findById(this.db, modelRoutersMapping(), param(req, "id")))));
+    return ok(routerJson(JSON.parse<ModelRouterRow>(findById(this.db, modelRoutersMapping(), id))));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, modelRoutersMapping(), param(req, "id"))) {
-      return notFound("model router " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, modelRoutersMapping(), id)) {
+      return notFound("model router " + id);
     }
-    let used = routerInUse(this.db, param(req, "id"));
+    let used = routerInUse(this.db, id);
     if (used != "") { return badRequest(used); }
-    deleteById(this.db, modelRoutersMapping(), param(req, "id"));
+    deleteById(this.db, modelRoutersMapping(), id);
     return noContent();
   }
 }
@@ -670,8 +670,8 @@ class ThreadApi {
   }
 
   @get("/replayable")
-  replayable(req: Request): Reply {
-    let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
+  replayable(@RequestParam("limit", "50") asked: string): Reply {
+    let limit = parseInt(asked) ?? 50;
     let rows = listReplayable(this.db, limit);
     let out: ReplayableThreadView[] = [];
     let i: int = 0;
@@ -687,21 +687,21 @@ class ThreadApi {
   }
 
   @put("/:id/replayable")
-  offer(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  offer(req: Request, @PathVariable("id") id: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
     if (req.body == "") { return badRequest("a body is required: {\"replayable\":true}"); }
     let on = jsonRaw(req.body, "replayable") == "true";
-    let wrong = markReplayable(this.db, param(req, "id"), on);
+    let wrong = markReplayable(this.db, id, on);
     if (wrong != "") { return badRequest(wrong); }
-    let v: ReplayableSetView = { id: param(req, "id"), replayable: on };
+    let v: ReplayableSetView = { id: id, replayable: on };
     return okJson(v);
   }
 
   @post("/:id/remix")
-  remix(req: Request): Reply {
-    let made = remixThread(this.db, { sourceId: param(req, "id"),
+  remix(req: Request, @PathVariable("id") id: string): Reply {
+    let made = remixThread(this.db, { sourceId: id,
       owner: owningTag(callerTags(req)), now: stamp() });
     if (made.threadId == "") { return notFound(made.problem); }
     let v: RemixedView = { id: made.threadId, files: made.files };
@@ -709,10 +709,12 @@ class ThreadApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
-    let limit = parseInt(queryParam(req, "limit", "50")) ?? 50;
-    let offset = parseInt(queryParam(req, "offset", "0")) ?? 0;
-    let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset, project: queryParam(req, "project", "") });
+  list(req: Request,
+       @RequestParam("limit", "50") asked: string,
+       @RequestParam("offset", "0") offset: int,
+       @RequestParam("project", "") project: string): Reply {
+    let limit = parseInt(asked) ?? 50;
+    let rows = listThreads(this.db, { tags: callerTags(req), limit: limit, offset: offset, project: project });
     let out: ThreadRowView[] = [];
     let i: int = 0;
     while (i < rows.length) {
@@ -799,27 +801,27 @@ class ThreadApi {
   }
 
   @get("/:id/steps")
-  steps(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  steps(req: Request, @PathVariable("id") id: string,
+        @RequestParam("seq", "") asked: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let asked = queryParam(req, "seq", "");
-    let round = latestRound(this.db, param(req, "id"));
+    let round = latestRound(this.db, id);
     let live: LiveStep[] = [];
     let thoughts: Thought[] = [];
     if (asked == "all") {
       round = TURN_SEQ_NONE;
-      live = stepsOfThread(this.db, param(req, "id"));
-      thoughts = thoughtsOfThread(this.db, param(req, "id"));
+      live = stepsOfThread(this.db, id);
+      thoughts = thoughtsOfThread(this.db, id);
     } else {
       if (asked != "") { round = parseInt(asked, 10) ?? -1; }
       if (round >= 0) {
-        live = stepsOfRound(this.db, param(req, "id"), round);
-        thoughts = thoughtsOfRound(this.db, param(req, "id"), round);
+        live = stepsOfRound(this.db, id, round);
+        thoughts = thoughtsOfRound(this.db, id, round);
       }
     }
     let partialText = "";
-    if (asked != "all") { partialText = partialOf(this.db, param(req, "id"), round); }
+    if (asked != "all") { partialText = partialOf(this.db, id, round); }
     let v: RoundView = {
       seq: round, running: roundRunning(live), partial: partialText,
       thoughts: thoughtViews(thoughts), steps: stepViews(live),
@@ -828,24 +830,24 @@ class ThreadApi {
   }
 
   @post("/:id/cancel")
-  cancel(req: Request): Reply {
-    if (ownedThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  cancel(req: Request, @PathVariable("id") id: string): Reply {
+    if (ownedThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let problem = askCancel(this.db, param(req, "id"));
+    let problem = askCancel(this.db, id);
     if (problem != "") { return badRequest(problem); }
     let v: CancelAskedView = { asked: true };
     return okJson(v);
   }
 
   @post("/:id/messages")
-  say(req: Request): Reply {
+  say(req: Request, @PathVariable("id") id: string): Reply {
     let tags = callerTags(req);
-    let agentId = ownedThread(this.db, param(req, "id"), tags);
+    let agentId = ownedThread(this.db, id, tags);
     if (agentId == "") {
-      return notFound("thread " + param(req, "id"));
+      return notFound("thread " + id);
     }
-    clearCancel(this.db, param(req, "id"));
+    clearCancel(this.db, id);
     if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
     let text = jsonText(req.body, "text");
     if (text == "") { return badRequest("nothing to ask: \"text\" is empty"); }
@@ -876,16 +878,16 @@ class ThreadApi {
     }
 
     let tracer = tracerWithSession(
-      tracerFor(this.db, this.master), param(req, "id"), owningTag(callerTags(req)));
-    let answered = runInThreadWith(this.db, param(req, "id"), {
+      tracerFor(this.db, this.master), id, owningTag(callerTags(req)));
+    let answered = runInThreadWith(this.db, id, {
       userText: text, master: this.master, tracer: tracer, pick: pick,
       think: jsonText(req.body, "think") == "true",
       scope: jsonText(req.body, "scope"),
     });
     let run = answered.run;
     let runId = recordRun(this.db, {
-      agentId: agentId, threadId: param(req, "id"),
-      owner: threadOwner(this.db, param(req, "id")),
+      agentId: agentId, threadId: id,
+      owner: threadOwner(this.db, id),
       question: text, run: withNotes(run, answered.notes),
       modelChoiceId: answered.modelChoiceId, routeNote: answered.routeNote,
     });
@@ -904,8 +906,8 @@ class ThreadApi {
       modelChoiceId: answered.modelChoiceId,
       routeNote: answered.routeNote,
       toolCalls: run.steps.length,
-      steps: stepViews(stepsOfRound(this.db, param(req, "id"), answered.baseSeq)),
-      thoughts: thoughtViews(thoughtsOfRound(this.db, param(req, "id"), answered.baseSeq)),
+      steps: stepViews(stepsOfRound(this.db, id, answered.baseSeq)),
+      thoughts: thoughtViews(thoughtsOfRound(this.db, id, answered.baseSeq)),
       inputTokens: run.inputTokens,
       outputTokens: run.outputTokens,
       traceId: traced,
@@ -935,12 +937,12 @@ class ThreadApi {
   }
 
   @get("/:id")
-  transcript(req: Request): Reply {
-    if (readableThread(this.db, param(req, "id"), callerTags(req)) == "") {
-      return notFound("thread " + param(req, "id"));
+  transcript(req: Request, @PathVariable("id") id: string): Reply {
+    if (readableThread(this.db, id, callerTags(req)) == "") {
+      return notFound("thread " + id);
     }
-    let mine = ownedThread(this.db, param(req, "id"), callerTags(req)) != "";
-    let said: ThreadTurnRow[] = threadMessageRows(this.db, param(req, "id"));
+    let mine = ownedThread(this.db, id, callerTags(req)) != "";
+    let said: ThreadTurnRow[] = threadMessageRows(this.db, id);
     let out: MessageView[] = [];
     let i: int = 0;
     while (i < said.length) {
@@ -960,8 +962,8 @@ class ThreadApi {
       i = i + 1;
     }
     let v: TranscriptView = {
-      modelChoiceId: threadChoice(this.db, param(req, "id")),
-      title: threadTitle(this.db, param(req, "id")),
+      modelChoiceId: threadChoice(this.db, id),
+      title: threadTitle(this.db, id),
       mine: mine,
       messages: out,
     };

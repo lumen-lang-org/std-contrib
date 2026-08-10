@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { ScriptImageRow, scriptImagesMapping } from "../../schema.ts";
 
@@ -28,7 +28,7 @@ export class ScriptImageApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     let keys: DbOrder[] = [asc("label")];
     return ok(listOrdered(this.db, scriptImagesMapping(), "", [], keys));
   }
@@ -46,27 +46,27 @@ export class ScriptImageApi {
   }
 
   @put("/:id")
-  update(req: Request): Reply {
-    if (!existsById(this.db, scriptImagesMapping(), param(req, "id"))) {
-      return notFound("script image " + param(req, "id"));
+  update(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, scriptImagesMapping(), id)) {
+      return notFound("script image " + id);
     }
     let row: ScriptImageRow = JSON.parse<ScriptImageRow>(req.body);
-    if (row.id != param(req, "id")) {
+    if (row.id != id) {
       return badRequest("the id in the body must match the path");
     }
     let named = scriptImageProblem(row);
     if (named != "") { return badRequest(named); }
     let written = persist(this.db, scriptImagesMapping(), req.body);
     if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, scriptImagesMapping(), param(req, "id")));
+    return ok(findById(this.db, scriptImagesMapping(), id));
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, scriptImagesMapping(), param(req, "id"))) {
-      return notFound("script image " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, scriptImagesMapping(), id)) {
+      return notFound("script image " + id);
     }
-    deleteWhere(this.db, scriptImagesMapping(), "id = " + placeholderAt(this.db, 1), [param(req, "id")]);
+    deleteWhere(this.db, scriptImagesMapping(), "id = " + placeholderAt(this.db, 1), [id]);
     return noContent();
   }
 }
