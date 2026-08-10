@@ -42,7 +42,7 @@ export function documentsMapping(): DbRepository {
     field("scope", "scope", "text"),
     field("body", "body", "text"),
   ];
-  return repository("documents", "id", "id", fs);
+  return repository({ table: "documents", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function createDocuments(db: Db, model: ModelRow): string {
@@ -433,7 +433,7 @@ export function agentRetrievalMapping(): DbRepository {
     field("maxDistance", "max_distance", "float8"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("agent_retrieval", "agentId", "agent_id", fs);
+  return repository({ table: "agent_retrieval", idField: "agentId", idColumn: "agent_id", fields: fs });
 }
 
 export function knowledgePlan(db: Db): Migration[] {

@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbRepository, asc, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
+import { DbField, DbRepository, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { pluginOn } from "./plugincards.ts";
 
@@ -23,7 +23,7 @@ export function toolCardsMapping(): DbRepository {
     field("hint", "hint", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("tool_cards", "id", "id", fs);
+  return repository({ table: "tool_cards", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function toolCardsPlan(db: Db): Migration[] {
@@ -65,5 +65,5 @@ export function cardClaims(db: Db, toolName: string): bool {
 }
 
 export function allToolCards(db: Db): ToolCardRow[] {
-  return JSON.parse<ToolCardRow[]>(listOrdered(db, toolCardsMapping(), "", [], [asc("tool_name")]));
+  return JSON.parse<ToolCardRow[]>(listOrdered(db, toolCardsMapping(), { order: [{ column: "tool_name" }] }));
 }

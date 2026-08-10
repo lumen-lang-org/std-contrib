@@ -22,7 +22,7 @@
 // change worth making deliberately rather than in passing.
 
 import { Db } from "./driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, DbResult, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, listOrdered, pageOrdered, countWhere, existsById, deleteById, deleteWhere, createTableSql, createTableSqlWithKeys, foreignKeys } from "./plume.ts";
+import { DbField, DbOrder, DbQuery, DbRelation, DbRepository, DbResult, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, listOrdered, pageOrdered, countWhere, existsById, deleteById, deleteWhere, createTableSql, createTableSqlWithKeys, foreignKeys } from "./plume.ts";
 
 export type Store = {
   // What it was built from, so anything the methods below do not cover is
@@ -49,8 +49,8 @@ export type Store = {
   list: () => string,
   listWhere: (where: string, args: string[]) => string,
   listProjected: (columns: string, where: string, args: string[]) => string,
-  listOrdered: (where: string, args: string[], keys: DbOrder[]) => string,
-  pageOrdered: (where: string, args: string[], keys: DbOrder[], limit: int, offset: int) => string,
+  listOrdered: (q: DbQuery) => string,
+  pageOrdered: (q: DbQuery) => string,
   count: () => int,
   countWhere: (where: string, args: string[]) => int,
   existsById: (id: string) => bool,
@@ -78,8 +78,8 @@ export function store(db: Db, mapping: DbRepository): Store {
     list: () => { return listWhere(db, mapping, "", none); },
     listWhere: (where: string, args: string[]) => { return listWhere(db, mapping, where, args); },
     listProjected: (columns: string, where: string, args: string[]) => { return listProjected(db, mapping, columns, where, args); },
-    listOrdered: (where: string, args: string[], keys: DbOrder[]) => { return listOrdered(db, mapping, where, args, keys); },
-    pageOrdered: (where: string, args: string[], keys: DbOrder[], limit: int, offset: int) => { return pageOrdered(db, mapping, where, args, keys, limit, offset); },
+    listOrdered: (q: DbQuery) => { return listOrdered(db, mapping, q); },
+    pageOrdered: (q: DbQuery) => { return pageOrdered(db, mapping, q); },
     count: () => { return countWhere(db, mapping, "", none); },
     countWhere: (where: string, args: string[]) => { return countWhere(db, mapping, where, args); },
     existsById: (id: string) => { return existsById(db, mapping, id); },

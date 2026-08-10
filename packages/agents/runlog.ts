@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasMany, boolColumn, desc, dialectType, persist, findById, pageOrdered, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasMany, boolColumn, dialectType, persist, findById, pageOrdered, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { AgentRun } from "./run.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
@@ -51,7 +51,7 @@ function runsMappingV1(): DbRepository {
     field("error", "error", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("runs", "id", "id", fs);
+  return repository({ table: "runs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function runsMapping(): DbRepository {
@@ -75,7 +75,7 @@ export function runsMapping(): DbRepository {
     field("error", "error", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("runs", "id", "id", fs);
+  return repository({ table: "runs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function runStepsMapping(): DbRepository {
@@ -89,16 +89,15 @@ export function runStepsMapping(): DbRepository {
     field("result", "result", "text"),
     field("ok", "ok", "bool"),
   ];
-  return repository("run_steps", "id", "id", fs);
+  return repository({ table: "run_steps", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function runsFull(db: Db): DbRepository {
   let rs: DbRelation[] = [
-    hasMany("steps", "run_steps", "id", "run_id",
-            "step_index AS \"stepIndex\", tool, server, args, result, "
-            + boolColumn(db, "ok") + " AS \"ok\""),
+    hasMany({ field: "steps", table: "run_steps", localColumn: "id", foreignColumn: "run_id", columns: "step_index AS \"stepIndex\", tool, server, args, result, "
+            + boolColumn(db, "ok") + " AS \"ok\"" }),
   ];
-  return repositoryWith("runs", "id", "id", runsMapping().fields, rs);
+  return repository({ table: "runs", idField: "id", idColumn: "id", fields: runsMapping().fields, relations: rs });
 }
 
 export function runLogPlan(db: Db): Migration[] {
@@ -182,7 +181,7 @@ export function recordRun(db: Db, wrote: RunRecord): string {
 }
 
 export function runsOf(db: Db, agentId: string, tags: string[], limit: int): string {
-  let keys: DbOrder[] = [desc("created_at")];
+  let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
   let where = "agent_id = " + placeholderAt(db, 1);
   let args: string[] = [agentId];
   let mine = ownerClause(db, tags, 2);
@@ -191,7 +190,7 @@ export function runsOf(db: Db, agentId: string, tags: string[], limit: int): str
     let i: int = 0;
     while (i < tags.length) { args.push(tags[i]); i = i + 1; }
   }
-  return pageOrdered(db, runsMapping(), where, args, keys, limit, 0);
+  return pageOrdered(db, runsMapping(), { where: where, args: args, order: keys, limit: limit, offset: 0 });
 }
 
 export function ownedRun(db: Db, runId: string, tags: string[]): string {

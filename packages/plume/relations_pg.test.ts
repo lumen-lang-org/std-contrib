@@ -8,7 +8,7 @@
 
 import { Db, DbConfig } from "./driver.ts";
 import { postgres } from "./postgres.ts";
-import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, relationValid, connectDatabase, createTable, dropTable, persist, findById, listWhere, countWhere } from "./plume.ts";
+import { DbField, DbRelation, DbRepository, field, repository, hasOne, hasMany, relationValid, connectDatabase, createTable, dropTable, persist, findById, listWhere, countWhere } from "./plume.ts";
 
 let database: Db = postgres();
 
@@ -37,7 +37,7 @@ function connectionConfig(): DbConfig {
 
 function teamsRepo(): DbRepository {
   let fs: DbField[] = [ field("id", "id", "text"), field("teamName", "team_name", "text") ];
-  return repository("rel_teams", "id", "id", fs);
+  return repository({ table: "rel_teams", idField: "id", idColumn: "id", fields: fs });
 }
 
 function tasksRepo(): DbRepository {
@@ -46,7 +46,7 @@ function tasksRepo(): DbRepository {
     field("agentId", "agent_id", "text"),
     field("title", "title", "text"),
   ];
-  return repository("rel_tasks", "id", "id", fs);
+  return repository({ table: "rel_tasks", idField: "id", idColumn: "id", fields: fs });
 }
 
 function agentsRepo(): DbRepository {
@@ -56,10 +56,10 @@ function agentsRepo(): DbRepository {
     field("teamId", "team_id", "text"),
   ];
   let rs: DbRelation[] = [
-    hasOne("team", "rel_teams", "team_id", "id", "id, team_name AS \"teamName\""),
-    hasMany("tasks", "rel_tasks", "id", "agent_id", "id, agent_id AS \"agentId\", title"),
+    hasOne({ field: "team", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" }),
+    hasMany({ field: "tasks", table: "rel_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, agent_id AS \"agentId\", title" }),
   ];
-  return repositoryWith("rel_agents", "id", "id", fs, rs);
+  return repository({ table: "rel_agents", idField: "id", idColumn: "id", fields: fs, relations: rs });
 }
 
 // The same mapping without relations, to show they are what changed.
@@ -69,7 +69,7 @@ function agentsFlat(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("teamId", "team_id", "text"),
   ];
-  return repository("rel_agents", "id", "id", fs);
+  return repository({ table: "rel_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 function seeded(): DbRepository {
@@ -97,7 +97,7 @@ function seeded(): DbRepository {
 // --- offline ---------------------------------------------------------------
 
 test("a relation states both sides and how to shape what comes back", () => {
-  let r = hasOne("team", "rel_teams", "team_id", "id", "id, team_name AS \"teamName\"");
+  let r = hasOne({ field: "team", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id, team_name AS \"teamName\"" });
   expect(r.field == "team");
   expect(r.kind == "one");
   expect(r.table == "rel_teams");
@@ -107,13 +107,13 @@ test("a relation states both sides and how to shape what comes back", () => {
 });
 
 test("a many relation differs only in kind", () => {
-  expect(hasMany("tasks", "rel_tasks", "id", "agent_id", "id, title").kind == "many");
+  expect(hasMany({ field: "tasks", table: "rel_tasks", localColumn: "id", foreignColumn: "agent_id", columns: "id, title" }).kind == "many");
 });
 
 test("a relation with an unsafe name or select list is refused", () => {
-  expect(!relationValid(hasOne("team", "x; DROP TABLE y", "team_id", "id", "id")));
-  expect(!relationValid(hasOne("team", "rel_teams", "team_id; --", "id", "id")));
-  expect(!relationValid(hasOne("t", "rel_teams", "team_id", "id", "id AS \"a'b\"")));
+  expect(!relationValid(hasOne({ field: "team", table: "x; DROP TABLE y", localColumn: "team_id", foreignColumn: "id", columns: "id" })));
+  expect(!relationValid(hasOne({ field: "team", table: "rel_teams", localColumn: "team_id; --", foreignColumn: "id", columns: "id" })));
+  expect(!relationValid(hasOne({ field: "t", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id AS \"a'b\"" })));
   // A kind that is neither is not a relation.
   let odd: DbRelation = { field: "t", kind: "some", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id", linkTable: "", linkLocalColumn: "", linkForeignColumn: "" };
   expect(!relationValid(odd));
@@ -189,8 +189,8 @@ test("a filter still applies to the parent, not to the relation", () => {
 
 test("a malformed relation refuses the read rather than sending it", () => {
   let repo = seeded();
-  let bad: DbRelation[] = [ hasOne("team", "rel_teams", "team_id", "id", "id AS \"a'b\"") ];
-  let broken = repositoryWith("rel_agents", "id", "id", agentsFlat().fields, bad);
+  let bad: DbRelation[] = [ hasOne({ field: "team", table: "rel_teams", localColumn: "team_id", foreignColumn: "id", columns: "id AS \"a'b\"" }) ];
+  let broken = repository({ table: "rel_agents", idField: "id", idColumn: "id", fields: agentsFlat().fields, relations: bad });
   expect(findById(database, broken, "a1") == "");
   expect(listWhere(database, broken, "", []) == "[]");
   // And the table is untouched.

@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, countWhere, deleteWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, countWhere, deleteWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok } from "../../../rest/server.ts";
 import { utf8Length } from "../../artifacts.ts";
@@ -66,12 +66,11 @@ export class SkillApi {
   @get("/")
   list(@RequestParam("featured", "") featured: string): Reply {
     if (featured == "1") {
-      let ranked: DbOrder[] = [asc("featured_rank")];
-      return ok(listOrdered(this.db, skillsMapping(),
-        "visibility = 'public' AND featured_rank > 0", [], ranked));
+      let ranked: DbOrder[] = [{ column: "featured_rank" }];
+      return ok(listOrdered(this.db, skillsMapping(), { where: "visibility = 'public' AND featured_rank > 0", order: ranked }));
     }
-    let keys: DbOrder[] = [asc("skill_name")];
-    return ok(listOrdered(this.db, skillsMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "skill_name" }];
+    return ok(listOrdered(this.db, skillsMapping(), { order: keys }));
   }
 
   @get("/:id")
@@ -177,8 +176,8 @@ export class SkillApi {
     if (!existsById(this.db, skillsMapping(), id)) {
       return notFound("skill " + id);
     }
-    let keys: DbOrder[] = [asc("path")];
-    return ok(listOrdered(this.db, skillFilesMapping(), "skill_id = " + placeholderAt(this.db, 1), [id], keys));
+    let keys: DbOrder[] = [{ column: "path" }];
+    return ok(listOrdered(this.db, skillFilesMapping(), { where: "skill_id = " + placeholderAt(this.db, 1), args: [id], order: keys }));
   }
 
   @post("/:id/files")

@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, DbRepository, asc, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, reply } from "../../../rest/server.ts";
 import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../tracing/tracing.ts";
@@ -58,11 +58,11 @@ export class AgentApi {
 
   @get("/")
   list(@RequestParam("enabled", "") enabled: string): Reply {
-    let keys: DbOrder[] = [asc("agent_name")];
+    let keys: DbOrder[] = [{ column: "agent_name" }];
     if (enabled == "true") {
-      return ok(listOrdered(this.db, this.full, "enabled = " + this.db.placeholder, ["1"], keys));
+      return ok(listOrdered(this.db, this.full, { where: "enabled = " + this.db.placeholder, args: ["1"], order: keys }));
     }
-    return ok(listOrdered(this.db, this.full, "", [], keys));
+    return ok(listOrdered(this.db, this.full, { order: keys }));
   }
 
   @get("/:id")

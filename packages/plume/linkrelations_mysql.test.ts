@@ -5,7 +5,7 @@
 
 import { Db, DbConfig } from "./driver.ts";
 import { mysql } from "./mysql.ts";
-import { DbField, DbRelation, DbRepository, field, repository, repositoryWith, hasManyThrough, relationValid, connectDatabase, createTable, dropTable, persist, findById, listWhere, countWhere, execute } from "./plume.ts";
+import { DbField, DbRelation, DbRepository, field, repository, hasManyThrough, relationValid, connectDatabase, createTable, dropTable, persist, findById, listWhere, countWhere, execute } from "./plume.ts";
 
 let database: Db = mysql();
 
@@ -14,7 +14,7 @@ type ServerRow = { id: string, serverName: string, url: string };
 
 function agentsFlat(): DbRepository {
   let fs: DbField[] = [ field("id", "id", "text"), field("agentName", "agent_name", "text") ];
-  return repository("lk_agents", "id", "id", fs);
+  return repository({ table: "lk_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 function serversRepo(): DbRepository {
@@ -23,7 +23,7 @@ function serversRepo(): DbRepository {
     field("serverName", "server_name", "text"),
     field("url", "url", "text"),
   ];
-  return repository("lk_servers", "id", "id", fs);
+  return repository({ table: "lk_servers", idField: "id", idColumn: "id", fields: fs });
 }
 
 // An agent, its MCP servers, and its sub-agents — both through link tables,
@@ -33,7 +33,7 @@ function agentsRepo(): DbRepository {
     hasManyThrough({ field: "servers", table: "lk_servers", foreignColumn: "id", linkTable: "lk_agent_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id", localColumn: "id", columns: "id, server_name AS \"serverName\", url" }),
     hasManyThrough({ field: "subAgents", table: "lk_agents", foreignColumn: "id", linkTable: "lk_agent_children", linkLocalColumn: "parent_id", linkForeignColumn: "child_id", localColumn: "id", columns: "id, agent_name AS \"agentName\"" }),
   ];
-  return repositoryWith("lk_agents", "id", "id", agentsFlat().fields, rs);
+  return repository({ table: "lk_agents", idField: "id", idColumn: "id", fields: agentsFlat().fields, relations: rs });
 }
 
 function seeded(): DbRepository {

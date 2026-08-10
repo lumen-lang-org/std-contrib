@@ -46,6 +46,11 @@ them — so nothing here locks the project into a single source monorepo.
 | [`pgvector`](packages/pgvector) | Persistent vector store on PostgreSQL + pgvector via FFI — upsert, cosine search, distance bounds |
 | [`pdf`](packages/pdf) | PDF text and metadata via Poppler — layout mode, page ranges, document info |
 | [`ai`](packages/ai) | Typed AI helpers for OpenAI-compatible chat APIs |
+| [`rest`](packages/rest) | Router and HTTP server — decorated controllers, a route table checked at startup |
+| [`websocket`](packages/websocket) | RFC 6455 websockets — handshake, frames, server and client |
+| [`socketio`](packages/socketio) | A socket.io server the official browser client connects to |
+| [`sse`](packages/sse) | Server-sent events — one-way push over a response that never ends, with resumption |
+| [`agents`](packages/agents) | Agents, prompts, models, MCP links and sub-agents as database rows — run and reconfigured over HTTP without a restart |
 
 ## Using a package
 

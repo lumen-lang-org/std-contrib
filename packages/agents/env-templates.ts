@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, persist, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export const MAX_TEMPLATE_NAME: int = 60;
@@ -31,7 +31,7 @@ export function envTemplatesMapping(): DbRepository {
     field("featuredRank", "featured_rank", "int"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("env_templates", "id", "id", fs);
+  return repository({ table: "env_templates", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function envTemplatesPlan(db: Db): Migration[] {
@@ -50,8 +50,8 @@ export function emptyEnvTemplate(): EnvTemplateRow {
 }
 
 export function envTemplatesAll(db: Db): EnvTemplateRow[] {
-  let keys: DbOrder[] = [asc("name")];
-  let listed = listOrdered(db, envTemplatesMapping(), "", [], keys);
+  let keys: DbOrder[] = [{ column: "name" }];
+  let listed = listOrdered(db, envTemplatesMapping(), { order: keys });
   if (listed == "" || listed == "[]") {
     let none: EnvTemplateRow[] = [];
     return none;

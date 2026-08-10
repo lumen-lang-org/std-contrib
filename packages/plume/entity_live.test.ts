@@ -54,7 +54,7 @@ function handWritten(): DbRepository {
     field("maxSteps", "max_steps", "int"),
     field("temperature", "temperature", "float8"),
   ];
-  return repository("entity_test_agents", "id", "id", fields);
+  return repository({ table: "entity_test_agents", idField: "id", idColumn: "id", fields: fields });
 }
 
 function generated(): DbRepository {

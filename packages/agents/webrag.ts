@@ -25,7 +25,7 @@ export function agentWebRagMapping(): DbRepository {
     field("queryMode", "query_mode", "text"),
     field("queryModelId", "query_model_id", "text"),
   ];
-  return repository("agent_web_rag", "agentId", "agent_id", fs);
+  return repository({ table: "agent_web_rag", idField: "agentId", idColumn: "agent_id", fields: fs });
 }
 
 export function webRagPlan(db: Db): Migration[] {

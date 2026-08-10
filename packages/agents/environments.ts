@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export const ENV_IDLE_MS: int = 900000;
@@ -26,7 +26,7 @@ export function envMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("lastUsedAt", "last_used_at", "text"),
   ];
-  return repository("environments", "id", "id", fs);
+  return repository({ table: "environments", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function envPlan(db: Db): Migration[] {
@@ -248,8 +248,8 @@ export function envIdle(db: Db, s: EnvSweep): int {
   let idleMs = s.idleMs > 0 ? s.idleMs : ENV_IDLE_MS;
   let deadline = envMinus(s.now, idleMs);
   if (deadline == "") { return 0; }
-  let keys: DbOrder[] = [asc("id")];
-  let listed = listOrdered(db, envMapping(), "status = " + placeholderAt(db, 1), ["running"], keys);
+  let keys: DbOrder[] = [{ column: "id" }];
+  let listed = listOrdered(db, envMapping(), { where: "status = " + placeholderAt(db, 1), args: ["running"], order: keys });
   if (listed == "" || listed == "[]") { return 0; }
   let rows = JSON.parse<EnvRow[]>(listed);
   let stopped: int = 0;
@@ -279,8 +279,8 @@ export function envForget(db: Db, threadId: string): void {
 }
 
 export function envList(db: Db, threadId: string): EnvRow[] {
-  let keys: DbOrder[] = [asc("name")];
-  let listed = listOrdered(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let keys: DbOrder[] = [{ column: "name" }];
+  let listed = listOrdered(db, envMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") {
     let none: EnvRow[] = [];
     return none;

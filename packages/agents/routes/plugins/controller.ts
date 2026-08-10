@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, existsById, findById, listOrdered } from "../../../plume/plume.ts";
+import { DbOrder, existsById, findById, listOrdered } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
@@ -49,8 +49,8 @@ export class PluginApi {
 
   @get("/")
   list(): Reply {
-    let keys: DbOrder[] = [asc("plugin_name")];
-    return ok(listOrdered(this.db, pluginsMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "plugin_name" }];
+    return ok(listOrdered(this.db, pluginsMapping(), { order: keys }));
   }
 
   @get("/:id/items")

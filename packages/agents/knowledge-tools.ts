@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbOrder, asc, executeWith, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
+import { DbOrder, executeWith, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
@@ -93,8 +93,8 @@ export type KnowledgeToolCall = {
 };
 
 function anyEmbedder(db: Db): ModelRow {
-  let keys: DbOrder[] = [asc("label")];
-  let rows = JSON.parse<ModelRow[]>(listOrdered(db, modelsMapping(), "", [], keys));
+  let keys: DbOrder[] = [{ column: "label" }];
+  let rows = JSON.parse<ModelRow[]>(listOrdered(db, modelsMapping(), { order: keys }));
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].kind == "embedding" && rows[i].enabled) { return rows[i]; }
@@ -105,8 +105,8 @@ function anyEmbedder(db: Db): ModelRow {
 }
 
 function skillSaid(db: Db, said: string): SkillRow {
-  let keys: DbOrder[] = [asc("skill_name")];
-  let rows = JSON.parse<SkillRow[]>(listOrdered(db, skillsMapping(), "", [], keys));
+  let keys: DbOrder[] = [{ column: "skill_name" }];
+  let rows = JSON.parse<SkillRow[]>(listOrdered(db, skillsMapping(), { order: keys }));
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].skillName.toLowerCase() == said.toLowerCase()) { return rows[i]; }
@@ -181,8 +181,8 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
   }
 
   if (call.name == "list_skills") {
-    let keys: DbOrder[] = [asc("skill_name")];
-    let rows = JSON.parse<SkillRow[]>(listOrdered(db, skillsMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "skill_name" }];
+    let rows = JSON.parse<SkillRow[]>(listOrdered(db, skillsMapping(), { order: keys }));
     if (rows.length == 0) { return yes("No skills yet — create_skill writes one."); }
     let out = `${rows.length}` + " skill(s):\n";
     let i: int = 0;
@@ -208,8 +208,8 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
       source: "local", sourceUrl: "", visibility: "private", featuredRank: 0, updatedAt: `${call.nowMs}`,
     };
     persist(db, skillsMapping(), JSON.stringify(row));
-    let keys2: DbOrder[] = [asc("agent_name")];
-    let agents = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), "", [], keys2));
+    let keys2: DbOrder[] = [{ column: "agent_name" }];
+    let agents = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: keys2 }));
     let a: int = 0;
     let carrier = "";
     while (a < agents.length) {

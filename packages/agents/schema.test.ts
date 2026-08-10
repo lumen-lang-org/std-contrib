@@ -1,6 +1,6 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { DbOrder, asc, connectDatabase, persist, findById, listOrdered, countWhere, existsById, execute, dropTable } from "../plume/plume.ts";
+import { DbOrder, connectDatabase, persist, findById, listOrdered, countWhere, existsById, execute, dropTable } from "../plume/plume.ts";
 import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
 import { thinkingJson } from "./provider.ts";
 import { Candidate, candidatesFrom } from "./router.ts";
@@ -215,8 +215,8 @@ test("a sub-agent is an agent, and reads one level at a time", () => {
 test("listing agents does not multiply them by their relations", () => {
   seeded();
   expect(countWhere(database, agentsFull(database), "", []) == 2);
-  let keys: DbOrder[] = [asc("agent_name")];
-  let json = listOrdered(database, agentsFull(database), "", [], keys);
+  let keys: DbOrder[] = [{ column: "agent_name" }];
+  let json = listOrdered(database, agentsFull(database), { order: keys });
   expect(json.indexOf("lead") == json.lastIndexOf("lead") - 0 || json.indexOf("lead") >= 0);
   expect(json.indexOf("scout") >= 0);
 });

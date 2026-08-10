@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { next as nextFiring, problem as cronProblem, civil, knownZone } from "../cron/cron.ts";
 
@@ -56,7 +56,7 @@ export function tasksMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("scheduled_tasks", "id", "id", fs);
+  return repository({ table: "scheduled_tasks", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function tasksPlan(db: Db): Migration[] {
@@ -263,8 +263,8 @@ export function enabledCount(db: Db, owner: string): int {
 }
 
 export function tasksOf(db: Db, owner: string): string {
-  let keys: DbOrder[] = [asc("next_at")];
-  return listOrdered(db, tasksMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "next_at" }];
+  return listOrdered(db, tasksMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
 }
 
 export function claimDue(db: Db, nowMs: number): TaskRow {

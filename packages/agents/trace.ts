@@ -25,7 +25,7 @@ export function traceConfigMapping(): DbRepository {
     field("environment", "environment", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("trace_config", "id", "id", fs);
+  return repository({ table: "trace_config", idField: "id", idColumn: "id", fields: fs });
 }
 
 function traceConfigMappingV1(): DbRepository {
@@ -37,7 +37,7 @@ function traceConfigMappingV1(): DbRepository {
     field("environment", "environment", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("trace_config", "id", "id", fs);
+  return repository({ table: "trace_config", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function tracePlan(db: Db): Migration[] {

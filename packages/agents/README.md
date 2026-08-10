@@ -602,6 +602,7 @@ The query vector is bound, not interpolated: it came from a provider's reply
 and is data like any other. `distance` is returned so a caller can decide what
 is too far, rather than trusting the ranking blindly.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -629,6 +630,7 @@ The live halves are `examples/mount-mcp.ts`, `examples/call-model.ts` and
 is a test that gets skipped, so those stay examples and the refusals stay tests.
 
 Requires `sh ../plume/build.sh` first.
+<!-- /website:skip -->
 
 ## The console
 
@@ -702,6 +704,7 @@ console renders, which a broker would not keep. `GET /jobs` is that journal;
 `GET /documents?scope=` puts queued and failed rows above the indexed ones, so
 a file you just dropped is visible instead of looking lost.
 
+<!-- website:skip -->
 ### End-to-end tests
 
 `app/e2e` drives the console with Playwright against a live API — it starts no
@@ -728,3 +731,4 @@ The app is plain npm/TypeScript and is not part of the URL-import catalog;
 CI's `packages/*/*.ts` glob is one level deep on purpose, so the TypeScript
 here is never handed to the Lumen compiler. Keep it that way — both languages
 use `.ts`.
+<!-- /website:skip -->

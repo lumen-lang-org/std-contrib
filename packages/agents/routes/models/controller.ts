@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, countWhere, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbOrder, countWhere, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { DestinationMove, credentialFor, destinationOf, destinationProblem, hasCredential } from "../../credentials.ts";
@@ -80,8 +80,8 @@ export class ModelApi {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("label")];
-    return ok(listOrdered(this.db, modelsMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "label" }];
+    return ok(listOrdered(this.db, modelsMapping(), { order: keys }));
   }
 
   @get("/choices")

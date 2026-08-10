@@ -127,6 +127,7 @@ Table names cannot be bound — SQL has no placeholder for an identifier — so
 they are checked against `pgSafeIdentifier` (letters, digits, underscores, not
 starting with a digit) and refused otherwise.
 
+<!-- website:skip -->
 ## Tests
 
 ```sh
@@ -137,6 +138,7 @@ They need a live database, which is the point: the distance operators, the
 vector literal round-trip, and the width check are the parts worth knowing are
 real, and none of them can be tested against a mock. Override the connection
 with `PGVECTOR_TEST_CONNINFO`.
+<!-- /website:skip -->
 
 ## Limits
 

@@ -15,7 +15,7 @@ import { controller } from "../controller.ts";
 import { Request, Reply, Mount, mountedRoutes, listen, ok, created, noContent, notFound, badRequest, param, queryParam } from "../server.ts";
 import { Db, DbConfig } from "../../plume/driver.ts";
 import { sqlite } from "../../plume/sqlite.ts";
-import { DbField, DbRepository, field, repository, connectDatabase, asc, DbOrder } from "../../plume/plume.ts";
+import { DbField, DbRepository, field, repository, connectDatabase, DbOrder } from "../../plume/plume.ts";
 import { Store, store } from "../../plume/store.ts";
 
 type AgentRow = { id: string, agentName: string, maxSteps: int };
@@ -26,7 +26,7 @@ function agentsRepo(): DbRepository {
     field("agentName", "agent_name", "text"),
     field("maxSteps", "max_steps", "int"),
   ];
-  return repository("ctl_agents", "id", "id", fs);
+  return repository({ table: "ctl_agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 // A helper, kept out of the class on purpose. `Class.invoke` dispatches over
@@ -57,10 +57,10 @@ class AgentController {
 
   @get("/")
   list(req: Request): Reply {
-    let keys: DbOrder[] = [asc("agent_name")];
+    let keys: DbOrder[] = [{ column: "agent_name" }];
     let ceiling = queryParam(req, "maxSteps", "");
-    if (ceiling == "") { return ok(this.agents.listOrdered("", [], keys)); }
-    return ok(this.agents.listOrdered("max_steps <= " + this.agents.db.placeholder, [ceiling], keys));
+    if (ceiling == "") { return ok(this.agents.listOrdered({ order: keys })); }
+    return ok(this.agents.listOrdered({ where: "max_steps <= " + this.agents.db.placeholder, args: [ceiling], order: keys }));
   }
 
   @get("/:id")

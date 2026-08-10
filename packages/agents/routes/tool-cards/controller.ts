@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { asc, deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
+import { deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, notFound, ok, okJson, problem } from "../../../rest/server.ts";
 import { toolCardProblem } from "../../api-core.ts";
@@ -16,7 +16,7 @@ export class ToolCardApi {
 
   @get("/")
   list(req: Request): Reply {
-    return ok(listOrdered(this.db, toolCardsMapping(), "", [], [asc("tool_name")]));
+    return ok(listOrdered(this.db, toolCardsMapping(), { order: [{ column: "tool_name" }] }));
   }
 
   @post("/")

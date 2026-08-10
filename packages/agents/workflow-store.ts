@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, desc, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
@@ -74,7 +74,7 @@ function workflowsMappingV1(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("workflows", "id", "id", fs);
+  return repository({ table: "workflows", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function workflowsMapping(): DbRepository {
@@ -104,7 +104,7 @@ export function workflowsMapping(): DbRepository {
     field("createdAt", "created_at", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("workflows", "id", "id", fs);
+  return repository({ table: "workflows", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function workflowRunsMapping(): DbRepository {
@@ -121,7 +121,7 @@ export function workflowRunsMapping(): DbRepository {
     field("startedAt", "started_at", "text"),
     field("endedAt", "ended_at", "text"),
   ];
-  return repository("workflow_runs", "id", "id", fs);
+  return repository({ table: "workflow_runs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function workflowsPlan(db: Db): Migration[] {
@@ -225,8 +225,8 @@ export function emptyWorkflow(): WorkflowRow {
 }
 
 export function workflowsOf(db: Db, owner: string): string {
-  let keys: DbOrder[] = [desc("updated_at")];
-  return listOrdered(db, workflowsMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }];
+  return listOrdered(db, workflowsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
 }
 
 export function enabledWorkflowCount(db: Db, owner: string): int {
@@ -242,10 +242,8 @@ export function enabledWorkflowCount(db: Db, owner: string): int {
 }
 
 export function workflowRunsOf(db: Db, workflowId: string, owner: string): string {
-  let keys: DbOrder[] = [desc("started_at")];
-  return listOrdered(db, workflowRunsMapping(),
-    "workflow_id = " + db.placeholder + " AND owner = " + placeholderAt(db, 2),
-    [workflowId, owner], keys);
+  let keys: DbOrder[] = [{ column: "started_at", direction: "desc" }];
+  return listOrdered(db, workflowRunsMapping(), { where: "workflow_id = " + db.placeholder + " AND owner = " + placeholderAt(db, 2), args: [workflowId, owner], order: keys });
 }
 
 export function nextWorkflowFire(row: WorkflowRow, afterMs: number): Scheduled {

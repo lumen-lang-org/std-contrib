@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { cardClaims } from "./toolcards.ts";
 import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
-import { DbField, DbRepository, DbOrder, asc, desc, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
+import { DbField, DbRepository, DbOrder, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export type LiveStep = {
@@ -46,7 +46,7 @@ export function stepsMapping(): DbRepository {
     field("ok", "ok", "bool"),
     field("result", "result", "text"),
   ];
-  return repository("thread_steps", "id", "id", fs);
+  return repository({ table: "thread_steps", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function stepPlan(db: Db): Migration[] {
@@ -116,7 +116,7 @@ export function thoughtsMapping(): DbRepository {
     field("text", "text", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("thread_thoughts", "id", "id", fs);
+  return repository({ table: "thread_thoughts", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function recordThought(db: Db, threadId: string, seq: int, depth: int, rotation: int, text: string, now: string): void {
@@ -129,17 +129,17 @@ export function recordThought(db: Db, threadId: string, seq: int, depth: int, ro
 }
 
 export function thoughtsOfRound(db: Db, threadId: string, seq: int): Thought[] {
-  let keys: DbOrder[] = [asc("created_at"), asc("depth"), asc("rotation")];
+  let keys: DbOrder[] = [{ column: "created_at" }, { column: "depth" }, { column: "rotation" }];
   let where = "thread_id = " + placeholderAt(db, 1) + " AND seq = " + placeholderAt(db, 2);
   let args: string[] = [threadId, `${seq}`];
-  return JSON.parse<Thought[]>(listOrdered(db, thoughtsMapping(), where, args, keys));
+  return JSON.parse<Thought[]>(listOrdered(db, thoughtsMapping(), { where: where, args: args, order: keys }));
 }
 
 export function thoughtsOfThread(db: Db, threadId: string): Thought[] {
-  let keys: DbOrder[] = [asc("seq"), asc("created_at"), asc("depth"), asc("rotation")];
+  let keys: DbOrder[] = [{ column: "seq" }, { column: "created_at" }, { column: "depth" }, { column: "rotation" }];
   let args: string[] = [threadId];
   return JSON.parse<Thought[]>(
-    listOrdered(db, thoughtsMapping(), "thread_id = " + placeholderAt(db, 1), args, keys));
+    listOrdered(db, thoughtsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: args, order: keys }));
 }
 
 export function forgetThoughts(db: Db, threadId: string, seq: int): void {
@@ -292,10 +292,10 @@ export function rotations(steps: LiveStep[]): int {
 }
 
 export function stepsOfRound(db: Db, threadId: string, seq: int): LiveStep[] {
-  let keys: DbOrder[] = [asc("idx")];
+  let keys: DbOrder[] = [{ column: "idx" }];
   let where = "thread_id = " + placeholderAt(db, 1) + " AND seq = " + placeholderAt(db, 2);
   let args: string[] = [threadId, `${seq}`];
-  return JSON.parse<LiveStep[]>(listOrdered(db, stepsMapping(), where, args, keys));
+  return JSON.parse<LiveStep[]>(listOrdered(db, stepsMapping(), { where: where, args: args, order: keys }));
 }
 
 export function roundRunning(steps: LiveStep[]): bool {
@@ -312,12 +312,12 @@ export function stepMillis(s: LiveStep): int {
 }
 
 export function latestRound(db: Db, threadId: string): int {
-  let keys: DbOrder[] = [desc("seq")];
+  let keys: DbOrder[] = [{ column: "seq", direction: "desc" }];
   let args: string[] = [threadId];
   let stepped = JSON.parse<LiveStep[]>(
-    listOrdered(db, stepsMapping(), "thread_id = " + placeholderAt(db, 1), args, keys));
+    listOrdered(db, stepsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: args, order: keys }));
   let thought = JSON.parse<Thought[]>(
-    listOrdered(db, thoughtsMapping(), "thread_id = " + placeholderAt(db, 1), args, keys));
+    listOrdered(db, thoughtsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: args, order: keys }));
   let best: int = -1;
   if (stepped.length > 0) { best = stepped[0].seq; }
   if (thought.length > 0 && thought[0].seq > best) { best = thought[0].seq; }
@@ -332,10 +332,10 @@ export function forgetRound(db: Db, threadId: string, seq: int): void {
 }
 
 export function stepsOfThread(db: Db, threadId: string): LiveStep[] {
-  let keys: DbOrder[] = [asc("seq"), asc("started_at"), asc("depth"), asc("idx")];
+  let keys: DbOrder[] = [{ column: "seq" }, { column: "started_at" }, { column: "depth" }, { column: "idx" }];
   let args: string[] = [threadId];
   return JSON.parse<LiveStep[]>(
-    listOrdered(db, stepsMapping(), "thread_id = " + placeholderAt(db, 1), args, keys));
+    listOrdered(db, stepsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: args, order: keys }));
 }
 
 export function forgetSteps(db: Db, threadId: string): void {
@@ -358,7 +358,7 @@ function partialsMapping(): DbRepository {
     field("text", "text", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("thread_partials", "id", "thread_id", fs);
+  return repository({ table: "thread_partials", idField: "id", idColumn: "thread_id", fields: fs });
 }
 
 export function clearPartial(db: Db, threadId: string, now: string): void {

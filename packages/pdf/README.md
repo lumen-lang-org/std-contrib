@@ -158,6 +158,7 @@ undefined because Poppler's API can throw.
 - Reading order for a heavily designed page — a magazine layout, a form — is as
   good as Poppler's, which is good but not perfect. `extractLayout` helps.
 
+<!-- website:skip -->
 ## Tests
 
 ```sh
@@ -168,3 +169,4 @@ cd packages/pdf && lumen test pdf_ffi.test.ts # FFI form, from this directory
 The fixtures are PDFs the test writes itself, cross-reference offsets and all,
 so there are no binary files in the repository and the bytes under test are
 visible in the source.
+<!-- /website:skip -->

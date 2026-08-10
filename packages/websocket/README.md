@@ -98,6 +98,7 @@ reading it:
   base64 of it is a 44-character key decoding to 32 bytes where the RFC says
   16. Converted at the call site, with the surprise noted there.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -116,3 +117,4 @@ cost real time: `about:blank` has an opaque origin and Chromium refuses to
 dial from it, and a page serving a Content-Security-Policy blocks `connect-src`
 to another port. Every "the browser failed" before those were understood was
 the harness, not the server — the browser had never opened a connection.
+<!-- /website:skip -->

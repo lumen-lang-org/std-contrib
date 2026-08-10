@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, desc, executeWith, field, findById, listOrdered, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, executeWith, field, findById, listOrdered, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { jsonText } from "./scan.ts";
 import { ArtifactRow, getVersion, listArtifacts } from "./artifacts.ts";
@@ -22,7 +22,7 @@ export function projectsMapping(): DbRepository {
     field("filesThreadId", "files_thread_id", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("projects", "id", "id", fs);
+  return repository({ table: "projects", idField: "id", idColumn: "id", fields: fs });
 }
 
 function projectsMappingV1(): DbRepository {
@@ -33,7 +33,7 @@ function projectsMappingV1(): DbRepository {
     field("instructions", "instructions", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("projects", "id", "id", fs);
+  return repository({ table: "projects", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function projectsPlan(db: Db): Migration[] {
@@ -50,8 +50,8 @@ export function projectsPlan(db: Db): Migration[] {
 }
 
 export function projectsOf(db: Db, owner: string): string {
-  let keys: DbOrder[] = [desc("created_at")];
-  return listOrdered(db, projectsMapping(), "owner = " + db.placeholder, [owner], keys);
+  let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
+  return listOrdered(db, projectsMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
 }
 
 export function emptyProject(): ProjectRow {

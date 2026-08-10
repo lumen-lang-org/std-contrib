@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, asc, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { envDockerBin } from "./environments.ts";
 
@@ -45,7 +45,7 @@ export function userEnvsMapping(): DbRepository {
     field("dockerfile", "dockerfile", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("user_environments", "id", "id", fs);
+  return repository({ table: "user_environments", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function userEnvsPlan(db: Db): Migration[] {
@@ -97,8 +97,8 @@ export function uenvTag(id: string): string {
 }
 
 export function userEnvsOf(db: Db, owner: string): UserEnvRow[] {
-  let keys: DbOrder[] = [asc("name")];
-  let listed = listOrdered(db, userEnvsMapping(), "owner = " + placeholderAt(db, 1), [owner], keys);
+  let keys: DbOrder[] = [{ column: "name" }];
+  let listed = listOrdered(db, userEnvsMapping(), { where: "owner = " + placeholderAt(db, 1), args: [owner], order: keys });
   if (listed == "" || listed == "[]") {
     let none: UserEnvRow[] = [];
     return none;

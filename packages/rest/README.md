@@ -358,6 +358,7 @@ should not have to guess whether it got JSON or a sentence. `accepted` is its ow
 function rather than a 201 with a different number: answering 201 for work
 merely queued tells a client the resource exists when it does not yet.
 
+<!-- website:skip -->
 ## Testing
 
 ```sh
@@ -379,6 +380,7 @@ catches a throw raised on the way to a handler, which is what `serve` and
 controllers that each have a `list`, PUTs a partial body at a handler that
 parses one, and asserts both that the reply is 400 and that the next request is
 still answered.
+<!-- /website:skip -->
 
 ## Dependency inversion
 

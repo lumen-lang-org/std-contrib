@@ -4,7 +4,7 @@ import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, 
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, asc, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
+import { DbOrder, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel } from "./schema.ts";
 import { masterKey, masterKeyProblem } from "./credentials.ts";
@@ -95,8 +95,8 @@ class ConfigApi {
 
   @get("/")
   list(): Reply {
-    let keys: DbOrder[] = [asc("id")];
-    return ok(listOrdered(this.db, modelConfigsMapping(this.db), "", [], keys));
+    let keys: DbOrder[] = [{ column: "id" }];
+    return ok(listOrdered(this.db, modelConfigsMapping(this.db), { order: keys }));
   }
 
   @post("/")
@@ -243,8 +243,8 @@ class ChoiceApi {
 
   @get("/")
   list(): Reply {
-    let keys: DbOrder[] = [asc("menu_rank"), asc("label")];
-    return ok(listOrdered(this.db, modelChoicesMapping(), "", [], keys));
+    let keys: DbOrder[] = [{ column: "menu_rank" }, { column: "label" }];
+    return ok(listOrdered(this.db, modelChoicesMapping(), { order: keys }));
   }
 
   @post("/")
@@ -423,8 +423,8 @@ export function routersJson(rows: ModelRouterRow[]): string {
 
 export function allRouters(db: Db): ModelRouterRow[] {
   let none: ModelRouterRow[] = [];
-  let keys: DbOrder[] = [asc("label"), asc("id")];
-  let listed = listOrdered(db, modelRoutersMapping(), "", [], keys);
+  let keys: DbOrder[] = [{ column: "label" }, { column: "id" }];
+  let listed = listOrdered(db, modelRoutersMapping(), { order: keys });
   if (listed == "" || listed == "[]") { return none; }
   return JSON.parse<ModelRouterRow[]>(listed);
 }

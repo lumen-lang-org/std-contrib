@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, asc, desc, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute, beginTransaction, commitTransaction, rollbackTransaction, dialectType} from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, pageOrdered, executeWith, placeholderAt, createTableSql, execute, beginTransaction, commitTransaction, rollbackTransaction, dialectType } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn, complete, assistantText, stopReasonOf, wasTruncated } from "./provider.ts";
 import { AgentRun, runAgentAt } from "./run.ts";
@@ -42,7 +42,7 @@ function threadsMappingV1(): DbRepository {
     field("agentId", "agent_id", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("threads", "id", "id", fs);
+  return repository({ table: "threads", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function threadsMapping(): DbRepository {
@@ -57,7 +57,7 @@ export function threadsMapping(): DbRepository {
     field("projectId", "project_id", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("threads", "id", "id", fs);
+  return repository({ table: "threads", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function threadTurnsMapping(): DbRepository {
@@ -71,7 +71,7 @@ export function threadTurnsMapping(): DbRepository {
     field("callId", "call_id", "text"),
     field("toolName", "tool_name", "text"),
   ];
-  return repository("thread_turns", "id", "id", fs);
+  return repository({ table: "thread_turns", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function threadPlan(db: Db): Migration[] {
@@ -186,7 +186,7 @@ export function sweepEmptyThreads(db: Db, before: string): void {
 
 export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
   let out: ThreadListing[] = [];
-  let newest: DbOrder[] = [desc("created_at")];
+  let newest: DbOrder[] = [{ column: "created_at", direction: "desc" }];
   let hidden = "route_key <> 'project-files'";
   let clause = ownerClause(db, page.tags, 1);
   clause = clause == "" ? hidden : hidden + " AND " + clause;
@@ -199,7 +199,7 @@ export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
     while (t < page.tags.length) { both.push(page.tags[t]); t = t + 1; }
     args = both;
   }
-  let mine = pageOrdered(db, threadsMapping(), clause, args, newest, page.limit, page.offset);
+  let mine = pageOrdered(db, threadsMapping(), { where: clause, args: args, order: newest, limit: page.limit, offset: page.offset });
   if (mine == "" || mine == "[]") { return out; }
   let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(mine);
   let i: int = 0;
@@ -256,8 +256,8 @@ export function readableThread(db: Db, threadId: string, tags: string[]): string
 
 export function threadTurns(db: Db, threadId: string): Turn[] {
   let out: Turn[] = [];
-  let keys: DbOrder[] = [asc("seq")];
-  let listed = listOrdered(db, threadTurnsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let keys: DbOrder[] = [{ column: "seq" }];
+  let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
   let i: int = 0;
@@ -487,8 +487,8 @@ export function isReplayable(db: Db, threadId: string): bool {
 
 export function listReplayable(db: Db, limit: int): ThreadListing[] {
   let out: ThreadListing[] = [];
-  let keys: DbOrder[] = [desc("created_at")];
-  let held = pageOrdered(db, threadsMapping(), "replayable = " + placeholderAt(db, 1), ["1"], keys, limit, 0);
+  let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
+  let held = pageOrdered(db, threadsMapping(), { where: "replayable = " + placeholderAt(db, 1), args: ["1"], order: keys, limit: limit, offset: 0 });
   if (held == "" || held == "[]") { return out; }
   let rows: ThreadRow[] = JSON.parse<ThreadRow[]>(held);
   let i: int = 0;
@@ -807,7 +807,7 @@ export function summaryText(db: Db, threadId: string): ThreadSummaryRow {
 }
 
 function listWhereThread(db: Db, threadId: string): string {
-  return listOrdered(db, threadSummariesMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], []);
+  return listOrdered(db, threadSummariesMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId] });
 }
 
 export type CompactAsk = {
@@ -1094,8 +1094,8 @@ export function threadMessages(db: Db, threadId: string): Turn[] {
 
 export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {
   let out: ThreadTurnRow[] = [];
-  let keys: DbOrder[] = [asc("seq")];
-  let listed = listOrdered(db, threadTurnsMapping(), "thread_id = " + placeholderAt(db, 1), [threadId], keys);
+  let keys: DbOrder[] = [{ column: "seq" }];
+  let listed = listOrdered(db, threadTurnsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
   let i: int = 0;

@@ -34,7 +34,7 @@ export function checkpointRepository(table: string): DbRepository {
     field("key", "checkpoint_key", "text"),
     field("value", "checkpoint_value", "text"),
   ];
-  return repository(table, "key", "checkpoint_key", fields);
+  return repository({ table: table, idField: "key", idColumn: "checkpoint_key", fields: fields });
 }
 
 function dbPut(db: Db, table: string, key: string, value: string): bool {

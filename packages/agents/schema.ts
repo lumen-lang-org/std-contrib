@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, repositoryWith, hasOne, hasMany, hasManyThrough, asc, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export type ModelRow = {
@@ -126,7 +126,7 @@ function modelsMappingV1(): DbRepository {
     field("dimensions", "dimensions", "int"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("models", "id", "id", fs);
+  return repository({ table: "models", idField: "id", idColumn: "id", fields: fs });
 }
 
 function mcpServersMappingV1(): DbRepository {
@@ -137,7 +137,7 @@ function mcpServersMappingV1(): DbRepository {
     field("endpoint", "endpoint", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("mcp_servers", "id", "id", fs);
+  return repository({ table: "mcp_servers", idField: "id", idColumn: "id", fields: fs });
 }
 
 function agentsMappingV1(): DbRepository {
@@ -150,7 +150,7 @@ function agentsMappingV1(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("agents", "id", "id", fs);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function modelsMapping(): DbRepository {
@@ -165,7 +165,7 @@ export function modelsMapping(): DbRepository {
     field("contextTokens", "context_tokens", "int"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("models", "id", "id", fs);
+  return repository({ table: "models", idField: "id", idColumn: "id", fields: fs });
 }
 
 function modelConfigsMappingV1(): DbRepository {
@@ -177,7 +177,7 @@ function modelConfigsMappingV1(): DbRepository {
     field("topP", "top_p", "float8"),
     field("extra", "extra", "text"),
   ];
-  return repository("model_configs", "id", "id", fs);
+  return repository({ table: "model_configs", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function modelConfigsMapping(db: Db): DbRepository {
@@ -194,10 +194,9 @@ export function modelConfigsMapping(db: Db): DbRepository {
     field("rank", "menu_rank", "int"),
   ];
   let rs: DbRelation[] = [
-    hasOne("model", "models", "model_id", "id",
-           "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\""),
+    hasOne({ field: "model", table: "models", localColumn: "model_id", foreignColumn: "id", columns: "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\"" }),
   ];
-  return repositoryWith("model_configs", "id", "id", fs, rs);
+  return repository({ table: "model_configs", idField: "id", idColumn: "id", fields: fs, relations: rs });
 }
 
 export function modelChoicesMapping(): DbRepository {
@@ -212,7 +211,7 @@ export function modelChoicesMapping(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("rank", "menu_rank", "int"),
   ];
-  return repository("model_choices", "id", "id", fs);
+  return repository({ table: "model_choices", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function modelRoutersMapping(): DbRepository {
@@ -226,14 +225,13 @@ export function modelRoutersMapping(): DbRepository {
     field("escalateOnly", "escalate_only", "bool"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("model_routers", "id", "id", fs);
+  return repository({ table: "model_routers", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function enabledChoices(db: Db): ModelChoiceRow[] {
   let out: ModelChoiceRow[] = [];
-  let keys: DbOrder[] = [asc("menu_rank"), asc("label")];
-  let listed = listOrdered(db, modelChoicesMapping(),
-    "enabled = " + placeholderAt(db, 1), ["1"], keys);
+  let keys: DbOrder[] = [{ column: "menu_rank" }, { column: "label" }];
+  let listed = listOrdered(db, modelChoicesMapping(), { where: "enabled = " + placeholderAt(db, 1), args: ["1"], order: keys });
   if (listed == "" || listed == "[]") { return out; }
   return JSON.parse<ModelChoiceRow[]>(listed);
 }
@@ -249,7 +247,7 @@ export function configForChoice(db: Db, choiceId: string): string {
 }
 
 export function modelConfigRows(db: Db): DbRepository {
-  return repository("model_configs", "id", "id", modelConfigsMapping(db).fields);
+  return repository({ table: "model_configs", idField: "id", idColumn: "id", fields: modelConfigsMapping(db).fields });
 }
 
 export type ConfigAndModel = {
@@ -290,7 +288,7 @@ export function promptsMapping(): DbRepository {
     field("body", "body", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("prompts", "id", "id", fs);
+  return repository({ table: "prompts", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function mcpServersMapping(): DbRepository {
@@ -303,7 +301,7 @@ export function mcpServersMapping(): DbRepository {
     field("authHeader", "auth_header", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("mcp_servers", "id", "id", fs);
+  return repository({ table: "mcp_servers", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type McpToolOffRow = {
@@ -318,7 +316,7 @@ export function mcpToolsOffMapping(): DbRepository {
     field("serverId", "server_id", "text"),
     field("toolName", "tool_name", "text"),
   ];
-  return repository("mcp_tools_off", "id", "id", fs);
+  return repository({ table: "mcp_tools_off", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type McpOauthRow = {
@@ -343,7 +341,7 @@ export function mcpOauthMapping(): DbRepository {
     field("redirectUri", "redirect_uri", "text"),
     field("registeredAt", "registered_at", "text"),
   ];
-  return repository("mcp_oauth", "id", "id", fs);
+  return repository({ table: "mcp_oauth", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type McpPendingRow = {
@@ -362,7 +360,7 @@ export function mcpPendingMapping(): DbRepository {
     field("verifier", "verifier", "text"),
     field("startedAt", "started_at", "text"),
   ];
-  return repository("mcp_oauth_pending", "id", "id", fs);
+  return repository({ table: "mcp_oauth_pending", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type McpGrantRow = {
@@ -383,7 +381,7 @@ export function mcpGrantsMapping(): DbRepository {
     field("refreshable", "refreshable", "bool"),
     field("connectedAt", "connected_at", "text"),
   ];
-  return repository("mcp_oauth_grants", "id", "id", fs);
+  return repository({ table: "mcp_oauth_grants", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function credentialsMapping(): DbRepository {
@@ -393,7 +391,7 @@ export function credentialsMapping(): DbRepository {
     field("envelope", "envelope", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("provider_credentials", "id", "id", fs);
+  return repository({ table: "provider_credentials", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function scriptImagesMappingV1(): DbRepository {
@@ -403,7 +401,7 @@ export function scriptImagesMappingV1(): DbRepository {
     field("image", "image", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("script_images", "id", "id", fs);
+  return repository({ table: "script_images", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function scriptImagesMapping(): DbRepository {
@@ -414,7 +412,7 @@ export function scriptImagesMapping(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("summary", "summary", "text"),
   ];
-  return repository("script_images", "id", "id", fs);
+  return repository({ table: "script_images", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function skillsMappingV1(): DbRepository {
@@ -425,7 +423,7 @@ export function skillsMappingV1(): DbRepository {
     field("body", "body", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("skills", "id", "id", fs);
+  return repository({ table: "skills", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function skillsMapping(): DbRepository {
@@ -440,7 +438,7 @@ export function skillsMapping(): DbRepository {
     field("source", "source", "text"),
     field("sourceUrl", "source_url", "text"),
   ];
-  return repository("skills", "id", "id", fs);
+  return repository({ table: "skills", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function skillFilesMapping(): DbRepository {
@@ -450,7 +448,7 @@ export function skillFilesMapping(): DbRepository {
     field("path", "path", "text"),
     field("body", "body", "text"),
   ];
-  return repository("skill_files", "id", "id", fs);
+  return repository({ table: "skill_files", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type PluginRow = {
@@ -471,7 +469,7 @@ export function pluginsMapping(): DbRepository {
     field("version", "version", "text"),
     field("installedAt", "installed_at", "text"),
   ];
-  return repository("plugins", "id", "id", fs);
+  return repository({ table: "plugins", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type PluginItemRow = {
@@ -488,7 +486,7 @@ export function pluginItemsMapping(): DbRepository {
     field("kind", "kind", "text"),
     field("itemId", "item_id", "text"),
   ];
-  return repository("plugin_items", "id", "id", fs);
+  return repository({ table: "plugin_items", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type ThreadSummaryRow = {
@@ -507,7 +505,7 @@ export function threadSummariesMapping(): DbRepository {
     field("text", "text", "text"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("thread_summaries", "id", "id", fs);
+  return repository({ table: "thread_summaries", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type AuthProviderRow = {
@@ -529,7 +527,7 @@ export function authProvidersMappingV1(): DbRepository {
     field("scopes", "scopes", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("auth_providers", "id", "id", fs);
+  return repository({ table: "auth_providers", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function authProvidersMapping(): DbRepository {
@@ -542,7 +540,7 @@ export function authProvidersMapping(): DbRepository {
     field("scopes", "scopes", "text"),
     field("enabled", "enabled", "bool"),
   ];
-  return repository("auth_providers", "id", "id", fs);
+  return repository({ table: "auth_providers", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type TemplateRow = {
@@ -565,7 +563,7 @@ export function templatesMapping(): DbRepository {
     field("visibility", "visibility", "text"),
     field("featuredRank", "featured_rank", "int"),
   ];
-  return repository("templates", "id", "id", fs);
+  return repository({ table: "templates", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type TemplateFileRow = {
@@ -584,7 +582,7 @@ export function templateFilesMapping(): DbRepository {
     field("title", "title", "text"),
     field("body", "body", "text"),
   ];
-  return repository("template_files", "id", "id", fs);
+  return repository({ table: "template_files", idField: "id", idColumn: "id", fields: fs });
 }
 
 export type OfficeRenderRow = {
@@ -603,7 +601,7 @@ export function officeRendersMapping(): DbRepository {
     field("body", "body", "text"),
     field("createdAt", "created_at", "text"),
   ];
-  return repository("office_renders", "id", "id", fs);
+  return repository({ table: "office_renders", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function agentsMapping(): DbRepository {
@@ -618,15 +616,13 @@ export function agentsMapping(): DbRepository {
     field("isDefault", "is_default", "bool"),
     field("updatedAt", "updated_at", "text"),
   ];
-  return repository("agents", "id", "id", fs);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function agentsFull(db: Db): DbRepository {
   let rs: DbRelation[] = [
-    hasOne("prompt", "prompts", "prompt_id", "id",
-           "id, prompt_name AS \"promptName\", version, body"),
-    hasOne("config", "model_configs", "model_config_id", "id",
-           "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking"),
+    hasOne({ field: "prompt", table: "prompts", localColumn: "prompt_id", foreignColumn: "id", columns: "id, prompt_name AS \"promptName\", version, body" }),
+    hasOne({ field: "config", table: "model_configs", localColumn: "model_config_id", foreignColumn: "id", columns: "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking" }),
     hasManyThrough({
       field: "servers", table: "mcp_servers", foreignColumn: "id",
       linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
@@ -648,7 +644,7 @@ export function agentsFull(db: Db): DbRepository {
       columns: "id, skill_name AS \"skillName\", description",
     }),
   ];
-  return repositoryWith("agents", "id", "id", agentsMapping().fields, rs);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: agentsMapping().fields, relations: rs });
 }
 
 function leaveExisting(db: Db, idColumn: string): string {
@@ -991,7 +987,7 @@ function cancelColumn(): DbRepository {
     field("id", "id", "text"),
     field("cancelAsked", "cancel_asked", "text"),
   ];
-  return repository("threads", "id", "id", fs);
+  return repository({ table: "threads", idField: "id", idColumn: "id", fields: fs });
 }
 
 type CancelRow = {
@@ -1032,7 +1028,7 @@ export function settingsMapping(): DbRepository {
     field("id", "id", "text"),
     field("value", "value", "text"),
   ];
-  return repository("settings", "id", "id", fs);
+  return repository({ table: "settings", idField: "id", idColumn: "id", fields: fs });
 }
 
 export function readSetting(db: Db, key: string): string {

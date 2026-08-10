@@ -1,12 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, asc, desc, existsById, findById, listOrdered, pageOrdered, persist } from "../../../plume/plume.ts";
+import { DbOrder, existsById, findById, listOrdered, pageOrdered, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
 import { Reply, Request, badRequest, created, ok } from "../../../rest/server.ts";
 import { PromptRow, promptsMapping } from "../../schema.ts";
 
 function maxVersion(db: Db, name: string): int {
-  let newest: DbOrder[] = [desc("version")];
-  let page = pageOrdered(db, promptsMapping(), "prompt_name = " + db.placeholder, [name], newest, 1, 0);
+  let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
+  let page = pageOrdered(db, promptsMapping(), { where: "prompt_name = " + db.placeholder, args: [name], order: newest, limit: 1, offset: 0 });
   if (page == "" || page == "[]") { return 0; }
   let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);
   if (rows.length == 0) { return 0; }
@@ -21,11 +21,11 @@ export class PromptApi {
   @get("/")
   list(@RequestParam("name", "") name: string): Reply {
     if (name == "") {
-      let keys: DbOrder[] = [asc("prompt_name"), asc("version")];
-      return ok(listOrdered(this.db, promptsMapping(), "", [], keys));
+      let keys: DbOrder[] = [{ column: "prompt_name" }, { column: "version" }];
+      return ok(listOrdered(this.db, promptsMapping(), { order: keys }));
     }
-    let newest: DbOrder[] = [desc("version")];
-    return ok(listOrdered(this.db, promptsMapping(), "prompt_name = " + this.db.placeholder, [name], newest));
+    let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
+    return ok(listOrdered(this.db, promptsMapping(), { where: "prompt_name = " + this.db.placeholder, args: [name], order: newest }));
   }
 
   @post("/")
