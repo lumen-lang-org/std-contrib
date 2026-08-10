@@ -1,12 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
 import { existsById, findById } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, ok, param, problem, reply } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, noContent, notFound, okJson, param, problem, reply } from "../../../rest/server.ts";
 import { callerTags } from "../../api-core.ts";
 import { beginConnect, completeConnect, disconnect, forgetSuppliedClient, setSuppliedClient, suppliedClientId } from "../../connect.ts";
 import { owningTag } from "../../owner.ts";
 import { McpServerRow, mcpServersMapping } from "../../schema.ts";
-import { SuppliedClientAsk } from "./types.ts";
+import { ConnectStarted, SuppliedClientAsk, SuppliedClientView } from "./types.ts";
 import { connectPageHtml } from "./page.ts";
 
 function callbackUri(): string {
@@ -33,7 +33,8 @@ export class ConnectApi {
     let server: McpServerRow = JSON.parse<McpServerRow>(document);
     let began = beginConnect(this.db, server, owningTag(callerTags(req)), this.master, callbackUri());
     if (began.problem != "") { return badRequest(began.problem); }
-    return ok("{\"url\":" + JSON.stringify(began.url) + "}");
+    let v: ConnectStarted = { url: began.url };
+    return okJson(v);
   }
 
   @get("/callback")
@@ -56,7 +57,8 @@ export class ConnectApi {
     let ask: SuppliedClientAsk = JSON.parse<SuppliedClientAsk>(req.body);
     let refused = setSuppliedClient(this.db, id, ask.clientId, ask.clientSecret, this.master);
     if (refused != "") { return badRequest(refused); }
-    return ok("{\"clientId\":" + JSON.stringify(suppliedClientId(this.db, id, this.master)) + "}");
+    let v: SuppliedClientView = { clientId: suppliedClientId(this.db, id, this.master) };
+    return okJson(v);
   }
 
   @del("/:id/client")

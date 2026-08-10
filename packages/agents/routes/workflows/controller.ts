@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, accepted, badRequest, created, noContent, notFound, ok, param } from "../../../rest/server.ts";
+import { Reply, Request, accepted, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
@@ -9,6 +9,7 @@ import { agentsMapping } from "../../schema.ts";
 import { ensureBuilt } from "../../script-wasm.ts";
 import { graphSecretProblem } from "../../secrets.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsOf, workflowsMapping, workflowsOf } from "../../workflow-store.ts";
+import { ScriptCheckFailed, ScriptCheckFresh } from "./types.ts";
 
 @controller("/workflows")
 export class WorkflowApi {
@@ -155,13 +156,16 @@ export class WorkflowApi {
     if (req.body == "") { return badRequest("a body is required: {\"source\":\"...\"}"); }
     let source = jsonText(req.body, "source");
     if (source.trim() == "") {
-      return ok("{\"ok\":false,\"error\":\"there is no script to compile\"}");
+      let empty: ScriptCheckFailed = { ok: false, error: "there is no script to compile" };
+      return okJson(empty);
     }
     let built = ensureBuilt(source);
     if (!built.ok) {
-      return ok("{\"ok\":false,\"error\":" + JSON.stringify(built.error) + "}");
+      let failed: ScriptCheckFailed = { ok: false, error: built.error };
+      return okJson(failed);
     }
-    return ok("{\"ok\":true,\"error\":\"\",\"fresh\":" + (built.fresh ? "true" : "false") + "}");
+    let done: ScriptCheckFresh = { ok: true, error: "", fresh: built.fresh };
+    return okJson(done);
   }
 
   @post("/:id/publish")

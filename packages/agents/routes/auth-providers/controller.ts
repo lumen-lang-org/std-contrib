@@ -1,12 +1,13 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, hasCredential, masterKey, storeCredential } from "../../credentials.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { jsonText } from "../../scan.ts";
 import { AuthProviderRow, authProvidersMapping } from "../../schema.ts";
+import { AuthProviderResolvedView, AuthProviderSecretStored, AuthProviderView } from "./types.ts";
 
 export function authProviderProblem(row: AuthProviderRow): string {
   if (row.id.trim() == "") { return "a provider needs an id — it is what the callback URL carries"; }
@@ -30,44 +31,48 @@ export class AuthProviderApi {
   list(req: Request): Reply {
     let keys: DbOrder[] = [asc("label")];
     let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), "", [], keys));
-    let out = "[";
+    let views: AuthProviderView[] = [];
     let i: int = 0;
     while (i < rows.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + "{\"id\":" + JSON.stringify(rows[i].id)
-        + ",\"label\":" + JSON.stringify(rows[i].label)
-        + ",\"kind\":" + JSON.stringify(rows[i].kind == "" ? "oidc" : rows[i].kind)
-        + ",\"issuer\":" + JSON.stringify(rows[i].issuer)
-        + ",\"clientId\":" + JSON.stringify(rows[i].clientId)
-        + ",\"scopes\":" + JSON.stringify(rows[i].scopes)
-        + ",\"enabled\":" + (rows[i].enabled ? "true" : "false")
-        + ",\"configured\":" + (hasCredential(this.db, "oauth:" + rows[i].id) ? "true" : "false") + "}";
+      let one: AuthProviderView = {
+        id: rows[i].id,
+        label: rows[i].label,
+        kind: rows[i].kind == "" ? "oidc" : rows[i].kind,
+        issuer: rows[i].issuer,
+        clientId: rows[i].clientId,
+        scopes: rows[i].scopes,
+        enabled: rows[i].enabled,
+        configured: hasCredential(this.db, "oauth:" + rows[i].id),
+      };
+      views.push(one);
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(views);
   }
 
   @get("/resolved")
   resolved(req: Request): Reply {
     let rows = JSON.parse<AuthProviderRow[]>(listWhere(this.db, authProvidersMapping(),
       "enabled = " + placeholderAt(this.db, 1), ["1"]));
-    let out = "[";
+    let views: AuthProviderResolvedView[] = [];
     let i: int = 0;
     while (i < rows.length) {
       let secret = credentialFor(this.db, "oauth:" + rows[i].id, this.master);
       if (secret != "") {
-        if (out.length > 1) { out = out + ","; }
-        out = out + "{\"id\":" + JSON.stringify(rows[i].id)
-          + ",\"label\":" + JSON.stringify(rows[i].label)
-          + ",\"kind\":" + JSON.stringify(rows[i].kind == "" ? "oidc" : rows[i].kind)
-        + ",\"issuer\":" + JSON.stringify(rows[i].issuer)
-          + ",\"clientId\":" + JSON.stringify(rows[i].clientId)
-          + ",\"clientSecret\":" + JSON.stringify(secret)
-          + ",\"scopes\":" + JSON.stringify(rows[i].scopes) + "}";
+        let one: AuthProviderResolvedView = {
+          id: rows[i].id,
+          label: rows[i].label,
+          kind: rows[i].kind == "" ? "oidc" : rows[i].kind,
+          issuer: rows[i].issuer,
+          clientId: rows[i].clientId,
+          clientSecret: secret,
+          scopes: rows[i].scopes,
+        };
+        views.push(one);
       }
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(views);
   }
 
   @post("/")
@@ -106,7 +111,8 @@ export class AuthProviderApi {
     let stored = storeCredential(this.db, { provider: "oauth:" + param(req, "id"),
       apiKey: secret, masterKey: this.master, now: stamp() });
     if (stored != "") { return badRequest(stored); }
-    return ok("{\"configured\":true}");
+    let v: AuthProviderSecretStored = { configured: true };
+    return okJson(v);
   }
 
   @del("/:id")

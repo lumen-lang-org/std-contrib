@@ -1,12 +1,13 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, existsById, findById, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
 import { PROJECT_FILES_KEY, ProjectRow, emptyProject, projectsMapping, projectsOf, releaseThreads, rememberFilesThread } from "../../projects.ts";
 import { jsonText } from "../../scan.ts";
 import { openThread, rememberRouteKey, threadsMapping } from "../../threads.ts";
+import { FilesThreadView } from "./types.ts";
 
 @controller("/projects")
 export class ProjectApi {
@@ -80,7 +81,8 @@ export class ProjectApi {
     if (mine.id == "") { return notFound("project " + param(req, "id")); }
     if (mine.filesThreadId != "") {
       if (existsById(this.db, threadsMapping(), mine.filesThreadId)) {
-        return ok("{\"threadId\":" + JSON.stringify(mine.filesThreadId) + "}");
+        let held: FilesThreadView = { threadId: mine.filesThreadId };
+        return okJson(held);
       }
     }
     let id = openThread(this.db, { agentId: PROJECT_FILES_KEY, owner: mine.owner, now: stamp() });
@@ -89,7 +91,8 @@ export class ProjectApi {
     if (stamped != "") { return badRequest(stamped); }
     let noted = rememberFilesThread(this.db, mine.id, id);
     if (noted != "") { return badRequest(noted); }
-    return ok("{\"threadId\":" + JSON.stringify(id) + "}");
+    let v: FilesThreadView = { threadId: id };
+    return okJson(v);
   }
 
   private owned(req: Request): ProjectRow {

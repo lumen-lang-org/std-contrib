@@ -1,11 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, countWhere, deleteById, executeWith, existsById, findById, listOrdered, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem } from "../../../rest/server.ts";
 import { DestinationMove, credentialFor, destinationOf, destinationProblem, hasCredential } from "../../credentials.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { complete, embedText, embeddingEndpoint, endpointFor, replyText } from "../../provider.ts";
 import { ModelChoiceRow, ModelConfigRow, ModelRow, enabledChoices, modelConfigsMapping, modelsMapping } from "../../schema.ts";
+import { ChatProbe, EmbeddingProbe, ModelTestFailed } from "./types.ts";
 
 export function choicesJson(rows: ModelChoiceRow[]): string {
   let out = "[";
@@ -114,21 +115,34 @@ export class ModelApi {
 
     if (model.kind == "embedding") {
       let vector = embedText(model, "a probe from the console", key);
-      if (!vector.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(vector.error) + "}"); }
+      if (!vector.ok) {
+        let failed: ModelTestFailed = { ok: false, error: vector.error };
+        return okJson(failed);
+      }
       let agrees = vector.dimensions == model.dimensions;
-      return ok("{\"ok\":" + `${agrees}`
-        + ",\"dimensions\":" + `${vector.dimensions}`
-        + ",\"declared\":" + `${model.dimensions}`
-        + ",\"error\":" + JSON.stringify(agrees ? "" : "the model returned a different width than this row declares") + "}");
+      let probe: EmbeddingProbe = {
+        ok: agrees,
+        dimensions: vector.dimensions,
+        declared: model.dimensions,
+        error: agrees ? "" : "the model returned a different width than this row declares",
+      };
+      return okJson(probe);
     }
 
     let config: ModelConfigRow = { id: "probe", modelId: model.id, temperature: 0, maxTokens: 16, topP: 1, extra: "" , thinking: "", label: "", selectable: false, rank: 0 };
     let said = complete(model, config, "Reply with the single word: ok", "ping", key);
-    if (!said.ok) { return ok("{\"ok\":false,\"error\":" + JSON.stringify(said.error) + "}"); }
+    if (!said.ok) {
+      let failed: ModelTestFailed = { ok: false, error: said.error };
+      return okJson(failed);
+    }
     let answer = replyText(model.provider, said.text);
-    return ok("{\"ok\":true,\"reply\":" + JSON.stringify(answer.slice(0, 120))
-      + ",\"inputTokens\":" + `${said.inputTokens}`
-      + ",\"outputTokens\":" + `${said.outputTokens}` + "}");
+    let probe: ChatProbe = {
+      ok: true,
+      reply: answer.slice(0, 120),
+      inputTokens: said.inputTokens,
+      outputTokens: said.outputTokens,
+    };
+    return okJson(probe);
   }
 
   @put("/:id")

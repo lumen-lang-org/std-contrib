@@ -1,12 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById, persist } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, notFound, ok, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, notFound, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { DestinationMove, credentialFor, destinationProblem, forgetCredential, hasCredential, masterKey, masterKeyProblem, storeCredential } from "../../credentials.ts";
 import { backendOr, knownBackend } from "../../payload.ts";
 import { TraceConfigRow, traceConfigMapping } from "../../trace.ts";
-import { TraceSecret } from "./types.ts";
+import { TraceSecret, TraceStatus, TraceStatusOff } from "./types.ts";
 
 export function traceDestinationProblem(db: Db, row: TraceConfigRow): string {
   let held = findById(db, traceConfigMapping(), "default");
@@ -37,18 +37,23 @@ export class TraceApi {
   status(req: Request): Reply {
     let document = findById(this.db, traceConfigMapping(), "default");
     if (document == "") {
-      return ok("{\"configured\":false,\"active\":false}");
+      let off: TraceStatusOff = { configured: false, active: false };
+      return okJson(off);
     }
     let row: TraceConfigRow = JSON.parse<TraceConfigRow>(document);
     let hasSecret = credentialFor(this.db, "tracing", this.master) != "";
-    return ok("{\"configured\":true,\"active\":" + `${tracing(tracerFor(this.db, this.master))}`
-      + ",\"backend\":" + JSON.stringify(backendOr(row.backend))
-      + ",\"endpoint\":" + JSON.stringify(row.endpoint)
-      + ",\"publicKey\":" + JSON.stringify(row.publicKey)
-      + ",\"serviceName\":" + JSON.stringify(row.serviceName)
-      + ",\"environment\":" + JSON.stringify(row.environment)
-      + ",\"enabled\":" + `${row.enabled}`
-      + ",\"secretStored\":" + `${hasSecret}` + "}");
+    let v: TraceStatus = {
+      configured: true,
+      active: tracing(tracerFor(this.db, this.master)),
+      backend: backendOr(row.backend),
+      endpoint: row.endpoint,
+      publicKey: row.publicKey,
+      serviceName: row.serviceName,
+      environment: row.environment,
+      enabled: row.enabled,
+      secretStored: hasSecret,
+    };
+    return okJson(v);
   }
 
   @put("/")

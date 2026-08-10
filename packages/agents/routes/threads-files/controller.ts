@@ -1,14 +1,14 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param, problem } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { credentialFor } from "../../credentials.ts";
 import { documentsMapping, embeddingModel, normalScope } from "../../knowledge.ts";
 import { jsonText } from "../../scan.ts";
 import { ownedThread } from "../../threads.ts";
 import { deleteFile, getFile, listFiles, mimeOf, promoteFile, putFile } from "../../workspace.ts";
-import { FilePromote, FilePull, FileUpload } from "./types.ts";
+import { FileContent, FilePromote, FilePromoted, FilePull, FilePulled, FileUpload, FileUploaded, FileView } from "./types.ts";
 
 @controller("/threads/:id/files")
 export class WorkspaceApi {
@@ -26,18 +26,20 @@ export class WorkspaceApi {
       return notFound("thread " + param(req, "id"));
     }
     let files = listFiles(this.db, param(req, "id"));
-    let out = "[";
+    let out: FileView[] = [];
     let i: int = 0;
     while (i < files.length) {
-      if (i > 0) { out = out + ","; }
-      out = out + "{\"name\":" + JSON.stringify(files[i].fileName)
-        + ",\"mime\":" + JSON.stringify(files[i].mime)
-        + ",\"origin\":" + JSON.stringify(files[i].origin)
-        + ",\"bytes\":" + `${files[i].body.length}`
-        + ",\"documentId\":" + JSON.stringify(files[i].documentId) + "}";
+      let v: FileView = {
+        name: files[i].fileName,
+        mime: files[i].mime,
+        origin: files[i].origin,
+        bytes: files[i].body.length,
+        documentId: files[i].documentId,
+      };
+      out.push(v);
       i = i + 1;
     }
-    return ok(out + "]");
+    return okJson(out);
   }
 
   @post("/")
@@ -49,7 +51,8 @@ export class WorkspaceApi {
     let body: FileUpload = JSON.parse<FileUpload>(req.body);
     let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "uploaded", body: body.content, documentId: "", now: stamp() });
     if (problem != "") { return badRequest(problem); }
-    return created("{\"name\":" + JSON.stringify(body.name) + ",\"bytes\":" + `${body.content.length}` + "}");
+    let v: FileUploaded = { name: body.name, bytes: body.content.length };
+    return createdJson(v);
   }
 
   @get("/:name")
@@ -59,10 +62,13 @@ export class WorkspaceApi {
     }
     let file = getFile(this.db, param(req, "id"), param(req, "name"));
     if (file.id == "") { return notFound("file " + param(req, "name")); }
-    return ok("{\"name\":" + JSON.stringify(file.fileName)
-      + ",\"mime\":" + JSON.stringify(file.mime)
-      + ",\"origin\":" + JSON.stringify(file.origin)
-      + ",\"content\":" + JSON.stringify(file.body) + "}");
+    let v: FileContent = {
+      name: file.fileName,
+      mime: file.mime,
+      origin: file.origin,
+      content: file.body,
+    };
+    return okJson(v);
   }
 
   @del("/:name")
@@ -91,7 +97,8 @@ export class WorkspaceApi {
     let content = jsonText(document, "body");
     let problem = putFile(this.db, { threadId: param(req, "id"), fileName: body.name, mime: mimeOf(body.name), origin: "retrieved", body: content, documentId: body.documentId, now: stamp() });
     if (problem != "") { return badRequest(problem); }
-    return created("{\"name\":" + JSON.stringify(body.name) + ",\"documentId\":" + JSON.stringify(body.documentId) + "}");
+    let v: FilePulled = { name: body.name, documentId: body.documentId };
+    return createdJson(v);
   }
 
   @post("/:name/promote")
@@ -111,8 +118,11 @@ export class WorkspaceApi {
 
     let stored = promoteFile(this.db, embedder, param(req, "id"), param(req, "name"), body.scope, key, stamp());
     if (!stored.ok) { return badRequest(stored.error); }
-    return ok("{\"name\":" + JSON.stringify(param(req, "name"))
-      + ",\"scope\":" + JSON.stringify(normalScope(body.scope))
-      + ",\"chunks\":" + `${stored.chunks}` + "}");
+    let v: FilePromoted = {
+      name: param(req, "name"),
+      scope: normalScope(body.scope),
+      chunks: stored.chunks,
+    };
+    return okJson(v);
   }
 }

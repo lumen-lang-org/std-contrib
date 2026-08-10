@@ -1,11 +1,12 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem, queryParam } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param, problem, queryParam } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { OfficeRenderAsk, officeRender, officeRenderExt } from "../../office-render.ts";
 import { createProblem, jsonId } from "../../payload.ts";
 import { putFile } from "../../workspace.ts";
+import { TemplatePdfView } from "./types.ts";
 
 @controller("/templates")
 export class TemplateApi {
@@ -121,10 +122,9 @@ export class TemplateApi {
     };
     let made = officeRender(this.db, ask);
     if (!made.ok) { return badRequest(made.problem); }
-    let out = ok("{\"template\":" + JSON.stringify(tpl.id)
-      + ",\"path\":" + JSON.stringify(files[i].path)
-      + ",\"cached\":" + (made.cached ? "true" : "false")
-      + ",\"pdf\":" + JSON.stringify(made.body) + "}");
+    let v: TemplatePdfView = { template: tpl.id, path: files[i].path,
+      cached: made.cached, pdf: made.body };
+    let out = okJson(v);
     out.headers.set("cache-control", "public, max-age=3600");
     return out;
   }
