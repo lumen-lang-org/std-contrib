@@ -28,8 +28,11 @@
 // the whole requirement, and it is met by not doing the thing that would break
 // it rather than by machinery.
 
+import { ApiKeyRow, apiKeysOf, apiKeysPlan, forgetApiKey, hasScope, mintApiKey, touchApiKey, verifyApiKey } from "./api-keys.ts";
+import { presentedKey, upstreamBase } from "./search-gateway.ts";
+import { urlEncode } from "./mcp-oauth.ts";
 import { controller } from "../rest/controller.ts";
-import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, accepted, noContent, notFound, badRequest, param, queryParam, header } from "../rest/server.ts";
+import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, accepted, noContent, notFound, badRequest, problem, param, queryParam, header } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
@@ -43,6 +46,7 @@ import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw, jsonFlag } from "./scan.ts";
+import { bannerShow, bannerChange } from "./banner-api.ts";
 import { toolListing } from "./mcp.ts";
 import { taskTools, callTaskTool } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
@@ -82,7 +86,7 @@ import { SandboxLimits, applySandboxLimits, defaultLimits, sandboxLimits, saveSa
 import { EnvTemplateRow, EnvTemplateWrite, emptyEnvTemplate, envTemplateById, envTemplatesAll, envTemplatesMapping, envTemplatesPlan, forgetEnvTemplate, saveEnvTemplate } from "./env-templates.ts";
 import { PROJECT_FILES_KEY, ProjectRow, assignProject, emptyProject, projectsMapping, projectsOf, projectsPlan, releaseThreads, rememberFilesThread } from "./projects.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, documentFilesMapping, documentFilesPlan, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
-import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans } from "../tracing/tracing.ts";
+import { Tracer, flush, traceId, spanCount, tracing, tracerWithMoreSpans, tracerWithSession } from "../tracing/tracing.ts";
 
 // A change to which model or prompt an agent uses, as a body.
 type ModelChange = { modelConfigId: string };
@@ -3308,7 +3312,21 @@ class ThreadApi {
       }
     }
 
-    let tracer = tracerFor(this.db, this.master);
+    // Stamped with the conversation it belongs to, which is what makes a trace
+    // findable afterwards. Without it every turn this engine has ever traced
+    // sits in one undifferentiated list: the collector groups by session, and
+    // a trace with no session groups under nothing.
+    //
+    // The thread id is the session because that is the identifier a person
+    // actually holds — it is in the console's own address bar at /c/<id>, on
+    // the workflow run that spawned the turn (`workflow_runs.thread_id`), and
+    // on the run row written below. One id, so a trace can be reached from any
+    // of them.
+    //
+    // The owner rides along as the user for the same reason and with the same
+    // caution the run row takes: it is the owning tag, not the raw header.
+    let tracer = tracerWithSession(
+      tracerFor(this.db, this.master), param(req, "id"), owningTag(callerTags(req)));
     // Handed to the turn rather than written here first. Applying the choice
     // and remembering it are one act, and `runInThreadWith` is where that act
     // lives — it resolves the precedence, keeps the pick only if it survived
@@ -5667,6 +5685,159 @@ class WorkflowApi {
 // the moment its value is stored, and editing either half alone is the
 // exfiltration this table exists to refuse. Change means delete and add
 // again, with the value in hand.
+// The one place a query leaves for the real search service. Both doors — the
+// keyed /v1 and the signed-in playground — authenticate on their own and then
+// come here, so the address, the allowed parameters and the "did it answer"
+// check live once. Only the three named products build a path; a caller never
+// names an upstream path of its own.
+function forwardProduct(req: Request, product: string): Reply {
+  let q = queryParam(req, "q", "");
+  if (q.trim() == "") { return badRequest("a query is required: ?q=..."); }
+  let url = upstreamBase() + "/" + product + "?q=" + urlEncode(q);
+  // suggest takes only q; the other two take a result count and hybrid toggle.
+  if (product != "suggest") {
+    let k = queryParam(req, "k", "");
+    if (k != "") { url = url + "&k=" + urlEncode(k); }
+    let hybrid = queryParam(req, "hybrid", "");
+    if (hybrid != "") { url = url + "&hybrid=" + urlEncode(hybrid); }
+  }
+  if (product == "retrieve") {
+    let mc = queryParam(req, "max_chars", "");
+    if (mc != "") { url = url + "&max_chars=" + urlEncode(mc); }
+  }
+  // Filters the search API already understands, passed through when present.
+  let site = queryParam(req, "site", "");
+  if (site != "") { url = url + "&site=" + urlEncode(site); }
+  let lang = queryParam(req, "lang", "");
+  if (lang != "") { url = url + "&lang=" + urlEncode(lang); }
+  let country = queryParam(req, "country", "");
+  if (country != "") { url = url + "&country=" + urlEncode(country); }
+  let res = http.request(url, "GET", "", new Map<string, string>());
+  if (!res.ok) { return problem(502, "the search service did not answer"); }
+  // The upstream's own JSON and its own status, verbatim — the gateway adds a
+  // door, not a shape.
+  return reply(res.status, res.body, "application/json");
+}
+
+// The public product API, reached with an API key. Its own front-door
+// exemption (publicPath) lets a jl_ key past the internal token and the proxy
+// identity check, because this door authenticates the key itself and nothing
+// else. Scopes gate which product a key may call; a use is stamped after a
+// forward so the key list can say a key is alive.
+@controller("/v1")
+class V1Api {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @get("/search")
+  search(req: Request): Reply { return this.gated(req, "search"); }
+
+  @get("/retrieve")
+  retrieve(req: Request): Reply { return this.gated(req, "retrieve"); }
+
+  @get("/suggest")
+  suggest(req: Request): Reply { return this.gated(req, "suggest"); }
+
+  gated(req: Request, product: string): Reply {
+    let secret = presentedKey(header(req, "authorization"), header(req, "x-api-key"));
+    let auth = verifyApiKey(this.db, secret);
+    if (!auth.ok) {
+      return problem(401, "a valid API key is required — send it as \"Authorization: Bearer jl_...\" or an X-API-Key header");
+    }
+    if (!hasScope(auth.scopes, product)) {
+      return problem(403, "this key is not scoped for " + product + " — mint one with that scope on the Platform page");
+    }
+    let out = forwardProduct(req, product);
+    touchApiKey(this.db, auth.keyId, stamp());
+    return out;
+  }
+}
+
+// The same forward, for a signed-in person trying it from the console. No key:
+// the playground is a person at a keyboard, authenticated by the proxy the way
+// every other console route is, and the key-scoped door is /v1. A guest is
+// asked to sign in rather than served.
+@controller("/playground")
+class PlaygroundApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  @get("/search")
+  search(req: Request): Reply { return this.run(req, "search"); }
+
+  @get("/retrieve")
+  retrieve(req: Request): Reply { return this.run(req, "retrieve"); }
+
+  @get("/suggest")
+  suggest(req: Request): Reply { return this.run(req, "suggest"); }
+
+  run(req: Request, product: string): Reply {
+    if (owningTag(callerTags(req)) == "") {
+      return problem(401, "sign in to use the playground");
+    }
+    return forwardProduct(req, product);
+  }
+}
+
+// The keys a person mints to call Joule's public products from their own code
+// (api-keys.ts). Management only — list, mint, revoke — behind the same proxy
+// identity every user route trusts. The secret itself is answered once, by
+// create, and by nothing else: the store keeps a hash, and so does this API.
+@controller("/api-keys")
+class ApiKeyApi {
+  db: Db;
+
+  constructor(db: Db) { this.db = db; }
+
+  // This owner's keys — named and prefixed, never the secret, never the hash.
+  @get("/")
+  list(req: Request): Reply {
+    let tags = callerTags(req);
+    if (owningTag(tags) == "" && tags.length > 0) { return ok("[]"); }
+    return ok(apiKeysOf(this.db, owningTag(tags)));
+  }
+
+  // Mint one. The response carries the secret ONCE — the only time any route
+  // returns it — so the console can show it and then forget it, exactly as the
+  // row already has.
+  @post("/")
+  create(req: Request): Reply {
+    let tags = callerTags(req);
+    let owner = owningTag(tags);
+    // A key is a standing credential someone's code will carry: it has to
+    // belong to a signed-in person, never a guest.
+    if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
+      return badRequest("signing in is what makes a key yours to keep");
+    }
+    if (req.body == "") {
+      return badRequest("a body is required: {\"name\":\"...\",\"scopes\":\"search,retrieve\"}");
+    }
+    let made = mintApiKey(this.db, owner,
+      jsonText(req.body, "name"),
+      jsonText(req.body, "scopes"),
+      stamp());
+    if (made.problem != "") { return badRequest(made.problem); }
+    // The secret, this once. Every character is [a-z0-9_-], so it needs no
+    // JSON escaping — the id is a uuid, the secret and prefix are "jl_" and
+    // hex. Shaped so the console has the id to list by and the prefix it keeps
+    // showing after the secret is dismissed.
+    let body = "{\"id\":\"" + made.id + "\",\"secret\":\"" + made.secret + "\",\"keyPrefix\":\"" + made.prefix + "\"}";
+    return created(body);
+  }
+
+  @del("/:id")
+  remove(req: Request): Reply {
+    // Owner-scoped inside forgetApiKey: somebody else's key is absent, not
+    // forbidden.
+    if (!forgetApiKey(this.db, param(req, "id"), owningTag(callerTags(req)))) {
+      return notFound("key " + param(req, "id"));
+    }
+    return noContent();
+  }
+}
+
 @controller("/secrets")
 class SecretApi {
   db: Db;
@@ -6642,22 +6813,14 @@ class BannerApi {
   // gateway lists this route among the guest-readable ones.
   @get("/")
   show(req: Request): Reply {
-    return ok("{\"text\":" + JSON.stringify(readSetting(this.db, "banner")) + "}");
+    return bannerShow(this.db);
   }
 
   // Writing goes through the gateway's authenticated tier like every other
-  // operator surface. "" takes the banner down — same row, empty value —
-  // so there is no delete route to keep in step.
+  // operator surface.
   @put("/")
   change(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
-    let text = jsonText(req.body, "text");
-    if (utf8Length(text) > 500) {
-      return badRequest("a banner is at most 500 bytes — it is a sentence, not a page");
-    }
-    let problem = writeSetting(this.db, "banner", text);
-    if (problem != "") { return badRequest(problem); }
-    return ok("{\"text\":" + JSON.stringify(text) + "}");
+    return bannerChange(this.db, req.body);
   }
 }
 
@@ -6899,7 +7062,13 @@ function publicPath(target: string): bool {
   let query = path.indexOf("?");
   if (query >= 0) { path = path.substring(0, query); }
   while (path.length > 1 && path.endsWith("/")) { path = path.substring(0, path.length - 1); }
-  return path == "/healthz";
+  if (path == "/healthz") { return true; }
+  // The keyed gateway carries its own credential; a jl_ key on Authorization
+  // must not be measured against the internal token, and an external caller
+  // sends no x-user for the proxy check to read.
+  if (path == "/v1") { return true; }
+  if (path.length >= 4 && path.substring(0, 4) == "/v1/") { return true; }
+  return false;
 }
 
 // The token an Authorization header carries, or "".
@@ -7464,6 +7633,11 @@ export function migrationProblem(db: Db): string {
   let roster = mcpRosterPlan(db);
   let ro: int = 0;
   while (ro < roster.length) { plan.push(roster[ro]); ro = ro + 1; }
+  // A standing credential for the public /v1 products (api-keys.ts),
+  // above mcp-roster's 113.
+  let keys = apiKeysPlan(db);
+  let kp: int = 0;
+  while (kp < keys.length) { plan.push(keys[kp]); kp = kp + 1; }
   let ran = migrate(db, plan);
   if (ran.ok) {
     // The schema is up: push any stored sandbox limits into the enforcing
@@ -7630,6 +7804,9 @@ function main(): void {
     new ProjectApi(db),
     new WorkflowApi(db),
     new SecretApi(db, master),
+    new ApiKeyApi(db),
+    new V1Api(db),
+    new PlaygroundApi(db),
     new EnvironmentApi(db),
     new EnvTemplateApi(db),
     new EnvKeyApi(db, master),
