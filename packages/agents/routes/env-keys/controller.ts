@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { existsById, findById } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { createEnvKey, envKeysMapping, envKeysOwnedBy, forgetEnvKey } from "../../env-keys.ts";
 import { owningTag } from "../../owner.ts";
@@ -52,9 +52,9 @@ export class EnvKeyApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!forgetEnvKey(this.db, param(req, "id"), owningTag(callerTags(req)))) {
-      return notFound("environment key " + param(req, "id"));
+  remove(req: Request, @PathVariable("id") id: string): Reply {
+    if (!forgetEnvKey(this.db, id, owningTag(callerTags(req)))) {
+      return notFound("environment key " + id);
     }
     return noContent();
   }

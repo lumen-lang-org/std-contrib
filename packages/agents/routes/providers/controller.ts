@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, okJson, param, problem } from "../../../rest/server.ts";
+import { Reply, badRequest, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, masterKey, masterKeyProblem, providersWithCredentials, storeCredential } from "../../credentials.ts";
 import { KeyBody, ProviderStatus } from "./types.ts";
@@ -16,15 +16,15 @@ export class ProviderApi {
   }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     let names: string[] = providersWithCredentials(this.db);
     return okJson(names);
   }
 
   @get("/:provider")
-  status(req: Request): Reply {
-    let usable = credentialFor(this.db, param(req, "provider"), this.master) != "";
-    let v: ProviderStatus = { provider: param(req, "provider"), configured: usable };
+  status(@PathVariable("provider") provider: string): Reply {
+    let usable = credentialFor(this.db, provider, this.master) != "";
+    let v: ProviderStatus = { provider: provider, configured: usable };
     return okJson(v);
   }
 
@@ -39,9 +39,9 @@ export class ProviderApi {
   }
 
   @del("/:provider/key")
-  clearKey(req: Request): Reply {
-    if (!forgetCredential(this.db, param(req, "provider"))) {
-      return notFound("no key for " + param(req, "provider"));
+  clearKey(@PathVariable("provider") provider: string): Reply {
+    if (!forgetCredential(this.db, provider)) {
+      return notFound("no key for " + provider);
     }
     return noContent();
   }

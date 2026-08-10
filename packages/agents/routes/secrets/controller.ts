@@ -21,16 +21,16 @@ export class SecretApi {
   }
 
   @post("/")
-  create(req: Request): Reply {
+  create(req: Request, @RequestBody body: string): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
     if (guestTag(tags) != "" || (owner == "" && tags.length > 0)) {
       return badRequest("signing in is what makes a secret yours to keep");
     }
-    if (req.body == "") {
+    if (body == "") {
       return badRequest("a body is required: {\"name\":\"...\",\"value\":\"...\",\"destination\":\"https://api.example.com\",\"header\":\"Authorization\",\"category\":\"Payments\"}");
     }
-    let ask: SecretCreateAsk = JSON.parse<SecretCreateAsk>(req.body);
+    let ask: SecretCreateAsk = JSON.parse<SecretCreateAsk>(body);
     let made = createSecret(this.db, {
       owner: owner,
       name: ask.name ?? "",
@@ -46,9 +46,9 @@ export class SecretApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!forgetSecret(this.db, param(req, "id"), owningTag(callerTags(req)))) {
-      return notFound("secret " + param(req, "id"));
+  remove(req: Request, @PathVariable("id") id: string): Reply {
+    if (!forgetSecret(this.db, id, owningTag(callerTags(req)))) {
+      return notFound("secret " + id);
     }
     return noContent();
   }

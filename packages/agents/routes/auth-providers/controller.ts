@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
+import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
 import { createProblem } from "../../payload.ts";
@@ -23,7 +23,7 @@ export class AuthProviderApi {
   constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     let keys: DbOrder[] = [asc("label")];
     let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), "", [], keys));
     let views: AuthProviderView[] = [];
@@ -46,7 +46,7 @@ export class AuthProviderApi {
   }
 
   @get("/resolved")
-  resolved(req: Request): Reply {
+  resolved(): Reply {
     let rows = JSON.parse<AuthProviderRow[]>(listWhere(this.db, authProvidersMapping(),
       "enabled = " + placeholderAt(this.db, 1), ["1"]));
     let views: AuthProviderResolvedView[] = [];
@@ -108,12 +108,12 @@ export class AuthProviderApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, authProvidersMapping(), param(req, "id"))) {
-      return notFound("auth provider " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, authProvidersMapping(), id)) {
+      return notFound("auth provider " + id);
     }
-    forgetCredential(this.db, "oauth:" + param(req, "id"));
-    deleteById(this.db, authProvidersMapping(), param(req, "id"));
+    forgetCredential(this.db, "oauth:" + id);
+    deleteById(this.db, authProvidersMapping(), id);
     return noContent();
   }
 }

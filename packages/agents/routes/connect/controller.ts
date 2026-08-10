@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { existsById, findById } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, okJson, param, problem, reply } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, noContent, notFound, okJson, problem, reply } from "../../../rest/server.ts";
 import { callerTags } from "../../api-core.ts";
 import { beginConnect, completeConnect, disconnect, forgetSuppliedClient, setSuppliedClient, suppliedClientId } from "../../connect.ts";
 import { owningTag } from "../../owner.ts";
@@ -27,9 +27,9 @@ export class ConnectApi {
   constructor(db: Db, master: string) { this.db = db; this.master = master; }
 
   @post("/:id/start")
-  start(req: Request): Reply {
-    let document = findById(this.db, mcpServersMapping(), param(req, "id"));
-    if (document == "") { return notFound("server " + param(req, "id")); }
+  start(req: Request, @PathVariable("id") id: string): Reply {
+    let document = findById(this.db, mcpServersMapping(), id);
+    if (document == "") { return notFound("server " + id); }
     let server: McpServerRow = JSON.parse<McpServerRow>(document);
     let began = beginConnect(this.db, server, owningTag(callerTags(req)), this.master, callbackUri());
     if (began.problem != "") { return badRequest(began.problem); }
@@ -51,8 +51,7 @@ export class ConnectApi {
   }
 
   @put("/:id/client")
-  setClient(req: Request): Reply {
-    let id = param(req, "id");
+  setClient(req: Request, @PathVariable("id") id: string): Reply {
     if (!existsById(this.db, mcpServersMapping(), id)) { return notFound("server " + id); }
     let ask: SuppliedClientAsk = JSON.parse<SuppliedClientAsk>(req.body);
     let refused = setSuppliedClient(this.db, id, ask.clientId, ask.clientSecret, this.master);
@@ -62,19 +61,18 @@ export class ConnectApi {
   }
 
   @del("/:id/client")
-  dropClient(req: Request): Reply {
-    let id = param(req, "id");
+  dropClient(@PathVariable("id") id: string): Reply {
     if (!existsById(this.db, mcpServersMapping(), id)) { return notFound("server " + id); }
     forgetSuppliedClient(this.db, id);
     return noContent();
   }
 
   @del("/:id")
-  drop(req: Request): Reply {
-    if (!existsById(this.db, mcpServersMapping(), param(req, "id"))) {
-      return notFound("server " + param(req, "id"));
+  drop(req: Request, @PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, mcpServersMapping(), id)) {
+      return notFound("server " + id);
     }
-    disconnect(this.db, param(req, "id"), owningTag(callerTags(req)));
+    disconnect(this.db, id, owningTag(callerTags(req)));
     return noContent();
   }
 }

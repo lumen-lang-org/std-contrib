@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, param, problem } from "../../../rest/server.ts";
+import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { apiKeysOf, forgetApiKey, mintApiKey } from "../../api-keys.ts";
 import { owningTag } from "../../owner.ts";
@@ -40,9 +40,9 @@ export class ApiKeyApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!forgetApiKey(this.db, param(req, "id"), owningTag(callerTags(req)))) {
-      return notFound("key " + param(req, "id"));
+  remove(req: Request, @PathVariable("id") id: string): Reply {
+    if (!forgetApiKey(this.db, id, owningTag(callerTags(req)))) {
+      return notFound("key " + id);
     }
     return noContent();
   }

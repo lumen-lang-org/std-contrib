@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, asc, existsById, findById, listOrdered } from "../../../plume/plume.ts";
 import { controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
+import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
 import { McpServerRow, SkillRow, mcpServersMapping, pluginsMapping, skillsMapping } from "../../schema.ts";
@@ -48,17 +48,17 @@ export class PluginApi {
   constructor(db: Db) { this.db = db; }
 
   @get("/")
-  list(req: Request): Reply {
+  list(): Reply {
     let keys: DbOrder[] = [asc("plugin_name")];
     return ok(listOrdered(this.db, pluginsMapping(), "", [], keys));
   }
 
   @get("/:id/items")
-  items(req: Request): Reply {
-    if (!existsById(this.db, pluginsMapping(), param(req, "id"))) {
-      return notFound("plugin " + param(req, "id"));
+  items(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, pluginsMapping(), id)) {
+      return notFound("plugin " + id);
     }
-    let rows = itemsOf(this.db, param(req, "id"));
+    let rows = itemsOf(this.db, id);
     let out: PluginItemView[] = [];
     let i: int = 0;
     while (i < rows.length) {
@@ -104,11 +104,11 @@ export class PluginApi {
   }
 
   @del("/:id")
-  remove(req: Request): Reply {
-    if (!existsById(this.db, pluginsMapping(), param(req, "id"))) {
-      return notFound("plugin " + param(req, "id"));
+  remove(@PathVariable("id") id: string): Reply {
+    if (!existsById(this.db, pluginsMapping(), id)) {
+      return notFound("plugin " + id);
     }
-    uninstall(this.db, param(req, "id"));
+    uninstall(this.db, id);
     return noContent();
   }
 }
