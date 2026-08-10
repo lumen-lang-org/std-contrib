@@ -41,6 +41,7 @@ import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtif
 import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { masterKey } from "./credentials.ts";
 import { envKeyFileBody, touchEnvKeys } from "./env-keys.ts";
+import { userEnvByName } from "./user-environments.ts";
 import { normalScope } from "./knowledge.ts";
 import { AgentRow, ScriptImageRow, SkillRow, SkillFileRow, agentsMapping, scriptImagesMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 
@@ -1144,10 +1145,23 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // script installs into it, and an installer with nowhere to fetch from is
   // decoration. Creation-time only — the row records it, a script cannot
   // flip it.
-  let image = scriptImageForEnv(db, run.agentId, envName);
+  // The conversation owner's own environments answer first: a person who made
+  // one named "scraper" means THEIRS, whatever the deployment also offers.
+  // The model still only ever said a name — whose image that name resolves to
+  // is decided here, from configuration, exactly as before.
+  let ownEnvId = "";
+  let image = "";
+  if (envName != "main") {
+    let owner = scriptThreadOwner(db, run.threadId);
+    if (owner != "") {
+      let own = userEnvByName(db, owner, envName);
+      if (own.id != "") { image = own.image; ownEnvId = own.id; }
+    }
+  }
+  if (image == "") { image = scriptImageForEnv(db, run.agentId, envName); }
   if (image == "" && envName != "main") {
     return scriptBail(container, stage,
-      "no curated image is labelled '" + envName + "' — environments are named after the operator's script images, and this deployment does not offer that one");
+      "no environment answers to '" + envName + "' — it is one of your own environments' names, or one of the deployment's, and neither has it");
   }
   let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: image, network: true, now: run.now };
   let ensured = envEnsure(db, ensure);
@@ -1238,7 +1252,10 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   // ones the person who owns the thread stored.
   let execArgs: string[] = ["exec", "--user", SCRIPT_UID, "--workdir", runDir];
   let owner = scriptThreadOwner(db, run.threadId);
-  let imageId = scriptImageIdForEnv(db, run.agentId, envName);
+  // Keys follow the environment that actually answered: a person's own
+  // environment carries the keys stored against it, a curated one the keys
+  // stored against its row.
+  let imageId = ownEnvId != "" ? ownEnvId : scriptImageIdForEnv(db, run.agentId, envName);
   if (owner != "" && imageId != "") {
     let body = envKeyFileBody(db, owner, imageId, masterKey());
     if (body != "") {

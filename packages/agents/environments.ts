@@ -348,6 +348,23 @@ export function envWorkspaceVolume(threadId: string): string {
   return "agents-ws-" + envSafeBytes(threadId);
 }
 
+// The container resource caps, deployment-wide and operator-set. The
+// scriptWallOverride pattern: a module value the admin screen writes through
+// envCapsOverride, 0 meaning "use the default", so nothing changes until an
+// operator changes it. Applied globally rather than per request because a cap
+// is a property of the deployment, not of one script.
+let envCapMemMbChosen: int = 0;
+let envCapCpusChosen: int = 0;
+let envCapPidsChosen: int = 0;
+export function envCapsOverride(memMb: int, cpus: int, pids: int): void {
+  envCapMemMbChosen = memMb;
+  envCapCpusChosen = cpus;
+  envCapPidsChosen = pids;
+}
+function envCapMemMb(): int { return envCapMemMbChosen > 0 ? envCapMemMbChosen : 1024; }
+function envCapCpus(): int { return envCapCpusChosen > 0 ? envCapCpusChosen : 2; }
+function envCapPids(): int { return envCapPidsChosen > 0 ? envCapPidsChosen : 256; }
+
 function envRunArgs(container: string, threadId: string, image: string, network: bool): string[] {
   let out: string[] = ["run", "-d", "--name", container];
   out.push("-v"); out.push(envWorkspaceVolume(threadId) + ":/workspace");
@@ -355,9 +372,13 @@ function envRunArgs(container: string, threadId: string, image: string, network:
   // the language field constrains nothing (a python script can shell out and
   // cd wherever it likes, deliberately), and without these a script owned the
   // host's CPU and memory until its wall clock ran out.
-  out.push("--memory"); out.push("1g");
-  out.push("--cpus"); out.push("2");
-  out.push("--pids-limit"); out.push("256");
+  //
+  // The numbers are an operator's to set — envCapsOverride carries what the
+  // Sandbox admin screen wrote, and 0 means "the default below", so an
+  // unconfigured deployment is exactly what it was before the setting existed.
+  out.push("--memory"); out.push(`${envCapMemMb()}` + "m");
+  out.push("--cpus"); out.push(`${envCapCpus()}`);
+  out.push("--pids-limit"); out.push(`${envCapPids()}`);
   // Chromium maps a lot of shared memory and docker's default /dev/shm is
   // 64MB, which it does not crash on so much as silently render blank. A
   // browser is a first-class reason to have an environment at all — a
@@ -525,4 +546,90 @@ function envMinus(now: string, ms: int): string {
   }
   let trimmed = envStripZeros(out);
   return trimmed == "" ? "0" : trimmed;
+}
+
+// --- managing what somebody's conversations hold --------------------------------
+//
+// Everything above answers the run loop: one thread, one name, make it exist.
+// These answer the person: which containers do MY conversations hold, and let
+// me drop one I am done with. Until they existed the only way an environment
+// ever died was the idle sweep stopping it or the whole thread being deleted —
+// a person who installed half of pip into a container had no way to say "start
+// me over" short of deleting the conversation around it.
+
+// A container as its owner sees it: joined to the conversation that holds it,
+// because "environment main of thread 8f3a…" identifies nothing to a person,
+// and the thread's title is how they know which one they mean.
+export type EnvOwnedRow = {
+  threadId: string,
+  threadTitle: string,
+  name: string,
+  image: string,
+  status: string,
+  createdAt: string,
+  lastUsedAt: string,
+};
+
+/** Every environment this owner's conversations hold, most recently used
+ *  first. The join reads the threads table directly rather than importing
+ *  threads.ts — that module reaches run.ts and tools.ts, and tools.ts reaches
+ *  back here, which is the cycle the compiler refuses. */
+export function envOwned(db: Db, owner: string): EnvOwnedRow[] {
+  let out: EnvOwnedRow[] = [];
+  if (!db.query(
+    "SELECT e.thread_id, t.title, e.name, e.image, e.status, e.created_at, e.last_used_at"
+      + " FROM environments e JOIN threads t ON t.id = e.thread_id"
+      + " WHERE t.owner = " + placeholderAt(db, 1)
+      + " ORDER BY e.last_used_at DESC, e.created_at DESC", [owner])) {
+    return out;
+  }
+  let i: int = 0;
+  while (i < db.rows()) {
+    let row: EnvOwnedRow = {
+      threadId: db.value(i, 0),
+      threadTitle: db.value(i, 1),
+      name: db.value(i, 2),
+      image: db.value(i, 3),
+      status: db.value(i, 4),
+      createdAt: db.value(i, 5),
+      lastUsedAt: db.value(i, 6),
+    };
+    out.push(row);
+    i = i + 1;
+  }
+  return out;
+}
+
+/** Drop one environment: the container and its row, and — when it was the
+ *  thread's last — the shared workspace volume, for envForget's reason: a
+ *  volume nothing mounts is the leak nobody notices until df does.
+ *
+ *  False when the row does not exist, which the caller turns into a 404
+ *  without ever confirming what exists. The docker rm is unconditional and
+ *  forced: a container docker no longer has is exactly as gone as one it
+ *  removed, and the row must not outlive either.
+ *
+ *  The next run_script naming this environment recreates it from the agent's
+ *  image — envEnsure treats a missing row as first use. Dropping is therefore
+ *  "start me over", never "break the conversation". */
+export function envDrop(db: Db, threadId: string, name: string): bool {
+  let held = findById(db, envMapping(), threadId + ":" + name);
+  if (held == "") { return false; }
+  envDocker(["rm", "-f", envContainerName(threadId, name)]);
+  deleteWhere(db, envMapping(), "id = " + placeholderAt(db, 1), [threadId + ":" + name]);
+  if (envList(db, threadId).length == 0) {
+    envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
+  }
+  return true;
+}
+
+/** Whether the daemon holds this image reference — the difference between an
+ *  environment that starts instantly, and one whose first use pays a pull that
+ *  may fail. Asked of docker every time: the daemon owns this fact, and it is
+ *  the same daemon whether local or an ssh away. A docker that is down answers
+ *  false, which is the honest reading — nothing would start right now. */
+export function envImagePresent(image: string): bool {
+  if (image == "") { return false; }
+  let asked = envDocker(["image", "inspect", "--format", "held", image]);
+  return asked.status == 0;
 }
