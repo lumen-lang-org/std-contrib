@@ -2,10 +2,10 @@ export type FieldRule = { name: string, argsText: string[] };
 export type FieldNote = { name: string, type: string, decorators: FieldRule[] };
 export type Description = { protocol: int, name: string, fields: FieldNote[] };
 
-export type Rule = { field: string, kind: string, limit: int, said: string };
+export type Rule = { field: string, kind: string, limit: int, allowed: string, said: string };
 export type Fault = { field: string, said: string };
 
-export function checked(d: Description): Rule[] {
+export function validated(d: Description): Rule[] {
   let out: Rule[] = [];
   let i: int = 0;
   while (i < d.fields.length) {
@@ -14,16 +14,19 @@ export function checked(d: Description): Rule[] {
     while (j < f.decorators.length) {
       let dec = f.decorators[j];
       let limit: int = 0;
+      let allowed = "";
       let said = "";
       if (dec.argsText.length == 1) {
         let only = dec.argsText[0];
         let n = parseInt(only, 10);
         if (n == null) { said = only; } else { limit = n; }
       } else if (dec.argsText.length > 1) {
-        limit = parseInt(dec.argsText[0], 10) ?? 0;
+        let first = dec.argsText[0];
+        let n = parseInt(first, 10);
+        if (n == null) { allowed = first; } else { limit = n; }
         said = dec.argsText[1];
       }
-      out.push({ field: f.name, kind: dec.name, limit: limit, said: said });
+      out.push({ field: f.name, kind: dec.name, limit: limit, allowed: allowed, said: said });
       j = j + 1;
     }
     i = i + 1;
@@ -101,6 +104,17 @@ export function faults(rules: Rule[], body: string): Fault[] {
       let n = parseInt(value, 10);
       if (n != null && n > r.limit) {
         out.push({ field: r.field, said: saidOr(r, "the field \"" + r.field + "\" is over " + `${r.limit}`) });
+      }
+    } else if (r.kind == "oneOf") {
+      let ok = false;
+      let names = r.allowed.split(",");
+      let k: int = 0;
+      while (k < names.length) {
+        if (names[k].trim() == value) { ok = true; }
+        k = k + 1;
+      }
+      if (value != "" && !ok) {
+        out.push({ field: r.field, said: saidOr(r, "the field \"" + r.field + "\" is one of " + r.allowed) });
       }
     } else if (r.kind == "min") {
       let n = parseInt(value, 10);

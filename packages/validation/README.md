@@ -1,9 +1,9 @@
-# guard
+# validation
 
 Validation written on the fields it validates.
 
 ```ts
-@checked
+@validated
 class Ask {
   @required("a site key is needed")
   @maxLength(200, "that is not a site key")
@@ -16,7 +16,7 @@ class Ask {
 ```
 
 ```ts
-let wrong = faults(Class.decorator(new Ask(...), "checked"), req.body);
+let wrong = faults(Class.decorator(new Ask(...), "validated"), req.body);
 if (wrong.length > 0) { return badRequest(faultsJson(wrong)); }
 let ask = JSON.parse<Ask>(req.body);
 ```
@@ -58,7 +58,7 @@ wanted, so a forgotten message is a plainer sentence rather than a silent pass.
 
 ## How it reads the annotations
 
-`@checked` runs while compiling. It is handed every field and every annotation
+`@validated` runs while compiling. It is handed every field and every annotation
 written on it, and leaves a `Rule[]` constant the class carries; `faults` reads
 that at run time through `Class.decorator`. Nothing is scanned or reflected on
 at run time, and nothing about the class survives into the binary that was not
@@ -71,6 +71,6 @@ every argument spelled as text and this package parses back the number.
 ## Testing
 
 ```sh
-cd packages/guard
-lumen test guard.test.ts    # 7
+cd packages/validation
+lumen test validation.test.ts    # 7
 ```
