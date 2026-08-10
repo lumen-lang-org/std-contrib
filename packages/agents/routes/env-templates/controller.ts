@@ -1,6 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, noContent, notFound, ok } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { EnvTemplateWrite, envTemplatesAll, forgetEnvTemplate, saveEnvTemplate } from "../../env-templates.ts";

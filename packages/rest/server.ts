@@ -90,9 +90,9 @@ export function stops(r: Reply): Guarded {
 // The `@Valid` form of a rule check, shaped like every other guard so the
 // dispatcher needs no second kind of statement.
 export function validatedBody(rules: Rule[], body: string): Guarded {
-  let said = validationRefusal(rules, body);
-  if (said != "") { return stops(badRequest(said)); }
-  return passes();
+  let wrong = faults(rules, body);
+  if (wrong.length == 0) { return passes(); }
+  return stops(json(400, "{\"errors\":" + faultsJson(wrong) + "}"));
 }
 
 export function validationRefusal(rules: Rule[], body: string): string {

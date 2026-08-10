@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Guarded, Reply, Request, badRequest, createdJson, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { credentialFor } from "../../credentials.ts";

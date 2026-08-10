@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, countWhere, deleteWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok } from "../../../rest/server.ts";
 import { utf8Length } from "../../artifacts.ts";
 import { createProblem, jsonId } from "../../payload.ts";

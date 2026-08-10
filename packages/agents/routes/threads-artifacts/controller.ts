@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { ArtifactRow, TURN_SEQ_NONE, TurnArtifact, artifactsByTurn, artifactsForTurn, artifactsMapping, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";

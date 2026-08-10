@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { existsById, findById } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { createEnvKey, envKeysMapping, envKeysOwnedBy, forgetEnvKey } from "../../env-keys.ts";

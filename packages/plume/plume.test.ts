@@ -413,7 +413,7 @@ test("a double declared in the database's own words keeps every digit", () => {
     field("maxSteps", "max_steps", "int"),
     field("temperature", "temperature", "double precision"),
   ];
-  let repo = repository("plume_test_agents", "id", "id", fields);
+  let repo = repository({ table: "plume_test_agents", idField: "id", idColumn: "id", fields: fields, relations: [] });
   dropTable(database, repo);
   createTable(database, repo);
   let precise = 1234567890.123456;

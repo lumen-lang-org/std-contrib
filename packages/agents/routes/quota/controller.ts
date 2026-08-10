@@ -1,6 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, okJson } from "../../../rest/server.ts";
 import { GUEST_DAILY_RUNS, callerTags, guestTag } from "../../api-core.ts";
 import { nextUtcMidnightIso, runsSince, utcDayStartText } from "../../usage.ts";

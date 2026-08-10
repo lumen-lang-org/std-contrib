@@ -1,6 +1,5 @@
 import { apiKeysPlan } from "./api-keys.ts";
 import { bindings, controller } from "../rest/controller.ts";
-import { Bound } from "../rest/plan.ts";
 import { Request, Reply, Mount, mountedRoutes, mountProblem, dispatchedMounted, reply, ok, created, okJson, createdJson, noContent, notFound, badRequest, problem } from "../rest/server.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";

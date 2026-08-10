@@ -843,6 +843,50 @@ export function executeWith(db: Db, sql: string, args: string[]): DbResult {
   return dbOk(db.rows());
 }
 
+// --- link tables -----------------------------------------------------------------------
+
+// A row in a link table has no id of its own, so none of the by-id verbs above
+// reach it. `hasManyThrough` already says where the table is and which column
+// means which side; these write through the same description, so a join row is
+// no more hand-written SQL than an entity row is.
+
+export type DbLink = {
+  // The key of the row that owns the relation, then the far row's key.
+  local: string,
+  foreign: string,
+};
+
+export function link(db: Db, m: ManyThrough, pair: DbLink): DbResult {
+  return executeWith(db, "INSERT INTO " + m.linkTable
+    + " (" + m.linkLocalColumn + ", " + m.linkForeignColumn + ") VALUES ("
+    + db.placeholder + ", " + placeholderAt(db, 2) + ")", [pair.local, pair.foreign]);
+}
+
+export function unlink(db: Db, m: ManyThrough, pair: DbLink): DbResult {
+  return executeWith(db, "DELETE FROM " + m.linkTable
+    + " WHERE " + m.linkLocalColumn + " = " + db.placeholder
+    + " AND " + m.linkForeignColumn + " = " + placeholderAt(db, 2), [pair.local, pair.foreign]);
+}
+
+// Everything this row owns, for deleting the row it belongs to.
+export function unlinkLocal(db: Db, m: ManyThrough, id: string): DbResult {
+  return executeWith(db, "DELETE FROM " + m.linkTable
+    + " WHERE " + m.linkLocalColumn + " = " + db.placeholder, [id]);
+}
+
+// Everything pointing AT this row. A self-referencing link — an agent's
+// sub-agents — needs both directions cleared, which is why this is separate.
+export function unlinkForeign(db: Db, m: ManyThrough, id: string): DbResult {
+  return executeWith(db, "DELETE FROM " + m.linkTable
+    + " WHERE " + m.linkForeignColumn + " = " + db.placeholder, [id]);
+}
+
+// One column, every row. Rare and blunt on purpose: it exists for "only one row
+// may be the default", where claiming the flag takes it from whoever held it.
+export function setEvery(db: Db, repo: DbRepository, column: string, value: string): DbResult {
+  return executeWith(db, "UPDATE " + repo.table + " SET " + column + " = " + db.placeholder, [value]);
+}
+
 // --- schema ----------------------------------------------------------------------------
 
 // Create the table the mapping describes, if it is absent. The key column is

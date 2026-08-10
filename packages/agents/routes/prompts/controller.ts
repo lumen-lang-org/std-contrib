@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, existsById, findById, listOrdered, pageOrdered, persist } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, created, ok } from "../../../rest/server.ts";
 import { PromptRow, promptsMapping } from "../../schema.ts";
 

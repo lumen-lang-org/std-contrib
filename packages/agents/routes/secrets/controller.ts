@@ -1,6 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, Request, badRequest, header, noContent, ok } from "../../../rest/server.ts";
 import { callerTags, guestTag } from "../../api-core.ts";
 import { owningTag } from "../../owner.ts";

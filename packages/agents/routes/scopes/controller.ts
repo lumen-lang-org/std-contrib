@@ -1,6 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Guarded, Reply, ok } from "../../../rest/server.ts";
 import { pgOnly } from "../../guards.ts";
 import { pendingJobs } from "../../indexing.ts";

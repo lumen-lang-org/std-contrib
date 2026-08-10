@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRelation, DbRepository, ManyThrough, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export type ModelRow = {
@@ -619,30 +619,54 @@ export function agentsMapping(): DbRepository {
   return repository({ table: "agents", idField: "id", idColumn: "id", fields: fs });
 }
 
+// The three link tables an agent owns, named so they can be written as well as
+// read: the same description drives the join in agentsFull and plume's
+// link/unlink, and there is no second place saying what a column means.
+export function agentServersLink(db: Db): ManyThrough {
+  return {
+    field: "servers", table: "mcp_servers", foreignColumn: "id",
+    linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
+    localColumn: "id",
+    columns: "id, server_name AS \"serverName\", transport, endpoint, "
+      + boolColumn(db, "enabled") + " AS \"enabled\"",
+  };
+}
+
+export function agentSubAgentsLink(db: Db): ManyThrough {
+  return {
+    field: "subAgents", table: "agents", foreignColumn: "id",
+    linkTable: "agent_sub_agents", linkLocalColumn: "parent_id", linkForeignColumn: "child_id",
+    localColumn: "id",
+    columns: "id, agent_name AS \"agentName\", "
+      + boolColumn(db, "enabled") + " AS \"enabled\"",
+  };
+}
+
+export function agentSkillsLink(): ManyThrough {
+  return {
+    field: "skills", table: "skills", foreignColumn: "id",
+    linkTable: "agent_skills", linkLocalColumn: "agent_id", linkForeignColumn: "skill_id",
+    localColumn: "id",
+    columns: "id, skill_name AS \"skillName\", description",
+  };
+}
+
+export function agentScopesLink(): ManyThrough {
+  return {
+    field: "scopes", table: "agent_scopes", foreignColumn: "scope",
+    linkTable: "agent_scopes", linkLocalColumn: "agent_id", linkForeignColumn: "scope",
+    localColumn: "id",
+    columns: "scope",
+  };
+}
+
 export function agentsFull(db: Db): DbRepository {
   let rs: DbRelation[] = [
     hasOne({ field: "prompt", table: "prompts", localColumn: "prompt_id", foreignColumn: "id", columns: "id, prompt_name AS \"promptName\", version, body" }),
     hasOne({ field: "config", table: "model_configs", localColumn: "model_config_id", foreignColumn: "id", columns: "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking" }),
-    hasManyThrough({
-      field: "servers", table: "mcp_servers", foreignColumn: "id",
-      linkTable: "agent_mcp_servers", linkLocalColumn: "agent_id", linkForeignColumn: "server_id",
-      localColumn: "id",
-      columns: "id, server_name AS \"serverName\", transport, endpoint, "
-        + boolColumn(db, "enabled") + " AS \"enabled\"",
-    }),
-    hasManyThrough({
-      field: "subAgents", table: "agents", foreignColumn: "id",
-      linkTable: "agent_sub_agents", linkLocalColumn: "parent_id", linkForeignColumn: "child_id",
-      localColumn: "id",
-      columns: "id, agent_name AS \"agentName\", "
-        + boolColumn(db, "enabled") + " AS \"enabled\"",
-    }),
-    hasManyThrough({
-      field: "skills", table: "skills", foreignColumn: "id",
-      linkTable: "agent_skills", linkLocalColumn: "agent_id", linkForeignColumn: "skill_id",
-      localColumn: "id",
-      columns: "id, skill_name AS \"skillName\", description",
-    }),
+    hasManyThrough(agentServersLink(db)),
+    hasManyThrough(agentSubAgentsLink(db)),
+    hasManyThrough(agentSkillsLink()),
   ];
   return repository({ table: "agents", idField: "id", idColumn: "id", fields: agentsMapping().fields, relations: rs });
 }

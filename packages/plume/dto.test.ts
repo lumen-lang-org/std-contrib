@@ -56,7 +56,7 @@ function agentsTable(): DbRepository {
     field("enabled", "enabled", "bool"),
     field("promptId", "prompt_id", "text"),
   ];
-  return repository("agents", "id", "id", fields);
+  return repository({ table: "agents", idField: "id", idColumn: "id", fields: fields, relations: [] });
 }
 
 test("every field of the record becomes a key of the shape", () => {

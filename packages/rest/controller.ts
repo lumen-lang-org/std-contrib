@@ -106,17 +106,24 @@ export function methodHas(m: ControllerMethod, name: string): bool {
 // The vocabulary is fixed here rather than in the compiler, which is the point
 // of the design: adding `@patch` is editing this list, not the language.
 export function httpMethodOf(m: ControllerMethod): string {
-  if (methodHas(m, "get")) { return "GET"; }
-  if (methodHas(m, "post")) { return "POST"; }
-  if (methodHas(m, "put")) { return "PUT"; }
-  if (methodHas(m, "patch")) { return "PATCH"; }
-  if (methodHas(m, "delete") || methodHas(m, "del")) { return "DELETE"; }
-  if (methodHas(m, "head")) { return "HEAD"; }
+  if (methodHas(m, "get") || methodHas(m, "Get")) { return "GET"; }
+  if (methodHas(m, "post") || methodHas(m, "Post")) { return "POST"; }
+  if (methodHas(m, "put") || methodHas(m, "Put")) { return "PUT"; }
+  if (methodHas(m, "patch") || methodHas(m, "Patch")) { return "PATCH"; }
+  if (methodHas(m, "delete") || methodHas(m, "Delete") || methodHas(m, "del")) { return "DELETE"; }
+  if (methodHas(m, "head") || methodHas(m, "Head")) { return "HEAD"; }
   return "";
 }
 
-// `@delete` is the verb; `@del` is kept because code was written against it.
+// `@Get` is the convention; `@get` and `@del` keep working because code was
+// written against them, and a convention that breaks the old spelling is a rule.
 export function routeDecoratorName(m: ControllerMethod): string {
+  if (methodHas(m, "Get")) { return "Get"; }
+  if (methodHas(m, "Post")) { return "Post"; }
+  if (methodHas(m, "Put")) { return "Put"; }
+  if (methodHas(m, "Patch")) { return "Patch"; }
+  if (methodHas(m, "Delete")) { return "Delete"; }
+  if (methodHas(m, "Head")) { return "Head"; }
   if (methodHas(m, "get")) { return "get"; }
   if (methodHas(m, "post")) { return "post"; }
   if (methodHas(m, "put")) { return "put"; }
@@ -249,13 +256,17 @@ function bindingFor(p: ControllerParam): string {
   return "";
 }
 
-function isOwnMethod(d: Description, name: string): bool {
+// How many parameters a guard the class defines itself takes, or -1 when the
+// name belongs to an imported function instead. A guard that needs nothing but
+// the class is written `self.needsPg()`; one that also reads the request takes
+// it, `self.theAgent(req)`, which is how a guard can look at a path variable.
+function ownMethodArity(d: Description, name: string): int {
   let i: int = 0;
   while (i < d.methods.length) {
-    if (d.methods[i].name == name && d.methods[i].params.length == 0) { return true; }
+    if (d.methods[i].name == name) { return d.methods[i].params.length; }
     i = i + 1;
   }
-  return false;
+  return -1;
 }
 
 function paramHas(p: ControllerParam, name: string): bool {
@@ -280,8 +291,11 @@ function guardsFor(d: Description, m: ControllerMethod): string[] {
           extra = extra + ", " + quoted(dec.args[j]);
           j = j + 1;
         }
-        if (isOwnMethod(d, dec.args[0])) {
+        let arity = ownMethodArity(d, dec.args[0]);
+        if (arity == 0) {
           out.push("self." + dec.args[0] + "()");
+        } else if (arity > 0) {
+          out.push("self." + dec.args[0] + "(req" + extra + ")");
         } else {
           out.push(dec.args[0] + "(req" + extra + ")");
         }

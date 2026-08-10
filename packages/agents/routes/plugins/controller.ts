@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, existsById, findById, listOrdered } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
 import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
