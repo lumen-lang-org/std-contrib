@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, persist, setEvery, unlink, unlinkForeign, unlinkLocal } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, persist, setEvery, unlink, unlinkAllPointingAt, unlinkAllOwnedBy } from "../../../plume/plume.ts";
 import { AgentRetrievalRow, agentRetrievalMapping, agentScopes, embeddingModel, grantScope, revokeScope } from "../../knowledge.ts";
 import { agentRepository } from "./entities/agent.entity.ts";
 import { mcpServerRepository } from "../servers/entities/mcp-server.entity.ts";
@@ -10,133 +10,133 @@ import { AgentWebRagRow, agentWebRagMapping, webRagFor } from "../../webrag.ts";
 import { runsOf } from "../../runlog.ts";
 
 export class AgentRepository {
-  db: Db;
+  database: Db;
   agents: DbRepository;
 
-  constructor(db: Db) {
-    this.db = db;
+  constructor(database: Db) {
+    this.database = database;
     this.agents = agentRepository();
   }
 
   listing(enabledOnly: bool): string {
     let keys: DbOrder[] = [{ column: "agent_name" }];
     if (enabledOnly) {
-      return listOrdered(this.db, this.agents, {
-        where: "enabled = " + this.db.placeholder,
+      return listOrdered(this.database, this.agents, {
+        where: "enabled = " + this.database.placeholder,
         args: ["1"],
         order: keys,
       });
     }
-    return listOrdered(this.db, this.agents, { order: keys });
+    return listOrdered(this.database, this.agents, { order: keys });
   }
 
   one(id: string): string {
-    return findById(this.db, this.agents, id);
+    return findById(this.database, this.agents, id);
   }
 
   exists(id: string): bool {
-    return existsById(this.db, this.agents, id);
+    return existsById(this.database, this.agents, id);
   }
 
   hasModelConfig(id: string): bool {
-    return existsById(this.db, modelConfigRepository(), id);
+    return existsById(this.database, modelConfigRepository(), id);
   }
 
   hasPrompt(id: string): bool {
-    return existsById(this.db, promptRepository(), id);
+    return existsById(this.database, promptRepository(), id);
   }
 
   hasServer(id: string): bool {
-    return existsById(this.db, mcpServerRepository(), id);
+    return existsById(this.database, mcpServerRepository(), id);
   }
 
   hasSkill(id: string): bool {
-    return existsById(this.db, skillRepository(), id);
+    return existsById(this.database, skillRepository(), id);
   }
 
   save(document: string): DbResult {
-    return persist(this.db, this.agents, document);
+    return persist(this.database, this.agents, document);
   }
 
   clearDefaults(): DbResult {
-    return setEvery(this.db, this.agents, "is_default", "0");
+    return setEvery(this.database, this.agents, "is_default", "0");
   }
 
   linkServer(id: string, serverId: string): DbResult {
-    return link(this.db, linkOf(this.agents, "servers"), { local: id, foreign: serverId });
+    return link(this.database, linkOf(this.agents, "servers"), { local: id, foreign: serverId });
   }
 
   unlinkServer(id: string, serverId: string): DbResult {
-    return unlink(this.db, linkOf(this.agents, "servers"), { local: id, foreign: serverId });
+    return unlink(this.database, linkOf(this.agents, "servers"), { local: id, foreign: serverId });
   }
 
   linkChild(id: string, childId: string): DbResult {
-    return link(this.db, linkOf(this.agents, "subAgents"), { local: id, foreign: childId });
+    return link(this.database, linkOf(this.agents, "subAgents"), { local: id, foreign: childId });
   }
 
   unlinkChild(id: string, childId: string): DbResult {
-    return unlink(this.db, linkOf(this.agents, "subAgents"), { local: id, foreign: childId });
+    return unlink(this.database, linkOf(this.agents, "subAgents"), { local: id, foreign: childId });
   }
 
   linkSkill(id: string, skillId: string): DbResult {
-    return link(this.db, linkOf(this.agents, "skills"), { local: id, foreign: skillId });
+    return link(this.database, linkOf(this.agents, "skills"), { local: id, foreign: skillId });
   }
 
   unlinkSkill(id: string, skillId: string): DbResult {
-    return unlink(this.db, linkOf(this.agents, "skills"), { local: id, foreign: skillId });
+    return unlink(this.database, linkOf(this.agents, "skills"), { local: id, foreign: skillId });
   }
 
   scopes(id: string): string[] {
-    return agentScopes(this.db, id);
+    return agentScopes(this.database, id);
   }
 
   grant(id: string, scope: string): string {
-    return grantScope(this.db, id, scope);
+    return grantScope(this.database, id, scope);
   }
 
   revoke(id: string, scope: string): string {
-    return revokeScope(this.db, id, scope);
+    return revokeScope(this.database, id, scope);
   }
 
   embeddingUsable(modelId: string): bool {
-    return embeddingModel(this.db, modelId).id != "";
+    return embeddingModel(this.database, modelId).id != "";
   }
 
   saveRetrieval(row: AgentRetrievalRow): DbResult {
-    return persist(this.db, agentRetrievalMapping(), JSON.stringify(row));
+    return persist(this.database, agentRetrievalMapping(), JSON.stringify(row));
   }
 
   retrieval(id: string): string {
-    return findById(this.db, agentRetrievalMapping(), id);
+    return findById(this.database, agentRetrievalMapping(), id);
   }
 
   webRag(id: string): AgentWebRagRow {
-    return webRagFor(this.db, id);
+    return webRagFor(this.database, id);
   }
 
   saveWebRag(row: AgentWebRagRow): DbResult {
-    return persist(this.db, agentWebRagMapping(), JSON.stringify(row));
+    return persist(this.database, agentWebRagMapping(), JSON.stringify(row));
   }
 
   storedWebRag(id: string): string {
-    return findById(this.db, agentWebRagMapping(), id);
+    return findById(this.database, agentWebRagMapping(), id);
   }
 
   model(id: string): string {
-    return findById(this.db, modelRepository(), id);
+    return findById(this.database, modelRepository(), id);
   }
 
   runs(id: string, tags: string[], limit: int): string {
-    return runsOf(this.db, id, tags, limit);
+    return runsOf(this.database, id, tags, limit);
   }
 
   forget(id: string): void {
-    unlinkLocal(this.db, linkOf(this.agents, "subAgents"), id);
-    unlinkForeign(this.db, linkOf(this.agents, "subAgents"), id);
-    unlinkLocal(this.db, linkOf(this.agents, "servers"), id);
-    unlinkLocal(this.db, linkOf(this.agents, "skills"), id);
-    unlinkLocal(this.db, linkOf(this.agents, "scopes"), id);
-    deleteById(this.db, agentRetrievalMapping(), id);
-    deleteById(this.db, agentRepository(), id);
+    unlinkAllOwnedBy(this.database, linkOf(this.agents, "subAgents"), id);
+    unlinkAllPointingAt(this.database, linkOf(this.agents, "subAgents"), id);
+    unlinkAllOwnedBy(this.database, linkOf(this.agents, "servers"), id);
+    unlinkAllOwnedBy(this.database, linkOf(this.agents, "skills"), id);
+    unlinkAllOwnedBy(this.database, linkOf(this.agents, "scopes"), id);
+    deleteById(this.database, agentRetrievalMapping(), id);
+    deleteById(this.database, agentRepository(), id);
   }
 }

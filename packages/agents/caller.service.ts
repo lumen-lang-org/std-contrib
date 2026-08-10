@@ -8,16 +8,16 @@ export class CallerService {
     this.trusted = trusted;
   }
 
-  tags(req: Request): string[] {
-    return tagsFromHeader(this.trusted, header(req, "x-user"));
+  tags(request: Request): string[] {
+    return tagsFromHeader(this.trusted, header(request, "x-user"));
   }
 
-  owner(req: Request): string {
-    return owningTag(this.tags(req));
+  owner(request: Request): string {
+    return owningTag(this.tags(request));
   }
 
-  unreadable(req: Request): bool {
-    let tags = this.tags(req);
+  unreadable(request: Request): bool {
+    let tags = this.tags(request);
     return tags.length == 1 && tags[0] == UNKNOWN_TAG;
   }
 }

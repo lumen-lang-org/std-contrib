@@ -19,8 +19,8 @@ export class AgentService {
   repository: AgentRepository;
   master: string;
 
-  constructor(db: Db, master: string) {
-    this.repository = new AgentRepository(db);
+  constructor(database: Db, master: string) {
+    this.repository = new AgentRepository(database);
     this.master = master;
   }
 
@@ -53,7 +53,7 @@ export class AgentService {
   }
 
   runsToday(guest: string, at: number): int {
-    return runsSince(this.repository.db, guest, utcDayStartText(at));
+    return runsSince(this.repository.database, guest, utcDayStartText(at));
   }
 
   create(body: AgentBody): Outcome {
@@ -199,9 +199,9 @@ export class AgentService {
       if (document == "") {
         return refusing("queryMode generated needs an existing chat model as queryModelId");
       }
-      let m: ModelRow = JSON.parse<ModelRow>(document);
-      if (m.kind != "chat") {
-        return refusing(m.label + " is not a chat model");
+      let model: ModelRow = JSON.parse<ModelRow>(document);
+      if (model.kind != "chat") {
+        return refusing(model.label + " is not a chat model");
       }
     }
     let row: AgentWebRagRow = {
@@ -220,10 +220,10 @@ export class AgentService {
   }
 
   run(id: string, text: string, owner: string): RunResult {
-    let tracer = tracerFor(this.repository.db, this.master);
-    let answered = runAgentTraced(this.repository.db, id, text, this.master, tracer);
+    let tracer = tracerFor(this.repository.database, this.master);
+    let answered = runAgentTraced(this.repository.database, id, text, this.master, tracer);
 
-    let runId = recordRun(this.repository.db, {
+    let runId = recordRun(this.repository.database, {
       agentId: id, threadId: "", owner: owner,
       question: text, run: answered, modelChoiceId: "", routeNote: "",
     });
@@ -239,6 +239,6 @@ export class AgentService {
   }
 }
 
-export function forgetAgent(db: Db, agentId: string): void {
-  new AgentRepository(db).forget(agentId);
+export function forgetAgent(database: Db, agentId: string): void {
+  new AgentRepository(database).forget(agentId);
 }

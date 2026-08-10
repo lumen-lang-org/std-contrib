@@ -19,16 +19,16 @@ import { scopeFromPath } from "./agent.utils.ts";
 export class AgentApi {
   agents: AgentService;
 
-  constructor(db: Db, master: string) {
-    this.agents = new AgentService(db, master);
+  constructor(database: Db, master: string) {
+    this.agents = new AgentService(database, master);
   }
 
-  theAgent(req: Request): Guarded {
-    return agentExists(this.agents, req);
+  theAgent(request: Request): Guarded {
+    return agentExists(this.agents, request);
   }
 
-  guestRuns(req: Request): Guarded {
-    return guestRunsLeft(this.agents, req);
+  guestRuns(request: Request): Guarded {
+    return guestRunsLeft(this.agents, request);
   }
 
   @Get("/")

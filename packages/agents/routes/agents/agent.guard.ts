@@ -3,16 +3,16 @@ import { GUEST_DAILY_RUNS, callerTags, guestQuotaJson, guestTag } from "../../ap
 import { nextUtcMidnightIso, secondsToUtcMidnight } from "../../usage.ts";
 import { AgentService } from "./agent.service.ts";
 
-export function agentExists(agents: AgentService, req: Request): Guarded {
-  let id = param(req, "id");
+export function agentExists(agents: AgentService, request: Request): Guarded {
+  let id = param(request, "id");
   if (!agents.exists(id)) {
     return stops(NotFound("agent " + id));
   }
   return passes();
 }
 
-export function guestRunsLeft(agents: AgentService, req: Request): Guarded {
-  let guest = guestTag(callerTags(req));
+export function guestRunsLeft(agents: AgentService, request: Request): Guarded {
+  let guest = guestTag(callerTags(request));
   if (guest == "") {
     return passes();
   }

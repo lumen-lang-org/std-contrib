@@ -1075,14 +1075,14 @@ export function unlink(db: Db, m: ManyThrough, pair: DbLink): DbResult {
 }
 
 // Everything this row owns, for deleting the row it belongs to.
-export function unlinkLocal(db: Db, m: ManyThrough, id: string): DbResult {
+export function unlinkAllOwnedBy(db: Db, m: ManyThrough, id: string): DbResult {
   return executeWith(db, "DELETE FROM " + m.linkTable
     + " WHERE " + m.linkLocalColumn + " = " + db.placeholder, [id]);
 }
 
 // Everything pointing AT this row. A self-referencing link — an agent's
 // sub-agents — needs both directions cleared, which is why this is separate.
-export function unlinkForeign(db: Db, m: ManyThrough, id: string): DbResult {
+export function unlinkAllPointingAt(db: Db, m: ManyThrough, id: string): DbResult {
   return executeWith(db, "DELETE FROM " + m.linkTable
     + " WHERE " + m.linkForeignColumn + " = " + db.placeholder, [id]);
 }
