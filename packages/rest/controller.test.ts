@@ -2,7 +2,8 @@
 //
 //   cd packages/rest && lumen test controller.test.ts
 
-import { Description, ControllerMethod, ControllerParam, ControllerField, ControllerDecoratorUse, controller, controllerProblem, joinPaths, httpMethodOf, methodArg } from "./controller.ts";
+import { Description, ControllerMethod, ControllerParam, ControllerField, ControllerDecoratorUse, controller, controllerProblem, joinPaths, httpMethodOf, methodArg, bindings } from "./controller.ts";
+import { Bound } from "./plan.ts";
 import { Route, match, tableProblem } from "./router.ts";
 
 function on(name: string, args: string[]): ControllerDecoratorUse {
@@ -185,4 +186,42 @@ test("@delete and @del both mean DELETE", () => {
   expect(table.length == 2);
   expect(match(table, "DELETE", "/things/x").handler == "remove");
   expect(match(table, "DELETE", "/things/x/hard").handler == "drop");
+});
+
+test("the binding plan names an expression per parameter, not a kind", () => {
+  let d = agentController();
+  let idParam: ControllerParam = { name: "id", type: "string", decorators: [on("PathVariable", ["id"])] };
+  let limitParam: ControllerParam = { name: "limit", type: "int", decorators: [on("RequestParam", ["limit", "20"])] };
+  let whoParam: ControllerParam = { name: "who", type: "string", decorators: [on("RequestHeader", ["x-user"])] };
+  let methods: ControllerMethod[] = [
+    { name: "find", returns: "Reply", params: [idParam, limitParam, whoParam], decorators: [on("get", ["/:id"])] },
+  ];
+  let plan = bindings({ protocol: 1, kind: "class", name: "A", args: ["/a"], file: "f", line: 1, fields: d.fields, methods: methods });
+  expect(plan.length == 1);
+  expect(plan[0].handler == "find");
+  expect(plan[0].args[0] == "param(req, \"id\")");
+  expect(plan[0].args[1] == "parseInt(queryParam(req, \"limit\", \"20\"), 10) ?? 0");
+  expect(plan[0].args[2] == "header(req, \"x-user\")");
+});
+
+test("a bare Request parameter binds to the request, and a body to its type", () => {
+  let d = agentController();
+  let reqParam: ControllerParam = { name: "req", type: "Request", decorators: [] };
+  let askParam: ControllerParam = { name: "ask", type: "Ask", decorators: [on("RequestBody", [])] };
+  let methods: ControllerMethod[] = [
+    { name: "save", returns: "Reply", params: [reqParam, askParam], decorators: [on("put", ["/"])] },
+  ];
+  let plan = bindings({ protocol: 1, kind: "class", name: "A", args: ["/a"], file: "f", line: 1, fields: d.fields, methods: methods });
+  expect(plan[0].args[0] == "req");
+  expect(plan[0].args[1] == "JSON.parse<Ask>(req.body)");
+});
+
+test("a guard becomes a call the dispatcher can run", () => {
+  let d = agentController();
+  let methods: ControllerMethod[] = [
+    { name: "list", returns: "Reply", params: [], decorators: [on("get", ["/"]), on("Guard", ["roleAtLeast", "owner"])] },
+  ];
+  let plan = bindings({ protocol: 1, kind: "class", name: "A", args: ["/a"], file: "f", line: 1, fields: d.fields, methods: methods });
+  expect(plan[0].guards.length == 1);
+  expect(plan[0].guards[0] == "roleAtLeast(req, \"owner\")");
 });

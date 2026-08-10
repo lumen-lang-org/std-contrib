@@ -1,4 +1,5 @@
-import { controller } from "./controller.ts";
+import { controller, bindings } from "./controller.ts";
+import { Bound } from "./plan.ts";
 import { Request, Reply, Mount, Guarded, ok, badRequest, passes, stops, dispatchedMounted, header } from "./server.ts";
 
 export function needsPostgres(req: Request): Guarded {
@@ -9,6 +10,7 @@ export function needsPostgres(req: Request): Guarded {
 }
 
 @controller("/documents")
+@bindings
 export class DocumentApi {
   kind: string;
   constructor(kind: string) { this.kind = kind; }
