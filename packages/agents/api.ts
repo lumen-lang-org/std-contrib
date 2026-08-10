@@ -46,7 +46,7 @@ import { runsMapping, runsFull, runLogPlan, recordRun, runsOf, ownedRun } from "
 import { TraceConfigRow, traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
 import { jsonId, createProblem, backendOr, knownBackend, scopesJson } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonUnescape, jsonRaw, jsonFlag } from "./scan.ts";
-import { bannerShow, bannerChange } from "./banner-api.ts";
+import { BannerApi } from "./banner-api.ts";
 import { toolListing } from "./mcp.ts";
 import { taskTools, callTaskTool } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
@@ -6800,29 +6800,6 @@ class CardPluginApi {
   }
 }
 
-@controller("/banner")
-class BannerApi {
-  db: Db;
-
-  constructor(db: Db) {
-    this.db = db;
-  }
-
-  // Public in the same sense the healthz is: it is one string the operator
-  // wrote for everyone to read, and a guest sees the banner too — the
-  // gateway lists this route among the guest-readable ones.
-  @get("/")
-  show(req: Request): Reply {
-    return bannerShow(this.db);
-  }
-
-  // Writing goes through the gateway's authenticated tier like every other
-  // operator surface.
-  @put("/")
-  change(req: Request): Reply {
-    return bannerChange(this.db, req.body);
-  }
-}
 
 // The sandbox's limits, operator-set. The numbers a script container is
 // bounded by, and the counts that bound how many environments and keys pile
@@ -7098,8 +7075,6 @@ function apiToken(): string {
 //
 // So every create refuses a taken id, by name. Changing a row is what PUT is
 // for, and for prompts the answer is a new version, which is a new id.
-
-
 
 
 // Which database, from the environment. AGENTS_PG_HOST set means PostgreSQL —
