@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { deleteById, findById, listOrdered, persist } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Bound } from "../../../rest/plan.ts";
-import { Reply, Request, badRequest, notFound, ok } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, NotFound, Ok } from "../../../rest/server.ts";
 import { stamp, toolCardProblem } from "../../api-core.ts";
 import { CardCaseRow, CardPluginRow, cardCasesMapping, cardPluginsMapping } from "../../plugincards.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
@@ -11,7 +11,9 @@ import { CardInput, CaseInput } from "./types.ts";
 
 function rawListOr(body: string, member: string): string {
   let raw = jsonRaw(body, member);
-  if (raw == "") { return "[]"; }
+  if (raw == "") {
+    return "[]";
+  }
   return raw;
 }
 
@@ -24,20 +26,26 @@ export class CardPluginApi {
     this.db = db;
   }
 
-  @get("/")
+  @Get("/")
   list(req: Request): Reply {
-    return ok(listOrdered(this.db, cardPluginsMapping(), { order: [{ column: "plugin_name" }] }));
+    return Ok(listOrdered(this.db, cardPluginsMapping(), { order: [{ column: "plugin_name" }] }));
   }
 
-  @post("/")
+  @Post("/")
   install(req: Request): Reply {
-    if (req.body == "") { return badRequest("a body is required"); }
+    if (req.body == "") {
+      return BadRequest("a body is required");
+    }
     let id = jsonText(req.body, "id");
     let name = jsonText(req.body, "pluginName");
-    if (id == "") { return badRequest("a plugin needs an id"); }
-    if (name == "") { return badRequest("a plugin needs a name"); }
+    if (id == "") {
+      return BadRequest("a plugin needs an id");
+    }
+    if (name == "") {
+      return BadRequest("a plugin needs a name");
+    }
     if (findById(this.db, cardPluginsMapping(), id) != "") {
-      return badRequest("plugin " + id + " is already installed");
+      return BadRequest("plugin " + id + " is already installed");
     }
 
     let plugin: CardPluginRow = {
@@ -59,7 +67,9 @@ export class CardPluginApi {
         payload: cards[c].payload, hint: cards[c].hint, enabled: true,
       };
       let problem = toolCardProblem(card);
-      if (problem != "") { return badRequest(problem); }
+      if (problem != "") {
+        return BadRequest(problem);
+      }
       c = c + 1;
     }
 
@@ -84,14 +94,16 @@ export class CardPluginApi {
       persist(this.db, cardCasesMapping(), JSON.stringify(one));
       k = k + 1;
     }
-    return ok(JSON.stringify(plugin));
+    return Ok(JSON.stringify(plugin));
   }
 
-  @put("/:id")
+  @Put("/:id")
   change(req: Request): Reply {
     let id = req.params.get("id") ?? "";
     let held = findById(this.db, cardPluginsMapping(), id);
-    if (held == "") { return notFound("no plugin " + id); }
+    if (held == "") {
+      return NotFound("no plugin " + id);
+    }
     let row: CardPluginRow = JSON.parse<CardPluginRow>(held);
     let after: CardPluginRow = {
       id: row.id, pluginName: row.pluginName, description: row.description,
@@ -101,36 +113,40 @@ export class CardPluginApi {
       installedAt: row.installedAt,
     };
     persist(this.db, cardPluginsMapping(), JSON.stringify(after));
-    return ok(JSON.stringify(after));
+    return Ok(JSON.stringify(after));
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(req: Request): Reply {
     let id = req.params.get("id") ?? "";
     if (findById(this.db, cardPluginsMapping(), id) == "") {
-      return notFound("no plugin " + id);
+      return NotFound("no plugin " + id);
     }
     deleteWhere(this.db, toolCardsMapping(), "plugin_id = " + this.db.placeholder, [id]);
     deleteWhere(this.db, cardCasesMapping(), "plugin_id = " + this.db.placeholder, [id]);
     deleteById(this.db, cardPluginsMapping(), id);
-    return ok("{\"uninstalled\":" + JSON.stringify(id) + "}");
+    return Ok("{\"uninstalled\":" + JSON.stringify(id) + "}");
   }
 
-  @post("/from-source")
+  @Post("/from-source")
   fromSource(req: Request): Reply {
     let url = jsonText(req.body, "sourceUrl");
-    if (url == "") { return badRequest("a sourceUrl is required"); }
+    if (url == "") {
+      return BadRequest("a sourceUrl is required");
+    }
     if (!url.startsWith("https://") && !url.startsWith("http://")) {
-      return badRequest("a plugin source is an http(s) url");
+      return BadRequest("a plugin source is an http(s) url");
     }
     let res = http.request(url, "GET", "", new Map<string, string>());
-    if (!res.ok) { return badRequest("could not reach " + url); }
+    if (!res.ok) {
+      return BadRequest("could not reach " + url);
+    }
     if (res.status != 200) {
-      return badRequest(url + " answered " + `${res.status}`);
+      return BadRequest(url + " answered " + `${res.status}`);
     }
     let manifest = res.body;
     if (jsonText(manifest, "id") == "") {
-      return badRequest("that url did not answer a plugin manifest (no id)");
+      return BadRequest("that url did not answer a plugin manifest (no id)");
     }
 
     let rendererUrl = "";
@@ -140,7 +156,7 @@ export class CardPluginApi {
       rendererUrl = resolveAgainst(url, renderer);
       let fetched = http.request(rendererUrl, "GET", "", new Map<string, string>());
       if (!fetched.ok || fetched.status != 200) {
-        return badRequest("the manifest names a renderer at " + rendererUrl
+        return BadRequest("the manifest names a renderer at " + rendererUrl
           + " and it could not be fetched — refusing a half-install");
       }
       rendererSource = fetched.body;
@@ -154,13 +170,17 @@ export class CardPluginApi {
     return this.install(forward);
   }
 
-  @get("/:id/renderer")
+  @Get("/:id/renderer")
   renderer(req: Request): Reply {
     let id = req.params.get("id") ?? "";
     let held = findById(this.db, cardPluginsMapping(), id);
-    if (held == "") { return notFound("no plugin " + id); }
+    if (held == "") {
+      return NotFound("no plugin " + id);
+    }
     let row: CardPluginRow = JSON.parse<CardPluginRow>(held);
-    if (row.rendererSource == "") { return notFound("plugin " + id + " ships no renderer"); }
+    if (row.rendererSource == "") {
+      return NotFound("plugin " + id + " ships no renderer");
+    }
     let reply: Reply = {
       status: 200, body: row.rendererSource,
       headers: new Map<string, string>([["Content-Type", "text/javascript; charset=utf-8"]]),
@@ -168,9 +188,9 @@ export class CardPluginApi {
     return reply;
   }
 
-  @get("/:id/cases")
+  @Get("/:id/cases")
   cases(req: Request): Reply {
     let id = req.params.get("id") ?? "";
-    return ok(listWhere(this.db, cardCasesMapping(), "plugin_id = " + this.db.placeholder, [id]));
+    return Ok(listWhere(this.db, cardCasesMapping(), "plugin_id = " + this.db.placeholder, [id]));
   }
 }

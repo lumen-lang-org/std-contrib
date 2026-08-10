@@ -49,7 +49,9 @@ export function envDockerOverride(bin: string): void {
 }
 
 export function envDockerBin(): string {
-  if (envChosenDocker != "") { return envChosenDocker; }
+  if (envChosenDocker != "") {
+    return envChosenDocker;
+  }
   return process.env("AGENTS_DOCKER") ?? "docker";
 }
 
@@ -61,7 +63,9 @@ function envDocker(args: string[]): EnvDockerReply {
 
 function envDockerProblem(doing: string, reply: EnvDockerReply): string {
   let detail = envFirstLine(reply.stderr);
-  if (detail == "") { detail = envFirstLine(reply.stdout); }
+  if (detail == "") {
+    detail = envFirstLine(reply.stdout);
+  }
   if (detail == "") {
     return "docker could not " + doing + " (docker itself did not run)";
   }
@@ -76,9 +80,13 @@ function envFirstLine(text: string): string {
     end = end + 1;
   }
   let line = text.slice(0, end).trim();
-  if (line.length <= ENV_PROBLEM_MAX) { return line; }
+  if (line.length <= ENV_PROBLEM_MAX) {
+    return line;
+  }
   let cut = ENV_PROBLEM_MAX;
-  while (cut > 0 && envContinuation(line.charCodeAt(cut))) { cut = cut - 1; }
+  while (cut > 0 && envContinuation(line.charCodeAt(cut))) {
+    cut = cut - 1;
+  }
   return line.slice(0, cut) + "...";
 }
 
@@ -118,7 +126,11 @@ function envSafeBytes(text: string): string {
     let c = text.charCodeAt(i);
     let fine = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
       || c == 45 || c == 46 || c == 95;
-    if (fine) { out = out + text.charAt(i); } else { out = out + "-"; }
+    if (fine) {
+      out = out + text.charAt(i);
+    } else {
+      out = out + "-";
+    }
     i = i + 1;
   }
   return out;
@@ -191,7 +203,9 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
 
 function envRunning(container: string): bool {
   let seen = envDocker(["inspect", "-f", "{{.State.Running}}", container]);
-  if (seen.status != 0) { return false; }
+  if (seen.status != 0) {
+    return false;
+  }
   return envFirstLine(seen.stdout).trim() == "true";
 }
 
@@ -215,9 +229,15 @@ export function envCapsOverride(memMb: int, cpus: int, pids: int): void {
   envCapCpusChosen = cpus;
   envCapPidsChosen = pids;
 }
-function envCapMemMb(): int { return envCapMemMbChosen > 0 ? envCapMemMbChosen : 1024; }
-function envCapCpus(): int { return envCapCpusChosen > 0 ? envCapCpusChosen : 2; }
-function envCapPids(): int { return envCapPidsChosen > 0 ? envCapPidsChosen : 256; }
+function envCapMemMb(): int {
+  return envCapMemMbChosen > 0 ? envCapMemMbChosen : 1024;
+}
+function envCapCpus(): int {
+  return envCapCpusChosen > 0 ? envCapCpusChosen : 2;
+}
+function envCapPids(): int {
+  return envCapPidsChosen > 0 ? envCapPidsChosen : 256;
+}
 
 function envRunArgs(container: string, threadId: string, image: string, network: bool): string[] {
   let out: string[] = ["run", "-d", "--name", container];
@@ -233,7 +253,10 @@ function envRunArgs(container: string, threadId: string, image: string, network:
   out.push("--cap-add"); out.push("FOWNER");
   out.push("--cap-add"); out.push("SETUID");
   out.push("--cap-add"); out.push("SETGID");
-  if (!network) { out.push("--network"); out.push("none"); }
+  if (!network) {
+    out.push("--network");
+    out.push("none");
+  }
   out.push("--entrypoint"); out.push("sleep");
   out.push(image); out.push("infinity");
   return out;
@@ -247,10 +270,14 @@ export type EnvSweep = {
 export function envIdle(db: Db, s: EnvSweep): int {
   let idleMs = s.idleMs > 0 ? s.idleMs : ENV_IDLE_MS;
   let deadline = envMinus(s.now, idleMs);
-  if (deadline == "") { return 0; }
+  if (deadline == "") {
+    return 0;
+  }
   let keys: DbOrder[] = [{ column: "id" }];
   let listed = listOrdered(db, envMapping(), { where: "status = " + placeholderAt(db, 1), args: ["running"], order: keys });
-  if (listed == "" || listed == "[]") { return 0; }
+  if (listed == "" || listed == "[]") {
+    return 0;
+  }
   let rows = JSON.parse<EnvRow[]>(listed);
   let stopped: int = 0;
   let i: int = 0;
@@ -267,7 +294,9 @@ export function envIdle(db: Db, s: EnvSweep): int {
 }
 
 export function envForget(db: Db, threadId: string): void {
-  if (threadId == "") { return; }
+  if (threadId == "") {
+    return;
+  }
   let rows = envList(db, threadId);
   let i: int = 0;
   while (i < rows.length) {
@@ -291,37 +320,55 @@ export function envList(db: Db, threadId: string): EnvRow[] {
 function envStampLess(a: string, b: string): bool {
   let sa = envStripZeros(a);
   let sb = envStripZeros(b);
-  if (sa == "" || sb == "") { return sa == "" && sb != ""; }
-  if (sa.length != sb.length) { return sa.length < sb.length; }
+  if (sa == "" || sb == "") {
+    return sa == "" && sb != "";
+  }
+  if (sa.length != sb.length) {
+    return sa.length < sb.length;
+  }
   let i: int = 0;
   while (i < sa.length) {
     let ca = sa.charCodeAt(i);
     let cb = sb.charCodeAt(i);
-    if (ca != cb) { return ca < cb; }
+    if (ca != cb) {
+      return ca < cb;
+    }
     i = i + 1;
   }
   return false;
 }
 
 function envStripZeros(text: string): string {
-  if (text == "") { return ""; }
+  if (text == "") {
+    return "";
+  }
   let i: int = 0;
   while (i < text.length) {
     let c = text.charCodeAt(i);
-    if (c < 48 || c > 57) { return ""; }
+    if (c < 48 || c > 57) {
+      return "";
+    }
     i = i + 1;
   }
   let at: int = 0;
-  while (at < text.length - 1 && text.charCodeAt(at) == 48) { at = at + 1; }
+  while (at < text.length - 1 && text.charCodeAt(at) == 48) {
+    at = at + 1;
+  }
   return text.slice(at);
 }
 
 function envMinus(now: string, ms: int): string {
-  if (ms < 0) { return ""; }
+  if (ms < 0) {
+    return "";
+  }
   let taking = `${ms}`;
   let stamp = envStripZeros(now);
-  if (stamp == "") { return ""; }
-  if (envStampLess(stamp, taking)) { return ""; }
+  if (stamp == "") {
+    return "";
+  }
+  if (envStampLess(stamp, taking)) {
+    return "";
+  }
   let out = "";
   let ai: int = stamp.length - 1;
   let bi: int = taking.length - 1;
@@ -330,7 +377,10 @@ function envMinus(now: string, ms: int): string {
     let da = stamp.charCodeAt(ai) - 48 - borrow;
     let taken = bi >= 0 ? taking.charCodeAt(bi) - 48 : 0;
     borrow = 0;
-    if (da < taken) { da = da + 10; borrow = 1; }
+    if (da < taken) {
+      da = da + 10;
+      borrow = 1;
+    }
     out = "0123456789".charAt(da - taken) + out;
     ai = ai - 1;
     bi = bi - 1;
@@ -377,7 +427,9 @@ export function envOwned(db: Db, owner: string): EnvOwnedRow[] {
 
 export function envDrop(db: Db, threadId: string, name: string): bool {
   let held = findById(db, envMapping(), threadId + ":" + name);
-  if (held == "") { return false; }
+  if (held == "") {
+    return false;
+  }
   envDocker(["rm", "-f", envContainerName(threadId, name)]);
   deleteWhere(db, envMapping(), "id = " + placeholderAt(db, 1), [threadId + ":" + name]);
   if (envList(db, threadId).length == 0) {
@@ -387,7 +439,9 @@ export function envDrop(db: Db, threadId: string, name: string): bool {
 }
 
 export function envImagePresent(image: string): bool {
-  if (image == "") { return false; }
+  if (image == "") {
+    return false;
+  }
   let asked = envDocker(["image", "inspect", "--format", "held", image]);
   return asked.status == 0;
 }

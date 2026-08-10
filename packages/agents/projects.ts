@@ -66,7 +66,9 @@ export function rememberFilesThread(db: Db, projectId: string, threadId: string)
     "UPDATE projects SET files_thread_id = " + placeholderAt(db, 1)
     + " WHERE id = " + placeholderAt(db, 2),
     [threadId, projectId]);
-  if (wrote.ok) { return ""; }
+  if (wrote.ok) {
+    return "";
+  }
   return wrote.error;
 }
 
@@ -75,7 +77,9 @@ export function assignProject(db: Db, threadId: string, projectId: string): stri
     "UPDATE threads SET project_id = " + placeholderAt(db, 1)
     + " WHERE id = " + placeholderAt(db, 2),
     [projectId, threadId]);
-  if (wrote.ok) { return ""; }
+  if (wrote.ok) {
+    return "";
+  }
   return wrote.error;
 }
 
@@ -89,11 +93,17 @@ export function projectBriefing(db: Db, threadId: string): string {
   if (!db.query("SELECT project_id FROM threads WHERE id = " + placeholderAt(db, 1), [threadId])) {
     return "";
   }
-  if (db.rows() == 0) { return ""; }
+  if (db.rows() == 0) {
+    return "";
+  }
   let projectId = db.value(0, 0);
-  if (projectId == "") { return ""; }
+  if (projectId == "") {
+    return "";
+  }
   let document = findById(db, projectsMapping(), projectId);
-  if (document == "") { return ""; }
+  if (document == "") {
+    return "";
+  }
   let name = jsonText(document, "name");
   let instructions = jsonText(document, "instructions");
   let out = "Project: " + name;
@@ -102,7 +112,9 @@ export function projectBriefing(db: Db, threadId: string): string {
       + instructions;
   }
   let files = filesBriefing(db, jsonText(document, "filesThreadId"));
-  if (files != "") { out = out + "\n\n" + files; }
+  if (files != "") {
+    out = out + "\n\n" + files;
+  }
   return out;
 }
 
@@ -116,9 +128,13 @@ function textualPath(path: string): bool {
 }
 
 function filesBriefing(db: Db, filesThreadId: string): string {
-  if (filesThreadId == "") { return ""; }
+  if (filesThreadId == "") {
+    return "";
+  }
   let rows: ArtifactRow[] = listArtifacts(db, filesThreadId);
-  if (rows.length == 0) { return ""; }
+  if (rows.length == 0) {
+    return "";
+  }
   let out = "The project carries these files. They are reference material for this conversation:";
   let inlined: int = 0;
   let i: int = 0;
@@ -133,7 +149,9 @@ function filesBriefing(db: Db, filesThreadId: string): string {
       let shown = cut ? body.slice(0, cap) : body;
       inlined = inlined + shown.length;
       out = out + "\n\n--- " + each.path + named + " ---\n" + shown;
-      if (cut) { out = out + "\n…cut"; }
+      if (cut) {
+        out = out + "\n…cut";
+      }
     } else {
       out = out + "\n- " + each.path + named;
     }

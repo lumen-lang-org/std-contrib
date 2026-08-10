@@ -1,6 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRelation, DbRepository, ManyThrough, field, repository, hasOne, hasMany, hasManyThrough, findById, listOrdered, placeholderAt, createTableSql, dialectType, boolColumn, executeWith, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { promptRepository } from "./entities/prompt.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -232,17 +233,27 @@ export function enabledChoices(db: Db): ModelChoiceRow[] {
   let out: ModelChoiceRow[] = [];
   let keys: DbOrder[] = [{ column: "menu_rank" }, { column: "label" }];
   let listed = listOrdered(db, modelChoicesMapping(), { where: "enabled = " + placeholderAt(db, 1), args: ["1"], order: keys });
-  if (listed == "" || listed == "[]") { return out; }
+  if (listed == "" || listed == "[]") {
+    return out;
+  }
   return JSON.parse<ModelChoiceRow[]>(listed);
 }
 
 export function configForChoice(db: Db, choiceId: string): string {
-  if (choiceId == "") { return ""; }
+  if (choiceId == "") {
+    return "";
+  }
   let document = findById(db, modelChoicesMapping(), choiceId);
-  if (document == "") { return ""; }
+  if (document == "") {
+    return "";
+  }
   let choice: ModelChoiceRow = JSON.parse<ModelChoiceRow>(document);
-  if (!choice.enabled) { return ""; }
-  if (choice.kind != "config") { return ""; }
+  if (!choice.enabled) {
+    return "";
+  }
+  if (choice.kind != "config") {
+    return "";
+  }
   return choice.configId;
 }
 
@@ -269,26 +280,28 @@ function noConfigAndModel(why: string): ConfigAndModel {
 }
 
 export function configAndModel(db: Db, configId: string): ConfigAndModel {
-  if (configId == "") { return noConfigAndModel("no model config was named"); }
+  if (configId == "") {
+    return noConfigAndModel("no model config was named");
+  }
   let configDoc = findById(db, modelConfigRows(db), configId);
-  if (configDoc == "") { return noConfigAndModel("no model config " + configId); }
+  if (configDoc == "") {
+    return noConfigAndModel("no model config " + configId);
+  }
   let config: ModelConfigRow = JSON.parse<ModelConfigRow>(configDoc);
   let modelDoc = findById(db, modelsMapping(), config.modelId);
-  if (modelDoc == "") { return noConfigAndModel("no model " + config.modelId); }
+  if (modelDoc == "") {
+    return noConfigAndModel("no model " + config.modelId);
+  }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
   let out: ConfigAndModel = { config: config, model: model, problem: "" };
   return out;
 }
 
+// The one mapping that is a decorated class rather than a list of field() calls.
+// See entities/prompt.entity.ts — @entity is what plume has offered all along,
+// and what the rest of these should become.
 export function promptsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("promptName", "prompt_name", "text"),
-    field("version", "version", "int"),
-    field("body", "body", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "prompts", idField: "id", idColumn: "id", fields: fs });
+  return promptRepository();
 }
 
 export function mcpServersMapping(): DbRepository {
@@ -1024,7 +1037,9 @@ export function askCancel(db: Db, threadId: string): string {
     "UPDATE threads SET cancel_asked = " + placeholderAt(db, 1)
     + " WHERE id = " + placeholderAt(db, 2),
     [`${Date.now()}`, threadId]);
-  if (wrote.ok) { return ""; }
+  if (wrote.ok) {
+    return "";
+  }
   return wrote.error;
 }
 
@@ -1035,9 +1050,13 @@ export function clearCancel(db: Db, threadId: string): void {
 }
 
 export function cancelAsked(db: Db, threadId: string): bool {
-  if (threadId == "") { return false; }
+  if (threadId == "") {
+    return false;
+  }
   let held = findById(db, cancelColumn(), threadId);
-  if (held == "") { return false; }
+  if (held == "") {
+    return false;
+  }
   let row: CancelRow = JSON.parse<CancelRow>(held);
   return row.cancelAsked != "";
 }
@@ -1057,7 +1076,9 @@ export function settingsMapping(): DbRepository {
 
 export function readSetting(db: Db, key: string): string {
   let held = findById(db, settingsMapping(), key);
-  if (held == "") { return ""; }
+  if (held == "") {
+    return "";
+  }
   let row: SettingRow = JSON.parse<SettingRow>(held);
   return row.value;
 }
@@ -1065,6 +1086,8 @@ export function readSetting(db: Db, key: string): string {
 export function writeSetting(db: Db, key: string, value: string): string {
   let row: SettingRow = { id: key, value: value };
   let written = persist(db, settingsMapping(), JSON.stringify(row));
-  if (written.ok) { return ""; }
+  if (written.ok) {
+    return "";
+  }
   return written.error;
 }

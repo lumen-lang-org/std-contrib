@@ -32,7 +32,10 @@ function conversation(rounds: int): Turn[] {
   while (i < rounds) {
     let r = round("question " + `${i}`, "c" + `${i}`, "result " + `${i}`, "answer " + `${i}`);
     let j: int = 0;
-    while (j < r.length) { out.push(r[j]); j = j + 1; }
+    while (j < r.length) {
+      out.push(r[j]);
+      j = j + 1;
+    }
     i = i + 1;
   }
   return out;
@@ -50,7 +53,9 @@ test("trimming drops whole rounds, never half of one", () => {
   expect(kept[0].role == "user");
   let i: int = 0;
   while (i < kept.length) {
-    if (kept[i].role == "tool") { expect(i > 0 && kept[i - 1].role != "user"); }
+    if (kept[i].role == "tool") {
+      expect(i > 0 && kept[i - 1].role != "user");
+    }
     i = i + 1;
   }
 });
@@ -91,7 +96,10 @@ function freshThreads(): void {
   let plan = threadPlan(database);
   let grouped = projectsPlan(database);
   let g: int = 0;
-  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
+  while (g < grouped.length) {
+    plan.push(grouped[g]);
+    g = g + 1;
+  }
   migrate(database, plan);
 }
 
@@ -152,19 +160,34 @@ function freshSweep(): void {
   let plan = threadPlan(database);
   let files = workspacePlan(database);
   let w: int = 0;
-  while (w < files.length) { plan.push(files[w]); w = w + 1; }
+  while (w < files.length) {
+    plan.push(files[w]);
+    w = w + 1;
+  }
   let held = artifactPlan(database);
   let a: int = 0;
-  while (a < held.length) { plan.push(held[a]); a = a + 1; }
+  while (a < held.length) {
+    plan.push(held[a]);
+    a = a + 1;
+  }
   let live = stepPlan(database);
   let s: int = 0;
-  while (s < live.length) { plan.push(live[s]); s = s + 1; }
+  while (s < live.length) {
+    plan.push(live[s]);
+    s = s + 1;
+  }
   let ran = runLogPlan(database);
   let r: int = 0;
-  while (r < ran.length) { plan.push(ran[r]); r = r + 1; }
+  while (r < ran.length) {
+    plan.push(ran[r]);
+    r = r + 1;
+  }
   let grouped = projectsPlan(database);
   let g: int = 0;
-  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
+  while (g < grouped.length) {
+    plan.push(grouped[g]);
+    g = g + 1;
+  }
   migrate(database, plan);
 }
 
@@ -266,13 +289,22 @@ function seededMenu(): void {
   let plan = schemaPlan(database);
   let conversations = threadPlan(database);
   let c: int = 0;
-  while (c < conversations.length) { plan.push(conversations[c]); c = c + 1; }
+  while (c < conversations.length) {
+    plan.push(conversations[c]);
+    c = c + 1;
+  }
   let live = stepPlan(database);
   let s: int = 0;
-  while (s < live.length) { plan.push(live[s]); s = s + 1; }
+  while (s < live.length) {
+    plan.push(live[s]);
+    s = s + 1;
+  }
   let grouped = projectsPlan(database);
   let g: int = 0;
-  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
+  while (g < grouped.length) {
+    plan.push(grouped[g]);
+    g = g + 1;
+  }
   migrate(database, plan);
 
   let own: ModelRow = { id: "m-own", label: "The agent's own", apiName: "own-1", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true, contextTokens: 0 };
@@ -312,7 +344,9 @@ function twoCandidates(): string {
     + "{\"key\":\"deep\",\"configId\":\"c-picked\",\"when\":\"a plan\"}]";
 }
 
-function testKey(): string { return "0123456789abcdef0123456789abcdef"; }
+function testKey(): string {
+  return "0123456789abcdef0123456789abcdef";
+}
 
 function ask(threadId: string, choiceId: string): ThreadReply {
   let said: ModelPick = { choiceId: choiceId, sent: true };
@@ -529,7 +563,9 @@ test("migration 88 adds the column, and every thread already there is untitled",
   let found = false;
   let i: int = 0;
   while (i < plan.length) {
-    if (plan[i].version == "88") { found = true; }
+    if (plan[i].version == "88") {
+      found = true;
+    }
     i = i + 1;
   }
   expect(found);
@@ -578,9 +614,15 @@ test("the sidebar prefers the name, and keeps every fallback it had", () => {
   expect(rows.length == 3);
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].id == named) { expect(rows[i].title == "Lyon stock levels"); }
-    if (rows[i].id == spoken) { expect(rows[i].title == "how many A-114 are in Lyon?"); }
-    if (rows[i].id == uploaded) { expect(rows[i].title == "/plan.md"); }
+    if (rows[i].id == named) {
+      expect(rows[i].title == "Lyon stock levels");
+    }
+    if (rows[i].id == spoken) {
+      expect(rows[i].title == "how many A-114 are in Lyon?");
+    }
+    if (rows[i].id == uploaded) {
+      expect(rows[i].title == "/plan.md");
+    }
     i = i + 1;
   }
 });
@@ -659,7 +701,10 @@ test("chunks are recorded per round and read back from a boundary", () => {
 test("a long title is cut on a character boundary, not in the middle of one", () => {
   let arabic = "";
   let i: int = 0;
-  while (i < 60) { arabic = arabic + "م"; i = i + 1; }
+  while (i < 60) {
+    arabic = arabic + "م";
+    i = i + 1;
+  }
   let cut = cleanTitle(arabic);
   expect(cut.length <= TITLE_MAX);
   expect(cut.endsWith("..."));
@@ -715,7 +760,10 @@ test("what falls out of the replay is summarised, not silently dropped", () => {
   let turns: Turn[] = [];
   let filler = "";
   let f: int = 0;
-  while (f < 400) { filler = filler + "long ago we agreed the port is 8100. "; f = f + 1; }
+  while (f < 400) {
+    filler = filler + "long ago we agreed the port is 8100. ";
+    f = f + 1;
+  }
   turns.push(userTurn("Round one: " + filler));
   turns.push(assistantTurn("Noted.", []));
   turns.push(userTurn("Round two: " + filler));

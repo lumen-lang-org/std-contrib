@@ -54,7 +54,7 @@ export type Handler = (req: Request) => Reply;
 
 // --- replies -----------------------------------------------------------------
 
-export function reply(status: int, body: string, contentType: string): Reply {
+export function Respond(status: int, body: string, contentType: string): Reply {
   let headers = new Map<string, string>();
   headers.set("content-type", contentType);
   let r: Reply = { status: status, body: body, headers: headers };
@@ -64,23 +64,23 @@ export function reply(status: int, body: string, contentType: string): Reply {
 // A JSON reply. plume's reads already return JSON, so a handler that fetches a
 // record hands it straight over — no re-serialising, and no chance of the two
 // disagreeing.
-export function json(status: int, body: string): Reply {
-  return reply(status, body, "application/json");
+export function Json(status: int, body: string): Reply {
+  return Respond(status, body, "application/json");
 }
 
-export function ok(body: string): Reply { return json(200, body); }
-export function created(body: string): Reply { return json(201, body); }
+export function Ok(body: string): Reply { return Json(200, body); }
+export function Created(body: string): Reply { return Json(201, body); }
 
-export function jsonOf<T>(status: int, value: T): Reply {
-  return reply(status, JSON.stringify(value), "application/json");
+export function JsonOf<T>(status: int, value: T): Reply {
+  return Respond(status, JSON.stringify(value), "application/json");
 }
 
-export function okJson<T>(value: T): Reply { return jsonOf(200, value); }
+export function OkJson<T>(value: T): Reply { return JsonOf(200, value); }
 
 export type Guarded = { stop: bool, reply: Reply };
 
 export function passes(): Guarded {
-  return { stop: false, reply: reply(200, "", "application/json") };
+  return { stop: false, reply: Respond(200, "", "application/json") };
 }
 
 export function stops(r: Reply): Guarded {
@@ -89,10 +89,25 @@ export function stops(r: Reply): Guarded {
 
 // The `@Valid` form of a rule check, shaped like every other guard so the
 // dispatcher needs no second kind of statement.
+// What a service answers with when the work could fail: a sentence saying why
+// not, or the document that resulted. A service names no status code — that is
+// this layer's decision — and this is the seam where it is made, the same way
+// in every controller.
+export type Outcome = { fault: string, document: string };
+
+export function refusing(said: string): Outcome { return { fault: said, document: "" }; }
+
+export function produced(document: string): Outcome { return { fault: "", document: document }; }
+
+export function answered(o: Outcome): Reply {
+  if (o.fault != "") { return BadRequest(o.fault); }
+  return Ok(o.document);
+}
+
 export function validatedBody(rules: Rule[], body: string): Guarded {
   let wrong = faults(rules, body);
   if (wrong.length == 0) { return passes(); }
-  return stops(json(400, "{\"errors\":" + faultsJson(wrong) + "}"));
+  return stops(Json(400, "{\"errors\":" + faultsJson(wrong) + "}"));
 }
 
 export function validationRefusal(rules: Rule[], body: string): string {
@@ -101,29 +116,29 @@ export function validationRefusal(rules: Rule[], body: string): string {
   return faultsJson(wrong);
 }
 
-export function createdJson<T>(value: T): Reply { return jsonOf(201, value); }
+export function CreatedJson<T>(value: T): Reply { return JsonOf(201, value); }
 
 // The work was taken but is not done — a queued job, not a finished one.
 // Answering 201 for something merely accepted tells a client the resource
 // exists when it does not yet.
-export function accepted(body: string): Reply { return json(202, body); }
+export function Accepted(body: string): Reply { return Json(202, body); }
 
-export function noContent(): Reply {
-  return reply(204, "", "application/json");
+export function NoContent(): Reply {
+  return Respond(204, "", "application/json");
 }
 
 // An error as a JSON document, because a client parsing the body should not
 // have to guess whether it got JSON or a sentence.
-export function problem(status: int, message: string): Reply {
-  return json(status, "{\"error\":" + JSON.stringify(message) + "}");
+export function Refused(status: int, message: string): Reply {
+  return Json(status, "{\"error\":" + JSON.stringify(message) + "}");
 }
 
-export function notFound(what: string): Reply {
-  return problem(404, what + " not found");
+export function NotFound(what: string): Reply {
+  return Refused(404, what + " not found");
 }
 
-export function badRequest(why: string): Reply {
-  return problem(400, why);
+export function BadRequest(why: string): Reply {
+  return Refused(400, why);
 }
 
 // --- reading a request -------------------------------------------------------
@@ -172,7 +187,7 @@ function emptyRequest(): Request {
 // Stands in for a binding that is not there. Unreachable once bindingProblem
 // has passed, but a Map lookup has to have something to fall back to.
 function unboundHandler(req: Request): Reply {
-  return problem(500, "no handler bound");
+  return Refused(500, "no handler bound");
 }
 
 // Why a table and its bindings do not agree. Called before listening: a route
@@ -200,16 +215,16 @@ export function dispatch(table: Route[], handlers: Map<string, Handler>, method:
     if (m.pathMatched) {
       // The resource exists, just not that way — a distinction a client acts
       // on, so it gets the Allow header it is owed.
-      let answer = problem(405, method.toUpperCase() + " is not allowed here");
+      let answer = Refused(405, method.toUpperCase() + " is not allowed here");
       answer.headers.set("allow", allowedMethods(table, target).join(", "));
       return answer;
     }
-    return notFound(target);
+    return NotFound(target);
   }
   if (!handlers.has(m.handler)) {
     // bindingProblem should have caught this before listening; answering 500
     // rather than crashing keeps one bad route from taking the server down.
-    return problem(500, "no handler bound for \"" + m.handler + "\"");
+    return Refused(500, "no handler bound for \"" + m.handler + "\"");
   }
   let handler: Handler = handlers.get(m.handler) ?? unboundHandler;
   let req: Request = {
@@ -245,13 +260,13 @@ export function dispatch(table: Route[], handlers: Map<string, Handler>, method:
 //
 // The status is 400: a request the router could not make sense of is the
 // request's fault. A handler failing for its own reasons should return
-// `problem(500, ...)` rather than throw.
+// `Refused(500, ...)` rather than throw.
 export function dispatched(table: Route[], handlers: Map<string, Handler>, method: string, target: string,
     body: string, headers: Map<string, string>): Reply {
   try {
     return dispatch(table, handlers, method, target, body, headers);
   } catch (e) {
-    return badRequest("the request could not be handled: " + e.message);
+    return BadRequest("the request could not be handled: " + e.message);
   }
 }
 
@@ -301,7 +316,7 @@ export function mount<T>(c: T): Mount {
     call: (handler: string, req: Request) => {
       try { return Class.invoke(c, handler, req); }
       catch (e) {
-        let bad: Reply = badRequest("the request could not be handled: " + e.message);
+        let bad: Reply = BadRequest("the request could not be handled: " + e.message);
         return bad;
       }
     },
@@ -380,7 +395,7 @@ export function dispatchMounted(mounts: Mount[], method: string, target: string,
   if (pathSeen) {
     // The resource exists, just not that way — the same distinction the
     // table-based dispatch draws, collected across every mount.
-    let answer = problem(405, method.toUpperCase() + " is not allowed here");
+    let answer = Refused(405, method.toUpperCase() + " is not allowed here");
     let allowed: string[] = [];
     let j: int = 0;
     while (j < mounts.length) {
@@ -395,7 +410,7 @@ export function dispatchMounted(mounts: Mount[], method: string, target: string,
     answer.headers.set("allow", allowed.join(", "));
     return answer;
   }
-  return notFound(target);
+  return NotFound(target);
 }
 
 // Routing that answers instead of dying. A handler's own throw is already
@@ -405,7 +420,7 @@ export function dispatchedMounted(mounts: Mount[], method: string, target: strin
   try {
     return dispatchMounted(mounts, method, target, body, headers);
   } catch (e) {
-    return badRequest("the request could not be handled: " + e.message);
+    return BadRequest("the request could not be handled: " + e.message);
   }
 }
 

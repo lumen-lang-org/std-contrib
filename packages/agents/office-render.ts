@@ -16,15 +16,23 @@ export function officeRenderImageOverride(image: string): void {
 }
 
 export function officeRenderImage(): string {
-  if (officeRenderChosenImage != "") { return officeRenderChosenImage; }
+  if (officeRenderChosenImage != "") {
+    return officeRenderChosenImage;
+  }
   return process.env("AGENTS_OFFICE_RENDER_IMAGE") ?? OFFICE_RENDER_IMAGE;
 }
 
 export function officeRenderExt(path: string): string {
   let lower = path.toLowerCase();
-  if (lower.endsWith(".docx")) { return "docx"; }
-  if (lower.endsWith(".xlsx")) { return "xlsx"; }
-  if (lower.endsWith(".pptx")) { return "pptx"; }
+  if (lower.endsWith(".docx")) {
+    return "docx";
+  }
+  if (lower.endsWith(".xlsx")) {
+    return "xlsx";
+  }
+  if (lower.endsWith(".pptx")) {
+    return "pptx";
+  }
   return "";
 }
 
@@ -80,7 +88,9 @@ function officeRenderDigits(now: string): string {
   let i: int = 0;
   while (i < now.length) {
     let c = now.charCodeAt(i);
-    if (c >= 48 && c <= 57) { out = out + now.charAt(i); }
+    if (c >= 48 && c <= 57) {
+      out = out + now.charAt(i);
+    }
     i = i + 1;
   }
   return out == "" ? "0" : out;
@@ -97,7 +107,9 @@ function officeRenderHostDir(dir: string): string {
 
 function officeRenderDrop(dir: string): void {
   try {
-    if (fs.existsSync(dir)) { fs.rmSync(dir, true); }
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, true);
+    }
   } catch (e) {
     return;
   }
@@ -119,7 +131,9 @@ function officeRenderDecode(stage: string, ext: string, body: string): string {
 
 function officeRenderEncode(path: string): string {
   let enc = child_process.spawnSync("base64", ["-w0", path]);
-  if (enc.status != 0) { return ""; }
+  if (enc.status != 0) {
+    return "";
+  }
   return enc.stdout.trim();
 }
 
@@ -129,7 +143,9 @@ function officeRenderKey(artifactId: string, version: int): string {
 
 export function officeRenderCached(db: Db, artifactId: string, version: int): string {
   let held = findById(db, officeRendersMapping(), officeRenderKey(artifactId, version));
-  if (held == "") { return ""; }
+  if (held == "") {
+    return "";
+  }
   let row = JSON.parse<OfficeRenderRow>(held);
   return row.body;
 }
@@ -173,7 +189,9 @@ export function officeRender(db: Db, ask: OfficeRenderAsk): OfficeRendered {
 
   let stage = officeRenderStage(ask.now);
   let staged = officeRenderHostDir(stage);
-  if (staged != "") { return officeRenderRefused(staged); }
+  if (staged != "") {
+    return officeRenderRefused(staged);
+  }
   let decoded = officeRenderDecode(stage, ext, ask.body);
   if (decoded != "") {
     officeRenderDrop(stage);

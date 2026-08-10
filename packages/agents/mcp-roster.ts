@@ -57,7 +57,9 @@ function rosterTool(tool: McpTool): RosterTool {
 }
 
 export function rememberRoster(db: Db, serverId: string, tools: McpTool[], now: string): void {
-  if (serverId == "") { return; }
+  if (serverId == "") {
+    return;
+  }
   let kept = tools.length > MAX_REMEMBERED_TOOLS ? tools.slice(0, MAX_REMEMBERED_TOOLS) : tools;
   let row: McpRosterRow = { id: serverId, tools: JSON.stringify(kept.map(rosterTool)), listedAt: now };
   persist(db, mcpRosterMapping(), JSON.stringify(row));
@@ -65,9 +67,13 @@ export function rememberRoster(db: Db, serverId: string, tools: McpTool[], now: 
 
 export function rosterOf(db: Db, serverId: string): Roster {
   let document = findById(db, mcpRosterMapping(), serverId);
-  if (document == "") { return emptyRoster(); }
+  if (document == "") {
+    return emptyRoster();
+  }
   let row: McpRosterRow = JSON.parse<McpRosterRow>(document);
-  if (row.tools == "") { return emptyRoster(); }
+  if (row.tools == "") {
+    return emptyRoster();
+  }
   let out: Roster = { tools: row.tools, listedAt: row.listedAt };
   return out;
 }

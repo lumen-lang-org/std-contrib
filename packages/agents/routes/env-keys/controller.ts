@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { existsById, findById } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, problem } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok, Refused } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { createEnvKey, envKeysMapping, envKeysOwnedBy, forgetEnvKey } from "../../env-keys.ts";
 import { owningTag } from "../../owner.ts";
@@ -16,28 +16,31 @@ export class EnvKeyApi {
   db: Db;
   master: string;
 
-  constructor(db: Db, master: string) { this.db = db; this.master = master; }
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
 
-  @get("/")
+  @Get("/")
   @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    return ok(envKeysOwnedBy(this.db, owningTag(tags)));
+    return Ok(envKeysOwnedBy(this.db, owningTag(tags)));
   }
 
-  @post("/")
+  @Post("/")
   @Guard(roleAtLeast("signed-in", "signing in is what makes an environment key yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
     if (req.body == "") {
-      return badRequest("a body is required: {\"imageId\":\"...\",\"name\":\"OPENAI_API_KEY\",\"value\":\"...\"}");
+      return BadRequest("a body is required: {\"imageId\":\"...\",\"name\":\"OPENAI_API_KEY\",\"value\":\"...\"}");
     }
     let imageId = jsonText(req.body, "imageId");
     if (imageId != "default"
         && !existsById(this.db, scriptImagesMapping(), imageId)
         && userEnvById(this.db, imageId, owner).id == "") {
-      return badRequest("no environment has the id \"" + imageId + "\" — one of yours, one this deployment offers, or \"default\" for the one an agent gets when nobody chose");
+      return BadRequest("no environment has the id \"" + imageId + "\" — one of yours, one this deployment offers, or \"default\" for the one an agent gets when nobody chose");
     }
     let made = createEnvKey(this.db, {
       owner: owner,
@@ -47,15 +50,17 @@ export class EnvKeyApi {
       master: this.master,
       now: stamp(),
     });
-    if (made.problem != "") { return badRequest(made.problem); }
-    return created(findById(this.db, envKeysMapping(), made.id));
+    if (made.problem != "") {
+      return BadRequest(made.problem);
+    }
+    return Created(findById(this.db, envKeysMapping(), made.id));
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(req: Request, @PathVariable("id") id: string): Reply {
     if (!forgetEnvKey(this.db, id, owningTag(callerTags(req)))) {
-      return notFound("environment key " + id);
+      return NotFound("environment key " + id);
     }
-    return noContent();
+    return NoContent();
   }
 }

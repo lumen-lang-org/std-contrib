@@ -4,7 +4,9 @@ import { McpServerRow, McpOauthRow, McpPendingRow, McpGrantRow, AgentRow, mcpOau
 import { credentialFor, storeCredential, hasCredential, forgetCredential } from "./credentials.ts";
 import { Discovery, Grant, consentUrl, discover, exchangeCode, newState, newVerifier, refreshGrant, registerClient } from "./mcp-oauth.ts";
 
-function stamp(): string { return `${Date.now()}`; }
+function stamp(): string {
+  return `${Date.now()}`;
+}
 
 export function userTokenKey(serverId: string, owner: string): string {
   return "mcp:" + serverId + ":u:" + owner;
@@ -21,7 +23,9 @@ export function tokenKeyFor(db: Db, serverId: string, owner: string): string {
   return sharedTokenKey(serverId);
 }
 
-function refreshKey(key: string): string { return key + "#refresh"; }
+function refreshKey(key: string): string {
+  return key + "#refresh";
+}
 
 export type Connection = {
   state: string,
@@ -56,36 +60,54 @@ export function connectionOf(db: Db, serverId: string, owner: string): Connectio
 }
 
 function expired(grant: McpGrantRow): bool {
-  if (grant.expiresAt == "") { return false; }
+  if (grant.expiresAt == "") {
+    return false;
+  }
   let at = parseFloat(grant.expiresAt) ?? 0.0;
-  if (at == 0.0) { return false; }
+  if (at == 0.0) {
+    return false;
+  }
   return (Date.now() as float) + 60000.0 >= at;
 }
 
 export function accessTokenFor(db: Db, server: McpServerRow, owner: string, master: string): string {
-  if (server.authKind == "" || server.authKind == "none") { return ""; }
+  if (server.authKind == "" || server.authKind == "none") {
+    return "";
+  }
   let key = tokenKeyFor(db, server.id, owner);
   let held = credentialFor(db, key, master);
-  if (server.authKind != "oauth") { return held; }
+  if (server.authKind != "oauth") {
+    return held;
+  }
 
   let document = findById(db, mcpGrantsMapping(), key);
-  if (document == "") { return held; }
+  if (document == "") {
+    return held;
+  }
   let grant: McpGrantRow = JSON.parse<McpGrantRow>(document);
-  if (!expired(grant)) { return held; }
+  if (!expired(grant)) {
+    return held;
+  }
   if (!grant.refreshable) {
     return "";
   }
   let renewed = renew(db, server, key, master);
-  if (renewed == "") { return ""; }
+  if (renewed == "") {
+    return "";
+  }
   return renewed;
 }
 
 function renew(db: Db, server: McpServerRow, key: string, master: string): string {
   let clientDoc = findById(db, mcpOauthMapping(), server.id);
-  if (clientDoc == "") { return ""; }
+  if (clientDoc == "") {
+    return "";
+  }
   let client: McpOauthRow = JSON.parse<McpOauthRow>(clientDoc);
   let refresh = credentialFor(db, refreshKey(key), master);
-  if (refresh == "") { return ""; }
+  if (refresh == "") {
+    return "";
+  }
 
   let got = refreshGrant(client.tokenUrl, refresh,
     client.clientId, credentialFor(db, clientSecretKey(server.id), master), server.endpoint);
@@ -103,27 +125,41 @@ function renew(db: Db, server: McpServerRow, key: string, master: string): strin
 
 function ownerOfKey(serverId: string, key: string): string {
   let prefix = userTokenKey(serverId, "");
-  if (key.startsWith(prefix)) { return key.slice(prefix.length, key.length); }
+  if (key.startsWith(prefix)) {
+    return key.slice(prefix.length, key.length);
+  }
   return "";
 }
 
-function clientSecretKey(serverId: string): string { return "mcpclient:" + serverId; }
+function clientSecretKey(serverId: string): string {
+  return "mcpclient:" + serverId;
+}
 
-function clientIdKey(serverId: string): string { return "mcpclientid:" + serverId; }
+function clientIdKey(serverId: string): string {
+  return "mcpclientid:" + serverId;
+}
 
 export function suppliedClientId(db: Db, serverId: string, master: string): string {
-  if (!hasCredential(db, clientIdKey(serverId))) { return ""; }
+  if (!hasCredential(db, clientIdKey(serverId))) {
+    return "";
+  }
   return credentialFor(db, clientIdKey(serverId), master);
 }
 
 export function setSuppliedClient(db: Db, serverId: string, clientId: string, clientSecret: string, master: string): string {
   let id = clientId.trim();
   let secret = clientSecret.trim();
-  if (id == "") { return "an OAuth client needs a client id"; }
-  if (secret == "") { return "an OAuth client needs a client secret"; }
+  if (id == "") {
+    return "an OAuth client needs a client id";
+  }
+  if (secret == "") {
+    return "an OAuth client needs a client secret";
+  }
   let wroteId = storeCredential(db, { provider: clientIdKey(serverId),
     apiKey: id, masterKey: master, now: stamp() });
-  if (wroteId != "") { return wroteId; }
+  if (wroteId != "") {
+    return wroteId;
+  }
   let wroteSecret = storeCredential(db, { provider: clientSecretKey(serverId),
     apiKey: secret, masterKey: master, now: stamp() });
   if (wroteSecret != "") {
@@ -142,7 +178,9 @@ export function forgetSuppliedClient(db: Db, serverId: string): void {
 
 function markUnrefreshable(db: Db, key: string): void {
   let document = findById(db, mcpGrantsMapping(), key);
-  if (document == "") { return; }
+  if (document == "") {
+    return;
+  }
   let grant: McpGrantRow = JSON.parse<McpGrantRow>(document);
   let dead: McpGrantRow = {
     id: grant.id, serverId: grant.serverId, owner: grant.owner,
@@ -158,7 +196,9 @@ function writeGrant(db: Db, key: string, serverId: string, owner: string, got: G
     let had = findById(db, mcpGrantsMapping(), key);
     if (had != "") {
       let before: McpGrantRow = JSON.parse<McpGrantRow>(had);
-      if (before.connectedAt != "") { connectedAt = before.connectedAt; }
+      if (before.connectedAt != "") {
+        connectedAt = before.connectedAt;
+      }
     }
   }
   let expiresAt = "";
@@ -199,7 +239,9 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
   }
 
   let found: Discovery = discover(server.endpoint);
-  if (found.problem != "") { return noClient(found.problem); }
+  if (found.problem != "") {
+    return noClient(found.problem);
+  }
 
   let clientId = supplied;
   if (supplied == "") {
@@ -217,7 +259,9 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
     if (made.clientSecret != "") {
       let stored = storeCredential(db, { provider: clientSecretKey(server.id),
         apiKey: made.clientSecret, masterKey: master, now: stamp() });
-      if (stored != "") { return noClient(stored); }
+      if (stored != "") {
+        return noClient(stored);
+      }
     } else {
       forgetCredential(db, clientSecretKey(server.id));
     }
@@ -234,7 +278,9 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
     registeredAt: stamp(),
   };
   let wrote = persist(db, mcpOauthMapping(), JSON.stringify(row));
-  if (!wrote.ok) { return noClient(wrote.error); }
+  if (!wrote.ok) {
+    return noClient(wrote.error);
+  }
   return { row: row, problem: "" };
 }
 
@@ -256,7 +302,9 @@ export function beginConnect(db: Db, server: McpServerRow, owner: string, master
     return notStarted("this deployment does not know its own public address, so it cannot be redirected back to; set AGENTS_PUBLIC_ORIGIN");
   }
   let client: ClientLookup = clientFor(db, server, master, redirectUri);
-  if (client.problem != "") { return notStarted(client.problem); }
+  if (client.problem != "") {
+    return notStarted(client.problem);
+  }
 
   let verifier = newVerifier();
   let state = newState();
@@ -265,7 +313,9 @@ export function beginConnect(db: Db, server: McpServerRow, owner: string, master
     verifier: verifier, startedAt: stamp(),
   };
   let wrote = persist(db, mcpPendingMapping(), JSON.stringify(pending));
-  if (!wrote.ok) { return notStarted(wrote.error); }
+  if (!wrote.ok) {
+    return notStarted(wrote.error);
+  }
 
   let url = consentUrl({
     authorizeUrl: client.row.authorizeUrl,
@@ -352,7 +402,9 @@ export function completeConnect(db: Db, master: string, state: string, code: str
 function attachToDefault(db: Db, serverId: string): void {
   let agents = JSON.parse<AgentRow[]>(listWhere(db, agentsMapping(),
     "is_default = " + placeholderAt(db, 1), ["1"]));
-  if (agents.length == 0) { return; }
+  if (agents.length == 0) {
+    return;
+  }
   let agentId = agents[0].id;
   if (countWhere(db, agentServerLink(),
         "agent_id = " + placeholderAt(db, 1) + " AND server_id = " + placeholderAt(db, 2),
@@ -373,9 +425,13 @@ function agentServerLink(): DbRepository {
 
 function enable(db: Db, serverId: string): void {
   let document = findById(db, mcpServersMapping(), serverId);
-  if (document == "") { return; }
+  if (document == "") {
+    return;
+  }
   let server: McpServerRow = JSON.parse<McpServerRow>(document);
-  if (server.enabled) { return; }
+  if (server.enabled) {
+    return;
+  }
   let on: McpServerRow = {
     id: server.id, serverName: server.serverName, transport: server.transport,
     endpoint: server.endpoint, authKind: server.authKind,
@@ -417,7 +473,10 @@ export function toolsOff(db: Db, serverId: string): string[] {
     "server_id = " + placeholderAt(db, 1), [serverId]));
   let out: string[] = [];
   let i: int = 0;
-  while (i < rows.length) { out.push(rows[i].toolName); i = i + 1; }
+  while (i < rows.length) {
+    out.push(rows[i].toolName);
+    i = i + 1;
+  }
   return out;
 }
 
@@ -427,7 +486,9 @@ export function setToolOn(db: Db, serverId: string, toolName: string, on: bool):
     deleteById(db, mcpToolsOffMapping(), id);
     return;
   }
-  if (findById(db, mcpToolsOffMapping(), id) != "") { return; }
+  if (findById(db, mcpToolsOffMapping(), id) != "") {
+    return;
+  }
   let row: McpToolOffRow = { id: id, serverId: serverId, toolName: toolName };
   persist(db, mcpToolsOffMapping(), JSON.stringify(row));
 }

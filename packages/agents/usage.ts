@@ -16,7 +16,9 @@ export function ownerUsage(db: Db, owner: string): OwnerUsage {
     outputTokens: "0",
   };
   let sql = "SELECT SUM(input_tokens), SUM(output_tokens) FROM runs WHERE owner = " + placeholderAt(db, 1);
-  if (!db.query(sql, [owner]) || db.rows() == 0) { return used; }
+  if (!db.query(sql, [owner]) || db.rows() == 0) {
+    return used;
+  }
   let counted: OwnerUsage = {
     owner: owner,
     bytes: used.bytes,
@@ -31,14 +33,18 @@ function artifactBytes(db: Db, owner: string): string {
     + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
     + " JOIN threads ON threads.id = artifacts.thread_id"
     + " WHERE threads.owner = " + placeholderAt(db, 1);
-  if (!db.query(sql, [owner]) || db.rows() == 0) { return "0"; }
+  if (!db.query(sql, [owner]) || db.rows() == 0) {
+    return "0";
+  }
   return digitsOrZero(db.value(0, 0));
 }
 
 export function runsSince(db: Db, owner: string, since: string): int {
   let sql = "SELECT COUNT(*) FROM runs WHERE owner = " + placeholderAt(db, 1)
     + " AND created_at >= " + placeholderAt(db, 2);
-  if (!db.query(sql, [owner, since]) || db.rows() == 0) { return 0; }
+  if (!db.query(sql, [owner, since]) || db.rows() == 0) {
+    return 0;
+  }
   return parseInt(digitsOrZero(db.value(0, 0)), 10) ?? 0;
 }
 
@@ -65,21 +71,29 @@ export function nextUtcMidnightIso(now: number): string {
   let mp = (5 * doy + 2) / 153;
   let d = doy - (153 * mp + 2) / 5 + 1;
   let m = mp + (mp < 10 ? 3 : -9);
-  if (m <= 2) { y = y + 1; }
+  if (m <= 2) {
+    y = y + 1;
+  }
   return `${y}` + "-" + pad2(m) + "-" + pad2(d) + "T00:00:00Z";
 }
 
 function pad2(n: int): string {
-  if (n < 10) { return "0" + `${n}`; }
+  if (n < 10) {
+    return "0" + `${n}`;
+  }
   return `${n}`;
 }
 
 function digitsOrZero(said: string): string {
-  if (said == "") { return "0"; }
+  if (said == "") {
+    return "0";
+  }
   let i: int = 0;
   while (i < said.length) {
     let c = said.charCodeAt(i);
-    if (c < 48 || c > 57) { return "0"; }
+    if (c < 48 || c > 57) {
+      return "0";
+    }
     i = i + 1;
   }
   return said;

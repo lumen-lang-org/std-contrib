@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { EnvKeyRow, envKeysOf, forgetEnvKey } from "../../env-keys.ts";
 import { envTemplateById } from "../../env-templates.ts";
@@ -18,9 +18,11 @@ import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 export class EnvironmentApi {
   db: Db;
 
-  constructor(db: Db) { this.db = db; }
+  constructor(db: Db) {
+    this.db = db;
+  }
 
-  @get("/")
+  @Get("/")
   @Guard(ownedOrEmpty)
   catalog(req: Request): Reply {
     let tags = callerTags(req);
@@ -59,16 +61,16 @@ export class EnvironmentApi {
       present: envImagePresent(scriptImage()),
     };
     items.push(fallback);
-    return okJson(items);
+    return OkJson(items);
   }
 
-  @post("/")
+  @Post("/")
   @Guard(roleAtLeast("signed-in", "signing in is what makes an environment yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
     if (req.body == "") {
-      return badRequest("a body is required: {\"name\":\"...\",\"image\":\"...\"}, {\"name\":\"...\",\"dockerfile\":\"FROM ...\"}, or {\"name\":\"...\",\"templateId\":\"...\"}");
+      return BadRequest("a body is required: {\"name\":\"...\",\"image\":\"...\"}, {\"name\":\"...\",\"dockerfile\":\"FROM ...\"}, or {\"name\":\"...\",\"templateId\":\"...\"}");
     }
     let ask: EnvCreateAsk = JSON.parse<EnvCreateAsk>(req.body);
     let image = ask.image ?? "";
@@ -77,50 +79,59 @@ export class EnvironmentApi {
     let templateId = ask.templateId ?? "";
     if (templateId != "") {
       let t = envTemplateById(this.db, templateId);
-      if (t.id == "") { return badRequest("no template has the id \"" + templateId + "\" — the catalog says which exist"); }
+      if (t.id == "") {
+        return BadRequest("no template has the id \"" + templateId + "\" — the catalog says which exist");
+      }
       image = t.image;
       dockerfile = t.dockerfile;
-      if (name.trim() == "") { name = t.name; }
+      if (name.trim() == "") {
+        name = t.name;
+      }
     }
     let made = createUserEnv(this.db, {
       owner: owner, name: name, image: image, dockerfile: dockerfile, now: stamp(),
     });
-    if (made.problem != "") { return badRequest(made.problem); }
-    return created(findById(this.db, userEnvsMapping(), made.id));
+    if (made.problem != "") {
+      return BadRequest(made.problem);
+    }
+    return Created(findById(this.db, userEnvsMapping(), made.id));
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(req: Request, @PathVariable("id") id: string): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
     if (!forgetUserEnv(this.db, id, owner)) {
-      return notFound("environment " + id);
+      return NotFound("environment " + id);
     }
     let keys = JSON.parse<EnvKeyRow[]>(envKeysOf(this.db, owner, id));
     let k: int = 0;
-    while (k < keys.length) { forgetEnvKey(this.db, keys[k].id, owner); k = k + 1; }
-    return noContent();
+    while (k < keys.length) {
+      forgetEnvKey(this.db, keys[k].id, owner);
+      k = k + 1;
+    }
+    return NoContent();
   }
 
-  @get("/mine")
+  @Get("/mine")
   @Guard(ownedOrEmpty)
   mine(req: Request): Reply {
     let tags = callerTags(req);
     let rows = envOwned(this.db, owningTag(tags));
-    return okJson(rows);
+    return OkJson(rows);
   }
 
-  @del("/mine/:threadId/:name")
+  @Delete("/mine/:threadId/:name")
   drop(req: Request,
        @PathVariable("threadId") threadId: string,
        @PathVariable("name") name: string): Reply {
     let tags = callerTags(req);
     if (!holdsOwner(tags, threadOwner(this.db, threadId))) {
-      return notFound("environment " + name);
+      return NotFound("environment " + name);
     }
     if (!envDrop(this.db, threadId, name)) {
-      return notFound("environment " + name);
+      return NotFound("environment " + name);
     }
-    return noContent();
+    return NoContent();
   }
 }

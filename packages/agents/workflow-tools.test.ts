@@ -44,18 +44,28 @@ function quotedRight(text: string): bool {
   while (i < text.length) {
     let ch = text.charAt(i);
     if (inString) {
-      if (escaped) { escaped = false; }
-      else if (ch == "\\") { escaped = true; }
+      if (escaped) {
+        escaped = false;
+      }
+      else if (ch == "\\") {
+        escaped = true;
+      }
       else if (ch == "\"") {
         inString = false;
         let j = i + 1;
-        while (j < text.length && (text.charAt(j) == " " || text.charAt(j) == "\n")) { j = j + 1; }
+        while (j < text.length && (text.charAt(j) == " " || text.charAt(j) == "\n")) {
+          j = j + 1;
+        }
         if (j < text.length) {
           let next = text.charAt(j);
-          if (next != "," && next != ":" && next != "}" && next != "]") { return false; }
+          if (next != "," && next != ":" && next != "}" && next != "]") {
+            return false;
+          }
         }
       }
-    } else if (ch == "\"") { inString = true; }
+    } else if (ch == "\"") {
+      inString = true;
+    }
     i = i + 1;
   }
   return !inString;
@@ -79,8 +89,12 @@ test("the thirteen names are offered, and nothing else answers to them", () => {
   let scheduling = "";
   let i0: int = 0;
   while (i0 < specs.length) {
-    if (specs[i0].name == "draft_workflow") { drafting = specs[i0].schema; }
-    if (specs[i0].name == "schedule_workflow") { scheduling = specs[i0].schema; }
+    if (specs[i0].name == "draft_workflow") {
+      drafting = specs[i0].schema;
+    }
+    if (specs[i0].name == "schedule_workflow") {
+      scheduling = specs[i0].schema;
+    }
     i0 = i0 + 1;
   }
   expect(drafting.indexOf("web_search") >= 0);
@@ -295,7 +309,10 @@ test("a chat can draft the telegram shapes, and publish what it drafted", () => 
   let g = parseGraph(rows[0].graph).graph;
   let kinds = "";
   let i: int = 0;
-  while (i < g.nodes.length) { kinds = kinds + g.nodes[i].type + " "; i = i + 1; }
+  while (i < g.nodes.length) {
+    kinds = kinds + g.nodes[i].type + " ";
+    i = i + 1;
+  }
   expect(kinds.includes("TELEGRAM_REPLY"));
   expect(kinds.includes("MCP"));
   expect(kinds.includes("TELEGRAM_ASK"));
@@ -304,8 +321,12 @@ test("a chat can draft the telegram shapes, and publish what it drafted", () => 
   let options = "";
   let server = "";
   while (i < g.nodes.length) {
-    if (g.nodes[i].type == "TELEGRAM_ASK") { options = g.nodes[i].cases ?? ""; }
-    if (g.nodes[i].type == "MCP") { server = g.nodes[i].serverId; }
+    if (g.nodes[i].type == "TELEGRAM_ASK") {
+      options = g.nodes[i].cases ?? "";
+    }
+    if (g.nodes[i].type == "MCP") {
+      server = g.nodes[i].serverId;
+    }
     i = i + 1;
   }
   expect(options == "Log it\nSkip");
@@ -327,9 +348,13 @@ test("a said switch lands valid, and connect_steps re-points one branch", () => 
   let fanned: int = 0;
   let sid = "";
   let i: int = 0;
-  while (i < g.nodes.length) { if (g.nodes[i].type == "SWITCH") { sid = g.nodes[i].id; } i = i + 1; }
+  while (i < g.nodes.length) { if (g.nodes[i].type == "SWITCH") {
+    sid = g.nodes[i].id;
+  } i = i + 1; }
   i = 0;
-  while (i < g.edges.length) { if (g.edges[i].from == sid) { fanned = fanned + 1; } i = i + 1; }
+  while (i < g.edges.length) { if (g.edges[i].from == sid) {
+    fanned = fanned + 1;
+  } i = i + 1; }
   expect(fanned == 3);
 
   let wired = call("o9", "connect_steps",
@@ -341,15 +366,23 @@ test("a said switch lands valid, and connect_steps re-points one branch", () => 
   let askIn = 0;
   let askId = "";
   let j: int = 0;
-  while (j < g2.nodes.length) { if (g2.nodes[j].type == "TELEGRAM_ASK") { askId = g2.nodes[j].id; } j = j + 1; }
+  while (j < g2.nodes.length) { if (g2.nodes[j].type == "TELEGRAM_ASK") {
+    askId = g2.nodes[j].id;
+  } j = j + 1; }
   while (i < g2.edges.length) {
-    if (g2.edges[i].to == askId) { askIn = askIn + 1; }
+    if (g2.edges[i].to == askId) {
+      askIn = askIn + 1;
+    }
     if (g2.edges[i].when == "") {
       let f = g2.edges[i].from;
       let isIssues = false;
       let k: int = 0;
-      while (k < g2.nodes.length) { if (g2.nodes[k].id == f && g2.nodes[k].type == "MCP") { isIssues = true; } k = k + 1; }
-      if (isIssues) { issuesTo = g2.edges[i].to; }
+      while (k < g2.nodes.length) { if (g2.nodes[k].id == f && g2.nodes[k].type == "MCP") {
+        isIssues = true;
+      } k = k + 1; }
+      if (isIssues) {
+        issuesTo = g2.edges[i].to;
+      }
     }
     i = i + 1;
   }
@@ -385,7 +418,9 @@ test("a rename does not cost a switch its cases", () => {
   let kept = "";
   let i: int = 0;
   while (i < g.nodes.length) {
-    if (g.nodes[i].type == "SWITCH") { kept = g.nodes[i].cases ?? ""; }
+    if (g.nodes[i].type == "SWITCH") {
+      kept = g.nodes[i].cases ?? "";
+    }
     i = i + 1;
   }
   expect(kept == "Log it\nSkip");
@@ -395,7 +430,9 @@ function replyBody(owner: string): string {
   let g = parseGraph(flowsFor(owner)[0].graph).graph;
   let i: int = 0;
   while (i < g.nodes.length) {
-    if (g.nodes[i].type == "TELEGRAM_REPLY") { return g.nodes[i].body; }
+    if (g.nodes[i].type == "TELEGRAM_REPLY") {
+      return g.nodes[i].body;
+    }
     i = i + 1;
   }
   return "(no reply step)";
@@ -412,7 +449,10 @@ function seededWithSecrets(): void {
   let plan = workflowsPlan(database);
   let extra = secretsPlan(database);
   let i: int = 0;
-  while (i < extra.length) { plan.push(extra[i]); i = i + 1; }
+  while (i < extra.length) {
+    plan.push(extra[i]);
+    i = i + 1;
+  }
   plan.push(migration("8", "provider credentials", createTableSql(database, credentialsMapping())));
   migrate(database, plan);
 }

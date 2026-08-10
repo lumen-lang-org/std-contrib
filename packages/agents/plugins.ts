@@ -40,14 +40,20 @@ function failedManifest(why: string): Manifest {
 }
 
 function without(document: string, raw: string): string {
-  if (raw == "") { return document; }
+  if (raw == "") {
+    return document;
+  }
   let at = document.indexOf(raw);
-  if (at < 0) { return document; }
+  if (at < 0) {
+    return document;
+  }
   return document.slice(0, at) + "\"\"" + document.slice(at + raw.length);
 }
 
 export function manifestFrom(document: string): Manifest {
-  if (document.trim() == "") { return failedManifest("that URL answered with nothing"); }
+  if (document.trim() == "") {
+    return failedManifest("that URL answered with nothing");
+  }
   if (!document.trim().startsWith("{")) {
     return failedManifest("that URL answered with something that is not a JSON manifest — a GitHub page URL answers HTML; use the raw one");
   }
@@ -56,7 +62,9 @@ export function manifestFrom(document: string): Manifest {
   let head = without(without(document, skillsRaw), connectorsRaw);
 
   let name = jsonText(head, "name");
-  if (name.trim() == "") { return failedManifest("a manifest needs a \"name\""); }
+  if (name.trim() == "") {
+    return failedManifest("a manifest needs a \"name\"");
+  }
   let named = scriptEnvNameProblem(name);
   if (named != "") {
     return failedManifest("\"" + name + "\" cannot be a plugin name: " + named);
@@ -74,7 +82,9 @@ export function manifestFrom(document: string): Manifest {
     let f: int = 0;
     while (f < raws.length) {
       let file: SeedFile = { path: jsonText(raws[f], "path"), body: jsonText(raws[f], "body") };
-      if (file.path.trim() == "") { return failedManifest("a skill file needs a \"path\""); }
+      if (file.path.trim() == "") {
+        return failedManifest("a skill file needs a \"path\"");
+      }
       if (file.path.indexOf("/") >= 0 || file.path.indexOf("..") >= 0) {
         return failedManifest("a skill file is a plain name; \"" + file.path + "\" is a path");
       }
@@ -87,9 +97,13 @@ export function manifestFrom(document: string): Manifest {
       body: jsonText(bare, "body"),
       files: files,
     };
-    if (seed.skillName.trim() == "") { return failedManifest("every skill in a manifest needs a \"name\""); }
+    if (seed.skillName.trim() == "") {
+      return failedManifest("every skill in a manifest needs a \"name\"");
+    }
     let ok = scriptEnvNameProblem(seed.skillName);
-    if (ok != "") { return failedManifest("skill \"" + seed.skillName + "\": " + ok); }
+    if (ok != "") {
+      return failedManifest("skill \"" + seed.skillName + "\": " + ok);
+    }
     if (seed.description.trim() == "") {
       return failedManifest("skill \"" + seed.skillName + "\" has no description, so nothing could choose it");
     }
@@ -106,7 +120,9 @@ export function manifestFrom(document: string): Manifest {
   while (c < cons.length) {
     let one = cons[c];
     let kind = jsonText(one, "authKind");
-    if (kind == "") { kind = "none"; }
+    if (kind == "") {
+      kind = "none";
+    }
     let conn: ConnectorSeed = {
       serverName: jsonText(one, "name"),
       transport: "http",
@@ -114,7 +130,9 @@ export function manifestFrom(document: string): Manifest {
       authKind: kind,
       authHeader: jsonText(one, "authHeader"),
     };
-    if (conn.serverName.trim() == "") { return failedManifest("every connector in a manifest needs a \"name\""); }
+    if (conn.serverName.trim() == "") {
+      return failedManifest("every connector in a manifest needs a \"name\"");
+    }
     if (conn.endpoint.trim() == "") {
       return failedManifest("connector \"" + conn.serverName + "\" has no endpoint");
     }

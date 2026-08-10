@@ -37,7 +37,9 @@ function main(): void {
   console.log("trigger-poller: " + botId + " starting");
 
   while (true) {
-    try { pass(db, botId, who, master); }
+    try {
+      pass(db, botId, who, master);
+    }
     catch (e) {
       console.error("trigger-poller: " + e.message);
       process.sleep(BACKOFF_MS);
@@ -89,12 +91,18 @@ function pass(db: Db, botId: string, who: string, master: string): void {
         counted = withRunCounted(counted, now);
         if (said[i].fileId != "") {
           if (said[i].fileSize > FILE_MAX_BYTES) {
-            try { sendMessage(token, said[i].chatId, "That file is " + `${said[i].fileSize}` + " bytes — I can read up to " + `${FILE_MAX_BYTES}` + ". Send a smaller one?", ""); }
-            catch (e) { console.error("trigger-poller: size refusal: " + e.message); }
+            try {
+              sendMessage(token, said[i].chatId, "That file is " + `${said[i].fileSize}` + " bytes — I can read up to " + `${FILE_MAX_BYTES}` + ". Send a smaller one?", "");
+            }
+            catch (e) {
+              console.error("trigger-poller: size refusal: " + e.message);
+            }
           } else {
             try {
               let got = fetchDocument(token, said[i].fileId);
-              if (got != "") { parkFile(db, rowId, said[i].fileName, got); }
+              if (got != "") {
+                parkFile(db, rowId, said[i].fileName, got);
+              }
             } catch (e) {
               console.error("trigger-poller: download " + said[i].fileName + ": " + e.message);
             }
@@ -103,8 +111,12 @@ function pass(db: Db, botId: string, who: string, master: string): void {
       }
     } else {
       if (refuseMessage(db, counted, said[i], verdict.reason, now) != "") {
-        try { sendMessage(token, said[i].chatId, verdict.reason, ""); }
-        catch (e) { console.error("trigger-poller: could not say why: " + e.message); }
+        try {
+          sendMessage(token, said[i].chatId, verdict.reason, "");
+        }
+        catch (e) {
+          console.error("trigger-poller: could not say why: " + e.message);
+        }
       }
     }
     i = i + 1;
@@ -141,7 +153,9 @@ function getUpdates(token: string, offset: string): string {
     + ",\"timeout\":" + `${POLL_SECONDS}`
     + ",\"allowed_updates\":[\"message\"]}";
   let res = http.request(api(token, "getUpdates"), "POST", ask, jsonHeaders());
-  if (!res.ok) { return ""; }
+  if (!res.ok) {
+    return "";
+  }
   return res.body;
 }
 
@@ -155,7 +169,9 @@ function sendDocument(db: Db, token: string, out: TriggerOutboxRow): void {
   let bytes = binaryKind(art.kind) ? crypto.base64Decode(held.body) : held.body;
   let parts = (out.filePath ?? "/file").split("/");
   let name = parts.length == 0 ? "file" : parts[parts.length - 1];
-  if (name == "") { name = "file"; }
+  if (name == "") {
+    name = "file";
+  }
   let B = "JouleBoundary7d29c1";
   let body = "--" + B + "\r\n"
     + "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" + out.chatId + "\r\n"
@@ -184,12 +200,18 @@ function sendMessage(token: string, chatId: string, text: string, markup: string
 function fetchDocument(token: string, fileId: string): string {
   let asked = http.request(api(token, "getFile"), "POST",
     "{\"file_id\":" + JSON.stringify(fileId) + "}", jsonHeaders());
-  if (!asked.ok) { return ""; }
+  if (!asked.ok) {
+    return "";
+  }
   let path = jsonText(jsonRaw(asked.body, "result"), "file_path");
-  if (path == "") { return ""; }
+  if (path == "") {
+    return "";
+  }
   let got = http.request("https://api.telegram.org/file/bot" + token + "/" + path,
     "GET", "", new Map<string, string>());
-  if (!got.ok || got.status != 200) { return ""; }
+  if (!got.ok || got.status != 200) {
+    return "";
+  }
   return crypto.base64Encode(got.body);
 }
 

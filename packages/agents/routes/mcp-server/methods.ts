@@ -23,7 +23,9 @@ export function mcpExportedTools(): ToolSpec[] {
     let one = families[f];
     let i: int = 0;
     while (i < one.length) {
-      if (one[i].name != "set_banner") { out.push(one[i]); }
+      if (one[i].name != "set_banner") {
+        out.push(one[i]);
+      }
       i = i + 1;
     }
     f = f + 1;
@@ -34,21 +36,33 @@ export function mcpExportedTools(): ToolSpec[] {
 export function mcpDispatch(db: Db, owner: string, name: string, args: string): FileToolResult {
   let nowMs = Date.now() as number;
   let scheduled = callTaskTool(db, { owner: owner, agentId: "", modelChoiceId: "", name: name, args: args, nowMs: nowMs });
-  if (scheduled.handled) { return scheduled; }
+  if (scheduled.handled) {
+    return scheduled;
+  }
   let flowed = callWorkflowTool(db, { owner: owner, agentId: "", name: name, args: args, nowMs: nowMs });
-  if (flowed.handled) { return flowed; }
+  if (flowed.handled) {
+    return flowed;
+  }
   let botted = callTriggerTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
-  if (botted.handled) { return botted; }
+  if (botted.handled) {
+    return botted;
+  }
   let selfed = callAgentTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
-  if (selfed.handled) { return selfed; }
+  if (selfed.handled) {
+    return selfed;
+  }
   if (name == "set_banner") {
     let barred: FileToolResult = { handled: true, ok: false, text: "the site banner is set from the console's own chat, not over MCP.", line: 0, changed: "" };
     return barred;
   }
   let known = callKnowledgeTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
-  if (known.handled) { return known; }
+  if (known.handled) {
+    return known;
+  }
   let grouped = callProjectTool(db, { owner: owner, threadId: "", name: name, args: args, nowMs: nowMs });
-  if (grouped.handled) { return grouped; }
+  if (grouped.handled) {
+    return grouped;
+  }
   let none: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
   return none;
 }
@@ -100,7 +114,9 @@ export class McpMethods {
   call(params: string): RpcReply {
     let name = jsonText(params, "name");
     let args = jsonRaw(params, "arguments");
-    if (args == "") { args = "{}"; }
+    if (args == "") {
+      args = "{}";
+    }
     let done = mcpDispatch(this.db, this.owner, name, args);
     if (!done.handled) {
       return rpcFailed(METHOD_NOT_FOUND, "no tool named " + name);

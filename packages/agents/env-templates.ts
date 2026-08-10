@@ -61,13 +61,19 @@ export function envTemplatesAll(db: Db): EnvTemplateRow[] {
   let plain: EnvTemplateRow[] = [];
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].featuredRank > 0) { featured.push(rows[i]); } else { plain.push(rows[i]); }
+    if (rows[i].featuredRank > 0) {
+      featured.push(rows[i]);
+    } else {
+      plain.push(rows[i]);
+    }
     i = i + 1;
   }
   let maxRank: int = 0;
   let m: int = 0;
   while (m < featured.length) {
-    if (featured[m].featuredRank > maxRank) { maxRank = featured[m].featuredRank; }
+    if (featured[m].featuredRank > maxRank) {
+      maxRank = featured[m].featuredRank;
+    }
     m = m + 1;
   }
   let out: EnvTemplateRow[] = [];
@@ -75,19 +81,26 @@ export function envTemplatesAll(db: Db): EnvTemplateRow[] {
   while (r <= maxRank) {
     let k: int = 0;
     while (k < featured.length) {
-      if (featured[k].featuredRank == r) { out.push(featured[k]); }
+      if (featured[k].featuredRank == r) {
+        out.push(featured[k]);
+      }
       k = k + 1;
     }
     r = r + 1;
   }
   let b: int = 0;
-  while (b < plain.length) { out.push(plain[b]); b = b + 1; }
+  while (b < plain.length) {
+    out.push(plain[b]);
+    b = b + 1;
+  }
   return out;
 }
 
 export function envTemplateById(db: Db, id: string): EnvTemplateRow {
   let doc = findById(db, envTemplatesMapping(), id);
-  if (doc == "") { return emptyEnvTemplate(); }
+  if (doc == "") {
+    return emptyEnvTemplate();
+  }
   return JSON.parse<EnvTemplateRow>(doc);
 }
 
@@ -97,7 +110,9 @@ function cleanTags(raw: string): string {
   let i: int = 0;
   while (i < parts.length) {
     let t = parts[i].trim().toLowerCase();
-    if (t != "") { out = out == "" ? t : out + "," + t; }
+    if (t != "") {
+      out = out == "" ? t : out + "," + t;
+    }
     i = i + 1;
   }
   return out;
@@ -116,31 +131,49 @@ export type EnvTemplateWrite = {
 
 export function refuseEnvTemplate(t: EnvTemplateWrite): string {
   let name = t.name.trim();
-  if (name == "") { return "a template needs a name — it is what the catalog shows"; }
-  if (name.length > MAX_TEMPLATE_NAME) { return "\"" + name.slice(0, 20) + "...\" is too long a name"; }
+  if (name == "") {
+    return "a template needs a name — it is what the catalog shows";
+  }
+  if (name.length > MAX_TEMPLATE_NAME) {
+    return "\"" + name.slice(0, 20) + "...\" is too long a name";
+  }
   if (t.summary.length > MAX_TEMPLATE_SUMMARY) {
     return "that description is " + `${t.summary.length}` + " characters — the most a card holds is " + `${MAX_TEMPLATE_SUMMARY}`;
   }
-  if (t.tags.length > MAX_TEMPLATE_TAGS) { return "that is a lot of tags — keep them under " + `${MAX_TEMPLATE_TAGS}` + " characters"; }
+  if (t.tags.length > MAX_TEMPLATE_TAGS) {
+    return "that is a lot of tags — keep them under " + `${MAX_TEMPLATE_TAGS}` + " characters";
+  }
   let img = t.image.trim();
   let df = t.dockerfile.trim();
-  if (img == "" && df == "") { return "a template is an image or a Dockerfile — one of the two is required"; }
-  if (img != "" && df != "") { return "an image or a Dockerfile, not both — the Dockerfile builds the image"; }
+  if (img == "" && df == "") {
+    return "a template is an image or a Dockerfile — one of the two is required";
+  }
+  if (img != "" && df != "") {
+    return "an image or a Dockerfile, not both — the Dockerfile builds the image";
+  }
   if (df != "" && df.length > MAX_TEMPLATE_DOCKERFILE) {
     return "that Dockerfile is " + `${df.length}` + " characters — the most a template takes is " + `${MAX_TEMPLATE_DOCKERFILE}`;
   }
-  if (df != "" && df.toUpperCase().indexOf("FROM") < 0) { return "a Dockerfile starts FROM something"; }
-  if (t.featuredRank < 0) { return "featuredRank is 0 (not featured) or a positive position"; }
+  if (df != "" && df.toUpperCase().indexOf("FROM") < 0) {
+    return "a Dockerfile starts FROM something";
+  }
+  if (t.featuredRank < 0) {
+    return "featuredRank is 0 (not featured) or a positive position";
+  }
   return "";
 }
 
 export function saveEnvTemplate(db: Db, t: EnvTemplateWrite): string {
   let wrong = refuseEnvTemplate(t);
-  if (wrong != "") { return wrong; }
+  if (wrong != "") {
+    return wrong;
+  }
   let id = t.id.trim() == "" ? crypto.randomUUID() : t.id.trim();
   let prior = findById(db, envTemplatesMapping(), id);
   let createdAt = t.now;
-  if (prior != "") { createdAt = JSON.parse<EnvTemplateRow>(prior).createdAt; }
+  if (prior != "") {
+    createdAt = JSON.parse<EnvTemplateRow>(prior).createdAt;
+  }
   let row: EnvTemplateRow = {
     id: id,
     name: t.name.trim(),
@@ -153,12 +186,16 @@ export function saveEnvTemplate(db: Db, t: EnvTemplateWrite): string {
     createdAt: createdAt,
   };
   let written = persist(db, envTemplatesMapping(), JSON.stringify(row));
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
 export function forgetEnvTemplate(db: Db, id: string): bool {
-  if (findById(db, envTemplatesMapping(), id) == "") { return false; }
+  if (findById(db, envTemplatesMapping(), id) == "") {
+    return false;
+  }
   deleteById(db, envTemplatesMapping(), id);
   return true;
 }

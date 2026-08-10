@@ -18,7 +18,9 @@ const FAKE_DIR = "/tmp/agents_uenv_fake";
 const FAKE_LOG = "/tmp/agents_uenv_fake/argv.log";
 
 function fakeDocker(script: string): void {
-  if (!fs.existsSync(FAKE_DIR)) { fs.mkdirSync(FAKE_DIR); }
+  if (!fs.existsSync(FAKE_DIR)) {
+    fs.mkdirSync(FAKE_DIR);
+  }
   let bin = FAKE_DIR + "/docker";
   fs.writeFileSync(bin, script);
   fs.chmodSync(bin, 493);

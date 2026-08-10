@@ -71,9 +71,15 @@ function decide(node: WfNode, ctx: WalkCtx): StepResult {
   let subject = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
   let has = subject.toLowerCase().includes(node.needle.toLowerCase());
   let verdict = false;
-  if (node.test == "contains") { verdict = has; }
-  if (node.test == "lacks") { verdict = !has; }
-  if (node.test == "equals") { verdict = subject.trim() == node.needle.trim(); }
+  if (node.test == "contains") {
+    verdict = has;
+  }
+  if (node.test == "lacks") {
+    verdict = !has;
+  }
+  if (node.test == "equals") {
+    verdict = subject.trim() == node.needle.trim();
+  }
   return stepBranch(ctx.prev, verdict ? "yes" : "no");
 }
 
@@ -84,17 +90,25 @@ function route(node: WfNode, ctx: WalkCtx): StepResult {
 
 function askModel(db: Db, agent: AgentRow, master: string, prompt: string): StepResult {
   let held = configAndModel(db, agent.modelConfigId);
-  if (held.problem != "") { return stepFailed(agent.agentName + ": " + held.problem); }
+  if (held.problem != "") {
+    return stepFailed(agent.agentName + ": " + held.problem);
+  }
   let config = held.config;
   let model = held.model;
-  if (!model.enabled) { return stepFailed(model.label + " is disabled"); }
+  if (!model.enabled) {
+    return stepFailed(model.label + " is disabled");
+  }
   let key = credentialFor(db, model.provider, master);
-  if (key == "") { return stepFailed("no usable credential for " + model.provider); }
+  if (key == "") {
+    return stepFailed("no usable credential for " + model.provider);
+  }
   let asked = complete(model, config,
     "You are one step in a workflow. Answer the instruction directly — your answer is handed "
     + "to the next step as text, so no preamble and no closing remarks.",
     prompt, key);
-  if (!asked.ok) { return stepFailed(asked.error); }
+  if (!asked.ok) {
+    return stepFailed(asked.error);
+  }
   return stepOk(replyText(model.provider, asked.text).trim());
 }
 
@@ -107,28 +121,44 @@ function lookUp(db: Db, agent: AgentRow, master: string, question: string): Step
     return stepFailed("retrieval needs PostgreSQL; this runs on " + db.name);
   }
   let embedder = embeddingModel(db, want.embeddingModelId);
-  if (embedder.id == "") { return stepFailed("no usable embedding model " + want.embeddingModelId); }
+  if (embedder.id == "") {
+    return stepFailed("no usable embedding model " + want.embeddingModelId);
+  }
   let granted = agentScopes(db, agent.id);
-  if (granted.length == 0) { return stepFailed(agent.agentName + " has no scopes granted, so there is nothing to read"); }
+  if (granted.length == 0) {
+    return stepFailed(agent.agentName + " has no scopes granted, so there is nothing to read");
+  }
   let key = credentialFor(db, embedder.provider, master);
-  if (key == "") { return stepFailed("no credential for " + embedder.provider); }
+  if (key == "") {
+    return stepFailed("no credential for " + embedder.provider);
+  }
   let found = retrieve(db, embedder, granted, question, KNOW_TOP_K, key);
-  if (!found.ok) { return stepFailed(found.error); }
-  if (found.found.length == 0) { return stepOk("Nothing in the documents matches: " + question); }
+  if (!found.ok) {
+    return stepFailed(found.error);
+  }
+  if (found.found.length == 0) {
+    return stepOk("Nothing in the documents matches: " + question);
+  }
   return stepOk(asContext(found.found));
 }
 
 function reachOut(db: Db, node: WfNode, owner: string, master: string, args: string): StepResult {
   let doc = findById(db, mcpServersMapping(), node.serverId);
-  if (doc == "") { return stepFailed("no connector " + node.serverId + " — it may have been removed"); }
+  if (doc == "") {
+    return stepFailed("no connector " + node.serverId + " — it may have been removed");
+  }
   let server: McpServerRow = JSON.parse<McpServerRow>(doc);
-  if (!server.enabled) { return stepFailed(server.serverName + " is switched off"); }
+  if (!server.enabled) {
+    return stepFailed(server.serverName + " is switched off");
+  }
   let token = accessTokenFor(db, server, owner, master);
   if (server.authKind != "" && server.authKind != "none" && token == "") {
     return stepFailed(server.serverName + " needs a token and none is stored for it");
   }
   let called = callTool(server, node.tool, args == "" ? "{}" : args, token);
-  if (!called.ok) { return stepFailed(called.error); }
+  if (!called.ok) {
+    return stepFailed(called.error);
+  }
   return stepOk(called.text);
 }
 
@@ -146,10 +176,14 @@ function scriptGiven(ctx: WalkCtx): ScriptGiven {
 
 function runScriptStep(node: WfNode, ctx: WalkCtx, runId: string): StepResult {
   let built = ensureBuilt(node.source ?? "");
-  if (!built.ok) { return stepFailed(built.error); }
+  if (!built.ok) {
+    return stepFailed(built.error);
+  }
   let dir = "/tmp/joule-script-run/" + runId + "-" + node.id;
   let ran = runScript(built.path, scriptGiven(ctx), dir);
-  if (!ran.ok) { return stepFailed(ran.error); }
+  if (!ran.ok) {
+    return stepFailed(ran.error);
+  }
   return stepOk(ran.output);
 }
 
@@ -188,7 +222,9 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
   }
   let body = node.method == "GET" ? "" : fill(node.body, ctx);
   let res = http.request(url, node.method, body, headers);
-  if (res.status == 0) { return stepFailed("no answer from " + url); }
+  if (res.status == 0) {
+    return stepFailed("no answer from " + url);
+  }
   if (res.status < 200 || res.status > 299) {
     return stepFailed(url + " answered " + `${res.status}` + ": " + res.body.slice(0, 300));
   }
@@ -229,7 +265,10 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
   let paint = (sofar: WfStep[], at: WfNode): void => {
     let all: WfStep[] = [];
     let i: int = 0;
-    while (i < sofar.length) { all.push(sofar[i]); i = i + 1; }
+    while (i < sofar.length) {
+      all.push(sofar[i]);
+      i = i + 1;
+    }
     if (at.id != "") {
       let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "", threadId: "" };
       all.push(underway);
@@ -251,8 +290,12 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
 
 function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, runId: string, threadId: string): (node: WfNode, ctx: WalkCtx) => StepResult {
   return (node: WfNode, ctx: WalkCtx): StepResult => {
-    if (node.type == "START" || node.type == "TELEGRAM") { return withInput(stepOk(ctx.input), ctx.input); }
-    if (node.type == "END") { return withInput(stepOk(ctx.prev), ctx.prev); }
+    if (node.type == "START" || node.type == "TELEGRAM") {
+      return withInput(stepOk(ctx.input), ctx.input);
+    }
+    if (node.type == "END") {
+      return withInput(stepOk(ctx.prev), ctx.prev);
+    }
     if (node.type == "CONDITION") {
       let tested = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
       return withInput(decide(node, ctx), tested);
@@ -268,8 +311,12 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
     if (node.type == "WEB_SEARCH") {
       let asked = fill(node.query, ctx);
       let found = retrieveWeb(asked, WEB_TOP_K, WEB_MAX_CHARS);
-      if (!found.ok) { return withInput(stepFailed(found.error), asked); }
-      if (found.found.length == 0) { return withInput(stepOk("The web index has nothing for: " + found.query), asked); }
+      if (!found.ok) {
+        return withInput(stepFailed(found.error), asked);
+      }
+      if (found.found.length == 0) {
+        return withInput(stepOk("The web index has nothing for: " + found.query), asked);
+      }
       return withInput(stepOk(asWebContext(found.found)), asked);
     }
     if (node.type == "KNOWLEDGE") {
@@ -335,7 +382,9 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
           scope: "",
         };
         let asked = runAgentAt(db, node.agentId, said, ask.master, below);
-        if (!asked.ok) { return inThread(withInput(stepFailed(asked.error), said), threadId); }
+        if (!asked.ok) {
+          return inThread(withInput(stepFailed(asked.error), said), threadId);
+        }
         return inThread(withInput(stepOk(asked.text), said), threadId);
       }
       let turn: ThreadAsk = {
@@ -347,7 +396,9 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
     scope: "",
 };
       let answered = runInThreadWith(db, threadId, turn);
-      if (!answered.run.ok) { return inThread(withInput(stepFailed(answered.run.error), said), threadId); }
+      if (!answered.run.ok) {
+        return inThread(withInput(stepFailed(answered.run.error), said), threadId);
+      }
       return inThread(withInput(stepOk(answered.text), said), threadId);
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
@@ -392,9 +443,15 @@ export function resumeWorkflow(db: Db, row: WorkflowRow, held: ResumeAsk): Workf
   let paint = (steps: WfStep[], at: WfNode): void => {
     let all: WfStep[] = [];
     let f: int = 0;
-    while (f < firstHalf.length) { all.push(firstHalf[f]); f = f + 1; }
+    while (f < firstHalf.length) {
+      all.push(firstHalf[f]);
+      f = f + 1;
+    }
     let g: int = 0;
-    while (g < steps.length) { all.push(steps[g]); g = g + 1; }
+    while (g < steps.length) {
+      all.push(steps[g]);
+      g = g + 1;
+    }
     if (at.id != "") {
       let underway: WfStep = { nodeId: at.id, type: at.type, status: "RUNNING", ms: 0, input: "", output: "", error: "", threadId: "" };
       all.push(underway);
@@ -414,9 +471,15 @@ export function resumeWorkflow(db: Db, row: WorkflowRow, held: ResumeAsk): Workf
 
   let all: WfStep[] = [];
   let f: int = 0;
-  while (f < firstHalf.length) { all.push(firstHalf[f]); f = f + 1; }
+  while (f < firstHalf.length) {
+    all.push(firstHalf[f]);
+    f = f + 1;
+  }
   let g: int = 0;
-  while (g < walked.steps.length) { all.push(walked.steps[g]); g = g + 1; }
+  while (g < walked.steps.length) {
+    all.push(walked.steps[g]);
+    g = g + 1;
+  }
   return closeWalk(db, row, row.owner, runId, threadId, held.input, held.startedAt, walked, all);
 }
 

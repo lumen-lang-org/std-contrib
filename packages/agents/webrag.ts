@@ -45,7 +45,9 @@ export function webRagFor(db: Db, agentId: string): AgentWebRagRow {
 
 export function searchApiBase(): string {
   let set = process.env("JOULE_SEARCH_API") ?? "";
-  if (set != "") { return set; }
+  if (set != "") {
+    return set;
+  }
   return "http://100.110.210.29:8080";
 }
 
@@ -63,13 +65,21 @@ export type WebFound = {
 };
 
 export function generateQuery(db: Db, row: AgentWebRagRow, userText: string, master: string): string {
-  if (row.queryMode != "generated" || row.queryModelId == "") { return userText; }
+  if (row.queryMode != "generated" || row.queryModelId == "") {
+    return userText;
+  }
   let modelDoc = findById(db, modelsMapping(), row.queryModelId);
-  if (modelDoc == "") { return userText; }
+  if (modelDoc == "") {
+    return userText;
+  }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
-  if (!model.enabled) { return userText; }
+  if (!model.enabled) {
+    return userText;
+  }
   let key = credentialFor(db, model.provider, master);
-  if (key == "") { return userText; }
+  if (key == "") {
+    return userText;
+  }
 
   let config: ModelConfigRow = {
     id: "", modelId: model.id, temperature: 0.0, maxTokens: 60, topP: 1.0,
@@ -79,12 +89,20 @@ export function generateQuery(db: Db, row: AgentWebRagRow, userText: string, mas
     "Write one short web-search query for the person's message. Answer with the query text only — "
     + "no quotes, no prefix, no explanation. Keep names, versions and error strings intact.",
     userText, key);
-  if (!asked.ok) { return userText; }
+  if (!asked.ok) {
+    return userText;
+  }
   let q = replyText(model.provider, asked.text).trim();
   let brk = q.indexOf("\n");
-  if (brk >= 0) { q = q.slice(0, brk).trim(); }
-  if (q.startsWith("\"") && q.endsWith("\"") && q.length > 1) { q = q.slice(1, q.length - 1); }
-  if (q == "" || q.length > 300) { return userText; }
+  if (brk >= 0) {
+    q = q.slice(0, brk).trim();
+  }
+  if (q.startsWith("\"") && q.endsWith("\"") && q.length > 1) {
+    q = q.slice(1, q.length - 1);
+  }
+  if (q == "" || q.length > 300) {
+    return userText;
+  }
   return q;
 }
 
@@ -109,7 +127,9 @@ export function retrieveWeb(query: string, topK: int, maxChars: int): WebFound {
       title: jsonText(rows[i], "title"),
       text: jsonText(rows[i], "text"),
     };
-    if (p.text != "") { out.push(p); }
+    if (p.text != "") {
+      out.push(p);
+    }
     i = i + 1;
   }
   let answer: WebFound = { ok: true, query: query, found: out, error: "" };
@@ -117,7 +137,9 @@ export function retrieveWeb(query: string, topK: int, maxChars: int): WebFound {
 }
 
 export function asWebContext(found: WebPassage[]): string {
-  if (found.length == 0) { return ""; }
+  if (found.length == 0) {
+    return "";
+  }
   let out = "Passages retrieved from the public web index for this question. "
     + "They are retrieved by resemblance to the question, so they may be beside the point: judge. "
     + "When you answer from one, cite its URL; never attribute to these pages what is not in them, "
@@ -133,7 +155,10 @@ export function asWebContext(found: WebPassage[]): string {
 export function webSummary(query: string, found: WebPassage[]): string {
   let urls: string[] = [];
   let i: int = 0;
-  while (i < found.length) { urls.push(found[i].url); i = i + 1; }
+  while (i < found.length) {
+    urls.push(found[i].url);
+    i = i + 1;
+  }
   return "web index: \"" + query + "\" -> " + `${found.length}` + " passages (" + urls.join(", ") + ")";
 }
 
@@ -165,37 +190,51 @@ export function webSearchTools(): ToolSpec[] {
 }
 
 export function callReadLinkTool(name: string, args: string): string {
-  if (name != "read_link") { return ""; }
+  if (name != "read_link") {
+    return "";
+  }
   let url = jsonText(args, "url").trim();
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     return "read_link needs an absolute url: {\"url\":\"https://...\"}.";
   }
   let res = http.request(searchApiBase() + "/fetch?url=" + urlEncode(url), "GET", "", new Map<string, string>());
-  if (!res.ok) { return "The page could not be fetched: the index did not answer."; }
+  if (!res.ok) {
+    return "The page could not be fetched: the index did not answer.";
+  }
   if (res.status == 422) {
     let why = jsonText(res.body, "reason");
     return "The page could not be read: " + (why == "" ? "the extractor refused it" : why)
       + ". Say so plainly rather than guessing at its contents.";
   }
-  if (res.status != 200) { return "The page could not be fetched: the index answered " + `${res.status}` + "."; }
+  if (res.status != 200) {
+    return "The page could not be fetched: the index answered " + `${res.status}` + ".";
+  }
   let title = jsonText(res.body, "title");
   let md = jsonText(res.body, "markdown");
   let published = jsonText(res.body, "published_at");
-  if (md == "") { return "The page answered but had no readable text."; }
+  if (md == "") {
+    return "The page answered but had no readable text.";
+  }
   return "# " + title + "\n" + (published == "" ? "" : "Published: " + published + "\n")
     + "Source: " + url + "\n\n" + md;
 }
 
 export function callWebSearchTool(name: string, args: string): string {
-  if (name != "search_web") { return ""; }
+  if (name != "search_web") {
+    return "";
+  }
   let query = jsonText(args, "query");
   if (query.trim() == "") {
     return "search_web needs a query: {\"query\":\"rust release notes\"}.";
   }
   let count = parseInt(jsonText(args, "count"), 10) ?? 5;
-  if (count <= 0 || count > 20) { count = 5; }
+  if (count <= 0 || count > 20) {
+    count = 5;
+  }
   let found = retrieveWeb(query, count, 6000);
-  if (!found.ok) { return "The search index did not answer: " + found.error; }
+  if (!found.ok) {
+    return "The search index did not answer: " + found.error;
+  }
   if (found.found.length == 0) {
     return "Nothing in the index for \"" + query + "\". It is one crawled corpus, not the whole web — say so rather than guessing.";
   }

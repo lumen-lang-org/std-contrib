@@ -1,5 +1,5 @@
 import { controller } from "./controller.ts";
-import { Request, Reply, Mount, ok, mountedRoutes, dispatchedMounted } from "./server.ts";
+import { Request, Reply, Mount, Ok, mountedRoutes, dispatchedMounted } from "./server.ts";
 
 type Ask = { name: string, size: int };
 
@@ -9,16 +9,16 @@ export class ThingApi {
   find(@PathVariable("id") id: string,
        @RequestParam("limit", "10") limit: int,
        @RequestHeader("x-user") who: string): Reply {
-    return ok("{\"id\":\"" + id + "\",\"limit\":" + `${limit}` + ",\"who\":\"" + who + "\"}");
+    return Ok("{\"id\":\"" + id + "\",\"limit\":" + `${limit}` + ",\"who\":\"" + who + "\"}");
   }
 
   @put("/:id")
   save(@RequestBody ask: Ask): Reply {
-    return ok("{\"name\":\"" + ask.name + "\",\"size\":" + `${ask.size}` + "}");
+    return Ok("{\"name\":\"" + ask.name + "\",\"size\":" + `${ask.size}` + "}");
   }
 
   @get("/")
-  plain(req: Request): Reply { return ok("{\"plain\":true}"); }
+  plain(req: Request): Reply { return Ok("{\"plain\":true}"); }
 }
 
 test("a path variable, a query param with a default, and a header all bind", () => {

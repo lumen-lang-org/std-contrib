@@ -246,7 +246,10 @@ function bindingFor(p: ControllerParam): string {
       if (p.type == "string") { return "req.body"; }
       return "JSON.parse<" + p.type + ">(req.body)";
     }
-    if (dec.name == "From" || dec.name == "from") {
+    // A resolver: the parameter is whatever the named function makes of the
+    // request. This is how a handler asks for who the caller is without being
+    // handed the raw header and the rule for trusting it.
+    if (dec.name == "Resolve" || dec.name == "From" || dec.name == "from") {
       if (named == "") { return ""; }
       return named + "(req)";
     }

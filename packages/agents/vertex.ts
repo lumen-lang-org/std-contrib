@@ -36,15 +36,23 @@ export function vertexForget(): void {
 
 function b64urlOfFile(path: string): string {
   let res = child_process.spawnSync("openssl", ["base64", "-A", "-in", path]);
-  if (res.status != 0) { return ""; }
+  if (res.status != 0) {
+    return "";
+  }
   let out = "";
   let i: int = 0;
   while (i < res.stdout.length) {
     let c = res.stdout.charAt(i);
-    if (c == "+") { out = out + "-"; }
-    else if (c == "/") { out = out + "_"; }
+    if (c == "+") {
+      out = out + "-";
+    }
+    else if (c == "/") {
+      out = out + "_";
+    }
     else if (c == "=" || c == "\n" || c == "\r") { }
-    else { out = out + c; }
+    else {
+      out = out + c;
+    }
     i = i + 1;
   }
   return out;
@@ -69,7 +77,9 @@ export function vertexBearer(saJson: string, now: number): VertexBearer {
   }
 
   let minted = mintToken(sa, now);
-  if (minted.ok) { vertexTokens.set(sa.client_email, minted); }
+  if (minted.ok) {
+    vertexTokens.set(sa.client_email, minted);
+  }
   return minted;
 }
 
@@ -82,7 +92,9 @@ function mintToken(sa: ServiceAccount, now: number): VertexBearer {
   }
 
   let out = mintTokenIn(dir, sa, now);
-  try { fs.rmSync(dir, true); } catch { }
+  try {
+    fs.rmSync(dir, true);
+  } catch { }
   return out;
 }
 
@@ -145,10 +157,14 @@ function mintTokenIn(dir: string, sa: ServiceAccount, now: number): VertexBearer
 
 function tokenFrom(body: string): string {
   let at = body.indexOf("\"access_token\"");
-  if (at < 0) { return ""; }
+  if (at < 0) {
+    return "";
+  }
   let colon = body.indexOf(":", at);
   let open = body.indexOf("\"", colon + 1);
   let close = body.indexOf("\"", open + 1);
-  if (open < 0 || close < 0) { return ""; }
+  if (open < 0 || close < 0) {
+    return "";
+  }
   return body.substring(open + 1, close);
 }

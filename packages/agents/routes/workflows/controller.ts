@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, executeWith, existsById, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, accepted, badRequest, created, noContent, notFound, ok, okJson, param } from "../../../rest/server.ts";
+import { Reply, Request, Accepted, BadRequest, Created, NoContent, NotFound, Ok, OkJson, param } from "../../../rest/server.ts";
 import { callerTags, guestTag, stamp } from "../../api-core.ts";
 import { holdsOwner, owningTag } from "../../owner.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../scan.ts";
@@ -17,38 +17,50 @@ import { ownedOrEmpty, roleAtLeast } from "../../guards.ts";
 export class WorkflowApi {
   db: Db;
 
-  constructor(db: Db) { this.db = db; }
+  constructor(db: Db) {
+    this.db = db;
+  }
 
-  @get("/")
+  @Get("/")
   @Guard(ownedOrEmpty)
   list(req: Request): Reply {
     let tags = callerTags(req);
-    return ok(workflowsOf(this.db, owningTag(tags)));
+    return Ok(workflowsOf(this.db, owningTag(tags)));
   }
 
-  @post("/")
+  @Post("/")
   @Guard(roleAtLeast("signed-in", "signing in is what makes a workflow yours to keep"))
   create(req: Request): Reply {
     let tags = callerTags(req);
     let owner = owningTag(tags);
     if (req.body == "") {
-      return badRequest("a body is required: {\"name\":\"...\",\"agentId\":\"a1\",\"graph\":{...}}");
+      return BadRequest("a body is required: {\"name\":\"...\",\"agentId\":\"a1\",\"graph\":{...}}");
     }
     let agentId = jsonText(req.body, "agentId");
-    if (!existsById(this.db, agentsMapping(), agentId)) { return badRequest("no agent " + agentId); }
+    if (!existsById(this.db, agentsMapping(), agentId)) {
+      return BadRequest("no agent " + agentId);
+    }
     if (enabledWorkflowCount(this.db, owner) >= MAX_WORKFLOWS_PER_OWNER) {
-      return badRequest("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — pause one before adding another");
+      return BadRequest("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — pause one before adding another");
     }
     let graphText = jsonRaw(req.body, "graph");
-    if (graphText == "") { return badRequest("a workflow needs a graph: nodes, edges and a view"); }
+    if (graphText == "") {
+      return BadRequest("a workflow needs a graph: nodes, edges and a view");
+    }
     let parsed = parseGraph(graphText);
-    if (!parsed.ok) { return badRequest(parsed.error); }
+    if (!parsed.ok) {
+      return BadRequest(parsed.error);
+    }
     let bare = req.body;
     let graphAt = req.body.indexOf(graphText);
-    if (graphAt >= 0) { bare = req.body.slice(0, graphAt) + "\"\"" + req.body.slice(graphAt + graphText.length); }
+    if (graphAt >= 0) {
+      bare = req.body.slice(0, graphAt) + "\"\"" + req.body.slice(graphAt + graphText.length);
+    }
     let zone = jsonText(bare, "tz");
     let timing = timingOf(parsed.graph, zone == "" ? "UTC" : zone, Date.now() as number);
-    if (!timing.ok) { return badRequest(timing.error); }
+    if (!timing.ok) {
+      return BadRequest(timing.error);
+    }
 
     let now = stamp();
     let row: WorkflowRow = {
@@ -66,49 +78,69 @@ export class WorkflowApi {
       createdAt: now, updatedAt: now,
     };
     let wrong = refuseWorkflow(row);
-    if (wrong != "") { return badRequest(wrong); }
+    if (wrong != "") {
+      return BadRequest(wrong);
+    }
     let secretWrong = graphSecretProblem(this.db, parsed.graph, owner);
-    if (secretWrong != "") { return badRequest(secretWrong); }
+    if (secretWrong != "") {
+      return BadRequest(secretWrong);
+    }
     let ready = row;
     if (row.kind == "every") {
       let first = nextWorkflowFire(row, Date.now() as number);
-      if (!first.ok) { return badRequest(first.error); }
+      if (!first.ok) {
+        return BadRequest(first.error);
+      }
       ready = withWorkflowNextAt(row, first.at);
     }
     let written = persist(this.db, workflowsMapping(), JSON.stringify(ready));
-    if (!written.ok) { return badRequest(written.error); }
-    return created(findById(this.db, workflowsMapping(), ready.id));
+    if (!written.ok) {
+      return BadRequest(written.error);
+    }
+    return Created(findById(this.db, workflowsMapping(), ready.id));
   }
 
-  @get("/:id")
+  @Get("/:id")
   one(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + id); }
-    return ok(JSON.stringify(mine));
+    if (mine.id == "") {
+      return NotFound("workflow " + id);
+    }
+    return Ok(JSON.stringify(mine));
   }
 
-  @put("/:id")
+  @Put("/:id")
   update(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + id); }
-    if (req.body == "") { return badRequest("a body is required"); }
+    if (mine.id == "") {
+      return NotFound("workflow " + id);
+    }
+    if (req.body == "") {
+      return BadRequest("a body is required");
+    }
     let sentGraph = jsonRaw(req.body, "graph");
     let bare = req.body;
     if (sentGraph != "") {
       let graphAt = req.body.indexOf(sentGraph);
-      if (graphAt >= 0) { bare = req.body.slice(0, graphAt) + "\"\"" + req.body.slice(graphAt + sentGraph.length); }
+      if (graphAt >= 0) {
+        bare = req.body.slice(0, graphAt) + "\"\"" + req.body.slice(graphAt + sentGraph.length);
+      }
     }
     let expected = jsonText(bare, "updatedAt");
     if (expected != "" && expected != mine.updatedAt) {
-      return badRequest("this workflow changed while you were editing — reload it and redo the change");
+      return BadRequest("this workflow changed while you were editing — reload it and redo the change");
     }
     let graphText = sentGraph == "" ? mine.graph : sentGraph;
     let parsed = parseGraph(graphText);
-    if (!parsed.ok) { return badRequest(parsed.error); }
+    if (!parsed.ok) {
+      return BadRequest(parsed.error);
+    }
     let zone = jsonText(bare, "tz");
     let tz = zone == "" ? mine.tz : zone;
     let timing = timingOf(parsed.graph, tz == "" ? "UTC" : tz, Date.now() as number);
-    if (!timing.ok) { return badRequest(timing.error); }
+    if (!timing.ok) {
+      return BadRequest(timing.error);
+    }
     let name = jsonText(bare, "name");
     let description = jsonText(bare, "description");
     let on = jsonFlag(bare, "enabled", mine.enabled);
@@ -133,95 +165,125 @@ export class WorkflowApi {
       createdAt: mine.createdAt, updatedAt: stamp(),
     };
     let wrong = refuseWorkflow(edited);
-    if (wrong != "") { return badRequest(wrong); }
+    if (wrong != "") {
+      return BadRequest(wrong);
+    }
     let secretWrong = graphSecretProblem(this.db, parsed.graph, mine.owner);
-    if (secretWrong != "") { return badRequest(secretWrong); }
+    if (secretWrong != "") {
+      return BadRequest(secretWrong);
+    }
     let stored = edited;
     if (edited.kind == "every") {
       let ahead = nextWorkflowFire(edited, Date.now() as number);
-      if (!ahead.ok) { return badRequest(ahead.error); }
+      if (!ahead.ok) {
+        return BadRequest(ahead.error);
+      }
       stored = withWorkflowNextAt(edited, ahead.at);
     }
     let written = persist(this.db, workflowsMapping(), JSON.stringify(stored));
-    if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, workflowsMapping(), stored.id));
+    if (!written.ok) {
+      return BadRequest(written.error);
+    }
+    return Ok(findById(this.db, workflowsMapping(), stored.id));
   }
 
-  @post("/script-check")
+  @Post("/script-check")
   scriptCheck(req: Request): Reply {
     let tags = callerTags(req);
     if (owningTag(tags) == "" || guestTag(tags) != "") {
-      return badRequest("signing in is what makes a script yours to compile");
+      return BadRequest("signing in is what makes a script yours to compile");
     }
-    if (req.body == "") { return badRequest("a body is required: {\"source\":\"...\"}"); }
+    if (req.body == "") {
+      return BadRequest("a body is required: {\"source\":\"...\"}");
+    }
     let source = jsonText(req.body, "source");
     if (source.trim() == "") {
       let empty: ScriptCheckFailed = { ok: false, error: "there is no script to compile" };
-      return okJson(empty);
+      return OkJson(empty);
     }
     let built = ensureBuilt(source);
     if (!built.ok) {
       let failed: ScriptCheckFailed = { ok: false, error: built.error };
-      return okJson(failed);
+      return OkJson(failed);
     }
     let done: ScriptCheckFresh = { ok: true, error: "", fresh: built.fresh };
-    return okJson(done);
+    return OkJson(done);
   }
 
-  @post("/:id/publish")
+  @Post("/:id/publish")
   publish(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + id); }
+    if (mine.id == "") {
+      return NotFound("workflow " + id);
+    }
     let parsed = parseGraph(mine.graph);
-    if (!parsed.ok) { return badRequest(parsed.error); }
+    if (!parsed.ok) {
+      return BadRequest(parsed.error);
+    }
     let wrong = refuseWorkflow(mine);
-    if (wrong != "") { return badRequest(wrong); }
+    if (wrong != "") {
+      return BadRequest(wrong);
+    }
     let secretWrong = graphSecretProblem(this.db, parsed.graph, mine.owner);
-    if (secretWrong != "") { return badRequest(secretWrong); }
+    if (secretWrong != "") {
+      return BadRequest(secretWrong);
+    }
     let now = stamp();
     executeWith(this.db,
       "UPDATE workflows SET published_graph = graph, published_at = " + this.db.placeholder
       + ", updated_at = " + placeholderAt(this.db, 2)
       + " WHERE id = " + placeholderAt(this.db, 3),
       [now, now, mine.id]);
-    return ok(findById(this.db, workflowsMapping(), mine.id));
+    return Ok(findById(this.db, workflowsMapping(), mine.id));
   }
 
-  @post("/:id/run-now")
+  @Post("/:id/run-now")
   runNow(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + id); }
+    if (mine.id == "") {
+      return NotFound("workflow " + id);
+    }
     let now = stamp();
     executeWith(this.db,
       "UPDATE workflows SET next_at = " + this.db.placeholder
       + ", running_since = '', enabled = true, updated_at = " + placeholderAt(this.db, 2)
       + " WHERE id = " + placeholderAt(this.db, 3),
       [now, now, mine.id]);
-    return accepted(findById(this.db, workflowsMapping(), mine.id));
+    return Accepted(findById(this.db, workflowsMapping(), mine.id));
   }
 
-  @get("/:id/runs")
+  @Get("/:id/runs")
   runs(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + id); }
-    return ok(workflowRunsOf(this.db, mine.id, mine.owner));
+    if (mine.id == "") {
+      return NotFound("workflow " + id);
+    }
+    return Ok(workflowRunsOf(this.db, mine.id, mine.owner));
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(req: Request, @PathVariable("id") id: string): Reply {
     let mine = this.owned(req);
-    if (mine.id == "") { return notFound("workflow " + id); }
+    if (mine.id == "") {
+      return NotFound("workflow " + id);
+    }
     executeWith(this.db, "DELETE FROM workflow_runs WHERE workflow_id = " + this.db.placeholder, [mine.id]);
     let gone = deleteById(this.db, workflowsMapping(), mine.id);
-    if (!gone.ok) { return badRequest(gone.error); }
-    return noContent();
+    if (!gone.ok) {
+      return BadRequest(gone.error);
+    }
+    return NoContent();
   }
 
   private owned(req: Request): WorkflowRow {
     let document = findById(this.db, workflowsMapping(), param(req, "id"));
-    if (document == "") { return emptyWorkflow(); }
+    if (document == "") {
+      return emptyWorkflow();
+    }
     let row: WorkflowRow = JSON.parse<WorkflowRow>(document);
-    if (!holdsOwner(callerTags(req), row.owner)) { return emptyWorkflow(); }
+    if (!holdsOwner(callerTags(req), row.owner)) {
+      return emptyWorkflow();
+    }
     return row;
   }
 }

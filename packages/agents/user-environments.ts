@@ -14,12 +14,20 @@ export function uenvLimitsOverride(perOwner: int, global: int): void {
   uenvPerOwnerChosen = perOwner;
   uenvGlobalChosen = global;
 }
-function uenvPerOwner(): int { return uenvPerOwnerChosen > 0 ? uenvPerOwnerChosen : MAX_USER_ENVS_PER_OWNER; }
-export function uenvGlobalCeiling(): int { return uenvGlobalChosen; }
+function uenvPerOwner(): int {
+  return uenvPerOwnerChosen > 0 ? uenvPerOwnerChosen : MAX_USER_ENVS_PER_OWNER;
+}
+export function uenvGlobalCeiling(): int {
+  return uenvGlobalChosen;
+}
 
 export function userEnvCountAll(db: Db): int {
-  if (!db.query("SELECT count(*) FROM user_environments", [])) { return 0; }
-  if (db.rows() == 0) { return 0; }
+  if (!db.query("SELECT count(*) FROM user_environments", [])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
   return parseInt(db.value(0, 0).trim(), 10) ?? 0;
 }
 export const MAX_USER_ENV_NAME: int = 40;
@@ -63,9 +71,13 @@ export function emptyUserEnv(): UserEnvRow {
 }
 
 let uenvChosenDocker: string = "";
-export function uenvDockerOverride(bin: string): void { uenvChosenDocker = bin; }
+export function uenvDockerOverride(bin: string): void {
+  uenvChosenDocker = bin;
+}
 function uenvDockerBin(): string {
-  if (uenvChosenDocker != "") { return uenvChosenDocker; }
+  if (uenvChosenDocker != "") {
+    return uenvChosenDocker;
+  }
   return envDockerBin();
 }
 type UenvDockerReply = {
@@ -84,11 +96,15 @@ function uenvTail(text: string): string {
   let keep: string[] = [];
   let i: int = lines.length - 1;
   while (i >= 0 && keep.length < 6) {
-    if (lines[i].trim() != "") { keep.unshift(lines[i].trim()); }
+    if (lines[i].trim() != "") {
+      keep.unshift(lines[i].trim());
+    }
     i = i - 1;
   }
   let out = keep.join("\n");
-  if (out.length > 700) { out = out.slice(out.length - 700); }
+  if (out.length > 700) {
+    out = out.slice(out.length - 700);
+  }
   return out;
 }
 
@@ -108,9 +124,13 @@ export function userEnvsOf(db: Db, owner: string): UserEnvRow[] {
 
 export function userEnvById(db: Db, id: string, owner: string): UserEnvRow {
   let doc = findById(db, userEnvsMapping(), id);
-  if (doc == "") { return emptyUserEnv(); }
+  if (doc == "") {
+    return emptyUserEnv();
+  }
   let row: UserEnvRow = JSON.parse<UserEnvRow>(doc);
-  if (row.owner != owner) { return emptyUserEnv(); }
+  if (row.owner != owner) {
+    return emptyUserEnv();
+  }
   return row;
 }
 
@@ -118,7 +138,9 @@ export function userEnvByName(db: Db, owner: string, name: string): UserEnvRow {
   let rows = userEnvsOf(db, owner);
   let i: int = 0;
   while (i < rows.length) {
-    if (foldName(rows[i].name) == foldName(name)) { return rows[i]; }
+    if (foldName(rows[i].name) == foldName(name)) {
+      return rows[i];
+    }
     i = i + 1;
   }
   return emptyUserEnv();
@@ -138,17 +160,27 @@ export type UserEnvMade = {
 };
 
 export function refuseUserEnv(db: Db, ask: UserEnvWrite): string {
-  if (ask.owner == "") { return "an environment has to belong to somebody"; }
+  if (ask.owner == "") {
+    return "an environment has to belong to somebody";
+  }
   let name = ask.name.trim();
-  if (name == "") { return "an environment needs a name — it is what run_script is asked for"; }
-  if (name.length > MAX_USER_ENV_NAME) { return "\"" + name.slice(0, 20) + "...\" is too long a name"; }
+  if (name == "") {
+    return "an environment needs a name — it is what run_script is asked for";
+  }
+  if (name.length > MAX_USER_ENV_NAME) {
+    return "\"" + name.slice(0, 20) + "...\" is too long a name";
+  }
   if (foldName(name) == "" || foldName(name) == "main" || foldName(name) == "default") {
     return "\"" + name + "\" is a name the runner already means something by — pick another";
   }
   let img = ask.image.trim();
   let df = ask.dockerfile.trim();
-  if (img == "" && df == "") { return "an environment is an image or a Dockerfile — one of the two is required"; }
-  if (img != "" && df != "") { return "an image or a Dockerfile, not both — the Dockerfile builds the image"; }
+  if (img == "" && df == "") {
+    return "an environment is an image or a Dockerfile — one of the two is required";
+  }
+  if (img != "" && df != "") {
+    return "an image or a Dockerfile, not both — the Dockerfile builds the image";
+  }
   if (df != "" && df.length > MAX_DOCKERFILE) {
     return "that Dockerfile is " + `${df.length}` + " characters — the most an environment takes is " + `${MAX_DOCKERFILE}`;
   }
@@ -170,7 +202,9 @@ export function refuseUserEnv(db: Db, ask: UserEnvWrite): string {
 
 export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
   let wrong = refuseUserEnv(db, ask);
-  if (wrong != "") { return { id: "", problem: wrong }; }
+  if (wrong != "") {
+    return { id: "", problem: wrong };
+  }
   let id = crypto.randomUUID();
   let name = ask.name.trim();
   let image = ask.image.trim();
@@ -187,9 +221,13 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
     } catch (e) {
       staged = "the build could not be staged";
     }
-    if (staged != "") { return { id: "", problem: staged }; }
+    if (staged != "") {
+      return { id: "", problem: staged };
+    }
     let built = uenvDocker(["build", "-t", image, stage]);
-    try { fs.rmSync(stage, true); } catch (e) { }
+    try {
+      fs.rmSync(stage, true);
+    } catch (e) { }
     if (built.status != 0) {
       return { id: "", problem: "the build failed:\n" + uenvTail(built.stderr == "" ? built.stdout : built.stderr) };
     }
@@ -205,13 +243,17 @@ export function createUserEnv(db: Db, ask: UserEnvWrite): UserEnvMade {
     dockerfile: ask.dockerfile.trim(), createdAt: ask.now,
   };
   let written = persist(db, userEnvsMapping(), JSON.stringify(row));
-  if (!written.ok) { return { id: "", problem: written.error }; }
+  if (!written.ok) {
+    return { id: "", problem: written.error };
+  }
   return { id: id, problem: "" };
 }
 
 export function forgetUserEnv(db: Db, id: string, owner: string): bool {
   let row = userEnvById(db, id, owner);
-  if (row.id == "") { return false; }
+  if (row.id == "") {
+    return false;
+  }
   if (row.source == "dockerfile") {
     uenvDocker(["image", "rm", "-f", row.image]);
   }

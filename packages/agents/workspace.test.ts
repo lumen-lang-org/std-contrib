@@ -71,8 +71,12 @@ test("deleting removes one file, not the workspace", () => {
 
 function bulk(n: int): string {
   let out = "x";
-  while (out.length * 2 <= n) { out = out + out; }
-  while (out.length < n) { out = out + "x"; }
+  while (out.length * 2 <= n) {
+    out = out + out;
+  }
+  while (out.length < n) {
+    out = out + "x";
+  }
   return out;
 }
 

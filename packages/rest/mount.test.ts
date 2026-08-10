@@ -8,7 +8,7 @@
 
 import { controller } from "./controller.ts";
 import { Route } from "./router.ts";
-import { Request, Reply, Mount, mount, mountedRoutes, mountProblem, dispatchMounted, ok, param } from "./server.ts";
+import { Request, Reply, Mount, mount, mountedRoutes, mountProblem, dispatchMounted, Ok, param } from "./server.ts";
 
 // A record with a required field, so a parse of a partial body throws the way
 // a real handler's does.
@@ -30,12 +30,12 @@ class AgentApi {
 
   @get("/")
   list(req: Request): Reply {
-    return ok("[\"" + this.label + "\"]");
+    return Ok("[\"" + this.label + "\"]");
   }
 
   @get("/:id")
   find(req: Request): Reply {
-    return ok("{\"id\":" + JSON.stringify(param(req, "id")) + "}");
+    return Ok("{\"id\":" + JSON.stringify(param(req, "id")) + "}");
   }
 
   // The regression this design exists for: a PUT with a partial body. The
@@ -43,7 +43,7 @@ class AgentApi {
   @put("/:id")
   update(req: Request): Reply {
     let body = JSON.parse<NewAgent>(req.body);
-    return ok("{\"name\":" + JSON.stringify(body.name) + "}");
+    return Ok("{\"name\":" + JSON.stringify(body.name) + "}");
   }
 }
 
@@ -52,7 +52,7 @@ class ModelApi {
   // The same name as AgentApi's. Nothing disambiguates it by hand.
   @get("/")
   list(req: Request): Reply {
-    return ok("[\"opus\"]");
+    return Ok("[\"opus\"]");
   }
 }
 
@@ -142,9 +142,9 @@ test("two controllers claiming one path is a startup failure", () => {
 @controller("/root")
 class RootVerbs {
   @get("/")
-  status(req: Request): Reply { return ok("\"from-get\""); }
+  status(req: Request): Reply { return Ok("\"from-get\""); }
   @put("/")
-  configure(req: Request): Reply { return ok("\"from-put\""); }
+  configure(req: Request): Reply { return Ok("\"from-put\""); }
 }
 
 test("a PUT on the controller's own root reaches the PUT handler", () => {
@@ -161,13 +161,13 @@ class ShapeApi {
   master: string;
   constructor(db: string, master: string) { this.db = db; this.master = master; }
   @get("/")
-  status(req: Request): Reply { return ok("\"s-get\""); }
+  status(req: Request): Reply { return Ok("\"s-get\""); }
   @put("/")
-  configure(req: Request): Reply { return ok("\"s-put\""); }
+  configure(req: Request): Reply { return Ok("\"s-put\""); }
   @put("/key")
-  setKey(req: Request): Reply { return ok("\"s-key\""); }
+  setKey(req: Request): Reply { return Ok("\"s-key\""); }
   @del("/key")
-  clearKey(req: Request): Reply { return ok("\"s-unkey\""); }
+  clearKey(req: Request): Reply { return Ok("\"s-unkey\""); }
 }
 
 test("the tracing shape dispatches every verb to its own method", () => {

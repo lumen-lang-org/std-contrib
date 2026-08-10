@@ -33,7 +33,10 @@ function main(): void {
   let plan = schemaPlan(db);
   let extra = tracePlan(db);
   let e: int = 0;
-  while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  while (e < extra.length) {
+    plan.push(extra[e]);
+    e = e + 1;
+  }
   migrate(db, plan);
 
   let model: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
@@ -92,14 +95,26 @@ function main(): void {
   while (i < out.results.length) {
     let r = out.results[i];
     let mark = "PASS";
-    if (!r.ran) { mark = "FAIL"; } else if (r.score < 0.7) { mark = "POOR"; }
+    if (!r.ran) {
+      mark = "FAIL";
+    } else if (r.score < 0.7) {
+      mark = "POOR";
+    }
     console.log(mark + "  answer " + `${r.score}` + "  tools " + `${r.toolScore}` + "  agents " + `${r.agentScore}` + "   " + r.question);
     console.log("      answered: " + r.answer.slice(0, 90));
-    if (r.reason != "") { console.log("      judge   : " + r.reason); }
+    if (r.reason != "") {
+      console.log("      judge   : " + r.reason);
+    }
     console.log("      route   : tools [" + r.calledTools.join(", ") + "]  agents [" + r.calledAgents.join(", ") + "]");
-    if (r.missingTools.length > 0) { console.log("      MISSING tools : " + r.missingTools.join(", ")); }
-    if (r.missingAgents.length > 0) { console.log("      MISSING agents: " + r.missingAgents.join(", ")); }
-    if (r.error != "") { console.log("      error   : " + r.error); }
+    if (r.missingTools.length > 0) {
+      console.log("      MISSING tools : " + r.missingTools.join(", "));
+    }
+    if (r.missingAgents.length > 0) {
+      console.log("      MISSING agents: " + r.missingAgents.join(", "));
+    }
+    if (r.error != "") {
+      console.log("      error   : " + r.error);
+    }
     console.log("      trace   : " + r.traceId + "  (" + `${r.delegations}` + " delegations, " + `${r.rounds}` + " rounds)");
     i = i + 1;
   }

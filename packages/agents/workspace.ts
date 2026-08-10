@@ -43,16 +43,22 @@ export function workspacePlan(db: Db): Migration[] {
 }
 
 export function fileNameOk(name: string): bool {
-  if (name == "" || name.length > 200) { return false; }
+  if (name == "" || name.length > 200) {
+    return false;
+  }
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
     let ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
       || c == 95 || c == 45 || c == 46 || c == 32;
-    if (!ok) { return false; }
+    if (!ok) {
+      return false;
+    }
     i = i + 1;
   }
-  if (name.startsWith(".") || name.indexOf("..") >= 0) { return false; }
+  if (name.startsWith(".") || name.indexOf("..") >= 0) {
+    return false;
+  }
   return true;
 }
 
@@ -95,7 +101,9 @@ export function putFile(db: Db, write: FileWrite): string {
     updatedAt: now,
   };
   let written = persist(db, workspaceFilesMapping(), JSON.stringify(row));
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
@@ -105,7 +113,9 @@ export function getFile(db: Db, threadId: string, fileName: string): WorkspaceFi
     body: "", documentId: "", updatedAt: "",
   };
   let document = findById(db, workspaceFilesMapping(), threadId + ":" + fileName);
-  if (document == "") { return absent; }
+  if (document == "") {
+    return absent;
+  }
   return JSON.parse<WorkspaceFileRow>(document);
 }
 
@@ -113,14 +123,18 @@ export function listFiles(db: Db, threadId: string): WorkspaceFileRow[] {
   let none: WorkspaceFileRow[] = [];
   let keys: DbOrder[] = [{ column: "file_name" }];
   let listed = listOrdered(db, workspaceFilesMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys  });
-  if (listed == "" || listed == "[]") { return none; }
+  if (listed == "" || listed == "[]") {
+    return none;
+  }
   return JSON.parse<WorkspaceFileRow[]>(listed);
 }
 
 export function deleteFile(db: Db, threadId: string, fileName: string): string {
   let gone = executeWith(db, "DELETE FROM workspace_files WHERE id = " + placeholderAt(db, 1),
     [threadId + ":" + fileName]);
-  if (!gone.ok) { return gone.error; }
+  if (!gone.ok) {
+    return gone.error;
+  }
   return "";
 }
 
@@ -132,7 +146,9 @@ export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName:
   }
   let source = sourceOf(fileName);
   let stored = uploadDocument(db, model, source, scope, file.body, apiKey);
-  if (!stored.ok) { return stored; }
+  if (!stored.ok) {
+    return stored;
+  }
   putFile(db, { threadId: threadId, fileName: fileName, mime: file.mime, origin: file.origin, body: file.body, documentId: source, now: now });
   return stored;
 }
@@ -143,7 +159,11 @@ export function sourceOf(fileName: string): string {
   while (i < fileName.length) {
     let c = fileName.charCodeAt(i);
     let ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 45;
-    if (ok) { out = out + fileName.charAt(i); } else { out = out + "_"; }
+    if (ok) {
+      out = out + fileName.charAt(i);
+    } else {
+      out = out + "_";
+    }
     i = i + 1;
   }
   return out;
@@ -186,7 +206,9 @@ export type FileToolResult = {
 
 export function callWorkspaceTool(db: Db, threadId: string, name: string, argsName: string, argsContent: string, now: string): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (threadId == "") { return not; }
+  if (threadId == "") {
+    return not;
+  }
 
   if (name == "list_files") {
     let arts = listArtifacts(db, threadId);
@@ -199,13 +221,17 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
     let out = "";
     let a: int = 0;
     while (a < arts.length) {
-      if (out != "") { out = out + "\n"; }
+      if (out != "") {
+        out = out + "\n";
+      }
       out = out + arts[a].path + "  (" + arts[a].kind + " v" + `${arts[a].currentVersion}` + ", artifact — the reader can open this)";
       a = a + 1;
     }
     let i: int = 0;
     while (i < files.length) {
-      if (out != "") { out = out + "\n"; }
+      if (out != "") {
+        out = out + "\n";
+      }
       out = out + files[i].fileName + "  (" + `${files[i].body.length}` + " bytes, scratch, " + files[i].origin + ")";
       i = i + 1;
     }
@@ -251,10 +277,20 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
 }
 
 export function mimeOf(fileName: string): string {
-  if (fileName.endsWith(".md")) { return "text/markdown"; }
-  if (fileName.endsWith(".json")) { return "application/json"; }
-  if (fileName.endsWith(".csv")) { return "text/csv"; }
-  if (fileName.endsWith(".html")) { return "text/html"; }
-  if (fileName.endsWith(".ts") || fileName.endsWith(".js") || fileName.endsWith(".py") || fileName.endsWith(".sql")) { return "text/x-source"; }
+  if (fileName.endsWith(".md")) {
+    return "text/markdown";
+  }
+  if (fileName.endsWith(".json")) {
+    return "application/json";
+  }
+  if (fileName.endsWith(".csv")) {
+    return "text/csv";
+  }
+  if (fileName.endsWith(".html")) {
+    return "text/html";
+  }
+  if (fileName.endsWith(".ts") || fileName.endsWith(".js") || fileName.endsWith(".py") || fileName.endsWith(".sql")) {
+    return "text/x-source";
+  }
   return "text/plain";
 }

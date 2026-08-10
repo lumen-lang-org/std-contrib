@@ -62,7 +62,9 @@ function fileRefusal(path: string, why: string): ScriptFile {
 
 function materialiseOne(db: Db, threadId: string, raw: string, dir: string): ScriptFile {
   let path = normalScope(raw);
-  if (threadId == "") { return fileRefusal(path, "an artifact belongs to a thread"); }
+  if (threadId == "") {
+    return fileRefusal(path, "an artifact belongs to a thread");
+  }
   let artifact = getArtifact(db, threadId, path);
   if (artifact.id == "") {
     return fileRefusal(path, "There is no artifact at " + path + " in this conversation.");
@@ -73,7 +75,9 @@ function materialiseOne(db: Db, threadId: string, raw: string, dir: string): Scr
       + `${artifact.currentVersion}` + ", which is not in its history.");
   }
   let placed = placeFile(dir, path, current.body);
-  if (placed != "") { return fileRefusal(path, placed); }
+  if (placed != "") {
+    return fileRefusal(path, placed);
+  }
   let out: ScriptFile = { path: path, version: artifact.currentVersion, ok: true, problem: "" };
   return out;
 }
@@ -87,7 +91,9 @@ function placeFile(dir: string, path: string, body: string): string {
       fs.writeFileSync(dir + path + ".b64", body);
       let dec = child_process.spawnSync("sh", ["-c",
         "base64 -d < '" + dir + path + ".b64' > '" + dir + path + "' && rm '" + dir + path + ".b64'"]);
-      if (dec.status != 0) { return "could not decode " + path + " into the run directory"; }
+      if (dec.status != 0) {
+        return "could not decode " + path + " into the run directory";
+      }
     } else {
       fs.writeFileSync(dir + path, body);
     }
@@ -133,11 +139,19 @@ function walkRun(base: string, rel: string): ScriptWalk {
       links.push(path);
     } else if (entry == "dir") {
       let sub = walkRun(base, path);
-      if (sub.problem != "") { return sub; }
+      if (sub.problem != "") {
+        return sub;
+      }
       let f: int = 0;
-      while (f < sub.files.length) { files.push(sub.files[f]); f = f + 1; }
+      while (f < sub.files.length) {
+        files.push(sub.files[f]);
+        f = f + 1;
+      }
       let l: int = 0;
-      while (l < sub.links.length) { links.push(sub.links[l]); l = l + 1; }
+      while (l < sub.links.length) {
+        links.push(sub.links[l]);
+        l = l + 1;
+      }
     } else if (entry == "gone") {
       return walkFailed();
     }
@@ -149,10 +163,16 @@ function walkRun(base: string, rel: string): ScriptWalk {
 
 function classifyEntry(base: string, path: string): string {
   try {
-    if (fs.readlinkSync(base + path) != "") { return "link"; }
+    if (fs.readlinkSync(base + path) != "") {
+      return "link";
+    }
     let st = fs.statSync(base + path);
-    if (st.isDirectory) { return "dir"; }
-    if (st.isFile) { return "file"; }
+    if (st.isDirectory) {
+      return "dir";
+    }
+    if (st.isFile) {
+      return "file";
+    }
   } catch (e) {
     return "gone";
   }
@@ -190,15 +210,21 @@ function reconcileProblem(why: string): ScriptReconciled {
 }
 
 export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled {
-  if (run.threadId == "") { return reconcileProblem("an artifact belongs to a thread"); }
+  if (run.threadId == "") {
+    return reconcileProblem("an artifact belongs to a thread");
+  }
   let badNote = labelProblem("note", run.note, ARTIFACT_NOTE_MAX);
-  if (badNote != "") { return reconcileProblem(badNote); }
+  if (badNote != "") {
+    return reconcileProblem(badNote);
+  }
   if (!fs.existsSync(run.dir)) {
     return reconcileProblem("the run directory is gone; nothing was reconciled");
   }
 
   let walked = walkRun(run.dir, "");
-  if (walked.problem != "") { return reconcileProblem(walked.problem); }
+  if (walked.problem != "") {
+    return reconcileProblem(walked.problem);
+  }
   let files = walked.files;
   let links = walked.links;
 
@@ -261,7 +287,9 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
 function snapshotAt(snapshot: ScriptFile[], path: string): int {
   let i: int = 0;
   while (i < snapshot.length) {
-    if (snapshot[i].ok && snapshot[i].path == path) { return i; }
+    if (snapshot[i].ok && snapshot[i].path == path) {
+      return i;
+    }
     i = i + 1;
   }
   return -1;
@@ -270,7 +298,9 @@ function snapshotAt(snapshot: ScriptFile[], path: string): int {
 function listedIn(list: string[], path: string): bool {
   let i: int = 0;
   while (i < list.length) {
-    if (list[i] == path) { return true; }
+    if (list[i] == path) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -344,7 +374,9 @@ function scriptAppend(db: Db, append: ScriptAppend): ScriptAppended {
   }
 
   let opened = beginTransaction(db);
-  if (!opened.ok) { return appendRefusal("the change to " + append.path + " could not be saved; try again"); }
+  if (!opened.ok) {
+    return appendRefusal("the change to " + append.path + " could not be saved; try again");
+  }
 
   let artifact = getArtifact(db, append.threadId, append.path);
   if (artifact.id == "") {
@@ -475,11 +507,15 @@ export function foldName(n: string): string {
 }
 
 export function scriptImageForEnv(db: Db, agentId: string, envName: string): string {
-  if (envName == "" || envName == "main") { return scriptImageFor(db, agentId); }
+  if (envName == "" || envName == "main") {
+    return scriptImageFor(db, agentId);
+  }
   let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
   let i: int = 0;
   while (i < rows.length) {
-    if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") { return rows[i].image; }
+    if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") {
+      return rows[i].image;
+    }
     i = i + 1;
   }
   return "";
@@ -488,39 +524,63 @@ export function scriptImageForEnv(db: Db, agentId: string, envName: string): str
 export const DEFAULT_IMAGE_ID: string = "default";
 
 export function scriptImageIdFor(db: Db, agentId: string): string {
-  if (agentId == "") { return DEFAULT_IMAGE_ID; }
+  if (agentId == "") {
+    return DEFAULT_IMAGE_ID;
+  }
   let held = findById(db, agentsMapping(), agentId);
-  if (held == "") { return DEFAULT_IMAGE_ID; }
+  if (held == "") {
+    return DEFAULT_IMAGE_ID;
+  }
   let chosen = JSON.parse<AgentRow>(held).scriptImageId;
-  if (chosen == "") { return DEFAULT_IMAGE_ID; }
+  if (chosen == "") {
+    return DEFAULT_IMAGE_ID;
+  }
   let row = findById(db, scriptImagesMapping(), chosen);
-  if (row == "") { return DEFAULT_IMAGE_ID; }
+  if (row == "") {
+    return DEFAULT_IMAGE_ID;
+  }
   let image: ScriptImageRow = JSON.parse<ScriptImageRow>(row);
-  if (!image.enabled || image.image == "") { return DEFAULT_IMAGE_ID; }
+  if (!image.enabled || image.image == "") {
+    return DEFAULT_IMAGE_ID;
+  }
   return image.id;
 }
 
 export function scriptImageIdForEnv(db: Db, agentId: string, envName: string): string {
-  if (envName == "" || envName == "main") { return scriptImageIdFor(db, agentId); }
+  if (envName == "" || envName == "main") {
+    return scriptImageIdFor(db, agentId);
+  }
   let rows = JSON.parse<ScriptImageRow[]>(listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]));
   let i: int = 0;
   while (i < rows.length) {
-    if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") { return rows[i].id; }
+    if (foldName(rows[i].label) == foldName(envName) && rows[i].image != "") {
+      return rows[i].id;
+    }
     i = i + 1;
   }
   return "";
 }
 
 export function scriptImageFor(db: Db, agentId: string): string {
-  if (agentId == "") { return scriptImage(); }
+  if (agentId == "") {
+    return scriptImage();
+  }
   let held = findById(db, agentsMapping(), agentId);
-  if (held == "") { return scriptImage(); }
+  if (held == "") {
+    return scriptImage();
+  }
   let chosen = JSON.parse<AgentRow>(held).scriptImageId;
-  if (chosen == "") { return scriptImage(); }
+  if (chosen == "") {
+    return scriptImage();
+  }
   let row = findById(db, scriptImagesMapping(), chosen);
-  if (row == "") { return scriptImage(); }
+  if (row == "") {
+    return scriptImage();
+  }
   let image: ScriptImageRow = JSON.parse<ScriptImageRow>(row);
-  if (!image.enabled || image.image == "") { return scriptImage(); }
+  if (!image.enabled || image.image == "") {
+    return scriptImage();
+  }
   return image.image;
 }
 
@@ -538,20 +598,26 @@ export const SCRIPT_RUN_DIR: string = "/artifacts";
 const SCRIPT_NOTE: string = "run_script";
 
 let scriptWallChosen: int = 0;
-export function scriptWallOverride(seconds: int): void { scriptWallChosen = seconds; }
+export function scriptWallOverride(seconds: int): void {
+  scriptWallChosen = seconds;
+}
 function scriptWallSeconds(): int {
   return scriptWallChosen > 0 ? scriptWallChosen : SCRIPT_WALL_SECONDS;
 }
 
 let scriptOutputChosen: int = 0;
-export function scriptOutputOverride(bytes: int): void { scriptOutputChosen = bytes; }
+export function scriptOutputOverride(bytes: int): void {
+  scriptOutputChosen = bytes;
+}
 function scriptOutputMax(): int {
   return scriptOutputChosen > 0 ? scriptOutputChosen : SCRIPT_OUTPUT_MAX;
 }
 
 let scriptProbed: int = -1;
 
-export function scriptProbeReset(): void { scriptProbed = -1; }
+export function scriptProbeReset(): void {
+  scriptProbed = -1;
+}
 
 export function scriptDockerWorks(): bool {
   if (scriptProbed < 0) {
@@ -569,8 +635,12 @@ function scriptDocker(args: string[]): EnvDockerReply {
 
 function scriptDockerFailed(doing: string, reply: EnvDockerReply): string {
   let line = scriptFirstLine(reply.stderr);
-  if (line == "") { line = scriptFirstLine(reply.stdout); }
-  if (line == "") { return "docker could not " + doing + " (docker itself did not run)"; }
+  if (line == "") {
+    line = scriptFirstLine(reply.stdout);
+  }
+  if (line == "") {
+    return "docker could not " + doing + " (docker itself did not run)";
+  }
   return "docker could not " + doing + ": " + scriptCut(line, 200);
 }
 
@@ -583,11 +653,15 @@ function scriptFirstLine(text: string): string {
 }
 
 function scriptCut(text: string, cap: int): string {
-  if (text.length <= cap) { return text; }
+  if (text.length <= cap) {
+    return text;
+  }
   let cut = cap;
   while (cut > 0) {
     let b = text.charCodeAt(cut);
-    if (b < 128 || b >= 192) { break; }
+    if (b < 128 || b >= 192) {
+      break;
+    }
     cut = cut - 1;
   }
   return text.slice(0, cut);
@@ -597,11 +671,15 @@ let scriptHeldNow: string = "";
 
 function scriptHeldLines(): string[] {
   let out: string[] = [];
-  if (scriptHeldNow == "") { return out; }
+  if (scriptHeldNow == "") {
+    return out;
+  }
   let parts = scriptHeldNow.split("\n");
   let i: int = 0;
   while (i < parts.length) {
-    if (parts[i] != "") { out.push(parts[i]); }
+    if (parts[i] != "") {
+      out.push(parts[i]);
+    }
     i = i + 1;
   }
   return out;
@@ -639,7 +717,9 @@ export function scriptRelease(container: string): void {
   while (i < held.length) {
     let cut = held[i].indexOf(" ");
     let key = cut < 0 ? held[i] : held[i].slice(0, cut);
-    if (key != container) { out = out + held[i] + "\n"; }
+    if (key != container) {
+      out = out + held[i] + "\n";
+    }
     i = i + 1;
   }
   scriptHeldNow = out;
@@ -746,17 +826,23 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   }
   let envName = run.environment == "" ? "main" : run.environment;
   let named = scriptEnvNameProblem(envName);
-  if (named != "") { return scriptRefused(named); }
+  if (named != "") {
+    return scriptRefused(named);
+  }
   let container = envContainerName(run.threadId, envName);
 
   let held = scriptAcquire(container, envName, run.now);
-  if (held != "") { return scriptRefused(held); }
+  if (held != "") {
+    return scriptRefused(held);
+  }
 
   scriptRunSeq = scriptRunSeq + 1;
   let id = scriptDigits(run.now) + "-" + `${scriptRunSeq}`;
   let stage = "/tmp/agents-script-" + id;
   let staged = scriptHostDir(stage + "/files");
-  if (staged != "") { return scriptBail(container, stage, staged); }
+  if (staged != "") {
+    return scriptBail(container, stage, staged);
+  }
 
   let snapshot = scriptMaterialise(db, run.threadId, run.paths, stage + "/files");
   let sn: int = 0;
@@ -769,13 +855,17 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
 
   let ext = scriptExt(run.language);
   let job = scriptHostFile(stage + "/job." + ext, run.source);
-  if (job != "") { return scriptBail(container, stage, job); }
+  if (job != "") {
+    return scriptBail(container, stage, job);
+  }
 
   let before = envList(db, run.threadId);
   let known = false;
   let b: int = 0;
   while (b < before.length) {
-    if (before[b].name == envName) { known = true; }
+    if (before[b].name == envName) {
+      known = true;
+    }
     b = b + 1;
   }
   let ownEnvId = "";
@@ -784,17 +874,24 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     let owner = scriptThreadOwner(db, run.threadId);
     if (owner != "") {
       let own = userEnvByName(db, owner, envName);
-      if (own.id != "") { image = own.image; ownEnvId = own.id; }
+      if (own.id != "") {
+        image = own.image;
+        ownEnvId = own.id;
+      }
     }
   }
-  if (image == "") { image = scriptImageForEnv(db, run.agentId, envName); }
+  if (image == "") {
+    image = scriptImageForEnv(db, run.agentId, envName);
+  }
   if (image == "" && envName != "main") {
     return scriptBail(container, stage,
       "no environment answers to '" + envName + "' — it is one of your own environments' names, or one of the deployment's, and neither has it");
   }
   let ensure: EnvEnsure = { threadId: run.threadId, name: envName, image: image, network: true, now: run.now };
   let ensured = envEnsure(db, ensure);
-  if (!ensured.ok) { return scriptBail(container, stage, ensured.problem); }
+  if (!ensured.ok) {
+    return scriptBail(container, stage, ensured.problem);
+  }
   let recreated = known && ensured.created;
 
   let runDir = SCRIPT_RUN_DIR;
@@ -814,16 +911,22 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   let skillSet = scriptSkillRows(db, run.agentId);
   if (skillSet.length > 0) {
     let stagedSkills = scriptHostDir(stage + "/skills");
-    if (stagedSkills != "") { return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, stagedSkills)); }
+    if (stagedSkills != "") {
+      return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, stagedSkills));
+    }
     let k: int = 0;
     while (k < skillSet.length) {
       let files = scriptSkillFiles(db, skillSet[k].id);
       let f: int = 0;
       while (f < files.length) {
         let dirMade = scriptHostDir(stage + "/skills/" + skillSet[k].skillName);
-        if (dirMade != "") { return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, dirMade)); }
+        if (dirMade != "") {
+          return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, dirMade));
+        }
         let put = scriptHostFile(stage + "/skills/" + skillSet[k].skillName + "/" + files[f].path, files[f].body);
-        if (put != "") { return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, put)); }
+        if (put != "") {
+          return scriptDone(container, stage, runDir, jobAt, scriptRanFlat(false, "", "", "", recreated, put));
+        }
         f = f + 1;
       }
       k = k + 1;
@@ -850,7 +953,9 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     if (body != "") {
       let keysAt = stage + "/env";
       let staged = scriptHostSecretFile(keysAt, body);
-      if (staged != "") { return scriptBail(container, stage, staged); }
+      if (staged != "") {
+        return scriptBail(container, stage, staged);
+      }
       execArgs.push("--env-file"); execArgs.push(keysAt);
       touchEnvKeys(db, owner, imageId, run.now);
     }
@@ -905,15 +1010,25 @@ function scriptStopped(status: int, runtime: string): string {
 }
 
 function scriptRuntime(language: string): string {
-  if (language == "python") { return "python3"; }
-  if (language == "node") { return "node"; }
-  if (language == "sh") { return "sh"; }
+  if (language == "python") {
+    return "python3";
+  }
+  if (language == "node") {
+    return "node";
+  }
+  if (language == "sh") {
+    return "sh";
+  }
   return "";
 }
 
 function scriptExt(language: string): string {
-  if (language == "python") { return "py"; }
-  if (language == "node") { return "js"; }
+  if (language == "python") {
+    return "py";
+  }
+  if (language == "node") {
+    return "js";
+  }
   return "sh";
 }
 
@@ -922,24 +1037,35 @@ function scriptDigits(text: string): string {
   let i: int = 0;
   while (i < text.length) {
     let c = text.charCodeAt(i);
-    if (c >= 48 && c <= 57) { out = out + text.charAt(i); }
+    if (c >= 48 && c <= 57) {
+      out = out + text.charAt(i);
+    }
     i = i + 1;
   }
   return out == "" ? "0" : out;
 }
 
 function scriptSkillRows(db: Db, agentId: string): SkillRow[] {
-  if (agentId == "") { let none: SkillRow[] = []; return none; }
+  if (agentId == "") {
+    let none: SkillRow[] = [];
+    return none;
+  }
   let where = "id IN (SELECT skill_id FROM agent_skills WHERE agent_id = " + placeholderAt(db, 1) + ")"
     + " OR visibility = 'public'";
   let document = listWhere(db, skillsMapping(), where, [agentId]);
-  if (document == "" || document == "[]") { let none: SkillRow[] = []; return none; }
+  if (document == "" || document == "[]") {
+    let none: SkillRow[] = [];
+    return none;
+  }
   return JSON.parse<SkillRow[]>(document);
 }
 
 function scriptSkillFiles(db: Db, skillId: string): SkillFileRow[] {
   let document = listWhere(db, skillFilesMapping(), "skill_id = " + placeholderAt(db, 1), [skillId]);
-  if (document == "" || document == "[]") { let none: SkillFileRow[] = []; return none; }
+  if (document == "" || document == "[]") {
+    let none: SkillFileRow[] = [];
+    return none;
+  }
   return JSON.parse<SkillFileRow[]>(document);
 }
 
@@ -963,7 +1089,9 @@ function scriptHostFile(path: string, body: string): string {
 
 function scriptHostSecretFile(path: string, body: string): string {
   let wrote = scriptHostFile(path, body);
-  if (wrote != "") { return "the environment keys could not be staged for the run"; }
+  if (wrote != "") {
+    return "the environment keys could not be staged for the run";
+  }
   try {
     fs.chmodSync(path, 384);
   } catch (e) {
@@ -976,13 +1104,17 @@ function scriptThreadOwner(db: Db, threadId: string): string {
   if (!db.query("SELECT owner FROM threads WHERE id = " + placeholderAt(db, 1), [threadId])) {
     return "";
   }
-  if (db.rows() == 0) { return ""; }
+  if (db.rows() == 0) {
+    return "";
+  }
   return db.value(0, 0);
 }
 
 function scriptHostDrop(dir: string): void {
   try {
-    if (fs.existsSync(dir)) { fs.rmSync(dir, true); }
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, true);
+    }
   } catch (e) {
     return;
   }

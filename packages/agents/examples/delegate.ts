@@ -60,19 +60,26 @@ function main(): void {
   while (i < run.steps.length) {
     let step = run.steps[i];
     let mark = "ok ";
-    if (!step.ok) { mark = "err"; }
+    if (!step.ok) {
+      mark = "err";
+    }
     console.log(`${step.index}` + " " + mark + " " + step.server + "." + step.tool + " " + step.args);
     console.log("      -> " + step.result);
     i = i + 1;
   }
   let n: int = 0;
-  while (n < run.notes.length) { console.log("  ! " + run.notes[n]); n = n + 1; }
+  while (n < run.notes.length) {
+    console.log("  ! " + run.notes[n]);
+    n = n + 1;
+  }
   console.log("rounds    " + `${run.rounds}` + ", stopped: " + run.stopReason);
 
   console.log("");
   console.log("-- what the user sees -----------------------------------------");
   console.log("lead      " + run.text);
-  if (!run.ok) { console.log("error     " + run.error); }
+  if (!run.ok) {
+    console.log("error     " + run.error);
+  }
 
   db.close();
 }

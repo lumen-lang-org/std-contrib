@@ -38,7 +38,9 @@ function run(db: Db, master: string, label: string): void {
   console.log("answer    " + out.text);
 
   let sent = flush(tracerWithMoreSpans(tracer, out.spans));
-  if (!sent.ok) { console.log("flush     " + sent.error); }
+  if (!sent.ok) {
+    console.log("flush     " + sent.error);
+  }
 }
 
 function main(): void {
@@ -65,7 +67,10 @@ function main(): void {
   let plan = schemaPlan(db);
   let extra = tracePlan(db);
   let e: int = 0;
-  while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  while (e < extra.length) {
+    plan.push(extra[e]);
+    e = e + 1;
+  }
   migrate(db, plan);
 
   let model: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };

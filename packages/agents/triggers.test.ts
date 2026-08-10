@@ -53,7 +53,10 @@ test("everything that is not a message with words is stepped over", () => {
 test("a very long message is cut before it becomes a row", () => {
   let long = "";
   let i: int = 0;
-  while (i < 900) { long = long + "0123456789"; i = i + 1; }
+  while (i < 900) {
+    long = long + "0123456789";
+    i = i + 1;
+  }
   let body = "{\"ok\":true,\"result\":[{\"update_id\":1,\"message\":{\"chat\":{\"id\":7},\"text\":\"" + long + "\"}}]}";
   let seen = updatesIn(body);
   expect(seen.length == 1);

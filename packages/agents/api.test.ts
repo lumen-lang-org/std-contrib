@@ -19,7 +19,7 @@ import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
 import { migrationProblem, bearerRefused, askedPick, configInUse, mergedConfig, configProblem, chatConfigProblem, blankChoice, mergedChoice, choiceRowProblem, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesProblem, routerRowProblem, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
-import { forgetAgent } from "./routes/agents/agents.service.ts";
+import { forgetAgent } from "./routes/agents/agent.service.ts";
 import { decodedSize } from "./routes/documents/controller.ts";
 import { healthJson } from "./routes/healthz/controller.ts";
 import { choicesJson, modelDestinationProblem, modelProblem } from "./routes/models/controller.ts";
@@ -95,7 +95,9 @@ function fresh(): string {
   dropTable(database, modelConfigsMapping(database));
   dropTable(database, modelsMapping());
   let problem = migrationProblem(database);
-  if (problem != "") { console.error("[fixture] the plan did not run: " + problem); }
+  if (problem != "") {
+    console.error("[fixture] the plan did not run: " + problem);
+  }
   return problem;
 }
 

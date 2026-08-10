@@ -1,5 +1,5 @@
 import { controller } from "./controller.ts";
-import { Request, Reply, Mount, ok, dispatchedMounted, header } from "./server.ts";
+import { Request, Reply, Mount, Ok, dispatchedMounted, header } from "./server.ts";
 
 export function whoAsked(req: Request): string {
   let said = header(req, "x-user").trim();
@@ -11,7 +11,7 @@ export function whoAsked(req: Request): string {
 export class WhoApi {
   @get("/:id")
   find(@From("whoAsked") who: string, @PathVariable("id") id: string): Reply {
-    return ok("{\"who\":\"" + who + "\",\"id\":\"" + id + "\"}");
+    return Ok("{\"who\":\"" + who + "\",\"id\":\"" + id + "\"}");
   }
 }
 

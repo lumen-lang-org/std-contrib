@@ -40,7 +40,9 @@ export function cardHintFor(db: Db, toolName: string): string {
   while (i < rows.length) {
     let row = rows[i];
     if (row.enabled && row.marker != "" && pluginOn(db, row.pluginId)) {
-      if (row.hint != "") { return "\n\n" + row.hint; }
+      if (row.hint != "") {
+        return "\n\n" + row.hint;
+      }
       return "\n\nWhen you answer, do not restate or list these fields. Emit "
         + "exactly one line, alone: [" + row.marker + "]" + row.payload
         + "[/" + row.marker + "] — the console renders this from the tool "

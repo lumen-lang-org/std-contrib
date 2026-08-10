@@ -78,10 +78,14 @@ export function allCardPlugins(db: Db): CardPluginRow[] {
 }
 
 export function pluginOn(db: Db, pluginId: string): bool {
-  if (pluginId == "") { return true; }
+  if (pluginId == "") {
+    return true;
+  }
   let rows = JSON.parse<CardPluginRow[]>(listWhere(db, cardPluginsMapping(),
     "id = " + db.placeholder, [pluginId]));
-  if (rows.length == 0) { return false; }
+  if (rows.length == 0) {
+    return false;
+  }
   return rows[0].enabled;
 }
 
@@ -103,7 +107,9 @@ export function casesBriefing(db: Db): string {
     }
     p = p + 1;
   }
-  if (lines.length == 0) { return ""; }
+  if (lines.length == 0) {
+    return "";
+  }
   return "This deployment draws some answers as cards instead of prose:\n"
     + lines.join("\n")
     + "\nThe card is rendered from the tool's own result, so never copy figures "

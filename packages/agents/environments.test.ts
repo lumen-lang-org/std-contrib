@@ -18,7 +18,9 @@ const FAKE_DIR = "/tmp/agents_env_fake";
 const FAKE_LOG = "/tmp/agents_env_fake/argv.log";
 
 function fakeDocker(script: string): void {
-  if (!fs.existsSync(FAKE_DIR)) { fs.mkdirSync(FAKE_DIR); }
+  if (!fs.existsSync(FAKE_DIR)) {
+    fs.mkdirSync(FAKE_DIR);
+  }
   let bin = FAKE_DIR + "/docker";
   fs.writeFileSync(bin, script);
   fs.chmodSync(bin, 493);
@@ -64,7 +66,9 @@ function argvLines(): string[] {
   let lines = held.split("\n");
   let i: int = 0;
   while (i < lines.length) {
-    if (lines[i] != "") { out.push(lines[i]); }
+    if (lines[i] != "") {
+      out.push(lines[i]);
+    }
     i = i + 1;
   }
   return out;
@@ -378,7 +382,10 @@ test("envOwned lists a person's containers with their conversations' titles, and
   expect(mine.length == 2);
   expect(mine[0].threadTitle == "Weather digest" || mine[1].threadTitle == "Weather digest");
   let i: int = 0;
-  while (i < mine.length) { expect(mine[i].threadId != "t9"); i = i + 1; }
+  while (i < mine.length) {
+    expect(mine[i].threadId != "t9");
+    i = i + 1;
+  }
   expect(envOwned(database, "o3").length == 0);
 });
 

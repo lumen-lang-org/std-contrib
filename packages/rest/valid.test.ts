@@ -1,5 +1,5 @@
 import { controller } from "./controller.ts";
-import { Request, Reply, Mount, ok, dispatchedMounted } from "./server.ts";
+import { Request, Reply, Mount, Ok, dispatchedMounted } from "./server.ts";
 import { validated, Rule } from "../validation/validation.ts";
 
 @validated
@@ -17,12 +17,12 @@ export class SiteAsk {
 export class CaptchaApi {
   @put("/")
   change(@Valid @RequestBody ask: SiteAsk): Reply {
-    return ok("{\"siteKey\":\"" + ask.siteKey + "\"}");
+    return Ok("{\"siteKey\":\"" + ask.siteKey + "\"}");
   }
 
   @post("/")
   mixed(req: Request, @Valid @RequestBody ask: SiteAsk): Reply {
-    return ok("{\"path\":\"" + req.path + "\",\"siteKey\":\"" + ask.siteKey + "\"}");
+    return Ok("{\"path\":\"" + req.path + "\",\"siteKey\":\"" + ask.siteKey + "\"}");
   }
 }
 

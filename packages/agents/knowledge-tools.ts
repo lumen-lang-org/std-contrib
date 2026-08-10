@@ -97,7 +97,9 @@ function anyEmbedder(db: Db): ModelRow {
   let rows = JSON.parse<ModelRow[]>(listOrdered(db, modelsMapping(), { order: keys }));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].kind == "embedding" && rows[i].enabled) { return rows[i]; }
+    if (rows[i].kind == "embedding" && rows[i].enabled) {
+      return rows[i];
+    }
     i = i + 1;
   }
   let none: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
@@ -109,7 +111,9 @@ function skillSaid(db: Db, said: string): SkillRow {
   let rows = JSON.parse<SkillRow[]>(listOrdered(db, skillsMapping(), { order: keys }));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].skillName.toLowerCase() == said.toLowerCase()) { return rows[i]; }
+    if (rows[i].skillName.toLowerCase() == said.toLowerCase()) {
+      return rows[i];
+    }
     i = i + 1;
   }
   let none: SkillRow = { id: "", skillName: "", description: "", body: "", source: "", sourceUrl: "", visibility: "", featuredRank: 0, updatedAt: "" };
@@ -117,12 +121,16 @@ function skillSaid(db: Db, said: string): SkillRow {
 }
 
 function plainName(name: string): bool {
-  if (name == "" || name.length > 48) { return false; }
+  if (name == "" || name.length > 48) {
+    return false;
+  }
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
     let ok = (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 95;
-    if (!ok) { return false; }
+    if (!ok) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
@@ -141,14 +149,22 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
 
   if (call.name == "add_document") {
     let source = jsonText(call.args, "source").trim();
-    if (!plainName(source)) { return no("a source is a plain name: lowercase letters, digits, _ and -."); }
+    if (!plainName(source)) {
+      return no("a source is a plain name: lowercase letters, digits, _ and -.");
+    }
     let scope = normalScope(jsonText(call.args, "scope").trim());
     let body = jsonText(call.args, "body");
-    if (body.trim() == "") { return no("an empty document has nothing to retrieve — pass the text in body."); }
+    if (body.trim() == "") {
+      return no("an empty document has nothing to retrieve — pass the text in body.");
+    }
     let embedder = anyEmbedder(db);
-    if (embedder.id == "") { return no("this deployment has no enabled embedding model, so nothing can be indexed."); }
+    if (embedder.id == "") {
+      return no("this deployment has no enabled embedding model, so nothing can be indexed.");
+    }
     let id = enqueue(db, source, scope, embedder.id, body, `${call.nowMs}`);
-    if (id == "") { return no("the indexing queue refused the job."); }
+    if (id == "") {
+      return no("the indexing queue refused the job.");
+    }
     return yes("Queued \"" + source + "\" under " + scope + " — searchable in about a minute. "
       + "Agents scoped to " + scope + " will retrieve and cite it.");
   }
@@ -162,7 +178,9 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
   if (call.name == "list_documents") {
     let scope = normalScope(jsonText(call.args, "scope").trim());
     let rows = listSources(db, scope);
-    if (rows.length == 0) { return yes("Nothing in " + scope + " yet — add_document files the first."); }
+    if (rows.length == 0) {
+      return yes("Nothing in " + scope + " yet — add_document files the first.");
+    }
     let out = `${rows.length}` + " source(s) in " + scope + ":\n";
     let i: int = 0;
     while (i < rows.length) {
@@ -174,7 +192,9 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
 
   if (call.name == "forget_document") {
     let source = jsonText(call.args, "source").trim();
-    if (source == "") { return no("say which source: {\"source\":\"...\"} — list_documents shows them."); }
+    if (source == "") {
+      return no("say which source: {\"source\":\"...\"} — list_documents shows them.");
+    }
     executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder, [source]);
     forgetDocumentFiles(db, source);
     return yes("Forgotten: \"" + source + "\" — out of every agent's retrieval now.");
@@ -183,7 +203,9 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
   if (call.name == "list_skills") {
     let keys: DbOrder[] = [{ column: "skill_name" }];
     let rows = JSON.parse<SkillRow[]>(listOrdered(db, skillsMapping(), { order: keys }));
-    if (rows.length == 0) { return yes("No skills yet — create_skill writes one."); }
+    if (rows.length == 0) {
+      return yes("No skills yet — create_skill writes one.");
+    }
     let out = `${rows.length}` + " skill(s):\n";
     let i: int = 0;
     while (i < rows.length) {
@@ -195,8 +217,12 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
 
   if (call.name == "create_skill") {
     let name = jsonText(call.args, "name").trim().toLowerCase();
-    if (!plainName(name)) { return no("a skill name is lowercase letters, digits and dashes, at most 48."); }
-    if (skillSaid(db, name).id != "") { return no("\"" + name + "\" exists — change_skill replaces its text."); }
+    if (!plainName(name)) {
+      return no("a skill name is lowercase letters, digits and dashes, at most 48.");
+    }
+    if (skillSaid(db, name).id != "") {
+      return no("\"" + name + "\" exists — change_skill replaces its text.");
+    }
     let description = jsonText(call.args, "description").trim();
     let instructions = jsonText(call.args, "instructions");
     if (description == "" || instructions.trim() == "") {
@@ -225,9 +251,13 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
   }
 
   let saidName = jsonText(call.args, "skill").trim();
-  if (saidName == "") { return no("say which skill: {\"skill\":\"...\"} — list_skills shows them."); }
+  if (saidName == "") {
+    return no("say which skill: {\"skill\":\"...\"} — list_skills shows them.");
+  }
   let skill = skillSaid(db, saidName);
-  if (skill.id == "") { return no("no skill called \"" + saidName + "\" — list_skills shows them."); }
+  if (skill.id == "") {
+    return no("no skill called \"" + saidName + "\" — list_skills shows them.");
+  }
   if (skill.source == "repo") {
     return no("\"" + skill.skillName + "\" comes from a repository — the next sync would lose a chat edit. Fork it: create_skill under a new name.");
   }

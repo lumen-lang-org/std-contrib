@@ -257,7 +257,9 @@ export type TriggerUpdate = {
 
 export function updatesIn(body: string): TriggerUpdate[] {
   let out: TriggerUpdate[] = [];
-  if (jsonRaw(body, "ok").trim() != "true") { return out; }
+  if (jsonRaw(body, "ok").trim() != "true") {
+    return out;
+  }
   let each = jsonList(jsonRaw(body, "result"));
   let i: int = 0;
   while (i < each.length) {
@@ -272,13 +274,17 @@ export function updatesIn(body: string): TriggerUpdate[] {
       let fileId = doc == "" ? "" : jsonText(doc, "file_id");
       let fileName = doc == "" ? "" : jsonText(doc, "file_name");
       let fileSize = doc == "" ? 0.0 : (parseFloat(jsonRaw(doc, "file_size").trim()) ?? 0.0);
-      if (doc != "" && text.trim() == "") { text = jsonText(message, "caption"); }
+      if (doc != "" && text.trim() == "") {
+        text = jsonText(message, "caption");
+      }
       let kind = chat == "" ? "" : jsonText(chat, "type");
       let who = "";
       if (kind != "" && kind != "private") {
         let from = jsonRaw(message, "from");
         who = from == "" ? "" : jsonText(from, "first_name");
-        if (who == "") { who = from == "" ? "" : jsonText(from, "username"); }
+        if (who == "") {
+          who = from == "" ? "" : jsonText(from, "username");
+        }
       }
       if (chatId != "" && (text.trim() != "" || fileId != "")) {
         let said: TriggerUpdate = { updateId: id, chatId: chatId,
@@ -298,7 +304,9 @@ export function nextOffset(seen: TriggerUpdate[], now: string): string {
   let i: int = 0;
   while (i < seen.length) {
     let id = parseInt(seen[i].updateId, 10) ?? 0;
-    if (id >= highest) { highest = id + 1; }
+    if (id >= highest) {
+      highest = id + 1;
+    }
     i = i + 1;
   }
   return `${highest}`;
@@ -390,7 +398,9 @@ export function unsentFor(db: Db, botId: string): string {
 
 export function botById(db: Db, id: string): TriggerBotRow {
   let doc = findById(db, triggerBotsMapping(), id);
-  if (doc == "") { return emptyBot(); }
+  if (doc == "") {
+    return emptyBot();
+  }
   return JSON.parse<TriggerBotRow>(doc);
 }
 
@@ -403,7 +413,9 @@ export function claimBot(db: Db, botId: string, who: string, nowMs: number): boo
     + " AND (lease_by = " + placeholderAt(db, 4)
     + " OR lease_until = '' OR lease_until < " + placeholderAt(db, 5) + ")"
     + " RETURNING id";
-  if (!db.query(sql, [who, until, botId, who, now])) { return false; }
+  if (!db.query(sql, [who, until, botId, who, now])) {
+    return false;
+  }
   return db.rows() > 0;
 }
 
@@ -422,7 +434,9 @@ export function saveBot(db: Db, bot: TriggerBotRow): void {
 }
 
 export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, nowMs: number): string {
-  if (alreadyHave(db, bot.id, said.updateId)) { return ""; }
+  if (alreadyHave(db, bot.id, said.updateId)) {
+    return "";
+  }
   let now = `${nowMs}`;
   let row: TriggerInboxRow = {
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
@@ -437,7 +451,9 @@ export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, now
 }
 
 export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, why: string, nowMs: number): string {
-  if (alreadyHave(db, bot.id, said.updateId)) { return ""; }
+  if (alreadyHave(db, bot.id, said.updateId)) {
+    return "";
+  }
   let now = `${nowMs}`;
   let row: TriggerInboxRow = {
     id: crypto.randomUUID(), owner: bot.owner, botId: bot.id,
@@ -460,8 +476,12 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
     + " OR (status = 'running' AND updated_at < " + placeholderAt(db, 2) + ")"
     + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
     + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at, file_name, file_body, thread_id, speaker";
-  if (!db.query(sql, [now, stale])) { return emptyMessage(); }
-  if (db.rows() == 0) { return emptyMessage(); }
+  if (!db.query(sql, [now, stale])) {
+    return emptyMessage();
+  }
+  if (db.rows() == 0) {
+    return emptyMessage();
+  }
   let got: TriggerInboxRow = {
     id: db.value(0, 0), owner: db.value(0, 1), botId: db.value(0, 2),
     workflowId: db.value(0, 3), updateId: db.value(0, 4), chatId: db.value(0, 5),
@@ -550,10 +570,14 @@ export function replyKeyboard(options: string): string {
   let i: int = 0;
   while (i < lines.length) {
     let one = lines[i].trim();
-    if (one != "") { said.push(one); }
+    if (one != "") {
+      said.push(one);
+    }
     i = i + 1;
   }
-  if (said.length == 0) { return ""; }
+  if (said.length == 0) {
+    return "";
+  }
   let board: ReplyKeyboardView = {
     keyboard: said.map(keyRow),
     one_time_keyboard: true,
@@ -581,7 +605,9 @@ export function pendingFor(db: Db, botId: string, chatId: string, nowMs: number)
   let rows = JSON.parse<TriggerPendingRow[]>(listWhere(db, triggerPendingMapping(),
     "bot_id = " + db.placeholder + " AND chat_id = " + placeholderAt(db, 2),
     [botId, chatId]));
-  if (rows.length == 0) { return emptyPending(); }
+  if (rows.length == 0) {
+    return emptyPending();
+  }
   let held = rows[0];
   if (stampMs(held.expiresAt) <= nowMs) {
     db.query("DELETE FROM trigger_pending WHERE id = " + db.placeholder, [held.id]);
@@ -614,8 +640,12 @@ export function threadForChat(db: Db, botId: string, chatId: string): string {
     + " AND chat_id = " + placeholderAt(db, 2)
     + " AND thread_id <> ''"
     + " ORDER BY created_at DESC LIMIT 1";
-  if (!db.query(sql, [botId, chatId])) { return ""; }
-  if (db.rows() == 0) { return ""; }
+  if (!db.query(sql, [botId, chatId])) {
+    return "";
+  }
+  if (db.rows() == 0) {
+    return "";
+  }
   return db.value(0, 0);
 }
 
@@ -629,9 +659,15 @@ export function plainly(answer: string): string {
   let rest = answer;
   while (true) {
     let open = rest.indexOf("[");
-    if (open < 0) { out = out + rest; break; }
+    if (open < 0) {
+      out = out + rest;
+      break;
+    }
     let shut = rest.indexOf("]", open);
-    if (shut < 0) { out = out + rest; break; }
+    if (shut < 0) {
+      out = out + rest;
+      break;
+    }
     let name = rest.slice(open + 1, shut);
     if (!isBlockName(name)) {
       out = out + rest.slice(0, shut + 1);
@@ -653,20 +689,28 @@ export function plainly(answer: string): string {
 
 export function fileBlock(answer: string): string {
   let open = answer.indexOf("[FILE]");
-  if (open < 0) { return ""; }
+  if (open < 0) {
+    return "";
+  }
   let shut = answer.indexOf("[/FILE]", open + 6);
-  if (shut < 0) { return ""; }
+  if (shut < 0) {
+    return "";
+  }
   return answer.slice(open + 6, shut).trim();
 }
 
 function isBlockName(name: string): bool {
-  if (name.length == 0 || name.length > 24) { return false; }
+  if (name.length == 0 || name.length > 24) {
+    return false;
+  }
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
     let upper = c >= 65 && c <= 90;
     let mark = c == 95;
-    if (!upper && !mark) { return false; }
+    if (!upper && !mark) {
+      return false;
+    }
     i = i + 1;
   }
   return true;

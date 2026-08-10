@@ -26,10 +26,14 @@ export function candidatesFrom(candidatesJson: string): Candidate[] {
 
 export function indexOfKey(candidates: Candidate[], key: string): int {
   let wanted = key.trim().toLowerCase();
-  if (wanted == "") { return -1; }
+  if (wanted == "") {
+    return -1;
+  }
   let i: int = 0;
   while (i < candidates.length) {
-    if (candidates[i].key.trim().toLowerCase() == wanted) { return i; }
+    if (candidates[i].key.trim().toLowerCase() == wanted) {
+      return i;
+    }
     i = i + 1;
   }
   return -1;
@@ -47,7 +51,9 @@ function unfenced(text: string): string {
 }
 
 function clip(text: string, max: int): string {
-  if (text.length <= max) { return text; }
+  if (text.length <= max) {
+    return text;
+  }
   return text.slice(0, max) + "...";
 }
 
@@ -67,24 +73,33 @@ export function recentTurns(turns: Turn[], keep: int): Turn[] {
   while (i >= 0 && newestFirst.length < keep) {
     let turn = turns[i];
     if (turn.role == "user" || turn.role == "assistant") {
-      if (turn.text.trim() != "") { newestFirst.push(turn); }
+      if (turn.text.trim() != "") {
+        newestFirst.push(turn);
+      }
     }
     i = i - 1;
   }
   let out: Turn[] = [];
   let k = newestFirst.length - 1;
-  while (k >= 0) { out.push(newestFirst[k]); k = k - 1; }
+  while (k >= 0) {
+    out.push(newestFirst[k]);
+    k = k - 1;
+  }
   return out;
 }
 
 export function routingSystemPrompt(candidates: Candidate[]): string {
-  if (candidates.length == 0) { return ""; }
+  if (candidates.length == 0) {
+    return "";
+  }
   let out = "You are choosing which assistant answers the next message in a conversation.\n\n";
   out = out + "The options, in order:\n";
   let i: int = 0;
   while (i < candidates.length) {
     let when = candidates[i].when;
-    if (when == "") { when = "no guidance was written for this option"; }
+    if (when == "") {
+      when = "no guidance was written for this option";
+    }
     out = out + "- " + candidates[i].key + ": " + when + "\n";
     i = i + 1;
   }
@@ -94,7 +109,9 @@ export function routingSystemPrompt(candidates: Candidate[]): string {
   out = out + "Answer with exactly one of these option names and nothing else: ";
   let k: int = 0;
   while (k < candidates.length) {
-    if (k > 0) { out = out + ", "; }
+    if (k > 0) {
+      out = out + ", ";
+    }
     out = out + candidates[k].key;
     k = k + 1;
   }
@@ -119,21 +136,31 @@ export function routingUserText(ask: RouteAsk): string {
 
 export function matchKey(candidates: Candidate[], reply: string): string {
   let said = reply.trim().toLowerCase();
-  if (said == "") { return ""; }
+  if (said == "") {
+    return "";
+  }
   let i: int = 0;
   while (i < candidates.length) {
-    if (candidates[i].key.trim().toLowerCase() == said) { return candidates[i].key; }
+    if (candidates[i].key.trim().toLowerCase() == said) {
+      return candidates[i].key;
+    }
     i = i + 1;
   }
   return "";
 }
 
 export function notEarlier(candidates: Candidate[], previousKey: string, key: string): string {
-  if (previousKey == "" || key == "") { return key; }
+  if (previousKey == "" || key == "") {
+    return key;
+  }
   let was = indexOfKey(candidates, previousKey);
   let now = indexOfKey(candidates, key);
-  if (was < 0 || now < 0) { return key; }
-  if (now < was) { return candidates[was].key; }
+  if (was < 0 || now < 0) {
+    return key;
+  }
+  if (now < was) {
+    return candidates[was].key;
+  }
   return key;
 }
 
@@ -176,15 +203,21 @@ export function decide(answer: RouterReply): Decision {
   let matched = matchKey(answer.candidates, answer.reply);
   if (matched == "") {
     let said = clip(oneLine(answer.reply.trim()), REPLY_IN_NOTE);
-    if (said == "") { return fellBack(answer.fallbackConfigId, "the router answered nothing"); }
+    if (said == "") {
+      return fellBack(answer.fallbackConfigId, "the router answered nothing");
+    }
     return fellBack(answer.fallbackConfigId,
       "the router answered " + JSON.stringify(said) + ", which is not one of its candidates");
   }
 
   let held = matched;
-  if (answer.escalateOnly) { held = notEarlier(answer.candidates, answer.previousKey, matched); }
+  if (answer.escalateOnly) {
+    held = notEarlier(answer.candidates, answer.previousKey, matched);
+  }
   let at = indexOfKey(answer.candidates, held);
-  if (at < 0) { return fellBack(answer.fallbackConfigId, "the router chose " + held + ", which is not in its candidates"); }
+  if (at < 0) {
+    return fellBack(answer.fallbackConfigId, "the router chose " + held + ", which is not in its candidates");
+  }
 
   let note = "routed to " + held;
   if (held != matched) {
@@ -206,13 +239,17 @@ export function withoutAddresses(text: string, name: string): string {
     while (start > 0) {
       let c = rest.charCodeAt(start - 1);
       let letter = (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
-      if (!letter) { break; }
+      if (!letter) {
+        break;
+      }
       start = start - 1;
     }
     let end = at + 3;
     while (end < rest.length) {
       let c = rest.charCodeAt(end);
-      if (c == 32 || c == 9 || c == 10 || c == 13) { break; }
+      if (c == 32 || c == 9 || c == 10 || c == 13) {
+        break;
+      }
       end = end + 1;
     }
     out = out + rest.slice(0, start) + name;
@@ -223,7 +260,9 @@ export function withoutAddresses(text: string, name: string): string {
 }
 
 export function withinRouterBudget(config: ModelConfigRow): ModelConfigRow {
-  if (config.maxTokens == ROUTER_MAX_TOKENS && config.thinking == "") { return config; }
+  if (config.maxTokens == ROUTER_MAX_TOKENS && config.thinking == "") {
+    return config;
+  }
   let capped: ModelConfigRow = {
     id: config.id, modelId: config.modelId, temperature: config.temperature,
     maxTokens: ROUTER_MAX_TOKENS, topP: config.topP, extra: config.extra,
@@ -265,7 +304,9 @@ export function answerFrom(provider: string, body: string, maxTokens: int): Rout
 }
 
 export function routeTurn(router: ModelRouterRow, model: ModelRow, config: ModelConfigRow, ask: RouteAsk, apiKey: string): Decision {
-  if (!router.enabled) { return fellBack(router.fallbackConfigId, "the router is switched off"); }
+  if (!router.enabled) {
+    return fellBack(router.fallbackConfigId, "the router is switched off");
+  }
 
   let candidates = candidatesFrom(router.candidatesJson);
   if (candidates.length == 0) {
@@ -286,7 +327,9 @@ export function routeTurn(router: ModelRouterRow, model: ModelRow, config: Model
   if (answered.ok) {
     let said = answerFrom(model.provider, answered.text, budgeted.maxTokens);
     reply = said.reply;
-    if (said.error != "") { error = said.error; }
+    if (said.error != "") {
+      error = said.error;
+    }
   }
 
   let seen: RouterReply = {

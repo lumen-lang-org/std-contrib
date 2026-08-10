@@ -75,7 +75,9 @@ function main(): void {
   while (i < run.steps.length) {
     let step = run.steps[i];
     let mark = "ok ";
-    if (!step.ok) { mark = "err"; }
+    if (!step.ok) {
+      mark = "err";
+    }
     console.log(`${step.index}` + " " + mark + " " + step.server + "." + step.tool + " " + step.args);
     console.log("      -> " + step.result);
     i = i + 1;
@@ -85,7 +87,9 @@ function main(): void {
   console.log("");
   console.log("-- what the user sees (conversation) ---------------------------");
   console.log("agent     " + run.text);
-  if (!run.ok) { console.log("error     " + run.error); }
+  if (!run.ok) {
+    console.log("error     " + run.error);
+  }
 
   db.close();
 }

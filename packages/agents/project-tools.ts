@@ -60,19 +60,25 @@ function projectSaid(db: Db, owner: string, said: string): ProjectRow {
   let doc = findById(db, projectsMapping(), said);
   if (doc != "") {
     let row: ProjectRow = JSON.parse<ProjectRow>(doc);
-    if (row.owner == owner) { return row; }
+    if (row.owner == owner) {
+      return row;
+    }
   }
   let rows = JSON.parse<ProjectRow[]>(projectsOf(db, owner));
   let found: int = -1;
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].name.toLowerCase() == said.toLowerCase()) {
-      if (found >= 0) { return empty(); }
+      if (found >= 0) {
+        return empty();
+      }
       found = i;
     }
     i = i + 1;
   }
-  if (found >= 0) { return rows[found]; }
+  if (found >= 0) {
+    return rows[found];
+  }
   return empty();
 }
 
@@ -91,7 +97,9 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
 
   if (call.name == "list_projects") {
     let rows = JSON.parse<ProjectRow[]>(projectsOf(db, call.owner));
-    if (rows.length == 0) { return yes("No projects yet — create_project starts one."); }
+    if (rows.length == 0) {
+      return yes("No projects yet — create_project starts one.");
+    }
     let out = `${rows.length}` + " project(s):\n";
     let i: int = 0;
     while (i < rows.length) {
@@ -104,9 +112,13 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
 
   if (call.name == "create_project") {
     let name = jsonText(call.args, "name").trim();
-    if (name == "") { return no("a project needs a name: {\"name\":\"...\"}"); }
+    if (name == "") {
+      return no("a project needs a name: {\"name\":\"...\"}");
+    }
     let taken = projectSaid(db, call.owner, name);
-    if (taken.id != "") { return no("\"" + name + "\" exists already — move_to_project puts this conversation in it."); }
+    if (taken.id != "") {
+      return no("\"" + name + "\" exists already — move_to_project puts this conversation in it.");
+    }
     let row: ProjectRow = {
       id: crypto.randomUUID(), owner: call.owner, name: name,
       instructions: jsonText(call.args, "instructions").trim(),
@@ -122,11 +134,17 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
     return no("this run has no conversation to move — say it in the conversation that should move.");
   }
   let said = jsonText(call.args, "project").trim();
-  if (said == "") { return no("say which project: {\"project\":\"...\"} — list_projects shows them."); }
+  if (said == "") {
+    return no("say which project: {\"project\":\"...\"} — list_projects shows them.");
+  }
   let project = projectSaid(db, call.owner, said);
-  if (project.id == "") { return no("no project by that name or id — list_projects shows them."); }
+  if (project.id == "") {
+    return no("no project by that name or id — list_projects shows them.");
+  }
   let problem = assignProject(db, call.threadId, project.id);
-  if (problem != "") { return no(problem); }
+  if (problem != "") {
+    return no(problem);
+  }
   return yes("Moved. From the next message on, this conversation carries \"" + project.name + "\""
     + (project.instructions == "" ? "." : "\" and its instructions."));
 }

@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, noContent, notFound, ok } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, NoContent, NotFound, Ok } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { EnvTemplateWrite, envTemplatesAll, forgetEnvTemplate, saveEnvTemplate } from "../../env-templates.ts";
 import { owningTag } from "../../owner.ts";
@@ -12,15 +12,17 @@ import { ownedOrEmpty } from "../../guards.ts";
 export class EnvTemplateApi {
   db: Db;
 
-  constructor(db: Db) { this.db = db; }
-
-  @get("/")
-  @Guard(ownedOrEmpty)
-  list(): Reply {
-    return ok(JSON.stringify(envTemplatesAll(this.db)));
+  constructor(db: Db) {
+    this.db = db;
   }
 
-  @post("/")
+  @Get("/")
+  @Guard(ownedOrEmpty)
+  list(): Reply {
+    return Ok(JSON.stringify(envTemplatesAll(this.db)));
+  }
+
+  @Post("/")
   save(@Valid @RequestBody ask: EnvTemplateAsk): Reply {
     let t: EnvTemplateWrite = {
       id: ask.id,
@@ -33,15 +35,17 @@ export class EnvTemplateApi {
       now: stamp(),
     };
     let problem = saveEnvTemplate(this.db, t);
-    if (problem != "") { return badRequest(problem); }
-    return ok(JSON.stringify(envTemplatesAll(this.db)));
+    if (problem != "") {
+      return BadRequest(problem);
+    }
+    return Ok(JSON.stringify(envTemplatesAll(this.db)));
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(@PathVariable("id") id: string): Reply {
     if (!forgetEnvTemplate(this.db, id)) {
-      return notFound("template " + id);
+      return NotFound("template " + id);
     }
-    return noContent();
+    return NoContent();
   }
 }

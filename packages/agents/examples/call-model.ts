@@ -37,7 +37,9 @@ function main(): void {
   let key = process.env("MISTRAL_API_KEY") ?? "";
   let answer = complete(model, config, "Answer in one word.", "What is 2+40?", key);
   console.log("ok=" + `${answer.ok}` + " status=" + `${answer.status}` + " " + answer.error);
-  if (answer.text != "") { console.log("body      " + answer.text.substring(0, 160)); }
+  if (answer.text != "") {
+    console.log("body      " + answer.text.substring(0, 160));
+  }
 
   execute(db, "UPDATE models SET enabled = 0 WHERE id = 'm3'");
   let raw = findById(db, modelsMapping(), "m3");

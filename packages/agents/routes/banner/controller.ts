@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, ok } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, Ok } from "../../../rest/server.ts";
 import { readSetting, writeSetting } from "../../schema.ts";
 import { utf8Length } from "../../artifacts.ts";
 
@@ -20,18 +20,24 @@ export function bannerJson(text: string): string {
 }
 
 export function bannerShow(db: Db): Reply {
-  return ok(bannerJson(readSetting(db, "banner")));
+  return Ok(bannerJson(readSetting(db, "banner")));
 }
 
 export function bannerChange(db: Db, body: string): Reply {
-  if (body == "") { return badRequest("a body is required: {\"text\":\"...\"}"); }
+  if (body == "") {
+    return BadRequest("a body is required: {\"text\":\"...\"}");
+  }
   let ask: BannerAsk = JSON.parse<BannerAsk>(body);
   let text = ask.text;
   let refused = bannerProblem(text);
-  if (refused != "") { return badRequest(refused); }
+  if (refused != "") {
+    return BadRequest(refused);
+  }
   let problem = writeSetting(db, "banner", text);
-  if (problem != "") { return badRequest(problem); }
-  return ok(bannerJson(text));
+  if (problem != "") {
+    return BadRequest(problem);
+  }
+  return Ok(bannerJson(text));
 }
 
 @controller("/banner")
@@ -43,12 +49,12 @@ export class BannerApi {
     this.db = db;
   }
 
-  @get("/")
+  @Get("/")
   show(req: Request): Reply {
     return bannerShow(this.db);
   }
 
-  @put("/")
+  @Put("/")
   change(req: Request): Reply {
     return bannerChange(this.db, req.body);
   }

@@ -23,10 +23,16 @@ function db(): Db {
     let plan: Migration[] = [];
     let a = workflowsPlan(database);
     let i: int = 0;
-    while (i < a.length) { plan.push(a[i]); i = i + 1; }
+    while (i < a.length) {
+      plan.push(a[i]);
+      i = i + 1;
+    }
     let b = triggersPlan(database);
     i = 0;
-    while (i < b.length) { plan.push(b[i]); i = i + 1; }
+    while (i < b.length) {
+      plan.push(b[i]);
+      i = i + 1;
+    }
     migrate(database, plan);
     seed();
     ready = true;

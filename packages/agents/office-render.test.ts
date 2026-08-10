@@ -25,7 +25,9 @@ const FAKE_DIR = "/tmp/agents_render_fake";
 const FAKE_LOG = "/tmp/agents_render_fake/argv.log";
 
 function fakeDocker(script: string): void {
-  if (!fs.existsSync(FAKE_DIR)) { fs.mkdirSync(FAKE_DIR); }
+  if (!fs.existsSync(FAKE_DIR)) {
+    fs.mkdirSync(FAKE_DIR);
+  }
   let bin = FAKE_DIR + "/docker";
   fs.writeFileSync(bin, script);
   fs.chmodSync(bin, 493);
@@ -74,7 +76,9 @@ function argvLines(): string[] {
   let parts = text.split("\n");
   let i: int = 0;
   while (i < parts.length) {
-    if (parts[i].trim() != "") { out.push(parts[i].trim()); }
+    if (parts[i].trim() != "") {
+      out.push(parts[i].trim());
+    }
     i = i + 1;
   }
   return out;

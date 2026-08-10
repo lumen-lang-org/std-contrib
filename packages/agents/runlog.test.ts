@@ -36,7 +36,10 @@ function seeded(): void {
   let plan = schemaPlan(database);
   let extra = runLogPlan(database);
   let e: int = 0;
-  while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  while (e < extra.length) {
+    plan.push(extra[e]);
+    e = e + 1;
+  }
   migrate(database, plan);
 }
 

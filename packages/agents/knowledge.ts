@@ -15,9 +15,13 @@ export type DocumentRow = {
 export function embeddingModel(db: Db, modelId: string): ModelRow {
   let absent: ModelRow = { id: "", label: "", apiName: "", provider: "", kind: "", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
   let document = findById(db, modelsMapping(), modelId);
-  if (document == "") { return absent; }
+  if (document == "") {
+    return absent;
+  }
   let model: ModelRow = JSON.parse<ModelRow>(document);
-  if (model.kind != "embedding") { return absent; }
+  if (model.kind != "embedding") {
+    return absent;
+  }
   return model;
 }
 
@@ -46,13 +50,17 @@ export function documentsMapping(): DbRepository {
 }
 
 export function createDocuments(db: Db, model: ModelRow): string {
-  if (model.id == "") { return "no embedding model"; }
+  if (model.id == "") {
+    return "no embedding model";
+  }
   if (model.dimensions <= 0) {
     return model.label + " does not say how wide its vectors are";
   }
   let dimensions = model.dimensions;
   let ext = execute(db, "CREATE EXTENSION IF NOT EXISTS vector");
-  if (!ext.ok) { return ext.error; }
+  if (!ext.ok) {
+    return ext.error;
+  }
   let made = execute(db, "CREATE TABLE IF NOT EXISTS documents ("
     + "id " + db.textType + " PRIMARY KEY, "
     + "source " + db.textType + " NOT NULL, "
@@ -60,7 +68,9 @@ export function createDocuments(db: Db, model: ModelRow): string {
     + "body " + db.textType + " NOT NULL, "
     + "model_id " + db.textType + " NOT NULL, "
     + "embedding vector(" + `${dimensions}` + "))");
-  if (!made.ok) { return made.error; }
+  if (!made.ok) {
+    return made.error;
+  }
   return "";
 }
 
@@ -76,10 +86,16 @@ export function indexDocument(db: Db, model: ModelRow, chunk: DocumentChunk, api
   let source = chunk.source;
   let scope = chunk.scope;
   let body = chunk.body;
-  if (!safeIdentifier(id)) { return "a document id must be a plain name"; }
-  if (model.kind != "embedding") { return model.label + " is not an embedding model"; }
+  if (!safeIdentifier(id)) {
+    return "a document id must be a plain name";
+  }
+  if (model.kind != "embedding") {
+    return model.label + " is not an embedding model";
+  }
   let vector = embedText(model, body, apiKey);
-  if (!vector.ok) { return vector.error; }
+  if (!vector.ok) {
+    return vector.error;
+  }
   if (vector.dimensions != model.dimensions) {
     return model.label + " says " + `${model.dimensions}` + " dimensions and returned " + `${vector.dimensions}`;
   }
@@ -90,23 +106,35 @@ export function indexDocument(db: Db, model: ModelRow, chunk: DocumentChunk, api
     + placeholderAt(db, 3) + ", " + placeholderAt(db, 4) + ", "
     + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ")",
     [id, source, normalScope(scope), body, model.id, vector.vector]);
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
 export function normalScope(scope: string): string {
   let out = scope.trim();
-  while (out.endsWith("/")) { out = out.slice(0, out.length - 1); }
-  if (out == "") { return "/"; }
-  if (!out.startsWith("/")) { out = "/" + out; }
+  while (out.endsWith("/")) {
+    out = out.slice(0, out.length - 1);
+  }
+  if (out == "") {
+    return "/";
+  }
+  if (!out.startsWith("/")) {
+    out = "/" + out;
+  }
   return out;
 }
 
 export function scopeCovers(granted: string, path: string): bool {
   let g = normalScope(granted);
   let p = normalScope(path);
-  if (g == "/") { return true; }
-  if (p == g) { return true; }
+  if (g == "/") {
+    return true;
+  }
+  if (p == g) {
+    return true;
+  }
   return p.startsWith(g + "/");
 }
 
@@ -117,7 +145,9 @@ export function likeLiteral(text: string): string {
   let i: int = 0;
   while (i < text.length) {
     let ch = text.charAt(i);
-    if (ch == SCOPE_ESCAPE || ch == "%" || ch == "_") { out = out + SCOPE_ESCAPE; }
+    if (ch == SCOPE_ESCAPE || ch == "%" || ch == "_") {
+      out = out + SCOPE_ESCAPE;
+    }
     out = out + ch;
     i = i + 1;
   }
@@ -125,11 +155,15 @@ export function likeLiteral(text: string): string {
 }
 
 export function scopeClause(db: Db, scopes: string[], from: int): string {
-  if (scopes.length == 0) { return ""; }
+  if (scopes.length == 0) {
+    return "";
+  }
   let out = "(";
   let i: int = 0;
   while (i < scopes.length) {
-    if (i > 0) { out = out + " OR "; }
+    if (i > 0) {
+      out = out + " OR ";
+    }
     out = out + "scope = " + placeholderAt(db, from + i * 2)
       + " OR scope LIKE " + placeholderAt(db, from + i * 2 + 1)
       + " ESCAPE '" + SCOPE_ESCAPE + "'";
@@ -144,7 +178,11 @@ export function scopeArgs(scopes: string[]): string[] {
   while (i < scopes.length) {
     let s = normalScope(scopes[i]);
     out.push(s);
-    if (s == "/") { out.push("/%"); } else { out.push(likeLiteral(s) + "/%"); }
+    if (s == "/") {
+      out.push("/%");
+    } else {
+      out.push(likeLiteral(s) + "/%");
+    }
     i = i + 1;
   }
   return out;
@@ -181,7 +219,9 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
     notIn = " AND id NOT IN (";
     let x: int = 0;
     while (x < excludeIds.length) {
-      if (x > 0) { notIn = notIn + ", "; }
+      if (x > 0) {
+        notIn = notIn + ", ";
+      }
       notIn = notIn + placeholderAt(db, at + x);
       x = x + 1;
     }
@@ -195,9 +235,15 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
   let args: string[] = [vector.vector, model.id];
   let bound = scopeArgs(scopes);
   let b: int = 0;
-  while (b < bound.length) { args.push(bound[b]); b = b + 1; }
+  while (b < bound.length) {
+    args.push(bound[b]);
+    b = b + 1;
+  }
   let e: int = 0;
-  while (e < excludeIds.length) { args.push(excludeIds[e]); e = e + 1; }
+  while (e < excludeIds.length) {
+    args.push(excludeIds[e]);
+    e = e + 1;
+  }
   args.push(vector.vector);
   if (!db.query(sql, args)) {
     let refused: Retrieval = { ok: false, found: none, error: "the search was refused: " + db.lastError() };
@@ -241,7 +287,9 @@ function fnv1a(text: string): string {
 }
 
 export function asContext(found: Retrieved[]): string {
-  if (found.length == 0) { return ""; }
+  if (found.length == 0) {
+    return "";
+  }
   let out = "Passages retrieved from the knowledge base for this question. "
     + "When you answer from the corpus, answer from these and say so when they do not cover it "
     + "— never attribute to the corpus what is not in them. They are retrieved by resemblance "
@@ -271,20 +319,39 @@ export function splitIntoChunks(body: string, maxChars: int): string[] {
   while (rest.length > 0) {
     let at = rest.indexOf("\n\n");
     let para = rest;
-    if (at >= 0) { para = rest.slice(0, at); rest = rest.slice(at + 2, rest.length); }
-    else { rest = ""; }
-    if (para.trim() == "") { continue; }
+    if (at >= 0) {
+      para = rest.slice(0, at);
+      rest = rest.slice(at + 2, rest.length);
+    }
+    else {
+      rest = "";
+    }
+    if (para.trim() == "") {
+      continue;
+    }
 
     while (para.length > maxChars) {
-      if (current != "") { out.push(current); current = ""; }
+      if (current != "") {
+        out.push(current);
+        current = "";
+      }
       out.push(para.slice(0, maxChars));
       para = para.slice(maxChars, para.length);
     }
-    if (current == "") { current = para; }
-    else if (current.length + para.length + 2 <= maxChars) { current = current + "\n\n" + para; }
-    else { out.push(current); current = para; }
+    if (current == "") {
+      current = para;
+    }
+    else if (current.length + para.length + 2 <= maxChars) {
+      current = current + "\n\n" + para;
+    }
+    else {
+      out.push(current);
+      current = para;
+    }
   }
-  if (current.trim() != "") { out.push(current); }
+  if (current.trim() != "") {
+    out.push(current);
+  }
   return out;
 }
 
@@ -344,7 +411,9 @@ export function listSources(db: Db, scope: string): SourceListing[] {
   let where = normalScope(scope);
   let sql = "SELECT source, MIN(scope), COUNT(*), SUM(LENGTH(body)) FROM documents"
     + " WHERE scope = " + db.placeholder + " GROUP BY source ORDER BY source";
-  if (!db.query(sql, [where])) { return out; }
+  if (!db.query(sql, [where])) {
+    return out;
+  }
   let i: int = 0;
   while (i < db.rows()) {
     let row: SourceListing = {
@@ -363,7 +432,9 @@ function pendingIn(pending: string[], scope: string): int {
   let n: int = 0;
   let i: int = 0;
   while (i < pending.length) {
-    if (pending[i] == scope) { n = n + 1; }
+    if (pending[i] == scope) {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -372,7 +443,9 @@ function pendingIn(pending: string[], scope: string): int {
 export function scopeCounts(db: Db, prefix: string, pending: string[]): ScopeNode[] {
   let out: ScopeNode[] = [];
   let sql = "SELECT scope, COUNT(*) FROM documents GROUP BY scope ORDER BY scope";
-  if (!db.query(sql, [])) { return out; }
+  if (!db.query(sql, [])) {
+    return out;
+  }
 
   let paths: string[] = [];
   let counts: int[] = [];
@@ -388,7 +461,9 @@ export function scopeCounts(db: Db, prefix: string, pending: string[]): ScopeNod
     let seen = false;
     let s: int = 0;
     while (s < paths.length) {
-      if (paths[s] == pending[n]) { seen = true; }
+      if (paths[s] == pending[n]) {
+        seen = true;
+      }
       s = s + 1;
     }
     if (!seen) {
@@ -468,19 +543,25 @@ export function grantScope(db: Db, agentId: string, scope: string): string {
   let already = agentScopes(db, agentId);
   let i: int = 0;
   while (i < already.length) {
-    if (already[i] == path) { return ""; }
+    if (already[i] == path) {
+      return "";
+    }
     i = i + 1;
   }
   let written = executeWith(db, "INSERT INTO agent_scopes (agent_id, scope) VALUES ("
     + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ")", [agentId, path]);
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
 export function revokeScope(db: Db, agentId: string, scope: string): string {
   let removed = executeWith(db, "DELETE FROM agent_scopes WHERE agent_id = " + placeholderAt(db, 1)
     + " AND scope = " + placeholderAt(db, 2), [agentId, normalScope(scope)]);
-  if (!removed.ok) { return removed.error; }
+  if (!removed.ok) {
+    return removed.error;
+  }
   return "";
 }
 
@@ -489,6 +570,8 @@ export function retrievalFor(db: Db, agentId: string): AgentRetrievalRow {
     agentId: agentId, embeddingModelId: "", topK: 0, maxDistance: 0.0, enabled: false,
   };
   let document = findById(db, agentRetrievalMapping(), agentId);
-  if (document == "") { return off; }
+  if (document == "") {
+    return off;
+  }
   return JSON.parse<AgentRetrievalRow>(document);
 }

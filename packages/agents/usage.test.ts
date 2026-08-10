@@ -31,13 +31,22 @@ function fresh(): void {
   let plan = threadPlan(database);
   let results = artifactPlan(database);
   let r: int = 0;
-  while (r < results.length) { plan.push(results[r]); r = r + 1; }
+  while (r < results.length) {
+    plan.push(results[r]);
+    r = r + 1;
+  }
   let runs = runLogPlan(database);
   let n: int = 0;
-  while (n < runs.length) { plan.push(runs[n]); n = n + 1; }
+  while (n < runs.length) {
+    plan.push(runs[n]);
+    n = n + 1;
+  }
   let grouped = projectsPlan(database);
   let g: int = 0;
-  while (g < grouped.length) { plan.push(grouped[g]); g = g + 1; }
+  while (g < grouped.length) {
+    plan.push(grouped[g]);
+    g = g + 1;
+  }
   migrate(database, plan);
 }
 
@@ -62,7 +71,9 @@ function spentRun(input: int, output: int): AgentRun {
 function spent(owner: string, word: string, bytes: int, input: int, output: int): string {
   let id = openThread(database, { agentId: "a1", owner: owner, now: "1700000000000" });
   let body = "";
-  while (body.length < bytes) { body = body + "x"; }
+  while (body.length < bytes) {
+    body = body + "x";
+  }
   putArtifact(database, {
     threadId: id, path: "/" + word + ".md", title: word, content: body,
     note: "", origin: "uploaded", mustCreate: true, turnSeq: TURN_SEQ_NONE, now: "1700000000000",

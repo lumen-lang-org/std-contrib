@@ -58,7 +58,9 @@ test("a failed close keeps what the call answered, capped and uncut through a ch
   let dispatched = call("t1", 4, 0, "run_script", "{\"language\":\"python\"}", "1000");
   beginStep(database, dispatched);
   let long = "no .json inputs found ";
-  while (long.length <= RESULT_PREVIEW) { long = long + "eé"; }
+  while (long.length <= RESULT_PREVIEW) {
+    long = long + "eé";
+  }
   let close: StepClose = { ok: false, endedAt: "1350", millis: 350, line: 0, changed: "", result: long };
   endStepAt(database, dispatched, close);
 
@@ -133,7 +135,10 @@ test("an argument list is previewed, not stored whole", () => {
   fresh();
   let big = "";
   let i: int = 0;
-  while (i < 500) { big = big + "x"; i = i + 1; }
+  while (i < 500) {
+    big = big + "x";
+    i = i + 1;
+  }
   beginStep(database, call("t1", 4, 0, "write_artifact", big, "1000"));
 
   let live = stepsOfRound(database, "t1", 4);
@@ -145,7 +150,10 @@ test("an argument list is previewed, not stored whole", () => {
 test("a preview is never cut through the middle of a character", () => {
   let wide = "";
   let i: int = 0;
-  while (i < 200) { wide = wide + "é"; i = i + 1; }
+  while (i < 200) {
+    wide = wide + "é";
+    i = i + 1;
+  }
   let preview = argsPreview(wide);
   expect(preview.length <= ARGS_PREVIEW);
   expect(preview.endsWith("..."));
@@ -250,7 +258,10 @@ test("a sub-agent's first call does not overwrite the delegation that caused it"
 test("an edit step keeps what the card shows: path, counts from the whole text, a bounded old and new", () => {
   let big = "";
   let i: int = 0;
-  while (i < 200) { big = big + "line " + `${i}` + "\n"; i = i + 1; }
+  while (i < 200) {
+    big = big + "line " + `${i}` + "\n";
+    i = i + 1;
+  }
   let args = "{\"path\":\"/index.html\",\"old\":" + JSON.stringify(big)
     + ",\"new\":\"<h1>x</h1>\",\"note\":\"\"}";
   let made = stepArgs("edit_artifact", args);

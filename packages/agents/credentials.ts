@@ -33,8 +33,12 @@ export function storeCredential(db: Db, write: CredentialWrite): string {
   let key = write.masterKey;
   let now = write.now;
   let problem = masterKeyProblem(key);
-  if (problem != "") { return problem; }
-  if (apiKey == "") { return "an empty key is not a credential"; }
+  if (problem != "") {
+    return problem;
+  }
+  if (apiKey == "") {
+    return "an empty key is not a credential";
+  }
 
   if (existsById(db, credentialsMapping(), credentialId(provider))) {
     deleteById(db, credentialsMapping(), credentialId(provider));
@@ -46,14 +50,20 @@ export function storeCredential(db: Db, write: CredentialWrite): string {
     updatedAt: now,
   };
   let written = persist(db, credentialsMapping(), JSON.stringify(row));
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
 export function credentialFor(db: Db, provider: string, key: string): string {
-  if (masterKeyProblem(key) != "") { return ""; }
+  if (masterKeyProblem(key) != "") {
+    return "";
+  }
   let document = findById(db, credentialsMapping(), credentialId(provider));
-  if (document == "") { return ""; }
+  if (document == "") {
+    return "";
+  }
   let row: CredentialRow = JSON.parse<CredentialRow>(document);
   return crypto.decrypt(row.envelope, key);
 }
@@ -63,28 +73,44 @@ export function hasCredential(db: Db, provider: string): bool {
 }
 
 export function forgetCredential(db: Db, provider: string): bool {
-  if (!existsById(db, credentialsMapping(), credentialId(provider))) { return false; }
+  if (!existsById(db, credentialsMapping(), credentialId(provider))) {
+    return false;
+  }
   return deleteById(db, credentialsMapping(), credentialId(provider)).ok;
 }
 
 export function destinationOf(url: string): string {
   let text = url.trim();
   let mark = text.indexOf("://");
-  if (mark < 0) { return ""; }
+  if (mark < 0) {
+    return "";
+  }
   let scheme = text.slice(0, mark).toLowerCase();
-  if (scheme != "http" && scheme != "https") { return ""; }
+  if (scheme != "http" && scheme != "https") {
+    return "";
+  }
   let rest = text.slice(mark + 3, text.length);
   let cut = rest.length;
   let slash = rest.indexOf("/");
-  if (slash >= 0 && slash < cut) { cut = slash; }
+  if (slash >= 0 && slash < cut) {
+    cut = slash;
+  }
   let question = rest.indexOf("?");
-  if (question >= 0 && question < cut) { cut = question; }
+  if (question >= 0 && question < cut) {
+    cut = question;
+  }
   let fragment = rest.indexOf("#");
-  if (fragment >= 0 && fragment < cut) { cut = fragment; }
+  if (fragment >= 0 && fragment < cut) {
+    cut = fragment;
+  }
   let authority = rest.slice(0, cut).toLowerCase();
   let at = authority.lastIndexOf("@");
-  if (at >= 0) { authority = authority.slice(at + 1, authority.length); }
-  if (authority == "") { return ""; }
+  if (at >= 0) {
+    authority = authority.slice(at + 1, authority.length);
+  }
+  if (authority == "") {
+    return "";
+  }
   return scheme + "://" + authority;
 }
 
@@ -98,15 +124,21 @@ export type DestinationMove = {
 };
 
 function namedDestination(origin: string): string {
-  if (origin == "") { return "an address this cannot read"; }
+  if (origin == "") {
+    return "an address this cannot read";
+  }
   return origin;
 }
 
 export function destinationProblem(move: DestinationMove): string {
-  if (!move.secretStored) { return ""; }
+  if (!move.secretStored) {
+    return "";
+  }
   let from = destinationOf(move.was);
   let to = destinationOf(move.now);
-  if (from != "" && from == to) { return ""; }
+  if (from != "" && from == to) {
+    return "";
+  }
   return move.subject + " sends to " + namedDestination(from) + ", and "
     + move.secretName + " was stored for that address; pointing it at "
     + namedDestination(to) + " would send the secret there too. Clear the secret first with "
@@ -120,13 +152,19 @@ export function providersWithCredentials(db: Db): string[] {
   let rest = json;
   while (true) {
     let at = rest.indexOf("\"provider\"");
-    if (at < 0) { return out; }
+    if (at < 0) {
+      return out;
+    }
     rest = rest.substring(at + 10, rest.length);
     let open = rest.indexOf("\"");
-    if (open < 0) { return out; }
+    if (open < 0) {
+      return out;
+    }
     rest = rest.substring(open + 1, rest.length);
     let close = rest.indexOf("\"");
-    if (close < 0) { return out; }
+    if (close < 0) {
+      return out;
+    }
     out.push(rest.substring(0, close));
     rest = rest.substring(close + 1, rest.length);
   }

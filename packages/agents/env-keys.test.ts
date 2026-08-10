@@ -34,7 +34,10 @@ function fresh(): void {
   let plan = schemaPlan(database);
   let extra = envKeysPlan(database);
   let i: int = 0;
-  while (i < extra.length) { plan.push(extra[i]); i = i + 1; }
+  while (i < extra.length) {
+    plan.push(extra[i]);
+    i = i + 1;
+  }
   migrate(database, plan);
 }
 

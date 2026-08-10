@@ -297,7 +297,9 @@ function runSeed(): bool {
   let i: int = 0;
   while (i < plan.length) {
     if (plan[i].version.startsWith("87.")) {
-      if (!execute(database, plan[i].sql).ok) { return false; }
+      if (!execute(database, plan[i].sql).ok) {
+        return false;
+      }
       ran = ran + 1;
     }
     i = i + 1;
@@ -309,7 +311,9 @@ function runMenu(): bool {
   let statements = derivedMenuStatements(database);
   let i: int = 0;
   while (i < statements.length) {
-    if (!execute(database, statements[i]).ok) { return false; }
+    if (!execute(database, statements[i]).ok) {
+      return false;
+    }
     i = i + 1;
   }
   return statements.length == 4;

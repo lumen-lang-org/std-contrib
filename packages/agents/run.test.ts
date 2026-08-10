@@ -9,7 +9,9 @@ import { replyText } from "./provider.ts";
 
 let database: Db = sqlite();
 
-function testKey(): string { return "0123456789abcdef0123456789abcdef"; }
+function testKey(): string {
+  return "0123456789abcdef0123456789abcdef";
+}
 
 function seeded(): void {
   let cfg: DbConfig = { filename: "/tmp/agents_run_test.db" };

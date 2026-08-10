@@ -7,7 +7,7 @@
 //
 //   cd packages/plume && lumen test entity.test.ts
 
-import { Description, FieldDescription, DecoratorUse, entity, entityViolation, fieldArg, fieldHas, defaultSqlType } from "./entity.ts";
+import { EntityDescription, FieldDescription, DecoratorUse, entity, entityViolation, fieldArg, fieldHas, defaultSqlType } from "./entity.ts";
 import { repositoryValid, selectList } from "./plume.ts";
 
 function use(name: string, args: string[]): DecoratorUse {
@@ -29,7 +29,7 @@ function fieldOf(name: string, declared: string, decorators: DecoratorUse[]): Fi
 //     @column("max_steps", "int")      maxSteps: int;
 //                                      scratch: string;   // not mapped
 //   }
-function agentDescription(): Description {
+function agentDescription(): EntityDescription {
   let idDecorators: DecoratorUse[] = [use("id", []), use("column", ["id", "text"])];
   let nameDecorators: DecoratorUse[] = [use("column", ["agent_name", "text"])];
   let stepDecorators: DecoratorUse[] = [use("column", ["max_steps", "int"])];
@@ -40,7 +40,7 @@ function agentDescription(): Description {
     fieldOf("maxSteps", "int", stepDecorators),
     fieldOf("scratch", "string", none),
   ];
-  let d: Description = {
+  let d: EntityDescription = {
     protocol: 1,
     kind: "class",
     name: "Agent",
@@ -90,7 +90,7 @@ test("a column name left out falls back to the field name", () => {
     fieldOf("id", "string", [use("id", []), use("column", ["id", "text"])]),
     fieldOf("temperature", "number", bare),
   ];
-  let withBare: Description = {
+  let withBare: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: d.name, args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
@@ -129,7 +129,7 @@ test("a description with no problem reports none", () => {
 
 test("a protocol it does not know is refused rather than guessed at", () => {
   let d = agentDescription();
-  let future: Description = {
+  let future: EntityDescription = {
     protocol: 2, kind: d.kind, name: d.name, args: d.args,
     file: d.file, line: d.line, fields: d.fields,
   };
@@ -139,7 +139,7 @@ test("a protocol it does not know is refused rather than guessed at", () => {
 test("a missing table name is named as such", () => {
   let d = agentDescription();
   let empty: string[] = [];
-  let noTable: Description = {
+  let noTable: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: d.name, args: empty,
     file: d.file, line: d.line, fields: d.fields,
   };
@@ -151,7 +151,7 @@ test("a class with no key is refused, and says which class", () => {
   let fields: FieldDescription[] = [
     fieldOf("agentName", "string", [use("column", ["agent_name", "text"])]),
   ];
-  let keyless: Description = {
+  let keyless: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
@@ -166,7 +166,7 @@ test("two keys are refused, counted", () => {
     fieldOf("id", "string", [use("id", []), use("column", ["id", "text"])]),
     fieldOf("other", "string", [use("id", []), use("column", ["other", "text"])]),
   ];
-  let twoKeys: Description = {
+  let twoKeys: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
@@ -179,7 +179,7 @@ test("an @id without an @column is refused, naming the field", () => {
     fieldOf("id", "string", [use("id", [])]),
     fieldOf("agentName", "string", [use("column", ["agent_name", "text"])]),
   ];
-  let unmappedKey: Description = {
+  let unmappedKey: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
@@ -192,7 +192,7 @@ test("a class with no mapped field is refused", () => {
   let d = agentDescription();
   let none: DecoratorUse[] = [];
   let fields: FieldDescription[] = [fieldOf("scratch", "string", none)];
-  let unmapped: Description = {
+  let unmapped: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
@@ -205,7 +205,7 @@ test("a bad description still produces a mapping that plume refuses", () => {
   let d = agentDescription();
   let none: DecoratorUse[] = [];
   let fields: FieldDescription[] = [fieldOf("scratch", "string", none)];
-  let unmapped: Description = {
+  let unmapped: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: "Agent", args: d.args,
     file: d.file, line: d.line, fields: fields,
   };
@@ -215,7 +215,7 @@ test("a bad description still produces a mapping that plume refuses", () => {
 test("a table name that is not a plain identifier is caught by plume, not here", () => {
   let d = agentDescription();
   let hostile: string[] = ["agents; DROP TABLE users"];
-  let injected: Description = {
+  let injected: EntityDescription = {
     protocol: d.protocol, kind: d.kind, name: d.name, args: hostile,
     file: d.file, line: d.line, fields: d.fields,
   };

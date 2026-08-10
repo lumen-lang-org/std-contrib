@@ -46,10 +46,14 @@ function mountedDeferredSummary(mounted: Mounted): string {
   let i: int = 0;
   while (i < mounted.deferred.length) {
     let server = mounted.servers[mounted.deferred[i].server].serverName;
-    if (!names.includes(server)) { names.push(server); }
+    if (!names.includes(server)) {
+      names.push(server);
+    }
     i = i + 1;
   }
-  if (names.length == 0) { return ""; }
+  if (names.length == 0) {
+    return "";
+  }
   return "Waiting: " + `${stillWaiting(mounted)}` + " tools from "
     + names.join(", ") + ".";
 }
@@ -63,14 +67,20 @@ export function findTools(mounted: Mounted, query: string, cap: int): FoundTools
   let words = query.toLowerCase().split(" ");
   let grown: MountedTool[] = [];
   let m: int = 0;
-  while (m < mounted.tools.length) { grown.push(mounted.tools[m]); m = m + 1; }
+  while (m < mounted.tools.length) {
+    grown.push(mounted.tools[m]);
+    m = m + 1;
+  }
 
   let pool: MountedTool[] = [];
   let scores: int[] = [];
   let i: int = 0;
   while (i < mounted.deferred.length) {
     let t = mounted.deferred[i];
-    if (mountedIndex(grown, t.name) >= 0) { i = i + 1; continue; }
+    if (mountedIndex(grown, t.name) >= 0) {
+      i = i + 1;
+      continue;
+    }
     let name = t.name.toLowerCase();
     let hay = name + " " + t.description.toLowerCase();
     let score: int = 0;
@@ -78,12 +88,19 @@ export function findTools(mounted: Mounted, query: string, cap: int): FoundTools
     while (w < words.length) {
       let word = words[w].trim();
       if (word.length > 2) {
-        if (name.includes(word)) { score = score + 4; }
-        else if (hay.includes(word)) { score = score + 1; }
+        if (name.includes(word)) {
+          score = score + 4;
+        }
+        else if (hay.includes(word)) {
+          score = score + 1;
+        }
       }
       w = w + 1;
     }
-    if (score > 0) { pool.push(t); scores.push(score); }
+    if (score > 0) {
+      pool.push(t);
+      scores.push(score);
+    }
     i = i + 1;
   }
 
@@ -93,10 +110,14 @@ export function findTools(mounted: Mounted, query: string, cap: int): FoundTools
     let k: int = 0;
     while (k < pool.length) {
       if (mountedIndex(found, pool[k].name) < 0
-          && (best < 0 || scores[k] > scores[best])) { best = k; }
+          && (best < 0 || scores[k] > scores[best])) {
+            best = k;
+          }
       k = k + 1;
     }
-    if (best < 0) { break; }
+    if (best < 0) {
+      break;
+    }
     found.push(pool[best]);
     grown.push(pool[best]);
   }
@@ -111,12 +132,16 @@ export function findTools(mounted: Mounted, query: string, cap: int): FoundTools
 
 
 export function deferredBriefing(mounted: Mounted): string {
-  if (stillWaiting(mounted) == 0) { return ""; }
+  if (stillWaiting(mounted) == 0) {
+    return "";
+  }
   let names: string[] = [];
   let i: int = 0;
   while (i < mounted.deferred.length) {
     let server = mounted.servers[mounted.deferred[i].server].serverName;
-    if (!names.includes(server)) { names.push(server); }
+    if (!names.includes(server)) {
+      names.push(server);
+    }
     i = i + 1;
   }
   return "You are connected to " + names.join(", ") + ". Their tools are not "
@@ -130,7 +155,9 @@ export function stillWaiting(mounted: Mounted): int {
   let n: int = 0;
   let i: int = 0;
   while (i < mounted.deferred.length) {
-    if (mountedIndex(mounted.tools, mounted.deferred[i].name) < 0) { n = n + 1; }
+    if (mountedIndex(mounted.tools, mounted.deferred[i].name) < 0) {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -165,7 +192,11 @@ export function delegateToolName(agentName: string): string {
   while (i < agentName.length) {
     let c = agentName.charCodeAt(i);
     let ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 45;
-    if (ok) { out = out + agentName.charAt(i); } else { out = out + "_"; }
+    if (ok) {
+      out = out + agentName.charAt(i);
+    } else {
+      out = out + "_";
+    }
     i = i + 1;
   }
   return out;
@@ -244,7 +275,11 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
           schema: offered[i].schema,
           server: s,
         };
-        if (offered.length > MOUNT_DIRECTLY) { deferred.push(t); } else { tools.push(t); }
+        if (offered.length > MOUNT_DIRECTLY) {
+          deferred.push(t);
+        } else {
+          tools.push(t);
+        }
       }
       i = i + 1;
     }
@@ -258,7 +293,9 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
 export function mountedIndex(tools: MountedTool[], name: string): int {
   let i: int = 0;
   while (i < tools.length) {
-    if (tools[i].name == name) { return i; }
+    if (tools[i].name == name) {
+      return i;
+    }
     i = i + 1;
   }
   return -1;
@@ -302,7 +339,9 @@ function mountedNames(mounted: Mounted): string {
 
 export function serverOf(mounted: Mounted, name: string): string {
   let at = mountedIndex(mounted.tools, name);
-  if (at < 0) { return ""; }
+  if (at < 0) {
+    return "";
+  }
   return mounted.servers[mounted.tools[at].server].serverName;
 }
 
@@ -351,7 +390,7 @@ export function artifactTools(): ToolSpec[] {
     + "and search_artifacts finds the line to send without reading the file. "
     + "Keep this tool for a path that does not exist yet, or a rewrite that replaces most of what is there — "
     + "a body sent whole costs its own size out of one reply's room, and a file large enough cannot be sent that way at all. "
-    + "A path-carrying code fence in your reply (```html path=/index.html) can create a new inert file the same way, but only this tool can update an existing path or write a script or stylesheet; when a reply names one path through both, this tool wins. "
+    + "A path-carrying code fence in your Respond (```html path=/index.html) can create a new inert file the same way, but only this tool can update an existing path or write a script or stylesheet; when a reply names one path through both, this tool wins. "
     + SELF_CONTAINED,
     "{\"type\":\"object\",\"properties\":{"
     + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot and dash; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt or a source suffix.\"},"
@@ -416,7 +455,9 @@ export type ArtifactToolCall = {
 
 export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (call.threadId == "") { return not; }
+  if (call.threadId == "") {
+    return not;
+  }
 
   if (call.name == "write_artifact") {
     let path = normalScope(jsonText(call.args, "path"));
@@ -575,7 +616,9 @@ function searchAnswer(found: ArtifactSearch): string {
 export function scriptEnvNames(db: Db): string[] {
   let out: string[] = [];
   let held = listWhere(db, scriptImagesMapping(), "enabled = " + placeholderAt(db, 1), ["1"]);
-  if (held == "" || held == "[]") { return out; }
+  if (held == "" || held == "[]") {
+    return out;
+  }
   let rows: ScriptImageRow[] = JSON.parse<ScriptImageRow[]>(held);
   let i: int = 0;
   while (i < rows.length) {
@@ -635,11 +678,15 @@ export function scriptTool(envs: string[]): ToolSpec {
 }
 
 function envSentence(envs: string[]): string {
-  if (envs.length == 0) { return ""; }
+  if (envs.length == 0) {
+    return "";
+  }
   let names = "";
   let i: int = 0;
   while (i < envs.length) {
-    if (i > 0) { names = names + (i == envs.length - 1 ? " and " : ", "); }
+    if (i > 0) {
+      names = names + (i == envs.length - 1 ? " and " : ", ");
+    }
     names = names + jsonSafe(envs[i]);
     i = i + 1;
   }
@@ -651,10 +698,18 @@ export function jsonSafe(text: string): string {
   let i: int = 0;
   while (i < text.length) {
     let ch = text.charAt(i);
-    if (ch == "\"") { out = out + "\\\""; }
-    else if (ch == "\\") { out = out + "\\\\"; }
-    else if (ch == "\n" || ch == "\r" || ch == "\t") { out = out + " "; }
-    else { out = out + ch; }
+    if (ch == "\"") {
+      out = out + "\\\"";
+    }
+    else if (ch == "\\") {
+      out = out + "\\\\";
+    }
+    else if (ch == "\n" || ch == "\r" || ch == "\t") {
+      out = out + " ";
+    }
+    else {
+      out = out + ch;
+    }
     i = i + 1;
   }
   return out;
@@ -662,14 +717,18 @@ export function jsonSafe(text: string): string {
 
 export function scriptTools(db: Db): ToolSpec[] {
   let out: ToolSpec[] = [];
-  if (!scriptDockerWorks()) { return out; }
+  if (!scriptDockerWorks()) {
+    return out;
+  }
   out.push(scriptTool(scriptEnvNames(db)));
   return out;
 }
 
 export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (call.threadId == "" || call.name != "run_script") { return not; }
+  if (call.threadId == "" || call.name != "run_script") {
+    return not;
+  }
 
   if (jsonFind(call.args, "language") < 0) {
     let unnamed: FileToolResult = {
@@ -729,7 +788,9 @@ export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
 }
 
 function scriptChangedJson(ran: ScriptRan): string {
-  if (ran.changed.length == 0 && ran.created.length == 0) { return ""; }
+  if (ran.changed.length == 0 && ran.created.length == 0) {
+    return "";
+  }
   let all: ScriptVersioned[] = [...ran.changed, ...ran.created];
   return JSON.stringify(all);
 }
@@ -748,12 +809,24 @@ function scriptRunAnswer(ran: ScriptRan, envName: string): string {
   }
   let ranAtAll = ran.ok || ran.stopped != "" || ran.stdout != "" || ran.stderr != "";
   if (ranAtAll) {
-    if (ran.stdout != "") { out = out + "\nstdout:\n" + ran.stdout; } else { out = out + "\nstdout: (empty)"; }
-    if (ran.stderr != "") { out = out + "\nstderr:\n" + ran.stderr; }
+    if (ran.stdout != "") {
+      out = out + "\nstdout:\n" + ran.stdout;
+    } else {
+      out = out + "\nstdout: (empty)";
+    }
+    if (ran.stderr != "") {
+      out = out + "\nstderr:\n" + ran.stderr;
+    }
   }
-  if (ran.changed.length > 0) { out = out + "\nchanged: " + scriptVersionList(ran.changed); }
-  if (ran.created.length > 0) { out = out + "\ncreated: " + scriptVersionList(ran.created); }
-  if (ran.unchanged.length > 0) { out = out + "\nunchanged: " + scriptVersionList(ran.unchanged); }
+  if (ran.changed.length > 0) {
+    out = out + "\nchanged: " + scriptVersionList(ran.changed);
+  }
+  if (ran.created.length > 0) {
+    out = out + "\ncreated: " + scriptVersionList(ran.created);
+  }
+  if (ran.unchanged.length > 0) {
+    out = out + "\nunchanged: " + scriptVersionList(ran.unchanged);
+  }
   if (ran.missing.length > 0) {
     out = out + "\ndeleted in the run directory (the artifacts keep every version): " + scriptPathList(ran.missing);
   }
@@ -772,7 +845,9 @@ function scriptVersionList(list: ScriptVersioned[]): string {
   let out = "";
   let i: int = 0;
   while (i < list.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + list[i].path + " v" + `${list[i].version}`;
     i = i + 1;
   }
@@ -783,7 +858,9 @@ function scriptPathList(list: string[]): string {
   let out = "";
   let i: int = 0;
   while (i < list.length) {
-    if (i > 0) { out = out + ", "; }
+    if (i > 0) {
+      out = out + ", ";
+    }
     out = out + list[i];
     i = i + 1;
   }
@@ -802,13 +879,18 @@ export function agentSkills(db: Db, agentId: string): SkillRow[] {
   let out: SkillRow[] = [];
   let taken: bool[] = [];
   let t: int = 0;
-  while (t < rows.length) { taken.push(false); t = t + 1; }
+  while (t < rows.length) {
+    taken.push(false);
+    t = t + 1;
+  }
   let picked: int = 0;
   while (picked < rows.length) {
     let at: int = -1;
     let i: int = 0;
     while (i < rows.length) {
-      if (!taken[i] && (at < 0 || rows[i].skillName < rows[at].skillName)) { at = i; }
+      if (!taken[i] && (at < 0 || rows[i].skillName < rows[at].skillName)) {
+        at = i;
+      }
       i = i + 1;
     }
     out.push(rows[at]);
@@ -829,8 +911,12 @@ export function skillFiles(db: Db, skillId: string): SkillFileRow[] {
 
 export function skillTools(db: Db, agentId: string): ToolSpec[] {
   let none: ToolSpec[] = [];
-  if (agentId == "") { return none; }
-  if (agentSkills(db, agentId).length == 0) { return none; }
+  if (agentId == "") {
+    return none;
+  }
+  if (agentSkills(db, agentId).length == 0) {
+    return none;
+  }
   let out: ToolSpec[] = [];
   out.push(toolSpec("use_skill",
     "Load the full instructions for one of your skills. Your briefing lists each skill as a name and a "
@@ -857,7 +943,9 @@ export type SkillToolCall = {
 
 export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (call.agentId == "") { return not; }
+  if (call.agentId == "") {
+    return not;
+  }
 
   let asked = "";
   if (call.name == "use_skill") {
@@ -870,7 +958,9 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
     }
     asked = jsonText(call.args, "name");
   } else {
-    if (!skillNamed(db, call.agentId, call.name)) { return not; }
+    if (!skillNamed(db, call.agentId, call.name)) {
+      return not;
+    }
     asked = call.name;
   }
 
@@ -884,7 +974,9 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
         let listed = "";
         let f: int = 0;
         while (f < files.length) {
-          if (f > 0) { listed = listed + ", "; }
+          if (f > 0) {
+            listed = listed + ", ";
+          }
           listed = listed + files[f].path;
           f = f + 1;
         }
@@ -900,7 +992,9 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
   let names = "";
   i = 0;
   while (i < rows.length) {
-    if (i > 0) { names = names + ", "; }
+    if (i > 0) {
+      names = names + ", ";
+    }
     names = names + rows[i].skillName;
     i = i + 1;
   }
@@ -912,11 +1006,15 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
 }
 
 export function skillNamed(db: Db, agentId: string, name: string): bool {
-  if (name == "") { return false; }
+  if (name == "") {
+    return false;
+  }
   let rows = agentSkills(db, agentId);
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].skillName == name || sameName(rows[i].skillName, name)) { return true; }
+    if (rows[i].skillName == name || sameName(rows[i].skillName, name)) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -927,9 +1025,13 @@ export function sameName(a: string, b: string): bool {
 }
 
 export function envBriefing(db: Db): string {
-  if (!scriptDockerWorks()) { return ""; }
+  if (!scriptDockerWorks()) {
+    return "";
+  }
   let names = scriptEnvNames(db);
-  if (names.length == 0) { return ""; }
+  if (names.length == 0) {
+    return "";
+  }
   let out = "run_script can run in any of these environments — pass the name as \"environment\":";
   let i: int = 0;
   while (i < names.length) {
@@ -947,7 +1049,9 @@ export const SKILL_BRIEFING_LINES: int = 50;
 
 export function skillBriefing(db: Db, agentId: string): string {
   let rows = agentSkills(db, agentId);
-  if (rows.length == 0) { return ""; }
+  if (rows.length == 0) {
+    return "";
+  }
   let shown = rows.length < SKILL_BRIEFING_LINES ? rows.length : SKILL_BRIEFING_LINES;
   let out = "You have these skills — named instructions you can load with use_skill:";
   let i: int = 0;
@@ -959,7 +1063,9 @@ export function skillBriefing(db: Db, agentId: string): string {
     let names = "";
     let n: int = shown;
     while (n < rows.length) {
-      if (n > shown) { names = names + ", "; }
+      if (n > shown) {
+        names = names + ", ";
+      }
       names = names + rows[n].skillName;
       n = n + 1;
     }

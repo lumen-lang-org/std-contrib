@@ -133,7 +133,9 @@ function segmentCharsOk(seg: string): bool {
     let c = seg.charCodeAt(i);
     let ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
       || c == 46 || c == 45;
-    if (!ok) { return false; }
+    if (!ok) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
@@ -157,26 +159,52 @@ export function labelProblem(what: string, text: string, cap: int): string {
 function extensionOf(path: string): string {
   let dot = path.lastIndexOf(".");
   let slash = path.lastIndexOf("/");
-  if (dot < 0 || dot < slash) { return ""; }
-  if (dot == path.length - 1) { return ""; }
+  if (dot < 0 || dot < slash) {
+    return "";
+  }
+  if (dot == path.length - 1) {
+    return "";
+  }
   return path.slice(dot + 1).toLowerCase();
 }
 
 export function kindOf(path: string): string {
   let ext = extensionOf(path);
-  if (ext == "html" || ext == "htm") { return "html"; }
-  if (ext == "svg") { return "svg"; }
-  if (ext == "md" || ext == "markdown") { return "markdown"; }
-  if (ext == "json") { return "json"; }
-  if (ext == "css") { return "css"; }
-  if (ext == "js" || ext == "mjs") { return "javascript"; }
+  if (ext == "html" || ext == "htm") {
+    return "html";
+  }
+  if (ext == "svg") {
+    return "svg";
+  }
+  if (ext == "md" || ext == "markdown") {
+    return "markdown";
+  }
+  if (ext == "json") {
+    return "json";
+  }
+  if (ext == "css") {
+    return "css";
+  }
+  if (ext == "js" || ext == "mjs") {
+    return "javascript";
+  }
   if (ext == "ts" || ext == "tsx" || ext == "jsx"
     || ext == "py" || ext == "sql" || ext == "sh"
-    || ext == "yaml" || ext == "yml" || ext == "toml") { return "code"; }
-  if (ext == "txt" || ext == "csv" || ext == "log") { return "text"; }
-  if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp") { return "image"; }
-  if (ext == "docx" || ext == "xlsx" || ext == "xls" || ext == "pptx") { return "office"; }
-  if (ext == "pdf") { return "pdf"; }
+    || ext == "yaml" || ext == "yml" || ext == "toml") {
+      return "code";
+    }
+  if (ext == "txt" || ext == "csv" || ext == "log") {
+    return "text";
+  }
+  if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp") {
+    return "image";
+  }
+  if (ext == "docx" || ext == "xlsx" || ext == "xls" || ext == "pptx") {
+    return "office";
+  }
+  if (ext == "pdf") {
+    return "pdf";
+  }
   return "file";
 }
 
@@ -186,22 +214,46 @@ export function binaryKind(kind: string): bool {
 
 export function imageMediaType(path: string): string {
   let ext = extensionOf(path);
-  if (ext == "png") { return "image/png"; }
-  if (ext == "jpg" || ext == "jpeg") { return "image/jpeg"; }
-  if (ext == "gif") { return "image/gif"; }
-  if (ext == "webp") { return "image/webp"; }
+  if (ext == "png") {
+    return "image/png";
+  }
+  if (ext == "jpg" || ext == "jpeg") {
+    return "image/jpeg";
+  }
+  if (ext == "gif") {
+    return "image/gif";
+  }
+  if (ext == "webp") {
+    return "image/webp";
+  }
   return "";
 }
 
 export function mimeOf(kind: string): string {
-  if (kind == "html") { return "text/html; charset=utf-8"; }
-  if (kind == "svg") { return "image/svg+xml; charset=utf-8"; }
-  if (kind == "markdown") { return "text/markdown; charset=utf-8"; }
-  if (kind == "json") { return "application/json; charset=utf-8"; }
-  if (kind == "css") { return "text/css; charset=utf-8"; }
-  if (kind == "javascript") { return "text/javascript; charset=utf-8"; }
-  if (kind == "image") { return "text/plain; charset=utf-8"; }
-  if (kind == "pdf") { return "application/pdf"; }
+  if (kind == "html") {
+    return "text/html; charset=utf-8";
+  }
+  if (kind == "svg") {
+    return "image/svg+xml; charset=utf-8";
+  }
+  if (kind == "markdown") {
+    return "text/markdown; charset=utf-8";
+  }
+  if (kind == "json") {
+    return "application/json; charset=utf-8";
+  }
+  if (kind == "css") {
+    return "text/css; charset=utf-8";
+  }
+  if (kind == "javascript") {
+    return "text/javascript; charset=utf-8";
+  }
+  if (kind == "image") {
+    return "text/plain; charset=utf-8";
+  }
+  if (kind == "pdf") {
+    return "application/pdf";
+  }
   return "text/plain; charset=utf-8";
 }
 
@@ -246,10 +298,18 @@ export function putArtifact(db: Db, write: ArtifactWrite): ArtifactWritten {
 
 function binaryBodyProblem(path: string, content: string): string {
   let kind = kindOf(path);
-  if (kind != "office" && kind != "pdf") { return ""; }
-  if (content == "") { return ""; }
-  if (kind == "office" && content.startsWith("UEs")) { return ""; }
-  if (kind == "pdf" && content.startsWith("JVBER")) { return ""; }
+  if (kind != "office" && kind != "pdf") {
+    return "";
+  }
+  if (content == "") {
+    return "";
+  }
+  if (kind == "office" && content.startsWith("UEs")) {
+    return "";
+  }
+  if (kind == "pdf" && content.startsWith("JVBER")) {
+    return "";
+  }
   let want = kind == "pdf" ? "a PDF" : "an Office document (a ZIP, as every .docx, .xlsx and .pptx is)";
   return "the body of " + path + " is not " + want
     + ": this artifact's content is base64 of the file's own bytes, and what arrived is not."
@@ -257,18 +317,28 @@ function binaryBodyProblem(path: string, content: string): string {
 }
 
 function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten {
-  if (write.threadId == "") { return refusal("an artifact belongs to a thread"); }
+  if (write.threadId == "") {
+    return refusal("an artifact belongs to a thread");
+  }
   let problem = pathProblem(write.path);
-  if (problem != "") { return refusal(problem); }
+  if (problem != "") {
+    return refusal(problem);
+  }
   if (write.origin != "uploaded" && write.origin != "generated") {
     return refusal("origin must be uploaded or generated");
   }
   let badTitle = labelProblem("title", write.title, ARTIFACT_TITLE_MAX);
-  if (badTitle != "") { return refusal(badTitle); }
+  if (badTitle != "") {
+    return refusal(badTitle);
+  }
   let badNote = labelProblem("note", write.note, ARTIFACT_NOTE_MAX);
-  if (badNote != "") { return refusal(badNote); }
+  if (badNote != "") {
+    return refusal(badNote);
+  }
   let badBinary = binaryBodyProblem(write.path, write.content);
-  if (badBinary != "") { return refusal(badBinary); }
+  if (badBinary != "") {
+    return refusal(badBinary);
+  }
   let bytes = utf8Length(write.content);
   if (bytes > ARTIFACT_MAX) {
     return refusal("an artifact is at most " + `${ARTIFACT_MAX}` + " bytes; this one is " + `${bytes}`);
@@ -278,7 +348,9 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
   let id = write.threadId + ":" + path;
 
   let opened = beginTransaction(db);
-  if (!opened.ok) { return refusal("the artifact could not be saved; try again"); }
+  if (!opened.ok) {
+    return refusal("the artifact could not be saved; try again");
+  }
 
   let existing = getArtifact(db, write.threadId, path);
   let slot = existing.slot;
@@ -391,10 +463,16 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
 
 function maxSlot(db: Db, threadId: string): int {
   let sql = "SELECT MAX(slot) FROM artifacts WHERE thread_id = " + placeholderAt(db, 1);
-  if (!db.query(sql, [threadId])) { return -2; }
-  if (db.rows() == 0) { return -1; }
+  if (!db.query(sql, [threadId])) {
+    return -2;
+  }
+  if (db.rows() == 0) {
+    return -1;
+  }
   let top = db.value(0, 0);
-  if (top == "") { return -1; }
+  if (top == "") {
+    return -1;
+  }
   return parseInt(top) ?? -1;
 }
 
@@ -402,17 +480,27 @@ export function threadBytes(db: Db, threadId: string): int {
   let sql = "SELECT SUM(artifact_versions.bytes) FROM artifact_versions"
     + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
     + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
-  if (!db.query(sql, [threadId])) { return -1; }
-  if (db.rows() == 0) { return 0; }
+  if (!db.query(sql, [threadId])) {
+    return -1;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
   let held = db.value(0, 0);
-  if (held == "") { return 0; }
+  if (held == "") {
+    return 0;
+  }
   return parseInt(held) ?? -1;
 }
 
 export function nextVersion(db: Db, artifactId: string): int {
   let sql = "SELECT MAX(version) FROM artifact_versions WHERE artifact_id = " + placeholderAt(db, 1);
-  if (!db.query(sql, [artifactId])) { return 0; }
-  if (db.rows() == 0) { return 1; }
+  if (!db.query(sql, [artifactId])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 1;
+  }
   return (parseInt(db.value(0, 0)) ?? 0) + 1;
 }
 
@@ -426,7 +514,9 @@ function noArtifact(): ArtifactRow {
 
 export function getArtifact(db: Db, threadId: string, path: string): ArtifactRow {
   let document = findById(db, artifactsMapping(), threadId + ":" + normalScope(path));
-  if (document == "") { return noArtifact(); }
+  if (document == "") {
+    return noArtifact();
+  }
   return JSON.parse<ArtifactRow>(document);
 }
 
@@ -435,9 +525,13 @@ export const BRIEFING_LINES: int = 50;
 export function artifactBriefing(db: Db, threadId: string): string {
   let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }, { column: "slot", direction: "desc" }];
   let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
-  if (listed == "" || listed == "[]") { return ""; }
+  if (listed == "" || listed == "[]") {
+    return "";
+  }
   let rows = JSON.parse<ArtifactRow[]>(listed);
-  if (rows.length == 0) { return ""; }
+  if (rows.length == 0) {
+    return "";
+  }
   let shown = rows.length < BRIEFING_LINES ? rows.length : BRIEFING_LINES;
   let out = "This conversation already has these artifacts:";
   let i: int = 0;
@@ -461,7 +555,9 @@ export function listArtifacts(db: Db, threadId: string): ArtifactRow[] {
   let none: ArtifactRow[] = [];
   let keys: DbOrder[] = [{ column: "slot" }];
   let listed = listOrdered(db, artifactsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: [threadId], order: keys });
-  if (listed == "" || listed == "[]") { return none; }
+  if (listed == "" || listed == "[]") {
+    return none;
+  }
   return JSON.parse<ArtifactRow[]>(listed);
 }
 
@@ -488,13 +584,18 @@ export function libraryFor(db: Db, tags: string[], cap: int): ArtifactCard[] {
   if (scope != "") {
     where = where + " WHERE " + scope;
     let t: int = 0;
-    while (t < tags.length) { args.push(tags[t]); t = t + 1; }
+    while (t < tags.length) {
+      args.push(tags[t]);
+      t = t + 1;
+    }
   }
   where = where + ")";
 
   let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }];
   let listed = listOrdered(db, artifactsMapping(), { where: where, args: args, order: keys });
-  if (listed == "" || listed == "[]") { return none; }
+  if (listed == "" || listed == "[]") {
+    return none;
+  }
   let rows = JSON.parse<ArtifactRow[]>(listed);
 
   let out: ArtifactCard[] = [];
@@ -549,13 +650,17 @@ function turnArtifactSql(): string {
 
 export function artifactsForTurn(db: Db, threadId: string, turnSeq: int): TurnArtifact[] {
   let out: TurnArtifact[] = [];
-  if (turnSeq < 0) { return out; }
+  if (turnSeq < 0) {
+    return out;
+  }
   let sql = turnArtifactSql()
     + " WHERE artifacts.thread_id = " + placeholderAt(db, 1)
     + " AND artifact_versions.turn_seq = " + placeholderAt(db, 2)
     + " AND artifact_versions.turn_seq >= 0"
     + " ORDER BY artifacts.slot, artifact_versions.version";
-  if (!db.query(sql, [threadId, `${turnSeq}`])) { return out; }
+  if (!db.query(sql, [threadId, `${turnSeq}`])) {
+    return out;
+  }
   let i: int = 0;
   while (i < db.rows()) {
     out.push(turnArtifactAt(db, i));
@@ -570,7 +675,9 @@ export function artifactsByTurn(db: Db, threadId: string): TurnArtifact[] {
     + " WHERE artifacts.thread_id = " + placeholderAt(db, 1)
     + " AND artifact_versions.turn_seq >= 0"
     + " ORDER BY artifact_versions.turn_seq, artifacts.slot, artifact_versions.version";
-  if (!db.query(sql, [threadId])) { return out; }
+  if (!db.query(sql, [threadId])) {
+    return out;
+  }
   let i: int = 0;
   while (i < db.rows()) {
     out.push(turnArtifactAt(db, i));
@@ -580,11 +687,17 @@ export function artifactsByTurn(db: Db, threadId: string): TurnArtifact[] {
 }
 
 export function findByToken(db: Db, token: string): ArtifactRow {
-  if (token == "") { return noArtifact(); }
+  if (token == "") {
+    return noArtifact();
+  }
   let listed = listWhere(db, artifactsMapping(), "preview_token = " + placeholderAt(db, 1), [token]);
-  if (listed == "" || listed == "[]") { return noArtifact(); }
+  if (listed == "" || listed == "[]") {
+    return noArtifact();
+  }
   let rows: ArtifactRow[] = JSON.parse<ArtifactRow[]>(listed);
-  if (rows.length == 0) { return noArtifact(); }
+  if (rows.length == 0) {
+    return noArtifact();
+  }
   return rows[0];
 }
 
@@ -594,16 +707,22 @@ export function getVersion(db: Db, artifactId: string, version: int): ArtifactVe
     origin: "", turnSeq: TURN_SEQ_NONE, note: "", createdAt: "",
   };
   let document = findById(db, artifactVersionsMapping(), artifactId + ":" + `${version}`);
-  if (document == "") { return absent; }
+  if (document == "") {
+    return absent;
+  }
   return JSON.parse<ArtifactVersionRow>(document);
 }
 
 export function deleteArtifact(db: Db, threadId: string, path: string): string {
   let artifact = getArtifact(db, threadId, path);
-  if (artifact.id == "") { return "no artifact at \"" + normalScope(path) + "\" in this thread"; }
+  if (artifact.id == "") {
+    return "no artifact at \"" + normalScope(path) + "\" in this thread";
+  }
 
   let opened = beginTransaction(db);
-  if (!opened.ok) { return opened.error; }
+  if (!opened.ok) {
+    return opened.error;
+  }
 
   let bodies = executeWith(db, "DELETE FROM artifact_versions WHERE artifact_id = " + placeholderAt(db, 1),
     [artifact.id]);

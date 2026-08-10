@@ -11,7 +11,10 @@ import { AgentRun, runAgent } from "../run.ts";
 
 function main(): void {
   let master = masterKey();
-  if (masterKeyProblem(master) != "") { console.error(masterKeyProblem(master)); return; }
+  if (masterKeyProblem(master) != "") {
+    console.error(masterKeyProblem(master));
+    return;
+  }
 
   let db = postgres();
   let cfg: DbConfig = { host: "127.0.0.1", user: "lumen", password: "lumen", database: "lumenvec" };
@@ -24,17 +27,25 @@ function main(): void {
   migrate(db, schemaPlan(db));
 
   let key = process.env("MISTRAL_API_KEY") ?? "";
-  if (key != "") { storeCredential(db, { provider: "mistral", apiKey: key, masterKey: master, now: "2026-07-25" }); }
+  if (key != "") {
+    storeCredential(db, { provider: "mistral", apiKey: key, masterKey: master, now: "2026-07-25" });
+  }
   let stored = credentialFor(db, "mistral", master);
 
   let embedRow: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
   persist(db, modelsMapping(), JSON.stringify(embedRow));
 
   let embedder = embeddingModel(db, "e1");
-  if (embedder.id == "") { console.error("no embedding model e1"); return; }
+  if (embedder.id == "") {
+    console.error("no embedding model e1");
+    return;
+  }
   console.log("embedding with " + embedder.label + " at " + `${embedder.dimensions}` + " dimensions");
   let problem = createDocuments(db, embedder);
-  if (problem != "") { console.error(problem); return; }
+  if (problem != "") {
+    console.error(problem);
+    return;
+  }
 
   indexDocument(db, embedder, { id: "d1", source: "plume", scope: "/specs/plume", body: "The plume package maps records to tables. A mapping is stated once with the field, column and SQL type; nothing is inferred from a name." }, stored);
   indexDocument(db, embedder, { id: "d2", source: "plume", scope: "/specs/plume", body: "A page without an ordering is refused by pageOrdered, because two requests for the first twenty rows can overlap or skip records when the database answers in any order." }, stored);
@@ -44,7 +55,10 @@ function main(): void {
   let question = "Why does plume refuse an unordered page?";
   let granted: string[] = ["/specs"];
   let found = retrieve(db, embedder, granted, question, 2, stored);
-  if (!found.ok) { console.error(found.error); return; }
+  if (!found.ok) {
+    console.error(found.error);
+    return;
+  }
   console.log("");
   let i: int = 0;
   while (i < found.found.length) {

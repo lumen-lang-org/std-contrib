@@ -69,7 +69,9 @@ function firstLine(text: string): string {
       line = line + text.charAt(j);
       j = j + 1;
     }
-    if (line.trim() != "") { return line.trim(); }
+    if (line.trim() != "") {
+      return line.trim();
+    }
     i = j + 1;
   }
   return "";
@@ -79,7 +81,9 @@ function preludeLines(): int {
   let n: int = 0;
   let i: int = 0;
   while (i < PRELUDE.length) {
-    if (PRELUDE.charCodeAt(i) == 10) { n = n + 1; }
+    if (PRELUDE.charCodeAt(i) == 10) {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -87,16 +91,22 @@ function preludeLines(): int {
 
 function atUserLine(said: string): string {
   let colon = said.indexOf(":");
-  if (colon <= 0) { return said; }
+  if (colon <= 0) {
+    return said;
+  }
   let head = said.slice(0, colon);
   let line = parseInt(head, 10) ?? 0;
-  if (line <= preludeLines()) { return said; }
+  if (line <= preludeLines()) {
+    return said;
+  }
   return `${line - preludeLines()}` + said.slice(colon);
 }
 
 function withoutPath(line: string): string {
   let at = line.indexOf(".ts:");
-  if (at < 0) { return line.trim(); }
+  if (at < 0) {
+    return line.trim();
+  }
   return atUserLine(line.slice(at + 4).trim());
 }
 
@@ -106,7 +116,10 @@ export function compilerSaid(stderr: string, stdout: string): string {
   while (i < text.length) {
     let line = "";
     let j = i;
-    while (j < text.length && text.charCodeAt(j) != 10) { line = line + text.charAt(j); j = j + 1; }
+    while (j < text.length && text.charCodeAt(j) != 10) {
+      line = line + text.charAt(j);
+      j = j + 1;
+    }
     if (line.includes("error:")) {
       let said = withoutPath(line);
       return said.length > 300 ? said.slice(0, 297) + "..." : said;
@@ -136,8 +149,12 @@ export function ensureBuilt(source: string): ScriptBuild {
       let had: ScriptBuild = { ok: true, path: wasm, error: "", fresh: false };
       return had;
     }
-    if (!fs.existsSync(scriptCacheDir())) { fs.mkdirSync(scriptCacheDir()); }
-    if (!fs.existsSync(dir)) { fs.mkdirSync(dir); }
+    if (!fs.existsSync(scriptCacheDir())) {
+      fs.mkdirSync(scriptCacheDir());
+    }
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
     fs.writeFileSync(dir + "/" + hash + ".ts", fullSource(source));
   } catch (e) {
     let broke: ScriptBuild = { ok: false, path: "",
@@ -147,7 +164,9 @@ export function ensureBuilt(source: string): ScriptBuild {
   let res = child_process.spawnSync(lumenBin(), ["compile", "--wasm", dir + "/" + hash + ".ts"]);
   let dropped = hash + ".wasm";
   if (res.status != 0 || !fs.existsSync(dropped)) {
-    try { if (fs.existsSync(dropped)) { fs.rmSync(dropped, false); } } catch { }
+    try { if (fs.existsSync(dropped)) {
+      fs.rmSync(dropped, false);
+    } } catch { }
     let refused: ScriptBuild = { ok: false, path: "",
       error: compilerSaid(res.stderr, res.stdout), fresh: true };
     return refused;
@@ -170,17 +189,24 @@ export const SCRIPT_CACHE_KEEP: int = 200;
 function sweepCache(): void {
   try {
     let names = fs.readdirSync(scriptCacheDir());
-    if (names.length <= SCRIPT_CACHE_KEEP) { return; }
+    if (names.length <= SCRIPT_CACHE_KEEP) {
+      return;
+    }
     let oldestAt: number = 0.0;
     let oldest = "";
     let i: int = 0;
     while (i < names.length) {
       let dir = scriptCacheDir() + "/" + names[i];
       let when = fs.statSync(dir).mtimeMs;
-      if (oldest == "" || when < oldestAt) { oldestAt = when; oldest = dir; }
+      if (oldest == "" || when < oldestAt) {
+        oldestAt = when;
+        oldest = dir;
+      }
       i = i + 1;
     }
-    if (oldest != "") { fs.rmSync(oldest, true); }
+    if (oldest != "") {
+      fs.rmSync(oldest, true);
+    }
   } catch (e) {
   }
 }
@@ -197,12 +223,16 @@ export type ScriptOut = {
 };
 
 function tameId(id: string): bool {
-  if (id == "" || id.length > 64) { return false; }
+  if (id == "" || id.length > 64) {
+    return false;
+  }
   let i: int = 0;
   while (i < id.length) {
     let c = id.charAt(i);
     let ok = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c == "-" || c == "_";
-    if (!ok) { return false; }
+    if (!ok) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
@@ -213,9 +243,13 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
     let cut = callDir.lastIndexOf("/");
     if (cut > 0) {
       let parent = callDir.slice(0, cut);
-      if (!fs.existsSync(parent)) { fs.mkdirSync(parent); }
+      if (!fs.existsSync(parent)) {
+        fs.mkdirSync(parent);
+      }
     }
-    if (!fs.existsSync(callDir)) { fs.mkdirSync(callDir); }
+    if (!fs.existsSync(callDir)) {
+      fs.mkdirSync(callDir);
+    }
     fs.writeFileSync(callDir + "/input", given.input);
     fs.writeFileSync(callDir + "/prev", given.prev);
     let o: int = 0;
@@ -247,7 +281,10 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
   timed.push(`${SCRIPT_WALL_S}`);
   timed.push(wasmtimeBin());
   let a: int = 0;
-  while (a < args.length) { timed.push(args[a]); a = a + 1; }
+  while (a < args.length) {
+    timed.push(args[a]);
+    a = a + 1;
+  }
   let res = child_process.spawnSync("timeout", timed);
   if (res.status != 0) {
     if (res.status == 124 || res.status == 137) {
@@ -256,7 +293,9 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
       return late;
     }
     let why = firstLine(res.stderr);
-    if (why == "") { why = firstLine(res.stdout); }
+    if (why == "") {
+      why = firstLine(res.stdout);
+    }
     if (res.stderr.includes("epoch deadline") || res.stderr.includes("interrupt")) {
       why = "the script ran longer than " + `${SCRIPT_TIMEOUT_S}` + " seconds and was stopped";
     } else if (why == "") {
@@ -273,7 +312,9 @@ export function runScript(wasmPath: string, given: ScriptGiven, callDir: string)
       error: "the script answered " + `${said.length}` + " characters — the most a step may pass on is " + `${SCRIPT_OUT_MAX}` };
     return loud;
   }
-  try { fs.rmSync(callDir, true); } catch (e) { }
+  try {
+    fs.rmSync(callDir, true);
+  } catch (e) { }
   let done: WasmRun = { ok: true, output: said.trim(), error: "" };
   return done;
 }

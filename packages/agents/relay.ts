@@ -7,10 +7,16 @@ const COOLOFF_MS: number = 30000;
 
 export function nudgeConsoles(): void {
   let targets = process.env("AGENTS_CONSOLE_NUDGE") ?? "";
-  if (targets == "") { return; }
+  if (targets == "") {
+    return;
+  }
   let now = Date.now();
-  if (now < coolUntil) { return; }
-  if (now - lastNudge < NUDGE_GAP_MS) { return; }
+  if (now < coolUntil) {
+    return;
+  }
+  if (now - lastNudge < NUDGE_GAP_MS) {
+    return;
+  }
   lastNudge = now;
 
   let list = targets.split(",");
@@ -20,9 +26,13 @@ export function nudgeConsoles(): void {
     let url = list[i].trim();
     if (url != "") {
       let res = http.request(url, "POST", "", new Map<string, string>());
-      if (!res.ok || res.status != 204) { failed = true; }
+      if (!res.ok || res.status != 204) {
+        failed = true;
+      }
     }
     i = i + 1;
   }
-  if (failed) { coolUntil = now + COOLOFF_MS; }
+  if (failed) {
+    coolUntil = now + COOLOFF_MS;
+  }
 }

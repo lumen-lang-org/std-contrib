@@ -28,7 +28,9 @@ export type TaskRow = {
 };
 
 export function stampMs(said: string): number {
-  if (said == "") { return 0.0; }
+  if (said == "") {
+    return 0.0;
+  }
   return parseFloat(said) ?? 0.0;
 }
 
@@ -88,30 +90,52 @@ function good(expr: string): Compiled {
 }
 
 function dayNumber(said: string): int {
-  if (said == "sunday" || said == "sun") { return 0; }
-  if (said == "monday" || said == "mon") { return 1; }
-  if (said == "tuesday" || said == "tue") { return 2; }
-  if (said == "wednesday" || said == "wed") { return 3; }
-  if (said == "thursday" || said == "thu") { return 4; }
-  if (said == "friday" || said == "fri") { return 5; }
-  if (said == "saturday" || said == "sat") { return 6; }
+  if (said == "sunday" || said == "sun") {
+    return 0;
+  }
+  if (said == "monday" || said == "mon") {
+    return 1;
+  }
+  if (said == "tuesday" || said == "tue") {
+    return 2;
+  }
+  if (said == "wednesday" || said == "wed") {
+    return 3;
+  }
+  if (said == "thursday" || said == "thu") {
+    return 4;
+  }
+  if (said == "friday" || said == "fri") {
+    return 5;
+  }
+  if (said == "saturday" || said == "sat") {
+    return 6;
+  }
   return -1;
 }
 
 function clockMinutes(said: string): int {
-  if (said.length != 5 || said.charAt(2) != ":") { return -1; }
+  if (said.length != 5 || said.charAt(2) != ":") {
+    return -1;
+  }
   let hh = parseInt(said.slice(0, 2), 10) ?? -1;
   let mm = parseInt(said.slice(3, 5), 10) ?? -1;
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) { return -1; }
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return -1;
+  }
   return hh * 60 + mm;
 }
 
 function digitsOnly(said: string): bool {
-  if (said.length == 0) { return false; }
+  if (said.length == 0) {
+    return false;
+  }
   let i: int = 0;
   while (i < said.length) {
     let c = said.charCodeAt(i);
-    if (c < 48 || c > 57) { return false; }
+    if (c < 48 || c > 57) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
@@ -123,7 +147,9 @@ export function compile(said: string): Compiled {
   let clean: string[] = [];
   let w: int = 0;
   while (w < words.length) {
-    if (words[w] != "") { clean.push(words[w]); }
+    if (words[w] != "") {
+      clean.push(words[w]);
+    }
     w = w + 1;
   }
   if (clean.length < 3 || clean[0] != "every") {
@@ -131,18 +157,24 @@ export function compile(said: string): Compiled {
   }
 
   if (digitsOnly(clean[1])) {
-    if (clean.length != 3) { return bad("say \"every " + clean[1] + " minutes\" or \"every " + clean[1] + " hours\""); }
+    if (clean.length != 3) {
+      return bad("say \"every " + clean[1] + " minutes\" or \"every " + clean[1] + " hours\"");
+    }
     let n = parseInt(clean[1], 10) ?? 0;
     let unit = clean[2];
     if (unit == "minutes" || unit == "minute") {
       if (n < MIN_EVERY_MINUTES) {
         return bad("the shortest interval is " + `${MIN_EVERY_MINUTES}` + " minutes");
       }
-      if (n > 59) { return bad("for an hour or more, say it in hours"); }
+      if (n > 59) {
+        return bad("for an hour or more, say it in hours");
+      }
       return good("0 */" + `${n}` + " * * * *");
     }
     if (unit == "hours" || unit == "hour") {
-      if (n < 1 || n > 23) { return bad("hours must be between 1 and 23"); }
+      if (n < 1 || n > 23) {
+        return bad("hours must be between 1 and 23");
+      }
       return good("0 0 */" + `${n}` + " * * *");
     }
     return bad("\"" + unit + "\" is not minutes or hours");
@@ -152,16 +184,26 @@ export function compile(said: string): Compiled {
     return bad("say \"every " + clean[1] + " at 08:00\"");
   }
   let when = clockMinutes(clean[3]);
-  if (when < 0) { return bad("\"" + clean[3] + "\" is not a time — write it as HH:MM, e.g. 08:00"); }
+  if (when < 0) {
+    return bad("\"" + clean[3] + "\" is not a time — write it as HH:MM, e.g. 08:00");
+  }
   let hh = `${when / 60}`;
   let mm = `${when % 60}`;
 
   let dow = clean[1];
-  if (dow == "day") { return good("0 " + mm + " " + hh + " * * *"); }
-  if (dow == "weekday") { return good("0 " + mm + " " + hh + " * * 1-5"); }
-  if (dow == "weekend") { return good("0 " + mm + " " + hh + " * * 0,6"); }
+  if (dow == "day") {
+    return good("0 " + mm + " " + hh + " * * *");
+  }
+  if (dow == "weekday") {
+    return good("0 " + mm + " " + hh + " * * 1-5");
+  }
+  if (dow == "weekend") {
+    return good("0 " + mm + " " + hh + " * * 0,6");
+  }
   let n = dayNumber(dow);
-  if (n >= 0) { return good("0 " + mm + " " + hh + " * * " + `${n}`); }
+  if (n >= 0) {
+    return good("0 " + mm + " " + hh + " * * " + `${n}`);
+  }
   return bad("\"" + dow + "\" is not a day, \"weekday\", \"weekend\" or \"day\"");
 }
 
@@ -183,15 +225,23 @@ function noFire(why: string): Scheduled {
 export function nextFire(row: TaskRow, afterMs: number): Scheduled {
   if (row.kind == "once") {
     let at = stampMs(row.nextAt);
-    if (at <= 0.0) { return noFire("this task has no instant to run at"); }
-    if (at <= afterMs) { return noFire("already run"); }
+    if (at <= 0.0) {
+      return noFire("this task has no instant to run at");
+    }
+    if (at <= afterMs) {
+      return noFire("already run");
+    }
     let once: Scheduled = { ok: true, at: row.nextAt, error: "" };
     return once;
   }
-  if (row.cronExpr == "") { return noFire("this task has no schedule"); }
+  if (row.cronExpr == "") {
+    return noFire("this task has no schedule");
+  }
   let zone = row.tz == "" ? "UTC" : row.tz;
   let fire = nextFiring(zone, row.cronExpr, afterMs as i64);
-  if (!fire.ok) { return noFire(fire.error); }
+  if (!fire.ok) {
+    return noFire(fire.error);
+  }
   let out: Scheduled = { ok: true, at: `${fire.at}`, error: "" };
   return out;
 }
@@ -202,7 +252,9 @@ export function onceInstant(said: string, zone: string, nowMs: number): Schedule
   let clean: string[] = [];
   let w: int = 0;
   while (w < words.length) {
-    if (words[w] != "") { clean.push(words[w]); }
+    if (words[w] != "") {
+      clean.push(words[w]);
+    }
     w = w + 1;
   }
   if (clean.length != 4 || clean[0] != "on" || clean[2] != "at") {
@@ -219,11 +271,15 @@ export function onceInstant(said: string, zone: string, nowMs: number): Schedule
     return noFire("\"" + date + "\" is not a date this understands");
   }
   let when = clockMinutes(clean[3]);
-  if (when < 0) { return noFire("\"" + clean[3] + "\" is not a time — write it as HH:MM, e.g. 09:00"); }
+  if (when < 0) {
+    return noFire("\"" + clean[3] + "\" is not a time — write it as HH:MM, e.g. 09:00");
+  }
 
   let expr = "0 " + `${when % 60}` + " " + `${when / 60}` + " " + `${day}` + " " + `${month}` + " *";
   let fire = nextFiring(zone == "" ? "UTC" : zone, expr, nowMs as i64);
-  if (!fire.ok) { return noFire("there is no " + date + " at " + clean[3] + " to run at"); }
+  if (!fire.ok) {
+    return noFire("there is no " + date + " at " + clean[3] + " to run at");
+  }
   let reads = civil(zone == "" ? "UTC" : zone, fire.at);
   if (!reads.startsWith(date)) {
     return noFire(date + " is in the past — the soonest " + `${day}` + "/" + `${month}`
@@ -234,19 +290,31 @@ export function onceInstant(said: string, zone: string, nowMs: number): Schedule
 }
 
 export function refuse(row: TaskRow): string {
-  if (row.instruction == "") { return "a task with no instruction has nothing to do"; }
-  if (row.agentId == "") { return "a task needs an agent to run it"; }
+  if (row.instruction == "") {
+    return "a task with no instruction has nothing to do";
+  }
+  if (row.agentId == "") {
+    return "a task needs an agent to run it";
+  }
   if (row.tz != "" && !knownZone(row.tz)) {
     return "\"" + row.tz + "\" is not a timezone this server knows";
   }
   if (row.kind == "once") {
-    if (stampMs(row.nextAt) <= 0.0) { return "a one-off task needs the instant it should run at"; }
+    if (stampMs(row.nextAt) <= 0.0) {
+      return "a one-off task needs the instant it should run at";
+    }
     return "";
   }
-  if (row.kind != "every") { return "a task is \"once\" or \"every\", not \"" + row.kind + "\""; }
-  if (row.cronExpr == "") { return "a repeating task needs a schedule"; }
+  if (row.kind != "every") {
+    return "a task is \"once\" or \"every\", not \"" + row.kind + "\"";
+  }
+  if (row.cronExpr == "") {
+    return "a repeating task needs a schedule";
+  }
   let complaint = cronProblem(row.cronExpr);
-  if (complaint != "") { return complaint; }
+  if (complaint != "") {
+    return complaint;
+  }
   return "";
 }
 
@@ -256,7 +324,9 @@ export function enabledCount(db: Db, owner: string): int {
   let n: int = 0;
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].enabled) { n = n + 1; }
+    if (rows[i].enabled) {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -279,8 +349,12 @@ export function claimDue(db: Db, nowMs: number): TaskRow {
     + " ORDER BY next_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
     + " RETURNING id, owner, agent_id, model_choice_id, title, instruction,"
     + " kind, cron_expr, tz, next_at, failures, run_count";
-  if (!db.query(sql, [now, now, stale])) { return none; }
-  if (db.rows() == 0) { return none; }
+  if (!db.query(sql, [now, now, stale])) {
+    return none;
+  }
+  if (db.rows() == 0) {
+    return none;
+  }
 
   let got: TaskRow = {
     id: db.value(0, 0),

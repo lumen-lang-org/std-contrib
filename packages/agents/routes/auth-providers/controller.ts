@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, deleteById, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
+import { Reply, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../credentials.ts";
 import { createProblem } from "../../payload.ts";
@@ -21,9 +21,12 @@ export function authProviderProblem(ask: AuthProviderAsk): string {
 export class AuthProviderApi {
   db: Db;
   master: string;
-  constructor(db: Db, master: string) { this.db = db; this.master = master; }
+  constructor(db: Db, master: string) {
+    this.db = db;
+    this.master = master;
+  }
 
-  @get("/")
+  @Get("/")
   list(): Reply {
     let keys: DbOrder[] = [{ column: "label" }];
     let rows = JSON.parse<AuthProviderRow[]>(listOrdered(this.db, authProvidersMapping(), { order: keys }));
@@ -43,10 +46,10 @@ export class AuthProviderApi {
       views.push(one);
       i = i + 1;
     }
-    return okJson(views);
+    return OkJson(views);
   }
 
-  @get("/resolved")
+  @Get("/resolved")
   resolved(): Reply {
     let rows = JSON.parse<AuthProviderRow[]>(listWhere(this.db, authProvidersMapping(),
       "enabled = " + placeholderAt(this.db, 1), ["1"]));
@@ -68,53 +71,67 @@ export class AuthProviderApi {
       }
       i = i + 1;
     }
-    return okJson(views);
+    return OkJson(views);
   }
 
-  @post("/")
+  @Post("/")
   create(@Valid @RequestBody ask: AuthProviderAsk, @RequestBody document: string): Reply {
     let problem = createProblem(this.db, authProvidersMapping(), document);
-    if (problem != "") { return badRequest(problem); }
+    if (problem != "") {
+      return BadRequest(problem);
+    }
     let bad = authProviderProblem(ask);
-    if (bad != "") { return badRequest(bad); }
+    if (bad != "") {
+      return BadRequest(bad);
+    }
     let written = persist(this.db, authProvidersMapping(), document);
-    if (!written.ok) { return badRequest(written.error); }
-    return created(findById(this.db, authProvidersMapping(), ask.id));
+    if (!written.ok) {
+      return BadRequest(written.error);
+    }
+    return Created(findById(this.db, authProvidersMapping(), ask.id));
   }
 
-  @put("/:id")
+  @Put("/:id")
   update(@PathVariable("id") id: string, @Valid @RequestBody ask: AuthProviderAsk,
          @RequestBody document: string): Reply {
     if (!existsById(this.db, authProvidersMapping(), id)) {
-      return notFound("auth provider " + id);
+      return NotFound("auth provider " + id);
     }
-    if (ask.id != id) { return badRequest("the id in the body must match the path"); }
+    if (ask.id != id) {
+      return BadRequest("the id in the body must match the path");
+    }
     let bad = authProviderProblem(ask);
-    if (bad != "") { return badRequest(bad); }
+    if (bad != "") {
+      return BadRequest(bad);
+    }
     let written = persist(this.db, authProvidersMapping(), document);
-    if (!written.ok) { return badRequest(written.error); }
-    return ok(findById(this.db, authProvidersMapping(), id));
+    if (!written.ok) {
+      return BadRequest(written.error);
+    }
+    return Ok(findById(this.db, authProvidersMapping(), id));
   }
 
-  @put("/:id/secret")
+  @Put("/:id/secret")
   setSecret(@PathVariable("id") id: string, @Valid @RequestBody ask: AuthProviderSecretAsk): Reply {
     if (!existsById(this.db, authProvidersMapping(), id)) {
-      return notFound("auth provider " + id);
+      return NotFound("auth provider " + id);
     }
     let stored = storeCredential(this.db, { provider: "oauth:" + id,
       apiKey: ask.clientSecret, masterKey: this.master, now: stamp() });
-    if (stored != "") { return badRequest(stored); }
+    if (stored != "") {
+      return BadRequest(stored);
+    }
     let v: AuthProviderSecretStored = { configured: true };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(@PathVariable("id") id: string): Reply {
     if (!existsById(this.db, authProvidersMapping(), id)) {
-      return notFound("auth provider " + id);
+      return NotFound("auth provider " + id);
     }
     forgetCredential(this.db, "oauth:" + id);
     deleteById(this.db, authProvidersMapping(), id);
-    return noContent();
+    return NoContent();
   }
 }

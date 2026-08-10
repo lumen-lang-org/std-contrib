@@ -40,7 +40,7 @@ export type FieldDescription = {
   decorators: DecoratorUse[],
 };
 
-export type Description = {
+export type EntityDescription = {
   protocol: int,
   kind: string,
   name: string,
@@ -92,7 +92,7 @@ export function defaultSqlType(declared: string): string {
 // Why this returns a `DbRepository` and not a string of Lumen: the return type
 // is declared, so the checker verifies it, and a mistake is reported against
 // this signature rather than against a generated line nobody wrote.
-export function entity(d: Description): DbRepository {
+export function entity(d: EntityDescription): DbRepository {
   let fields: DbField[] = [];
   let relations: DbRelation[] = [];
   let idField = "";
@@ -133,7 +133,7 @@ export function entity(d: Description): DbRepository {
 // by hand; `entity` itself returns whatever it was given, and
 // `repositoryValid` refuses the result — the same path a hand-written mapping
 // takes.
-export function entityViolation(d: Description): string {
+export function entityViolation(d: EntityDescription): string {
   if (d.protocol != 1) {
     return "this decorator understands description protocol 1, not " + `${d.protocol}`;
   }

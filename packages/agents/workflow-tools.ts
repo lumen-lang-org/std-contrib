@@ -197,11 +197,15 @@ function rowsOf(db: Db, owner: string): WorkflowRow[] {
 
 function mine(db: Db, owner: string, said: string): WorkflowRow {
   let none = emptyWorkflow();
-  if (said == "") { return none; }
+  if (said == "") {
+    return none;
+  }
   let document = findById(db, workflowsMapping(), said);
   if (document != "") {
     let row: WorkflowRow = JSON.parse<WorkflowRow>(document);
-    if (row.owner == owner) { return row; }
+    if (row.owner == owner) {
+      return row;
+    }
     return none;
   }
   let wanted = said.toLowerCase().trim();
@@ -216,7 +220,9 @@ function mine(db: Db, owner: string, said: string): WorkflowRow {
     }
     i = i + 1;
   }
-  if (hits == 1) { return found; }
+  if (hits == 1) {
+    return found;
+  }
   return none;
 }
 
@@ -224,7 +230,9 @@ function stepOf(graph: WfGraph, said: string): WfNode {
   let wanted = said.toLowerCase().trim();
   let i: int = 0;
   while (i < graph.nodes.length) {
-    if (graph.nodes[i].id == said) { return graph.nodes[i]; }
+    if (graph.nodes[i].id == said) {
+      return graph.nodes[i];
+    }
     i = i + 1;
   }
   let found = emptyNode();
@@ -238,28 +246,54 @@ function stepOf(graph: WfGraph, said: string): WfNode {
     }
     i = i + 1;
   }
-  if (hits == 1) { return found; }
+  if (hits == 1) {
+    return found;
+  }
   return emptyNode();
 }
 
 function whenReads(row: WorkflowRow): string {
-  if (!row.enabled) { return "paused"; }
-  if (row.kind == "manual") { return "runs when asked"; }
+  if (!row.enabled) {
+    return "paused";
+  }
+  if (row.kind == "manual") {
+    return "runs when asked";
+  }
   let at = stampMs(row.nextAt);
-  if (at <= 0.0) { return "nothing scheduled"; }
+  if (at <= 0.0) {
+    return "nothing scheduled";
+  }
   return "next " + civil(row.tz == "" ? "UTC" : row.tz, at as i64);
 }
 
 function stepReads(node: WfNode): string {
-  if (node.type == "START") { return node.schedule == "" ? "start (by hand)" : "start (" + node.schedule + ")"; }
-  if (node.type == "END") { return "end — the answer"; }
-  if (node.type == "AGENT") { return "agent: " + node.instruction; }
-  if (node.type == "LLM") { return "model: " + node.instruction; }
-  if (node.type == "WEB_SEARCH") { return "web search: " + node.query; }
-  if (node.type == "KNOWLEDGE") { return "documents: " + node.query; }
-  if (node.type == "HTTP") { return node.method + " " + node.url; }
-  if (node.type == "MCP") { return "connector " + node.serverId + ": " + node.tool; }
-  if (node.type == "CONDITION") { return "if the text " + node.test + " \"" + node.needle + "\" — yes/no"; }
+  if (node.type == "START") {
+    return node.schedule == "" ? "start (by hand)" : "start (" + node.schedule + ")";
+  }
+  if (node.type == "END") {
+    return "end — the answer";
+  }
+  if (node.type == "AGENT") {
+    return "agent: " + node.instruction;
+  }
+  if (node.type == "LLM") {
+    return "model: " + node.instruction;
+  }
+  if (node.type == "WEB_SEARCH") {
+    return "web search: " + node.query;
+  }
+  if (node.type == "KNOWLEDGE") {
+    return "documents: " + node.query;
+  }
+  if (node.type == "HTTP") {
+    return node.method + " " + node.url;
+  }
+  if (node.type == "MCP") {
+    return "connector " + node.serverId + ": " + node.tool;
+  }
+  if (node.type == "CONDITION") {
+    return "if the text " + node.test + " \"" + node.needle + "\" — yes/no";
+  }
   return node.type;
 }
 
@@ -270,7 +304,9 @@ function graphProse(graph: WfGraph): string {
   let branches = false;
   let e: int = 0;
   while (e < graph.edges.length) {
-    if (graph.edges[e].when != "") { branches = true; }
+    if (graph.edges[e].when != "") {
+      branches = true;
+    }
     e = e + 1;
   }
   while (at.id != "" && seen <= graph.nodes.length) {
@@ -279,14 +315,20 @@ function graphProse(graph: WfGraph): string {
     let toId = "";
     e = 0;
     while (e < graph.edges.length) {
-      if (graph.edges[e].from == at.id && graph.edges[e].when == "") { toId = graph.edges[e].to; }
+      if (graph.edges[e].from == at.id && graph.edges[e].when == "") {
+        toId = graph.edges[e].to;
+      }
       e = e + 1;
     }
-    if (toId == "") { break; }
+    if (toId == "") {
+      break;
+    }
     let next = emptyNode();
     let n: int = 0;
     while (n < graph.nodes.length) {
-      if (graph.nodes[n].id == toId) { next = graph.nodes[n]; }
+      if (graph.nodes[n].id == toId) {
+        next = graph.nodes[n];
+      }
       n = n + 1;
     }
     at = next;
@@ -306,21 +348,33 @@ function graphProse(graph: WfGraph): string {
 
 function describe(row: WorkflowRow, parsedSteps: bool): string {
   let line = row.name + " [" + row.id + "]";
-  if (row.description != "") { line = line + "\n  " + row.description; }
+  if (row.description != "") {
+    line = line + "\n  " + row.description;
+  }
   line = line + "\n  " + whenReads(row);
-  if (row.tz != "") { line = line + " (" + row.tz + ")"; }
+  if (row.tz != "") {
+    line = line + " (" + row.tz + ")";
+  }
   if (parsedSteps) {
     let parsed = parseGraph(row.graph);
-    if (parsed.ok) { line = line + graphProse(parsed.graph); }
+    if (parsed.ok) {
+      line = line + graphProse(parsed.graph);
+    }
   } else {
     let parsed = parseGraph(row.graph);
-    if (parsed.ok) { line = line + ", " + `${parsed.graph.nodes.length - 2}` + " steps"; }
+    if (parsed.ok) {
+      line = line + ", " + `${parsed.graph.nodes.length - 2}` + " steps";
+    }
   }
   if (row.runCount > 0) {
     line = line + "\n  ran " + `${row.runCount}` + " time" + (row.runCount == 1 ? "" : "s");
-    if (row.lastStatus == "failed") { line = line + ", last one failed: " + row.lastError; }
+    if (row.lastStatus == "failed") {
+      line = line + ", last one failed: " + row.lastError;
+    }
   }
-  if (!row.enabled && row.pausedReason != "") { line = line + "\n  paused: " + row.pausedReason; }
+  if (!row.enabled && row.pausedReason != "") {
+    line = line + "\n  paused: " + row.pausedReason;
+  }
   return line;
 }
 
@@ -341,17 +395,39 @@ export function noExtras(): SaidExtras {
 function saidNode(kind: string, text: string, title: string, id: string, idx: int, extra: SaidExtras): WfNode {
   let base = emptyNode();
   let made = "";
-  if (kind == "agent") { made = "AGENT"; }
-  if (kind == "model" || kind == "llm") { made = "LLM"; }
-  if (kind == "web_search" || kind == "web") { made = "WEB_SEARCH"; }
-  if (kind == "knowledge" || kind == "documents") { made = "KNOWLEDGE"; }
-  if (kind == "http" || kind == "fetch") { made = "HTTP"; }
-  if (kind == "script") { made = "SCRIPT"; }
-  if (kind == "reply") { made = "TELEGRAM_REPLY"; }
-  if (kind == "ask") { made = "TELEGRAM_ASK"; }
-  if (kind == "connector" || kind == "mcp") { made = "MCP"; }
-  if (kind == "switch") { made = "SWITCH"; }
-  if (made == "") { return base; }
+  if (kind == "agent") {
+    made = "AGENT";
+  }
+  if (kind == "model" || kind == "llm") {
+    made = "LLM";
+  }
+  if (kind == "web_search" || kind == "web") {
+    made = "WEB_SEARCH";
+  }
+  if (kind == "knowledge" || kind == "documents") {
+    made = "KNOWLEDGE";
+  }
+  if (kind == "http" || kind == "fetch") {
+    made = "HTTP";
+  }
+  if (kind == "script") {
+    made = "SCRIPT";
+  }
+  if (kind == "reply") {
+    made = "TELEGRAM_REPLY";
+  }
+  if (kind == "ask") {
+    made = "TELEGRAM_ASK";
+  }
+  if (kind == "connector" || kind == "mcp") {
+    made = "MCP";
+  }
+  if (kind == "switch") {
+    made = "SWITCH";
+  }
+  if (made == "") {
+    return base;
+  }
   let built: WfNode = {
     id: id, type: made, name: title,
     x: 120.0 + (idx as number) * 240.0, y: 200.0,
@@ -440,14 +516,18 @@ function splitSaid(said: string): string[] {
   while (i < said.length) {
     let ch = said.charAt(i);
     if (ch == "," || ch == "\n") {
-      if (piece.trim() != "") { out.push(piece.trim()); }
+      if (piece.trim() != "") {
+        out.push(piece.trim());
+      }
       piece = "";
     } else {
       piece = piece + ch;
     }
     i = i + 1;
   }
-  if (piece.trim() != "") { out.push(piece.trim()); }
+  if (piece.trim() != "") {
+    out.push(piece.trim());
+  }
   return out;
 }
 
@@ -544,15 +624,21 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
 }
 
 function zoneFor(db: Db, owner: string, asked: string): string {
-  if (asked != "") { return asked; }
+  if (asked != "") {
+    return asked;
+  }
   let rows = rowsOf(db, owner);
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].tz != "") { return rows[i].tz; }
+    if (rows[i].tz != "") {
+      return rows[i].tz;
+    }
     i = i + 1;
   }
   let set = (process.env("AGENTS_TZ") ?? "").trim();
-  if (set != "") { return set; }
+  if (set != "") {
+    return set;
+  }
   return "UTC";
 }
 
@@ -572,7 +658,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
 
   if (call.name == "list_workflows") {
     let rows = rowsOf(db, call.owner);
-    if (rows.length == 0) { return yes("No workflows yet."); }
+    if (rows.length == 0) {
+      return yes("No workflows yet.");
+    }
     let out = `${rows.length}` + " workflow" + (rows.length == 1 ? "" : "s") + ":";
     let i: int = 0;
     while (i < rows.length) {
@@ -600,7 +688,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
 
   if (call.name == "draft_workflow") {
     let name = jsonText(call.args, "name").trim();
-    if (name == "") { return no("give it a name: {\"name\":\"Morning brief\",\"steps\":[...]}"); }
+    if (name == "") {
+      return no("give it a name: {\"name\":\"Morning brief\",\"steps\":[...]}");
+    }
     let asked = jsonText(call.args, "timezone").trim();
     if (asked != "" && !knownZone(asked)) {
       return no("\"" + asked + "\" is not a timezone this server knows — an IANA name such as Europe/Paris.");
@@ -609,7 +699,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       return no("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — one has to be paused or deleted first. list_workflows shows them.");
     }
     let saidSteps = jsonList(jsonRaw(call.args, "steps"));
-    if (saidSteps.length == 0) { return no("say the steps in order: {\"steps\":[{\"kind\":\"web_search\",\"text\":\"...\"},{\"kind\":\"agent\",\"text\":\"...\"}]}"); }
+    if (saidSteps.length == 0) {
+      return no("say the steps in order: {\"steps\":[{\"kind\":\"web_search\",\"text\":\"...\"},{\"kind\":\"agent\",\"text\":\"...\"}]}");
+    }
 
     let nodes: WfNode[] = [];
     let edges: WfEdge[] = [];
@@ -618,7 +710,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let look: int = 0;
     while (look < saidSteps.length) {
       let k = jsonText(saidSteps[look], "kind").trim().toLowerCase();
-      if (k == "reply" || k == "ask") { chatty = true; }
+      if (k == "reply" || k == "ask") {
+        chatty = true;
+      }
       look = look + 1;
     }
     if (chatty && said != "" && said != "manual" && said != "never") {
@@ -651,10 +745,15 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       nodes.push(built);
       let prevNode = emptyNode();
       let pn: int = 0;
-      while (pn < nodes.length) { if (nodes[pn].id == prevId) { prevNode = nodes[pn]; } pn = pn + 1; }
+      while (pn < nodes.length) { if (nodes[pn].id == prevId) {
+        prevNode = nodes[pn];
+      } pn = pn + 1; }
       let ways = branchEdges(prevNode, prevId, id);
       let w: int = 0;
-      while (w < ways.length) { edges.push(ways[w]); w = w + 1; }
+      while (w < ways.length) {
+        edges.push(ways[w]);
+        w = w + 1;
+      }
       prevId = id;
       i = i + 1;
     }
@@ -675,7 +774,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       runCount: 0, publishedGraph: "", publishedAt: "", createdAt: now, updatedAt: now,
     };
     let stored = storeGraph(db, row, graph, zone, call.nowMs);
-    if (!stored.ok) { return no(stored.error); }
+    if (!stored.ok) {
+      return no(stored.error);
+    }
     return yes("Drafted.\n\n" + describe(stored.row, true)
       + "\n\nIt is on the Workflows page to rearrange by hand. run_workflow tries it out"
       + (stored.row.kind == "manual" ? "." : "; each firing files a conversation of its own.")
@@ -715,7 +816,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   if (call.name == "delete_workflow") {
     executeWith(db, "DELETE FROM workflow_runs WHERE workflow_id = " + db.placeholder, [row.id]);
     let gone = deleteById(db, workflowsMapping(), row.id);
-    if (!gone.ok) { return no(gone.error); }
+    if (!gone.ok) {
+      return no(gone.error);
+    }
     return yes("Deleted \"" + row.name + "\" and its history. It will not run again.");
   }
 
@@ -740,14 +843,20 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       createdAt: row.createdAt, updatedAt: `${call.nowMs}`,
     };
     let wrong = refuseWorkflow(edited);
-    if (wrong != "") { return no(wrong); }
+    if (wrong != "") {
+      return no(wrong);
+    }
     let stored = edited;
     if (on && !row.enabled && edited.kind == "every") {
       let ahead = nextWorkflowFire(edited, call.nowMs);
-      if (ahead.ok) { stored = withWorkflowNextAt(edited, ahead.at); }
+      if (ahead.ok) {
+        stored = withWorkflowNextAt(edited, ahead.at);
+      }
     }
     let written = persist(db, workflowsMapping(), JSON.stringify(stored));
-    if (!written.ok) { return no(written.error); }
+    if (!written.ok) {
+      return no(written.error);
+    }
     return yes("Changed.\n\n" + describe(stored, false));
   }
 
@@ -758,9 +867,13 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     }
     let zone = asked == "" ? (row.tz == "" ? zoneFor(db, call.owner, "") : row.tz) : asked;
     let said = jsonText(call.args, "schedule").trim();
-    if (said == "manual" || said == "never" || said == "by hand") { said = ""; }
+    if (said == "manual" || said == "never" || said == "by hand") {
+      said = "";
+    }
     let parsed = parseGraph(row.graph);
-    if (!parsed.ok) { return no(parsed.error); }
+    if (!parsed.ok) {
+      return no(parsed.error);
+    }
     let nodes: WfNode[] = [];
     let i: int = 0;
     while (i < parsed.graph.nodes.length) {
@@ -770,45 +883,65 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     }
     let graph: WfGraph = { nodes: nodes, edges: parsed.graph.edges, view: parsed.graph.view };
     let stored = storeGraph(db, row, graph, zone, call.nowMs);
-    if (!stored.ok) { return no(stored.error); }
+    if (!stored.ok) {
+      return no(stored.error);
+    }
     return yes((said == "" ? "It now runs only when asked." : "Scheduled.") + "\n\n" + describe(stored.row, false));
   }
 
   let parsed = parseGraph(row.graph);
-  if (!parsed.ok) { return no(parsed.error); }
+  if (!parsed.ok) {
+    return no(parsed.error);
+  }
   let graph = parsed.graph;
 
   if (call.name == "add_step") {
     let kind = jsonText(call.args, "kind").trim().toLowerCase();
     let text = jsonText(call.args, "text").trim();
-    if (text == "" && kind != "switch" && kind != "connector" && kind != "mcp") { return no("say what the step does: {\"kind\":\"agent\",\"text\":\"...\"}"); }
+    if (text == "" && kind != "switch" && kind != "connector" && kind != "mcp") {
+      return no("say what the step does: {\"kind\":\"agent\",\"text\":\"...\"}");
+    }
     let saidAfter = jsonText(call.args, "after").trim();
     let fromId = "";
     if (saidAfter != "") {
       let anchor = stepOf(graph, saidAfter);
-      if (anchor.id == "") { return no("no step by that id or name — show_workflow lists them."); }
-      if (anchor.type == "END") { return no("nothing runs after the end — name the step to add after, or leave it out."); }
+      if (anchor.id == "") {
+        return no("no step by that id or name — show_workflow lists them.");
+      }
+      if (anchor.type == "END") {
+        return no("nothing runs after the end — name the step to add after, or leave it out.");
+      }
       fromId = anchor.id;
     } else {
       let e: int = 0;
       while (e < graph.edges.length) {
         let toNode = stepOf(graph, graph.edges[e].to);
-        if (toNode.type == "END" && graph.edges[e].when == "") { fromId = graph.edges[e].from; }
+        if (toNode.type == "END" && graph.edges[e].when == "") {
+          fromId = graph.edges[e].from;
+        }
         e = e + 1;
       }
-      if (fromId == "") { return no("this workflow's end is reached by a branch — open it on the Workflows page and add the step there."); }
+      if (fromId == "") {
+        return no("this workflow's end is reached by a branch — open it on the Workflows page and add the step there.");
+      }
     }
     let oldTo = "";
     let branchy = false;
     let e2: int = 0;
     while (e2 < graph.edges.length) {
       if (graph.edges[e2].from == fromId) {
-        if (graph.edges[e2].when != "") { branchy = true; }
-        else { oldTo = graph.edges[e2].to; }
+        if (graph.edges[e2].when != "") {
+          branchy = true;
+        }
+        else {
+          oldTo = graph.edges[e2].to;
+        }
       }
       e2 = e2 + 1;
     }
-    if (branchy) { return no("that step branches — open the workflow on the Workflows page and add the step where it belongs."); }
+    if (branchy) {
+      return no("that step branches — open the workflow on the Workflows page and add the step where it belongs.");
+    }
     let id = "s" + crypto.randomUUID().slice(0, 8);
     let anchorNode = stepOf(graph, fromId);
     let built = saidNode(kind, text, jsonText(call.args, "title").trim(), id, 0, extrasOf(call.args));
@@ -828,7 +961,10 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     };
     let nodes: WfNode[] = [];
     let n: int = 0;
-    while (n < graph.nodes.length) { nodes.push(graph.nodes[n]); n = n + 1; }
+    while (n < graph.nodes.length) {
+      nodes.push(graph.nodes[n]);
+      n = n + 1;
+    }
     nodes.push(placed);
     let edges: WfEdge[] = [];
     let e3: int = 0;
@@ -839,28 +975,39 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
         if (oldTo != "") {
           let fan = branchEdges(placed, id, oldTo);
           let b: int = 0;
-          while (b < fan.length) { edges.push(fan[b]); b = b + 1; }
+          while (b < fan.length) {
+            edges.push(fan[b]);
+            b = b + 1;
+          }
         }
       } else {
         edges.push(edge);
       }
       e3 = e3 + 1;
     }
-    if (oldTo == "") { edges.push(edgeOf(fromId, id)); }
+    if (oldTo == "") {
+      edges.push(edgeOf(fromId, id));
+    }
     let grown: WfGraph = { nodes: nodes, edges: edges, view: graph.view };
     let stored = storeGraph(db, row, grown, row.tz, call.nowMs);
-    if (!stored.ok) { return no(stored.error); }
+    if (!stored.ok) {
+      return no(stored.error);
+    }
     return yes("Added.\n\n" + describe(stored.row, true));
   }
 
   let anchorSaid = call.name == "connect_steps" ? jsonText(call.args, "from").trim() : jsonText(call.args, "step").trim();
   let node = stepOf(graph, anchorSaid);
-  if (node.id == "") { return no("no step by that id or name — show_workflow lists them."); }
+  if (node.id == "") {
+    return no("no step by that id or name — show_workflow lists them.");
+  }
 
   if (call.name == "connect_steps") {
     let toSaid = jsonText(call.args, "to").trim();
     let target = stepOf(graph, toSaid);
-    if (target.id == "") { return no("no step called \"" + toSaid + "\" — show_workflow lists them."); }
+    if (target.id == "") {
+      return no("no step called \"" + toSaid + "\" — show_workflow lists them.");
+    }
     let branch = jsonText(call.args, "branch").trim();
     let edges2: WfEdge[] = [];
     let moved = false;
@@ -882,7 +1029,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     }
     let rewired: WfGraph = { nodes: graph.nodes, edges: edges2, view: graph.view };
     let stored = storeGraph(db, row, rewired, row.tz, call.nowMs);
-    if (!stored.ok) { return no(stored.error); }
+    if (!stored.ok) {
+      return no(stored.error);
+    }
     return yes("Connected.\n\n" + describe(stored.row, true));
   }
 
@@ -891,7 +1040,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let title = jsonText(call.args, "title").trim();
     let file = jsonText(call.args, "file").trim();
     let secretSaid = jsonText(call.args, "secret").trim();
-    if (text == "" && title == "" && file == "" && secretSaid == "") { return no("say what changes: text, a title, a file, a secret, or any of them."); }
+    if (text == "" && title == "" && file == "" && secretSaid == "") {
+      return no("say what changes: text, a title, a file, a secret, or any of them.");
+    }
     if (text != "" && (node.type == "START" || node.type == "END" || node.type == "CONDITION" || node.type == "MCP")) {
       return no("a " + node.type + " step is edited on the Workflows page — text here changes agent, model, web_search, knowledge, reply and ask steps.");
     }
@@ -932,7 +1083,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     }
     let changed: WfGraph = { nodes: nodes, edges: graph.edges, view: graph.view };
     let stored = storeGraph(db, row, changed, row.tz, call.nowMs);
-    if (!stored.ok) { return no(stored.error); }
+    if (!stored.ok) {
+      return no(stored.error);
+    }
     return yes("Changed.\n\n" + describe(stored.row, true));
   }
 
@@ -946,11 +1099,15 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   while (e4 < graph.edges.length) {
     let edge = graph.edges[e4];
     if (edge.to == node.id) {
-      if (inFrom != "" || edge.when != "") { tangled = true; }
+      if (inFrom != "" || edge.when != "") {
+        tangled = true;
+      }
       inFrom = edge.from;
     }
     if (edge.from == node.id) {
-      if (outTo != "" || edge.when != "") { tangled = true; }
+      if (outTo != "" || edge.when != "") {
+        tangled = true;
+      }
       outTo = edge.to;
     }
     e4 = e4 + 1;
@@ -961,19 +1118,27 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   let nodes: WfNode[] = [];
   let n2: int = 0;
   while (n2 < graph.nodes.length) {
-    if (graph.nodes[n2].id != node.id) { nodes.push(graph.nodes[n2]); }
+    if (graph.nodes[n2].id != node.id) {
+      nodes.push(graph.nodes[n2]);
+    }
     n2 = n2 + 1;
   }
   let edges: WfEdge[] = [];
   let e5: int = 0;
   while (e5 < graph.edges.length) {
     let edge = graph.edges[e5];
-    if (edge.from != node.id && edge.to != node.id) { edges.push(edge); }
+    if (edge.from != node.id && edge.to != node.id) {
+      edges.push(edge);
+    }
     e5 = e5 + 1;
   }
-  if (inFrom != "" && outTo != "") { edges.push(edgeOf(inFrom, outTo)); }
+  if (inFrom != "" && outTo != "") {
+    edges.push(edgeOf(inFrom, outTo));
+  }
   let shrunk: WfGraph = { nodes: nodes, edges: edges, view: graph.view };
   let stored = storeGraph(db, row, shrunk, row.tz, call.nowMs);
-  if (!stored.ok) { return no(stored.error); }
+  if (!stored.ok) {
+    return no(stored.error);
+  }
   return yes("Removed.\n\n" + describe(stored.row, true));
 }

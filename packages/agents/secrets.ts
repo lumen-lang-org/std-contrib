@@ -68,9 +68,15 @@ function refOf(id: string): string {
 }
 
 export function refuseSecret(row: SecretRow): string {
-  if (row.name.trim() == "") { return "a secret needs a name to be picked by"; }
-  if (row.name.length > MAX_SECRET_NAME) { return "\"" + row.name.slice(0, 20) + "...\" is too long a name"; }
-  if (row.owner == "") { return "a secret has to belong to somebody"; }
+  if (row.name.trim() == "") {
+    return "a secret needs a name to be picked by";
+  }
+  if (row.name.length > MAX_SECRET_NAME) {
+    return "\"" + row.name.slice(0, 20) + "...\" is too long a name";
+  }
+  if (row.owner == "") {
+    return "a secret has to belong to somebody";
+  }
   let header = row.header.trim();
   if (header == "" || header.indexOf(" ") >= 0 || header.indexOf(":") >= 0) {
     return "\"" + row.header + "\" is not a header name — one word, like \"Authorization\" or \"X-Api-Key\"";
@@ -88,9 +94,13 @@ export function secretsOf(db: Db, owner: string): string {
 
 export function secretById(db: Db, id: string, owner: string): SecretRow {
   let doc = findById(db, secretsMapping(), id);
-  if (doc == "") { return emptySecret(); }
+  if (doc == "") {
+    return emptySecret();
+  }
   let row: SecretRow = JSON.parse<SecretRow>(doc);
-  if (row.owner != owner) { return emptySecret(); }
+  if (row.owner != owner) {
+    return emptySecret();
+  }
   return row;
 }
 
@@ -98,7 +108,9 @@ export function secretByName(db: Db, name: string, owner: string): SecretRow {
   let rows = JSON.parse<SecretRow[]>(secretsOf(db, owner));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].name.toLowerCase() == name.trim().toLowerCase()) { return rows[i]; }
+    if (rows[i].name.toLowerCase() == name.trim().toLowerCase()) {
+      return rows[i];
+    }
     i = i + 1;
   }
   return emptySecret();
@@ -132,7 +144,9 @@ export function createSecret(db: Db, ask: SecretWrite): SecretMade {
     lastUsedAt: "",
   };
   let wrong = refuseSecret(row);
-  if (wrong != "") { return { id: "", problem: wrong }; }
+  if (wrong != "") {
+    return { id: "", problem: wrong };
+  }
   if (ask.value.length > MAX_SECRET_VALUE) {
     return { id: "", problem: "that value is " + `${ask.value.length}` + " characters — the most a secret may hold is " + `${MAX_SECRET_VALUE}` };
   }
@@ -146,7 +160,9 @@ export function createSecret(db: Db, ask: SecretWrite): SecretMade {
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,
   });
-  if (stored != "") { return { id: "", problem: stored }; }
+  if (stored != "") {
+    return { id: "", problem: stored };
+  }
   let written = persistRow(db, row);
   if (written != "") {
     forgetCredential(db, refOf(row.id));
@@ -158,13 +174,17 @@ export function createSecret(db: Db, ask: SecretWrite): SecretMade {
 
 function persistRow(db: Db, row: SecretRow): string {
   let written = persist(db, secretsMapping(), JSON.stringify(row));
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
 export function forgetSecret(db: Db, id: string, owner: string): bool {
   let row = secretById(db, id, owner);
-  if (row.id == "") { return false; }
+  if (row.id == "") {
+    return false;
+  }
   deleteById(db, secretsMapping(), id);
   forgetCredential(db, refOf(id));
   return true;

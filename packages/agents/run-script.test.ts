@@ -18,7 +18,10 @@ function fresh(): void {
   let plan = artifactPlan(database);
   let more = envPlan(database);
   let m: int = 0;
-  while (m < more.length) { plan.push(more[m]); m = m + 1; }
+  while (m < more.length) {
+    plan.push(more[m]);
+    m = m + 1;
+  }
   migrate(database, plan);
 }
 
@@ -32,7 +35,9 @@ function seeded(path: string, body: string): void {
 
 function runDir(): string {
   let dir = "/tmp/agents_script_test_run";
-  if (fs.existsSync(dir)) { fs.rmSync(dir, true); }
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, true);
+  }
   fs.mkdirSync(dir, true);
   return dir;
 }
@@ -58,7 +63,10 @@ function outOfBand(artifactId: string, version: int, body: string): void {
 function fill(piece: string, n: int): string {
   let out = "";
   let i: int = 0;
-  while (i < n) { out = out + piece; i = i + 1; }
+  while (i < n) {
+    out = out + piece;
+    i = i + 1;
+  }
   return out;
 }
 
@@ -395,13 +403,19 @@ const FAKE_LOG = "/tmp/agents_script_fake/argv.log";
 const FAKE_CTR = "/tmp/agents_script_fake/ctr";
 
 function fakeDocker(script: string): void {
-  if (!fs.existsSync(FAKE_DIR)) { fs.mkdirSync(FAKE_DIR, true); }
+  if (!fs.existsSync(FAKE_DIR)) {
+    fs.mkdirSync(FAKE_DIR, true);
+  }
   let bin = FAKE_DIR + "/docker";
   fs.writeFileSync(bin, script);
   fs.chmodSync(bin, 493);
   fs.writeFileSync(FAKE_LOG, "");
-  if (fs.existsSync(FAKE_CTR)) { fs.rmSync(FAKE_CTR, true); }
-  if (fs.existsSync(FAKE_DIR + "/pruned")) { fs.rmSync(FAKE_DIR + "/pruned", false); }
+  if (fs.existsSync(FAKE_CTR)) {
+    fs.rmSync(FAKE_CTR, true);
+  }
+  if (fs.existsSync(FAKE_DIR + "/pruned")) {
+    fs.rmSync(FAKE_DIR + "/pruned", false);
+  }
   envDockerOverride(bin);
 }
 
@@ -459,7 +473,9 @@ function argvLines(): string[] {
   let lines = held.split("\n");
   let i: int = 0;
   while (i < lines.length) {
-    if (lines[i] != "") { out.push(lines[i]); }
+    if (lines[i] != "") {
+      out.push(lines[i]);
+    }
     i = i + 1;
   }
   return out;
@@ -472,7 +488,9 @@ function clearLog(): void {
 function findLine(lines: string[], prefix: string): string {
   let i: int = 0;
   while (i < lines.length) {
-    if (lines[i].indexOf(prefix) == 0) { return lines[i]; }
+    if (lines[i].indexOf(prefix) == 0) {
+      return lines[i];
+    }
     i = i + 1;
   }
   return "";
@@ -686,7 +704,10 @@ test("an environment name is refused before anything exists: bytes counted as by
   seeded("/a.md", "hello\n");
   let wide = "";
   let i: int = 0;
-  while (i < 60) { wide = wide + "ل"; i = i + 1; }
+  while (i < 60) {
+    wide = wide + "ل";
+    i = i + 1;
+  }
   let long = scriptRun(database, {
     threadId: "t1", language: "sh", source: "true", paths: ["/a.md"],
     mayCreate: false, environment: wide, agentId: "", turnSeq: -1, now: "1785200000000",

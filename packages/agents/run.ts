@@ -28,15 +28,21 @@ const CANCELLED_TEXT: string = "Stopped at your request.";
 
 function maxToolSteps(): int {
   let said = process.env["AGENTS_MAX_TOOL_STEPS"] ?? "";
-  if (said == "") { return 18; }
+  if (said == "") {
+    return 18;
+  }
   let n = parseInt(said, 10) ?? 18;
-  if (n < 1) { return 18; }
+  if (n < 1) {
+    return 18;
+  }
   return n;
 }
 
 const MAX_DEPTH: int = 3;
 
-function stamp(): string { return `${Date.now()}`; }
+function stamp(): string {
+  return `${Date.now()}`;
+}
 
 type NestedModel = { id: string, label: string, apiName: string, provider: string, enabled: bool };
 type ConfigWithModel = {
@@ -134,21 +140,33 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let threadId = where.threadId;
   let excludeChunks = where.excludeChunks;
   let agentDoc = findById(db, agentsMapping(), agentId);
-  if (agentDoc == "") { return failed("", "no agent " + agentId); }
+  if (agentDoc == "") {
+    return failed("", "no agent " + agentId);
+  }
   let agent: AgentRow = JSON.parse<AgentRow>(agentDoc);
-  if (!agent.enabled) { return failed(agent.agentName, agent.agentName + " is disabled"); }
+  if (!agent.enabled) {
+    return failed(agent.agentName, agent.agentName + " is disabled");
+  }
 
   let promptDoc = findById(db, promptsMapping(), agent.promptId);
-  if (promptDoc == "") { return failed(agent.agentName, "no prompt " + agent.promptId); }
+  if (promptDoc == "") {
+    return failed(agent.agentName, "no prompt " + agent.promptId);
+  }
   let prompt: PromptRow = JSON.parse<PromptRow>(promptDoc);
 
   let configId = agent.modelConfigId;
-  if (where.modelConfigId != "") { configId = where.modelConfigId; }
+  if (where.modelConfigId != "") {
+    configId = where.modelConfigId;
+  }
   let configDoc = findById(db, modelConfigsMapping(db), configId);
-  if (configDoc == "") { return failed(agent.agentName, "no model config " + configId); }
+  if (configDoc == "") {
+    return failed(agent.agentName, "no model config " + configId);
+  }
   let parsed: ConfigWithModel = JSON.parse<ConfigWithModel>(configDoc);
   let asks = parsed.thinking;
-  if (!where.think) { asks = "off"; }
+  if (!where.think) {
+    asks = "off";
+  }
   let config: ConfigWithModel = {
     id: parsed.id, modelId: parsed.modelId, temperature: parsed.temperature,
     maxTokens: parsed.maxTokens, topP: parsed.topP, extra: parsed.extra, thinking: asks,
@@ -156,9 +174,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   };
 
   let modelDoc = findById(db, modelsMapping(), config.modelId);
-  if (modelDoc == "") { return failed(agent.agentName, "no model " + config.modelId); }
+  if (modelDoc == "") {
+    return failed(agent.agentName, "no model " + config.modelId);
+  }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
-  if (!model.enabled) { return failed(agent.agentName, model.label + " is disabled"); }
+  if (!model.enabled) {
+    return failed(agent.agentName, model.label + " is disabled");
+  }
 
   let configRow: ModelConfigRow = {
     id: config.id, modelId: config.modelId, temperature: config.temperature,
@@ -187,8 +209,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let specs = toolSpecs(mounted);
   let webSpecs = webSearchTools();
   let ws: int = 0;
-  while (ws < webSpecs.length) { specs.push(webSpecs[ws]); ws = ws + 1; }
-  if (stillWaiting(mounted) > 0) { specs.push(findToolsSpec(mounted)); }
+  while (ws < webSpecs.length) {
+    specs.push(webSpecs[ws]);
+    ws = ws + 1;
+  }
+  if (stillWaiting(mounted) > 0) {
+    specs.push(findToolsSpec(mounted));
+  }
 
   if (threadId != "") {
     let ws = workspaceTools();
@@ -259,7 +286,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   let notes: string[] = [];
   let n: int = 0;
-  while (n < mounted.problems.length) { notes.push(mounted.problems[n]); n = n + 1; }
+  while (n < mounted.problems.length) {
+    notes.push(mounted.problems[n]);
+    n = n + 1;
+  }
 
   let children: AgentRow[] = [];
   let deeper = depth + 1;
@@ -355,7 +385,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   let context: Turn[] = [];
   let carried: int = 0;
-  while (carried < prior.length) { context.push(prior[carried]); carried = carried + 1; }
+  while (carried < prior.length) {
+    context.push(prior[carried]);
+    carried = carried + 1;
+  }
   if (retrieved.length > 0) {
     context.push(userTurn(asContext(retrieved)));
   }
@@ -369,15 +402,23 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let answer = "";
   let system = prompt.body;
   let skillLines = skillBriefing(db, agent.id);
-  if (skillLines != "") { system = system + "\n\n" + skillLines; }
+  if (skillLines != "") {
+    system = system + "\n\n" + skillLines;
+  }
   let envLines = envBriefing(db);
-  if (envLines != "") { system = system + "\n\n" + envLines; }
+  if (envLines != "") {
+    system = system + "\n\n" + envLines;
+  }
 
   let waitingLines = deferredBriefing(mounted);
-  if (waitingLines != "") { system = system + "\n\n" + waitingLines; }
+  if (waitingLines != "") {
+    system = system + "\n\n" + waitingLines;
+  }
 
   let cases = casesBriefing(db);
-  if (cases != "") { system = system + "\n\n" + cases; }
+  if (cases != "") {
+    system = system + "\n\n" + cases;
+  }
 
   if (mounted.tools.length > 0 || stillWaiting(mounted) > 0) {
     system = system + "\n\n" + NO_PLACEHOLDER_ARGS;
@@ -386,9 +427,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   if (threadId != "") {
     system = system + "\n\n" + FILE_FENCE;
     let briefing = artifactBriefing(db, threadId);
-    if (briefing != "") { system = system + "\n\n" + briefing; }
+    if (briefing != "") {
+      system = system + "\n\n" + briefing;
+    }
     let project = projectBriefing(db, threadId);
-    if (project != "") { system = system + "\n\n" + project; }
+    if (project != "") {
+      system = system + "\n\n" + project;
+    }
   }
 
   system = system + "\n\n" + TEXT_CARD;
@@ -401,7 +446,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
   while (rounds < MAX_TOOL_STEPS) {
     if (cancelAsked(db, threadId)) {
-      if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT }); }
+      if (on) {
+        trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT });
+      }
       return report(agent, prompt, model, notes, context, steps, last, CANCELLED_TEXT, "cancelled", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
     }
     let modelSpan = startSpan(model.apiName, TRACE_GENERATION, agentSpan.id);
@@ -418,7 +465,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         }
       }, () => cancelAsked(db, threadId));
       if (cancelAsked(db, threadId)) {
-        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT }); }
+        if (on) {
+          trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT });
+        }
         return report(agent, prompt, model, notes, context, steps, last, CANCELLED_TEXT, "cancelled", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       }
     }
@@ -449,7 +498,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
     let cut = truncationProblem(model.provider, last.text, configRow.maxTokens);
     if (cut != "") {
-      if (on) { trace = endSpanFailed(trace, agentSpan, { input: userText, message: cut }); }
+      if (on) {
+        trace = endSpanFailed(trace, agentSpan, { input: userText, message: cut });
+      }
       let stopped: Completion = {
         ok: false, text: last.text, status: last.status, error: cut,
         inputTokens: last.inputTokens, outputTokens: last.outputTokens, counted: last.counted,
@@ -464,7 +515,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
 
     if (calls.length == 0) {
       answer = replyText(model.provider, last.text);
-      if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: answer }); }
+      if (on) {
+        trace = endSpan(trace, agentSpan, { input: userText, output: answer });
+      }
       return report(agent, prompt, model, notes, context, steps, last, answer, "final", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
     }
 
@@ -473,13 +526,19 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     let i: int = 0;
     while (i < calls.length) {
       if (cancelAsked(db, threadId)) {
-        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT }); }
+        if (on) {
+          trace = endSpan(trace, agentSpan, { input: userText, output: CANCELLED_TEXT });
+        }
         return report(agent, prompt, model, notes, context, steps, last, CANCELLED_TEXT, "cancelled", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       }
       if (steps.length >= MAX_TOOL_STEPS) {
         let cutSaid = said.text;
-        if (cutSaid == "") { cutSaid = closingWord(model, configRow, system, context, key); }
-        if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: cutSaid }); }
+        if (cutSaid == "") {
+          cutSaid = closingWord(model, configRow, system, context, key);
+        }
+        if (on) {
+          trace = endSpan(trace, agentSpan, { input: userText, output: cutSaid });
+        }
         return report(agent, prompt, model, notes, context, steps, last, cutSaid, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
       }
       let child = childFor(children, calls[i].name);
@@ -489,7 +548,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let callSpan = startSpan(calls[i].name, TRACE_TOOL, agentSpan.id);
       let now = stamp();
       let liveKind = "tool";
-      if (child.id != "") { liveKind = "agent"; }
+      if (child.id != "") {
+        liveKind = "agent";
+      }
       let live: StepStart = {
         threadId: threadId, seq: where.baseSeq, depth: where.depth,
         rotation: rounds - 1, idx: steps.length,
@@ -497,7 +558,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         args: calls[i].args, now: now,
       };
       let startedMs = Date.now();
-      if (threadId != "") { beginStep(db, live); }
+      if (threadId != "") {
+        beginStep(db, live);
+      }
       let sameBefore: int = 0;
       let priorStep: int = 0;
       while (priorStep < steps.length) {
@@ -507,7 +570,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         priorStep = priorStep + 1;
       }
       let repeatCap: int = 2;
-      if (calls[i].name == "use_skill") { repeatCap = 1; }
+      if (calls[i].name == "use_skill") {
+        repeatCap = 1;
+      }
       if (sameBefore >= repeatCap) {
         let stuck = "You already made this exact call this turn"
           + (sameBefore > 1 ? " " + `${sameBefore}` + " times" : "")
@@ -672,7 +737,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             scope: where.scope,
           };
           let asked = runAgentAt(db, child.id, question, master, below2);
-          if (on) { trace = tracerWithMoreSpans(trace, asked.spans); }
+          if (on) {
+            trace = tracerWithMoreSpans(trace, asked.spans);
+          }
           inputTokens = inputTokens + asked.inputTokens;
           outputTokens = outputTokens + asked.outputTokens;
           calledAgents.push(child.agentName);
@@ -700,7 +767,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           if (recalled.found.length > 0) {
             mounted = recalled.mounted;
             specs = toolSpecs(mounted);
-            if (stillWaiting(mounted) > 0) { specs.push(findToolsSpec(mounted)); }
+            if (stillWaiting(mounted) > 0) {
+              specs.push(findToolsSpec(mounted));
+            }
           }
         }
         let answered = callMounted(mounted, calls[i].name, calls[i].args);
@@ -713,10 +782,14 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             + "projects\"), call it, take the id from its answer, and retry "
             + "this tool.";
         }
-        if (resultOk) { resultText = resultText + cardHintFor(db, calls[i].name); }
+        if (resultOk) {
+          resultText = resultText + cardHintFor(db, calls[i].name);
+        }
         calledTools.push(calls[i].name);
       }
-      if (on) { trace = endTool(trace, callSpan, { input: calls[i].args, output: resultText }, resultOk); }
+      if (on) {
+        trace = endTool(trace, callSpan, { input: calls[i].args, output: resultText }, resultOk);
+      }
       if (threadId != "") {
         let done: StepStart = {
           threadId: live.threadId, seq: live.seq, depth: live.depth,
@@ -746,8 +819,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     }
   }
 
-  if (answer == "") { answer = closingWord(model, configRow, system, context, key); }
-  if (on) { trace = endSpan(trace, agentSpan, { input: userText, output: answer }); }
+  if (answer == "") {
+    answer = closingWord(model, configRow, system, context, key);
+  }
+  if (on) {
+    trace = endSpan(trace, agentSpan, { input: userText, output: answer });
+  }
   return report(agent, prompt, model, notes, context, steps, last, answer, "max_steps", rounds, spansOf(on, trace), calledTools, calledAgents, retrieved, inputTokens, outputTokens);
 }
 
@@ -763,7 +840,9 @@ function withAll(into: string[], more: string[]): string[] {
   let out = into;
   let i: int = 0;
   while (i < more.length) {
-    if (!hasName(out, more[i])) { out.push(more[i]); }
+    if (!hasName(out, more[i])) {
+      out.push(more[i]);
+    }
     i = i + 1;
   }
   return out;
@@ -772,18 +851,24 @@ function withAll(into: string[], more: string[]): string[] {
 export function hasName(names: string[], name: string): bool {
   let i: int = 0;
   while (i < names.length) {
-    if (names[i] == name) { return true; }
+    if (names[i] == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
 }
 
 function passageSummary(found: Retrieved[]): string {
-  if (found.length == 0) { return "nothing retrieved"; }
+  if (found.length == 0) {
+    return "nothing retrieved";
+  }
   let out = "";
   let i: int = 0;
   while (i < found.length) {
-    if (i > 0) { out = out + "\n"; }
+    if (i > 0) {
+      out = out + "\n";
+    }
     out = out + found[i].scope + "/" + found[i].source + "  distance " + `${found[i].distance}`;
     i = i + 1;
   }
@@ -794,7 +879,9 @@ function withinDistance(found: Retrieved[], maxDistance: number): Retrieved[] {
   let out: Retrieved[] = [];
   let i: int = 0;
   while (i < found.length) {
-    if (found[i].distance <= maxDistance) { out.push(found[i]); }
+    if (found[i].distance <= maxDistance) {
+      out.push(found[i]);
+    }
     i = i + 1;
   }
   return out;
@@ -804,7 +891,9 @@ function failedSteps(steps: AgentStep[]): int {
   let n: int = 0;
   let i: int = 0;
   while (i < steps.length) {
-    if (!steps[i].ok) { n = n + 1; }
+    if (!steps[i].ok) {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -813,7 +902,9 @@ function failedSteps(steps: AgentStep[]): int {
 function onPath(path: string[], agentId: string): bool {
   let i: int = 0;
   while (i < path.length) {
-    if (path[i] == agentId) { return true; }
+    if (path[i] == agentId) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -822,7 +913,9 @@ function onPath(path: string[], agentId: string): bool {
 function nameTaken(specs: ToolSpec[], name: string): bool {
   let i: int = 0;
   while (i < specs.length) {
-    if (specs[i].name == name) { return true; }
+    if (specs[i].name == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -831,7 +924,9 @@ function nameTaken(specs: ToolSpec[], name: string): bool {
 function childFor(children: AgentRow[], name: string): AgentRow {
   let i: int = 0;
   while (i < children.length) {
-    if (delegateToolName(children[i].agentName) == name) { return children[i]; }
+    if (delegateToolName(children[i].agentName) == name) {
+      return children[i];
+    }
     i = i + 1;
   }
   let none: AgentRow = { id: "", agentName: "", description: "", modelConfigId: "", promptId: "", scriptImageId: "", isDefault: false, enabled: false, updatedAt: "" };
@@ -845,7 +940,9 @@ function closingWord(model: ModelRow, configRow: ModelConfigRow, system: string,
     + "and what you would do next.")];
   let noTools: ToolSpec[] = [];
   let said = completeTurns(model, configRow, system, asked, noTools, key);
-  if (!said.ok) { return ""; }
+  if (!said.ok) {
+    return "";
+  }
   return assistantText(model.provider, said.text).text;
 }
 

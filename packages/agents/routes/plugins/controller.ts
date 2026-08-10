@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, existsById, findById, listOrdered } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, badRequest, created, noContent, notFound, ok, okJson } from "../../../rest/server.ts";
+import { Reply, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { Manifest, fetchManifest, install, installProblem, itemsOf, manifestFrom, manifestUrl, uninstall } from "../../plugins.ts";
 import { McpServerRow, SkillRow, mcpServersMapping, pluginsMapping, skillsMapping } from "../../schema.ts";
@@ -46,18 +46,20 @@ function manifestView(m: Manifest, clash: string): ManifestView {
 export class PluginApi {
   db: Db;
 
-  constructor(db: Db) { this.db = db; }
-
-  @get("/")
-  list(): Reply {
-    let keys: DbOrder[] = [{ column: "plugin_name" }];
-    return ok(listOrdered(this.db, pluginsMapping(), { order: keys }));
+  constructor(db: Db) {
+    this.db = db;
   }
 
-  @get("/:id/items")
+  @Get("/")
+  list(): Reply {
+    let keys: DbOrder[] = [{ column: "plugin_name" }];
+    return Ok(listOrdered(this.db, pluginsMapping(), { order: keys }));
+  }
+
+  @Get("/:id/items")
   items(@PathVariable("id") id: string): Reply {
     if (!existsById(this.db, pluginsMapping(), id)) {
-      return notFound("plugin " + id);
+      return NotFound("plugin " + id);
     }
     let rows = itemsOf(this.db, id);
     let out: PluginItemView[] = [];
@@ -66,10 +68,14 @@ export class PluginApi {
       let name = "";
       if (rows[i].kind == "skill") {
         let held = findById(this.db, skillsMapping(), rows[i].itemId);
-        if (held != "") { name = JSON.parse<SkillRow>(held).skillName; }
+        if (held != "") {
+          name = JSON.parse<SkillRow>(held).skillName;
+        }
       } else {
         let held = findById(this.db, mcpServersMapping(), rows[i].itemId);
-        if (held != "") { name = JSON.parse<McpServerRow>(held).serverName; }
+        if (held != "") {
+          name = JSON.parse<McpServerRow>(held).serverName;
+        }
       }
       let one: PluginItemView = {
         kind: rows[i].kind,
@@ -79,37 +85,47 @@ export class PluginApi {
       out.push(one);
       i = i + 1;
     }
-    return okJson(out);
+    return OkJson(out);
   }
 
-  @post("/inspect")
+  @Post("/inspect")
   inspect(@Valid @RequestBody ask: PluginAsk): Reply {
     let got = fetchManifest(ask.sourceUrl);
-    if (got.problem != "") { return badRequest(got.problem); }
+    if (got.problem != "") {
+      return BadRequest(got.problem);
+    }
     let m = manifestFrom(got.body);
-    if (m.problem != "") { return badRequest(m.problem); }
+    if (m.problem != "") {
+      return BadRequest(m.problem);
+    }
     let v: ManifestView = manifestView(m, installProblem(this.db, m));
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @post("/install")
+  @Post("/install")
   add(@Valid @RequestBody ask: PluginAsk): Reply {
     let got = fetchManifest(ask.sourceUrl);
-    if (got.problem != "") { return badRequest(got.problem); }
+    if (got.problem != "") {
+      return BadRequest(got.problem);
+    }
     let m = manifestFrom(got.body);
-    if (m.problem != "") { return badRequest(m.problem); }
+    if (m.problem != "") {
+      return BadRequest(m.problem);
+    }
     let clash = installProblem(this.db, m);
-    if (clash != "") { return badRequest(clash); }
+    if (clash != "") {
+      return BadRequest(clash);
+    }
     let made = install(this.db, m, manifestUrl(ask.sourceUrl), stamp());
-    return created(findById(this.db, pluginsMapping(), made.id));
+    return Created(findById(this.db, pluginsMapping(), made.id));
   }
 
-  @del("/:id")
+  @Delete("/:id")
   remove(@PathVariable("id") id: string): Reply {
     if (!existsById(this.db, pluginsMapping(), id)) {
-      return notFound("plugin " + id);
+      return NotFound("plugin " + id);
     }
     uninstall(this.db, id);
-    return noContent();
+    return NoContent();
   }
 }

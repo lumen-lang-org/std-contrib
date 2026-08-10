@@ -1,10 +1,10 @@
 import { controller, bindings } from "./controller.ts";
 import { Bound } from "./plan.ts";
-import { Request, Reply, Mount, Guarded, ok, badRequest, passes, stops, dispatchedMounted, header } from "./server.ts";
+import { Request, Reply, Mount, Guarded, Ok, BadRequest, passes, stops, dispatchedMounted, header } from "./server.ts";
 
 export function needsPostgres(req: Request): Guarded {
   if (header(req, "x-db") != "postgres") {
-    return stops(badRequest("documents need PostgreSQL (pgvector)"));
+    return stops(BadRequest("documents need PostgreSQL (pgvector)"));
   }
   return passes();
 }
@@ -17,19 +17,19 @@ export class DocumentApi {
 
   @get("/")
   @Guard(needsPostgres)
-  list(req: Request): Reply { return ok("[\"a\"]"); }
+  list(req: Request): Reply { return Ok("[\"a\"]"); }
 
   @get("/open")
-  open(req: Request): Reply { return ok("{\"open\":true}"); }
+  open(req: Request): Reply { return Ok("{\"open\":true}"); }
 
   ready(): Guarded {
-    if (this.kind != "postgres") { return stops(badRequest("this deployment cannot answer that")); }
+    if (this.kind != "postgres") { return stops(BadRequest("this deployment cannot answer that")); }
     return passes();
   }
 
   @get("/own")
   @Guard(ready)
-  own(req: Request): Reply { return ok("{\"own\":true}"); }
+  own(req: Request): Reply { return Ok("{\"own\":true}"); }
 }
 
 test("a guard lets a capable server through", () => {
@@ -65,7 +65,7 @@ test("a guard that is a method reaches the controller's own state", () => {
 
 export function roleAtLeast(req: Request, role: string): Guarded {
   if (role == "signed-in" && header(req, "x-user").trim() == "") {
-    return stops(badRequest("signing in is what makes this yours"));
+    return stops(BadRequest("signing in is what makes this yours"));
   }
   return passes();
 }
@@ -75,7 +75,7 @@ export function roleAtLeast(req: Request, role: string): Guarded {
 export class RoledApi {
   @get("/")
   @Guard(roleAtLeast("signed-in"))
-  mine(req: Request): Reply { return ok("{\"mine\":true}"); }
+  mine(req: Request): Reply { return Ok("{\"mine\":true}"); }
 }
 
 test("a guard written as a call carries its argument", () => {

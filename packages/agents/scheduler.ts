@@ -47,28 +47,40 @@ function main(): void {
   let fired: int = 0;
   while (fired < PER_PASS) {
     let task = claimDue(db, Date.now() as number);
-    if (task.id == "") { break; }
-    try { fire(db, task, master); }
+    if (task.id == "") {
+      break;
+    }
+    try {
+      fire(db, task, master);
+    }
     catch (e) {
       console.error("scheduler: " + task.id + " threw: " + e.message);
       markFailed(db, task, e.message, Date.now() as number);
     }
     fired = fired + 1;
   }
-  if (fired > 0) { console.log("scheduler: fired " + `${fired}`); }
+  if (fired > 0) {
+    console.log("scheduler: fired " + `${fired}`);
+  }
 
   let walked: int = 0;
   while (walked < WORKFLOWS_PER_PASS) {
     let flow = claimDueWorkflow(db, Date.now() as number);
-    if (flow.id == "") { break; }
-    try { fireWorkflow(db, flow, master); }
+    if (flow.id == "") {
+      break;
+    }
+    try {
+      fireWorkflow(db, flow, master);
+    }
     catch (e) {
       console.error("scheduler: workflow " + flow.id + " threw: " + e.message);
       markWorkflowFailed(db, flow, e.message, Date.now() as number);
     }
     walked = walked + 1;
   }
-  if (walked > 0) { console.log("scheduler: walked " + `${walked}` + " workflows"); }
+  if (walked > 0) {
+    console.log("scheduler: walked " + `${walked}` + " workflows");
+  }
 
   reflow(db, master);
 
@@ -108,8 +120,12 @@ function sweep(db: Db): void {
 }
 
 function queuedMessages(db: Db): int {
-  if (!db.query("SELECT count(*) FROM trigger_inbox WHERE status = 'queued'", [])) { return 0; }
-  if (db.rows() == 0) { return 0; }
+  if (!db.query("SELECT count(*) FROM trigger_inbox WHERE status = 'queued'", [])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
   return parseInt(db.value(0, 0), 10) ?? 0;
 }
 
@@ -130,15 +146,21 @@ function drainTriggers(db: Db, master: string): void {
   let answered: int = 0;
   while (answered < 50) {
     let msg = claimMessage(db, Date.now() as number);
-    if (msg.id == "") { break; }
-    try { answer(db, msg, master); }
+    if (msg.id == "") {
+      break;
+    }
+    try {
+      answer(db, msg, master);
+    }
     catch (e) {
       console.error("scheduler: trigger message " + msg.id + " threw: " + e.message);
       finishMessage(db, msg, "failed", "", "", e.message, Date.now() as number);
     }
     answered = answered + 1;
   }
-  if (answered > 0) { console.log("scheduler: answered " + `${answered}` + " triggered messages"); }
+  if (answered > 0) {
+    console.log("scheduler: answered " + `${answered}` + " triggered messages");
+  }
 }
 
 function answer(db: Db, msg: TriggerInboxRow, master: string): void {
@@ -154,7 +176,9 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     forgetAsk(db, open.id);
     let stepsSoFar = "[]";
     let runDoc = findById(db, workflowRunsMapping(), open.runId);
-    if (runDoc != "") { stepsSoFar = jsonText(runDoc, "steps"); }
+    if (runDoc != "") {
+      stepsSoFar = jsonText(runDoc, "steps");
+    }
     let held: ResumeAsk = {
       runId: open.runId, threadId: open.threadId, graph: open.graph,
       nodeId: open.nodeId, input: open.input, outputs: open.outputs,
@@ -164,7 +188,9 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
       botId: msg.botId, chatId: msg.chatId,
     };
     let resumed = resumeWorkflow(db, flow, held);
-    if (resumed.threadId != "") { noteThread(db, msg.id, resumed.threadId); }
+    if (resumed.threadId != "") {
+      noteThread(db, msg.id, resumed.threadId);
+    }
     if ((resumed.waitingAt ?? "") != "") {
       rememberOpenQuestion(db, msg, withGraph(flow, open.graph), resumed);
       finishMessage(db, msg, "done", resumed.runId, "", "", Date.now() as number);
@@ -199,7 +225,9 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     if (home != "") {
       let path = "/" + (msg.fileName ?? "document");
       let body = msg.fileBody ?? "";
-      if (!binaryKind(kindOf(path))) { body = crypto.base64Decode(body); }
+      if (!binaryKind(kindOf(path))) {
+        body = crypto.base64Decode(body);
+      }
       let filed = putArtifact(db, {
         threadId: home, path: path,
         title: msg.fileName ?? "document",
@@ -218,7 +246,9 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     }
   }
   let done = runWorkflow(db, flow, ask);
-  if (done.threadId != "") { noteThread(db, msg.id, done.threadId); }
+  if (done.threadId != "") {
+    noteThread(db, msg.id, done.threadId);
+  }
   if ((done.waitingAt ?? "") != "") {
     rememberOpenQuestion(db, msg, flow, done);
     finishMessage(db, msg, "done", done.runId, "", "", Date.now() as number);
@@ -249,7 +279,9 @@ function reflow(db: Db, master: string): void {
     }
     i = i + 1;
   }
-  if (done > 0) { console.log("scheduler: made " + `${done}` + " stories readable"); }
+  if (done > 0) {
+    console.log("scheduler: made " + `${done}` + " stories readable");
+  }
 }
 
 function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {

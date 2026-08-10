@@ -51,7 +51,9 @@ export type EvalRun = {
 const PASS_MARK: number = 0.7;
 
 export function evalApiBase(backend: TraceBackend): string {
-  if (!hasDatasets(backend)) { return ""; }
+  if (!hasDatasets(backend)) {
+    return "";
+  }
   return backend.apiBase;
 }
 
@@ -64,25 +66,35 @@ function jsonHeaders(auth: string): Map<string, string> {
 
 export function datasetItems(base: string, auth: string, dataset: string, maxItems: int): EvalItem[] {
   let out: EvalItem[] = [];
-  if (base == "") { return out; }
+  if (base == "") {
+    return out;
+  }
   let page: int = 1;
   while (out.length < maxItems) {
     let url = base + "/api/public/dataset-items?datasetName=" + dataset
       + "&limit=50&page=" + `${page}`;
     let res = http.request(url, "GET", "", jsonHeaders(auth));
-    if (!res.ok || res.status != 200) { return out; }
+    if (!res.ok || res.status != 200) {
+      return out;
+    }
 
     let items = jsonList(jsonRaw(res.body, "data"));
-    if (items.length == 0) { return out; }
+    if (items.length == 0) {
+      return out;
+    }
 
     let i: int = 0;
     while (i < items.length && out.length < maxItems) {
       let input = jsonRaw(items[i], "input");
       let question = jsonText(input, "question");
-      if (question == "") { question = input; }
+      if (question == "") {
+        question = input;
+      }
       let expectedRaw = jsonRaw(items[i], "expectedOutput");
       let expected = jsonText(expectedRaw, "answer");
-      if (expected == "") { expected = expectedRaw; }
+      if (expected == "") {
+        expected = expectedRaw;
+      }
 
       let item: EvalItem = {
         id: jsonText(items[i], "id"),
@@ -92,12 +104,16 @@ export function datasetItems(base: string, auth: string, dataset: string, maxIte
         expectedAgents: namesIn(jsonRaw(expectedRaw, "agents")),
         expectedScopes: namesIn(jsonRaw(expectedRaw, "scopes")),
       };
-      if (item.id != "" && item.question != "") { out.push(item); }
+      if (item.id != "" && item.question != "") {
+        out.push(item);
+      }
       i = i + 1;
     }
 
     let pages = jsonRaw(res.body, "totalPages");
-    if (pages == "" || `${page}` == pages) { return out; }
+    if (pages == "" || `${page}` == pages) {
+      return out;
+    }
     page = page + 1;
   }
   return out;
@@ -105,7 +121,9 @@ export function datasetItems(base: string, auth: string, dataset: string, maxIte
 
 export function namesIn(array: string): string[] {
   let out: string[] = [];
-  if (array == "") { return out; }
+  if (array == "") {
+    return out;
+  }
   if (array.startsWith("\"")) {
     out.push(jsonUnescape(array.slice(1, array.length - 1)));
     return out;
@@ -125,25 +143,33 @@ export function missingFrom(expected: string[], actual: string[]): string[] {
   let out: string[] = [];
   let i: int = 0;
   while (i < expected.length) {
-    if (!hasName(actual, expected[i])) { out.push(expected[i]); }
+    if (!hasName(actual, expected[i])) {
+      out.push(expected[i]);
+    }
     i = i + 1;
   }
   return out;
 }
 
 export function reachedScore(expected: string[], actual: string[]): number {
-  if (expected.length == 0) { return 1.0; }
+  if (expected.length == 0) {
+    return 1.0;
+  }
   let hit: int = 0;
   let i: int = 0;
   while (i < expected.length) {
-    if (hasName(actual, expected[i])) { hit = hit + 1; }
+    if (hasName(actual, expected[i])) {
+      hit = hit + 1;
+    }
     i = i + 1;
   }
   return (hit + 0.0) / (expected.length + 0.0);
 }
 
 export function linkRunItem(base: string, auth: string, runName: string, itemId: string, runTraceId: string): bool {
-  if (base == "" || runTraceId == "") { return false; }
+  if (base == "" || runTraceId == "") {
+    return false;
+  }
   let body = "{\"runName\":" + JSON.stringify(runName)
     + ",\"datasetItemId\":" + JSON.stringify(itemId)
     + ",\"traceId\":" + JSON.stringify(runTraceId) + "}";
@@ -152,7 +178,9 @@ export function linkRunItem(base: string, auth: string, runName: string, itemId:
 }
 
 export function postScore(base: string, auth: string, runTraceId: string, name: string, value: number, comment: string): bool {
-  if (base == "" || runTraceId == "") { return false; }
+  if (base == "" || runTraceId == "") {
+    return false;
+  }
   let body = "{\"traceId\":" + JSON.stringify(runTraceId)
     + ",\"name\":" + JSON.stringify(name)
     + ",\"value\":" + `${value}`
@@ -190,15 +218,21 @@ export function readVerdict(text: string): Verdict {
     return unreadable;
   }
   let value: number = parsed;
-  if (value < 0.0) { value = 0.0; }
-  if (value > 1.0) { value = 1.0; }
+  if (value < 0.0) {
+    value = 0.0;
+  }
+  if (value > 1.0) {
+    value = 1.0;
+  }
   let why = jsonStringMember(text, "reason");
   let out: Verdict = { score: value, reason: why.text, ok: true };
   return out;
 }
 
 export function judgeAnswer(db: Db, judgeAgentId: string, item: EvalItem, answer: string, master: string): Verdict {
-  if (judgeAgentId == "") { return compareNumbers(item, answer); }
+  if (judgeAgentId == "") {
+    return compareNumbers(item, answer);
+  }
   let asked = runAgentTraced(db, judgeAgentId, judgePrompt(item.question, item.expected, answer), master, judgeTracer());
   if (!asked.ok) {
     let broken: Verdict = { score: 0.0, reason: "the judge could not run: " + asked.error, ok: false };
@@ -216,7 +250,9 @@ export function compareNumbers(item: EvalItem, answer: string): Verdict {
   let found: int = 0;
   let i: int = 0;
   while (i < wanted.length) {
-    if (answer.indexOf(wanted[i]) >= 0) { found = found + 1; }
+    if (answer.indexOf(wanted[i]) >= 0) {
+      found = found + 1;
+    }
     i = i + 1;
   }
   let score: number = (found + 0.0) / (wanted.length + 0.0);
@@ -240,18 +276,24 @@ export function numbersIn(text: string): string[] {
     if (digit || inner) {
       current = current + text.charAt(i);
     } else {
-      if (current != "") { out.push(trimTrailingPoint(current)); }
+      if (current != "") {
+        out.push(trimTrailingPoint(current));
+      }
       current = "";
     }
     i = i + 1;
   }
-  if (current != "") { out.push(trimTrailingPoint(current)); }
+  if (current != "") {
+    out.push(trimTrailingPoint(current));
+  }
   return out;
 }
 
 function trimTrailingPoint(value: string): string {
   let out = value;
-  while (out.endsWith(".") || out.endsWith(",")) { out = out.slice(0, out.length - 1); }
+  while (out.endsWith(".") || out.endsWith(",")) {
+    out = out.slice(0, out.length - 1);
+  }
   return out;
 }
 
@@ -264,7 +306,9 @@ export function missingReason(kind: string, missing: string[], reached: string[]
     return "every expected " + kind.slice(0, kind.length - 1) + " was reached (" + reached.join(", ") + ")";
   }
   let saw = "nothing";
-  if (reached.length > 0) { saw = reached.join(", "); }
+  if (reached.length > 0) {
+    saw = reached.join(", ");
+  }
   return "never reached " + missing.join(", ") + "; the run used " + saw;
 }
 
@@ -322,7 +366,9 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
     let delegations: int = 0;
     let s: int = 0;
     while (s < answered.steps.length) {
-      if (answered.steps[s].tool.startsWith("ask_")) { delegations = delegations + 1; }
+      if (answered.steps[s].tool.startsWith("ask_")) {
+        delegations = delegations + 1;
+      }
       s = s + 1;
     }
 
@@ -341,7 +387,9 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
       if (verdict.ok) {
         scored = scored + 1;
         total = total + verdict.score;
-        if (verdict.score >= PASS_MARK) { passed = passed + 1; }
+        if (verdict.score >= PASS_MARK) {
+          passed = passed + 1;
+        }
         postScore(base, auth, caseTrace, "correctness", verdict.score, verdict.reason);
       } else {
         why = verdict.reason;
@@ -404,7 +452,9 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
   }
 
   let mean: number = 0.0;
-  if (scored > 0) { mean = total / scored; }
+  if (scored > 0) {
+    mean = total / scored;
+  }
   let out: EvalRun = {
     ok: true, dataset: dataset, runName: runName, items: items.length,
     scored: scored, passed: passed, meanScore: mean, results: results, error: "",

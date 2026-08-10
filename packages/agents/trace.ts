@@ -51,29 +51,43 @@ export function tracePlan(db: Db): Migration[] {
 
 export function tracerFor(db: Db, master: string): Tracer {
   let document = findById(db, traceConfigMapping(), "default");
-  if (document == "") { return noTracer(); }
+  if (document == "") {
+    return noTracer();
+  }
   let row: TraceConfigRow = JSON.parse<TraceConfigRow>(document);
-  if (!row.enabled || row.endpoint == "") { return noTracer(); }
+  if (!row.enabled || row.endpoint == "") {
+    return noTracer();
+  }
 
   let secret = credentialFor(db, "tracing", master);
   let name = backendNameOf(row);
-  if (secret == "" && name == "langfuse") { return noTracer(); }
+  if (secret == "" && name == "langfuse") {
+    return noTracer();
+  }
 
   let creds: BackendCredentials = { endpoint: row.endpoint, identity: row.publicKey, secret: secret };
   let backend = backendNamed(name, creds);
-  if (backend.name == "none") { return noTracer(); }
+  if (backend.name == "none") {
+    return noTracer();
+  }
 
   let t = makeTracerFor(backend, row.endpoint, serviceNameOr(row));
-  if (row.environment == "") { return t; }
+  if (row.environment == "") {
+    return t;
+  }
   return tracerWithEnvironment(t, row.environment);
 }
 
 function backendNameOf(row: TraceConfigRow): string {
-  if (row.backend == "") { return "langfuse"; }
+  if (row.backend == "") {
+    return "langfuse";
+  }
   return row.backend;
 }
 
 function serviceNameOr(row: TraceConfigRow): string {
-  if (row.serviceName == "") { return "lumen-agents"; }
+  if (row.serviceName == "") {
+    return "lumen-agents";
+  }
   return row.serviceName;
 }

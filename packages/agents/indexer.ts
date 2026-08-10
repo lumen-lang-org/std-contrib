@@ -27,15 +27,21 @@ function main(): void {
   console.log("indexer: draining the queue");
 
   while (true) {
-    try { drainOne(db, master); }
-    catch (e) { console.error("indexer: " + e.message); }
+    try {
+      drainOne(db, master);
+    }
+    catch (e) {
+      console.error("indexer: " + e.message);
+    }
     process.sleep(IDLE_MS);
   }
 }
 
 function drainOne(db: Db, master: string): void {
   let job = claimNext(db, now());
-  if (job.id == "") { return; }
+  if (job.id == "") {
+    return;
+  }
 
   let embedder = embeddingModel(db, job.modelId);
   if (embedder.id == "") {

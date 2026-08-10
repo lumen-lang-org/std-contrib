@@ -10,8 +10,12 @@ import { MAX_PER_OWNER, MIN_EVERY_MINUTES, TaskRow, compile, emptyTask, enabledC
 const QUOTE_LIMIT: int = 200;
 
 export function maySchedule(owner: string): bool {
-  if (owner.startsWith("guest:")) { return false; }
-  if (owner == "" && trustsProxyAuth()) { return false; }
+  if (owner.startsWith("guest:")) {
+    return false;
+  }
+  if (owner == "" && trustsProxyAuth()) {
+    return false;
+  }
   return true;
 }
 
@@ -105,25 +109,35 @@ function rowsOf(db: Db, owner: string): TaskRow[] {
 }
 
 function zoneFor(db: Db, owner: string, asked: string): string {
-  if (asked != "") { return asked; }
+  if (asked != "") {
+    return asked;
+  }
   let rows = rowsOf(db, owner);
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].tz != "") { return rows[i].tz; }
+    if (rows[i].tz != "") {
+      return rows[i].tz;
+    }
     i = i + 1;
   }
   let set = (process.env("AGENTS_TZ") ?? "").trim();
-  if (set != "") { return set; }
+  if (set != "") {
+    return set;
+  }
   return "UTC";
 }
 
 function mine(db: Db, owner: string, said: string): TaskRow {
   let none = emptyTask();
-  if (said == "") { return none; }
+  if (said == "") {
+    return none;
+  }
   let document = findById(db, tasksMapping(), said);
   if (document != "") {
     let row: TaskRow = JSON.parse<TaskRow>(document);
-    if (row.owner == owner) { return row; }
+    if (row.owner == owner) {
+      return row;
+    }
     return none;
   }
   let wanted = said.toLowerCase().trim();
@@ -139,14 +153,20 @@ function mine(db: Db, owner: string, said: string): TaskRow {
     }
     i = i + 1;
   }
-  if (hits == 1) { return found; }
+  if (hits == 1) {
+    return found;
+  }
   return none;
 }
 
 function nextReads(row: TaskRow): string {
-  if (!row.enabled) { return "paused"; }
+  if (!row.enabled) {
+    return "paused";
+  }
   let at = stampMs(row.nextAt);
-  if (at <= 0.0) { return "nothing scheduled"; }
+  if (at <= 0.0) {
+    return "nothing scheduled";
+  }
   return civil(row.tz == "" ? "UTC" : row.tz, at as i64);
 }
 
@@ -154,14 +174,24 @@ function describe(row: TaskRow, full: bool): string {
   let name = row.title == "" ? "(unnamed)" : row.title;
   let line = name + " [" + row.id + "]";
   line = line + "\n  next: " + nextReads(row);
-  if (row.tz != "") { line = line + " (" + row.tz + ")"; }
-  if (row.kind == "once") { line = line + ", then finished"; }
-  if (full) { line = line + "\n  does: " + row.instruction; }
+  if (row.tz != "") {
+    line = line + " (" + row.tz + ")";
+  }
+  if (row.kind == "once") {
+    line = line + ", then finished";
+  }
+  if (full) {
+    line = line + "\n  does: " + row.instruction;
+  }
   if (row.runCount > 0) {
     line = line + "\n  ran " + `${row.runCount}` + " time" + (row.runCount == 1 ? "" : "s");
-    if (row.lastStatus == "failed") { line = line + ", last one failed: " + row.lastError; }
+    if (row.lastStatus == "failed") {
+      line = line + ", last one failed: " + row.lastError;
+    }
   }
-  if (!row.enabled && row.pausedReason != "") { line = line + "\n  paused: " + row.pausedReason; }
+  if (!row.enabled && row.pausedReason != "") {
+    line = line + "\n  paused: " + row.pausedReason;
+  }
   return line;
 }
 
@@ -218,9 +248,13 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
 
   if (call.name == "schedule_task") {
     let instruction = jsonText(call.args, "instruction").trim();
-    if (instruction == "") { return no("say what should happen: {\"instruction\":\"...\",\"schedule\":\"every weekday at 08:00\"}"); }
+    if (instruction == "") {
+      return no("say what should happen: {\"instruction\":\"...\",\"schedule\":\"every weekday at 08:00\"}");
+    }
     let said = jsonText(call.args, "schedule").trim();
-    if (said == "") { return no("say when: \"every weekday at 08:00\", \"every 30 minutes\", or \"on 2026-08-06 at 09:00\"."); }
+    if (said == "") {
+      return no("say when: \"every weekday at 08:00\", \"every 30 minutes\", or \"on 2026-08-06 at 09:00\".");
+    }
 
     let asked = jsonText(call.args, "timezone").trim();
     if (asked != "" && !knownZone(asked)) {
@@ -231,7 +265,9 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
       return no("that is " + `${MAX_PER_OWNER}` + " tasks already — one has to be paused or deleted before another can run. list_tasks shows them.");
     }
     let timing = timingFor(said, zone, call.nowMs);
-    if (!timing.ok) { return no(timing.error); }
+    if (!timing.ok) {
+      return no(timing.error);
+    }
 
     let now = `${call.nowMs}`;
     let row: TaskRow = {
@@ -255,15 +291,21 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
       updatedAt: now,
     };
     let wrong = refuse(row);
-    if (wrong != "") { return no(wrong); }
+    if (wrong != "") {
+      return no(wrong);
+    }
     let ready = row;
     if (timing.kind == "every") {
       let first = nextFire(row, call.nowMs);
-      if (!first.ok) { return no(first.error); }
+      if (!first.ok) {
+        return no(first.error);
+      }
       ready = withNextAt(row, first.at);
     }
     let written = persist(db, tasksMapping(), JSON.stringify(ready));
-    if (!written.ok) { return no(written.error); }
+    if (!written.ok) {
+      return no(written.error);
+    }
     return yes("Scheduled.\n\n" + describe(ready, true)
       + "\n\nIt opens a conversation of its own each time it runs."
       + (asked == "" ? "\nTimes are read in " + zone + " — say so, in case that is not where they are." : ""));
@@ -288,7 +330,9 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
 
   if (call.name == "delete_task") {
     let gone = deleteById(db, tasksMapping(), row.id);
-    if (!gone.ok) { return no(gone.error); }
+    if (!gone.ok) {
+      return no(gone.error);
+    }
     return yes("Deleted \"" + (row.title == "" ? row.instruction : row.title) + "\". It will not run again.");
   }
 
@@ -303,7 +347,9 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
   let at = row.nextAt;
   if (said != "") {
     let timing = timingFor(said, zone, call.nowMs);
-    if (!timing.ok) { return no(timing.error); }
+    if (!timing.ok) {
+      return no(timing.error);
+    }
     kind = timing.kind;
     expr = timing.expr;
     at = timing.at;
@@ -327,14 +373,20 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
     runCount: row.runCount, createdAt: row.createdAt, updatedAt: `${call.nowMs}`,
   };
   let wrong = refuse(edited);
-  if (wrong != "") { return no(wrong); }
+  if (wrong != "") {
+    return no(wrong);
+  }
   let stored = edited;
   if (edited.kind == "every") {
     let ahead = nextFire(edited, call.nowMs);
-    if (!ahead.ok) { return no(ahead.error); }
+    if (!ahead.ok) {
+      return no(ahead.error);
+    }
     stored = withNextAt(edited, ahead.at);
   }
   let written = persist(db, tasksMapping(), JSON.stringify(stored));
-  if (!written.ok) { return no(written.error); }
+  if (!written.ok) {
+    return no(written.error);
+  }
   return yes("Changed.\n\n" + describe(stored, true));
 }

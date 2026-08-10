@@ -8,7 +8,10 @@ import { AgentRun, runAgent } from "../run.ts";
 
 function main(): void {
   let master = masterKey();
-  if (masterKeyProblem(master) != "") { console.error(masterKeyProblem(master)); return; }
+  if (masterKeyProblem(master) != "") {
+    console.error(masterKeyProblem(master));
+    return;
+  }
 
   let db = sqlite();
   let cfg: DbConfig = { filename: "/tmp/agents_run.db" };
@@ -31,18 +34,24 @@ function main(): void {
   persist(db, agentsMapping(), JSON.stringify(calc));
 
   let fromEnv = process.env("MISTRAL_API_KEY") ?? "";
-  if (fromEnv != "") { storeCredential(db, { provider: "mistral", apiKey: fromEnv, masterKey: master, now: "2026-07-25" }); }
+  if (fromEnv != "") {
+    storeCredential(db, { provider: "mistral", apiKey: fromEnv, masterKey: master, now: "2026-07-25" });
+  }
 
   let first = runAgent(db, "a1", "What is 2 plus 40?", master);
   console.log("agent=" + first.agentName + " prompt=v" + `${first.promptVersion}` + " model=" + first.modelApiName);
   console.log("ok=" + `${first.ok}` + " status=" + `${first.status}` + " " + first.error);
-  if (first.text != "") { console.log("reply " + first.text); }
+  if (first.text != "") {
+    console.log("reply " + first.text);
+  }
 
   execute(db, "UPDATE agents SET prompt_id = 'p2' WHERE id = 'a1'");
   let second = runAgent(db, "a1", "What is 2 plus 40?", master);
   console.log("");
   console.log("after UPDATE: prompt=v" + `${second.promptVersion}` + " ok=" + `${second.ok}`);
-  if (second.text != "") { console.log("reply " + second.text); }
+  if (second.text != "") {
+    console.log("reply " + second.text);
+  }
 
   execute(db, "UPDATE agents SET enabled = 0 WHERE id = 'a1'");
   console.log("disabled -> " + runAgent(db, "a1", "hi", master).error);

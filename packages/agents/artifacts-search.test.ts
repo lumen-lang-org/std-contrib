@@ -27,7 +27,10 @@ function seed(path: string, title: string, body: string): void {
 function copies(piece: string, n: int): string {
   let out = "";
   let i: int = 0;
-  while (i < n) { out = out + piece; i = i + 1; }
+  while (i < n) {
+    out = out + piece;
+    i = i + 1;
+  }
   return out;
 }
 

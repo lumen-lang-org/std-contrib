@@ -84,18 +84,24 @@ export type AgentToolCall = {
 
 function agentSaid(db: Db, said: string): AgentRow {
   let doc = findById(db, agentsMapping(), said);
-  if (doc != "") { return JSON.parse<AgentRow>(doc); }
+  if (doc != "") {
+    return JSON.parse<AgentRow>(doc);
+  }
   let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: noOrder() }));
   let found: int = -1;
   let i: int = 0;
   while (i < rows.length) {
     if (rows[i].agentName.toLowerCase() == said.toLowerCase()) {
-      if (found >= 0) { return emptyAgent(); }
+      if (found >= 0) {
+        return emptyAgent();
+      }
       found = i;
     }
     i = i + 1;
   }
-  if (found >= 0) { return rows[found]; }
+  if (found >= 0) {
+    return rows[found];
+  }
   return emptyAgent();
 }
 
@@ -114,11 +120,15 @@ function emptyAgent(): AgentRow {
 
 function configSaid(db: Db, said: string): ModelConfigRow {
   let doc = findById(db, modelConfigRows(db), said);
-  if (doc != "") { return JSON.parse<ModelConfigRow>(doc); }
+  if (doc != "") {
+    return JSON.parse<ModelConfigRow>(doc);
+  }
   let rows = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), { order: labelOrder() }));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].label.toLowerCase() == said.toLowerCase()) { return rows[i]; }
+    if (rows[i].label.toLowerCase() == said.toLowerCase()) {
+      return rows[i];
+    }
     i = i + 1;
   }
   let none: ModelConfigRow = {
@@ -137,13 +147,17 @@ function defaultConfig(db: Db): string {
   let rows = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: noOrder() }));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].isDefault) { return rows[i].modelConfigId; }
+    if (rows[i].isDefault) {
+      return rows[i].modelConfigId;
+    }
     i = i + 1;
   }
   let configs = JSON.parse<ModelConfigRow[]>(listOrdered(db, modelConfigRows(db), { order: labelOrder() }));
   i = 0;
   while (i < configs.length) {
-    if (configs[i].selectable) { return configs[i].id; }
+    if (configs[i].selectable) {
+      return configs[i].id;
+    }
     i = i + 1;
   }
   return "";
@@ -151,7 +165,9 @@ function defaultConfig(db: Db): string {
 
 function promptOf(db: Db, promptId: string): PromptRow {
   let doc = findById(db, promptsMapping(), promptId);
-  if (doc != "") { return JSON.parse<PromptRow>(doc); }
+  if (doc != "") {
+    return JSON.parse<PromptRow>(doc);
+  }
   let none: PromptRow = { id: "", promptName: "", version: 0, body: "", createdAt: "" };
   return none;
 }
@@ -162,7 +178,9 @@ function writePromptVersion(db: Db, promptName: string, body: string, nowMs: num
   let at = 0;
   if (page != "" && page != "[]") {
     let rows: PromptRow[] = JSON.parse<PromptRow[]>(page);
-    if (rows.length > 0) { at = rows[0].version; }
+    if (rows.length > 0) {
+      at = rows[0].version;
+    }
   }
   let row: PromptRow = {
     id: crypto.randomUUID(), promptName: promptName, version: at + 1,
@@ -174,21 +192,31 @@ function writePromptVersion(db: Db, promptName: string, body: string, nowMs: num
 
 function findSkill(db: Db, said: string): string {
   let sql = "SELECT id FROM skills WHERE LOWER(skill_name) = " + db.placeholder;
-  if (!db.query(sql, [said.toLowerCase()])) { return ""; }
-  if (db.rows() != 1) { return ""; }
+  if (!db.query(sql, [said.toLowerCase()])) {
+    return "";
+  }
+  if (db.rows() != 1) {
+    return "";
+  }
   return db.value(0, 0);
 }
 
 function promptAtVersion(db: Db, promptName: string, version: int): string {
   let sql = "SELECT id FROM prompts WHERE prompt_name = " + db.placeholder
     + " AND version = " + placeholderAt(db, 2);
-  if (!db.query(sql, [promptName, `${version}`])) { return ""; }
-  if (db.rows() != 1) { return ""; }
+  if (!db.query(sql, [promptName, `${version}`])) {
+    return "";
+  }
+  if (db.rows() != 1) {
+    return "";
+  }
   return db.value(0, 0);
 }
 
 function boolLit(db: Db, v: bool): string {
-  if (db.name == "postgres") { return v ? "TRUE" : "FALSE"; }
+  if (db.name == "postgres") {
+    return v ? "TRUE" : "FALSE";
+  }
   return v ? "1" : "0";
 }
 
@@ -230,20 +258,32 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
 
   if (call.name == "create_agent") {
     let name = jsonText(call.args, "name").trim();
-    if (name == "") { return no("an agent needs a name: {\"name\":\"...\",\"prompt\":\"...\"}"); }
-    if (name.length > 48) { return no("an agent name is at most 48 characters — it doubles as a tool name."); }
+    if (name == "") {
+      return no("an agent needs a name: {\"name\":\"...\",\"prompt\":\"...\"}");
+    }
+    if (name.length > 48) {
+      return no("an agent name is at most 48 characters — it doubles as a tool name.");
+    }
     let prompt = jsonText(call.args, "prompt").trim();
-    if (prompt == "") { return no("an agent needs its system prompt — who it is and how it answers."); }
+    if (prompt == "") {
+      return no("an agent needs its system prompt — who it is and how it answers.");
+    }
     let taken = agentSaid(db, name);
-    if (taken.id != "") { return no("\"" + name + "\" exists already — show_agent shows it, change_agent changes it."); }
+    if (taken.id != "") {
+      return no("\"" + name + "\" exists already — show_agent shows it, change_agent changes it.");
+    }
     let configId = defaultConfig(db);
     let configSaidText = jsonText(call.args, "model_config").trim();
     if (configSaidText != "") {
       let config = configSaid(db, configSaidText);
-      if (config.id == "") { return no("no model config called \"" + configSaidText + "\" — list_agents shows the ones in use."); }
+      if (config.id == "") {
+        return no("no model config called \"" + configSaidText + "\" — list_agents shows the ones in use.");
+      }
       configId = config.id;
     }
-    if (configId == "") { return no("this deployment has no model config to run an agent on yet."); }
+    if (configId == "") {
+      return no("this deployment has no model config to run an agent on yet.");
+    }
     let promptId = writePromptVersion(db, name, prompt, call.nowMs);
     let row: AgentRow = {
       id: "a-" + crypto.randomUUID().slice(0, 8), agentName: name,
@@ -258,9 +298,13 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   }
 
   let said = jsonText(call.args, "agent").trim();
-  if (said == "") { return no("say which agent: {\"agent\":\"...\"} — list_agents shows them."); }
+  if (said == "") {
+    return no("say which agent: {\"agent\":\"...\"} — list_agents shows them.");
+  }
   let agent = agentSaid(db, said);
-  if (agent.id == "") { return no("no agent by that name or id — list_agents shows them."); }
+  if (agent.id == "") {
+    return no("no agent by that name or id — list_agents shows them.");
+  }
 
   if (call.name == "show_agent") {
     return yes(describeAgent(db, agent, true));
@@ -290,13 +334,17 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   let note = "";
   if (configWord != "") {
     let config = configSaid(db, configWord);
-    if (config.id == "") { return no("no model config called \"" + configWord + "\"."); }
+    if (config.id == "") {
+      return no("no model config called \"" + configWord + "\".");
+    }
     configId = config.id;
     note = " Now on " + config.label + ".";
   }
   if (addSkill != "") {
     let sk = findSkill(db, addSkill);
-    if (sk == "") { return no("no skill called \"" + addSkill + "\" — list_skills shows them."); }
+    if (sk == "") {
+      return no("no skill called \"" + addSkill + "\" — list_skills shows them.");
+    }
     executeWith(db, "DELETE FROM agent_skills WHERE agent_id = " + db.placeholder
       + " AND skill_id = " + placeholderAt(db, 2), [agent.id, sk]);
     executeWith(db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
@@ -313,7 +361,9 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     let wantV = parseInt(promptVersionRaw, 10) ?? 0;
     let old = promptOf(db, agent.promptId);
     let found = promptAtVersion(db, old.promptName, wantV);
-    if (found == "") { return no("\"" + old.promptName + "\" has no version " + `${wantV}` + " — show_agent names the current one."); }
+    if (found == "") {
+      return no("\"" + old.promptName + "\" has no version " + `${wantV}` + " — show_agent names the current one.");
+    }
     promptId = found;
     note = note + " Prompt rolled to v" + `${wantV}` + ".";
   }

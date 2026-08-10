@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { deleteById, listOrdered, persist } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, notFound, ok, okJson } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { DiscoverFeed, allFeeds, discoverFeedsMapping, discoverStoriesMapping, discoverText, discoverTextMapping, ensureGeoFeed, feedById, geoCode, setDiscoverText, storiesFor, storyById } from "../../discover.ts";
 import { jsonText } from "../../scan.ts";
@@ -12,28 +12,30 @@ const PROMPT_CHARS_MAX: int = 20000;
 @controller("/discover")
 @bindings
 export class DiscoverApi {
-  @get("/prompt")
+  @Get("/prompt")
   readPrompt(req: Request): Reply {
     let held = discoverText(this.db, "digest-prompt");
     let v: PromptView = { prompt: held, usingDefault: held.trim() == "" };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @put("/prompt")
+  @Put("/prompt")
   writePrompt(req: Request): Reply {
     let asked = jsonText(req.body, "prompt");
     if (asked.trim() == "") {
       deleteById(this.db, discoverTextMapping(), "digest-prompt");
       let cleared: PromptView = { prompt: "", usingDefault: true };
-      return okJson(cleared);
+      return OkJson(cleared);
     }
     if (asked.length > PROMPT_CHARS_MAX) {
-      return badRequest("a prompt over " + `${PROMPT_CHARS_MAX}` + " characters is refused");
+      return BadRequest("a prompt over " + `${PROMPT_CHARS_MAX}` + " characters is refused");
     }
     let problem = setDiscoverText(this.db, "digest-prompt", asked, stamp());
-    if (problem != "") { return badRequest(problem); }
+    if (problem != "") {
+      return BadRequest(problem);
+    }
     let v: PromptView = { prompt: asked, usingDefault: false };
-    return okJson(v);
+    return OkJson(v);
   }
 
   db: Db;
@@ -42,12 +44,14 @@ export class DiscoverApi {
     this.db = db;
   }
 
-  @get("/")
+  @Get("/")
   read(req: Request,
        @RequestParam("lang", "") lang: string,
        @RequestParam("all", "") all: string): Reply {
     let country = geoCode(req.query.get("country") ?? "");
-    if (country != "") { ensureGeoFeed(this.db, country); }
+    if (country != "") {
+      ensureGeoFeed(this.db, country);
+    }
     let feeds = allFeeds(this.db);
 
     let out: DiscoverFeedView[] = [];
@@ -96,27 +100,27 @@ export class DiscoverApi {
       }
       i = i + 1;
     }
-    return okJson(out);
+    return OkJson(out);
   }
 
-  @get("/story/:id")
+  @Get("/story/:id")
   story(@PathVariable("id") id: string): Reply {
     let row = storyById(this.db, id);
     if (row.id == "") {
-      return notFound("story " + id + " has rolled off its feed");
+      return NotFound("story " + id + " has rolled off its feed");
     }
     let feed = feedById(this.db, row.feedId);
 
     let v: StoryDetailView = { story: row, topic: feed.topic, feedId: feed.id };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @get("/feeds")
+  @Get("/feeds")
   feeds(req: Request): Reply {
-    return ok(listOrdered(this.db, discoverFeedsMapping(), { order: [{ column: "topic" }] }));
+    return Ok(listOrdered(this.db, discoverFeedsMapping(), { order: [{ column: "topic" }] }));
   }
 
-  @get("/places")
+  @Get("/places")
   places(req: Request): Reply {
     let feeds = allFeeds(this.db);
     let out: PlaceView[] = [];
@@ -130,10 +134,10 @@ export class DiscoverApi {
       }
       i = i + 1;
     }
-    return okJson(out);
+    return OkJson(out);
   }
 
-  @post("/feeds")
+  @Post("/feeds")
   addFeed(@Valid @RequestBody ask: FeedAsk): Reply {
     let row: DiscoverFeed = {
       id: ask.id,
@@ -145,14 +149,14 @@ export class DiscoverApi {
       digestedAt: ask.digestedAt,
     };
     persist(this.db, discoverFeedsMapping(), JSON.stringify(row));
-    return okJson(row);
+    return OkJson(row);
   }
 
-  @del("/feeds/:id")
+  @Delete("/feeds/:id")
   dropFeed(@PathVariable("id") id: string): Reply {
     deleteWhere(this.db, discoverStoriesMapping(), "feed_id = " + this.db.placeholder, [id]);
     deleteById(this.db, discoverFeedsMapping(), id);
     let v: DeletedView = { deleted: id };
-    return okJson(v);
+    return OkJson(v);
   }
 }

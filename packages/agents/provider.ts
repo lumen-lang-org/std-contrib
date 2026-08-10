@@ -21,15 +21,22 @@ export type Usage = {
 export function usageFrom(provider: string, body: string): Usage {
   let none: Usage = { inputTokens: 0, outputTokens: 0, counted: false };
   let usage = jsonRaw(body, "usage");
-  if (usage == "") { return none; }
+  if (usage == "") {
+    return none;
+  }
 
   let inKey = "prompt_tokens";
   let outKey = "completion_tokens";
-  if (provider == "anthropic") { inKey = "input_tokens"; outKey = "output_tokens"; }
+  if (provider == "anthropic") {
+    inKey = "input_tokens";
+    outKey = "output_tokens";
+  }
 
   let inRaw = jsonRaw(usage, inKey);
   let outRaw = jsonRaw(usage, outKey);
-  if (inRaw == "" && outRaw == "") { return none; }
+  if (inRaw == "" && outRaw == "") {
+    return none;
+  }
 
   let out: Usage = {
     inputTokens: parseInt(inRaw) ?? 0,
@@ -40,19 +47,29 @@ export function usageFrom(provider: string, body: string): Usage {
 }
 
 export function embeddingEndpoint(provider: string): string {
-  if (provider == "mistral") { return "https://api.mistral.ai/v1/embeddings"; }
-  if (provider == "openai") { return "https://api.openai.com/v1/embeddings"; }
+  if (provider == "mistral") {
+    return "https://api.mistral.ai/v1/embeddings";
+  }
+  if (provider == "openai") {
+    return "https://api.openai.com/v1/embeddings";
+  }
   return "";
 }
 
 export function endpointFor(model: ModelRow, path: string): string {
   if (model.baseUrl == "") {
-    if (path == "embeddings") { return embeddingEndpoint(model.provider); }
+    if (path == "embeddings") {
+      return embeddingEndpoint(model.provider);
+    }
     return chatEndpoint(model.provider);
   }
   let root = model.baseUrl;
-  while (root.endsWith("/")) { root = root.slice(0, root.length - 1); }
-  if (root.endsWith("/" + path)) { return root; }
+  while (root.endsWith("/")) {
+    root = root.slice(0, root.length - 1);
+  }
+  if (root.endsWith("/" + path)) {
+    return root;
+  }
   return root + "/" + path;
 }
 
@@ -178,13 +195,21 @@ function vertexVectorFrom(body: string): Embedding {
   let i: int = 0;
   while (i < pretty.length) {
     let c = pretty.charAt(i);
-    if (c == ",") { dims = dims + 1; }
-    if (c != " " && c != "\n" && c != "\r" && c != "\t") { literal = literal + c; }
+    if (c == ",") {
+      dims = dims + 1;
+    }
+    if (c != " " && c != "\n" && c != "\r" && c != "\t") {
+      literal = literal + c;
+    }
     i = i + 1;
   }
-  if (dims > 0) { dims = dims + 1; }
+  if (dims > 0) {
+    dims = dims + 1;
+  }
   let out: Embedding = { ok: dims > 0, vector: literal, dimensions: dims, error: "" };
-  if (dims == 0) { out = { ok: false, vector: "", dimensions: 0, error: "the embedding is empty" }; }
+  if (dims == 0) {
+    out = { ok: false, vector: "", dimensions: 0, error: "the embedding is empty" };
+  }
   return out;
 }
 
@@ -205,13 +230,19 @@ export function vectorFrom(body: string): Embedding {
   let commas: int = 0;
   let i: int = 0;
   while (i < literal.length) {
-    if (literal.substring(i, i + 1) == ",") { commas = commas + 1; }
+    if (literal.substring(i, i + 1) == ",") {
+      commas = commas + 1;
+    }
     i = i + 1;
   }
   let dims = commas + 1;
-  if (literal == "[]") { dims = 0; }
+  if (literal == "[]") {
+    dims = 0;
+  }
   let out: Embedding = { ok: dims > 0, vector: literal, dimensions: dims, error: "" };
-  if (dims == 0) { out = { ok: false, vector: "", dimensions: 0, error: "the embedding is empty" }; }
+  if (dims == 0) {
+    out = { ok: false, vector: "", dimensions: 0, error: "the embedding is empty" };
+  }
   return out;
 }
 
@@ -253,14 +284,22 @@ export function streamDetail(model: ModelRow, status: int, body: string): string
 }
 
 export function chatEndpoint(provider: string): string {
-  if (provider == "mistral") { return "https://api.mistral.ai/v1/chat/completions"; }
-  if (provider == "anthropic") { return "https://api.anthropic.com/v1/messages"; }
-  if (provider == "openai") { return "https://api.openai.com/v1/chat/completions"; }
+  if (provider == "mistral") {
+    return "https://api.mistral.ai/v1/chat/completions";
+  }
+  if (provider == "anthropic") {
+    return "https://api.anthropic.com/v1/messages";
+  }
+  if (provider == "openai") {
+    return "https://api.openai.com/v1/chat/completions";
+  }
   return "";
 }
 
 export function chatPath(provider: string): string {
-  if (provider == "anthropic") { return "messages"; }
+  if (provider == "anthropic") {
+    return "messages";
+  }
   return "chat/completions";
 }
 
@@ -292,13 +331,19 @@ export function toolSpec(name: string, description: string, schema: string): Too
 }
 
 export function toolsJson(provider: string, tools: ToolSpec[]): string {
-  if (tools.length == 0) { return ""; }
+  if (tools.length == 0) {
+    return "";
+  }
   let out = "[";
   let i: int = 0;
   while (i < tools.length) {
-    if (i > 0) { out = out + ","; }
+    if (i > 0) {
+      out = out + ",";
+    }
     let schema = tools[i].schema;
-    if (schema == "") { schema = "{\"type\":\"object\",\"properties\":{}}"; }
+    if (schema == "") {
+      schema = "{\"type\":\"object\",\"properties\":{}}";
+    }
     if (provider == "anthropic") {
       out = out + "{\"name\":" + JSON.stringify(tools[i].name)
         + ",\"description\":" + JSON.stringify(tools[i].description)
@@ -385,12 +430,20 @@ type ToolResultBlock = {
 
 function openAiAssistant(turn: Turn): string {
   let out = "{\"role\":\"assistant\",\"content\":";
-  if (turn.text == "") { out = out + "null"; } else { out = out + JSON.stringify(turn.text); }
-  if (turn.calls.length == 0) { return out + "}"; }
+  if (turn.text == "") {
+    out = out + "null";
+  } else {
+    out = out + JSON.stringify(turn.text);
+  }
+  if (turn.calls.length == 0) {
+    return out + "}";
+  }
   out = out + ",\"tool_calls\":[";
   let i: int = 0;
   while (i < turn.calls.length) {
-    if (i > 0) { out = out + ","; }
+    if (i > 0) {
+      out = out + ",";
+    }
     let fn: FunctionCall = { name: turn.calls[i].name, arguments: turn.calls[i].args };
     let entry: ToolCallEntry = { id: turn.calls[i].id, type: "function", function: fn };
     out = out + JSON.stringify(entry);
@@ -409,9 +462,13 @@ function anthropicAssistant(turn: Turn): string {
   }
   let i: int = 0;
   while (i < turn.calls.length) {
-    if (written > 0) { out = out + ","; }
+    if (written > 0) {
+      out = out + ",";
+    }
     let input = turn.calls[i].args;
-    if (input == "") { input = "{}"; }
+    if (input == "") {
+      input = "{}";
+    }
     out = out + "{\"type\":\"tool_use\",\"id\":" + JSON.stringify(turn.calls[i].id)
       + ",\"name\":" + JSON.stringify(turn.calls[i].name)
       + ",\"input\":" + input + "}";
@@ -433,11 +490,17 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
   let i: int = 0;
   while (i < turns.length) {
     let turn = turns[i];
-    if (written > 0) { out = out + ","; }
+    if (written > 0) {
+      out = out + ",";
+    }
 
     if (turn.role == "assistant") {
-      if (provider == "anthropic") { out = out + anthropicAssistant(turn); }
-      else { out = out + openAiAssistant(turn); }
+      if (provider == "anthropic") {
+        out = out + anthropicAssistant(turn);
+      }
+      else {
+        out = out + openAiAssistant(turn);
+      }
       written = written + 1;
       i = i + 1;
       continue;
@@ -448,7 +511,9 @@ export function messagesJson(provider: string, systemPrompt: string, turns: Turn
         out = out + "{\"role\":\"user\",\"content\":[";
         let first: bool = true;
         while (i < turns.length && turns[i].role == "tool") {
-          if (!first) { out = out + ","; }
+          if (!first) {
+            out = out + ",";
+          }
           let result: ToolResultBlock = { type: "tool_result", tool_use_id: turns[i].callId, content: turns[i].text };
           out = out + JSON.stringify(result);
           first = false;
@@ -483,12 +548,20 @@ export function thinkingJson(provider: string, config: ModelConfigRow): string {
     }
     return "";
   }
-  if (config.thinking == "") { return ""; }
+  if (config.thinking == "") {
+    return "";
+  }
   if (provider == "anthropic") {
     let budget = parseInt(config.thinking, 10) ?? 0;
-    if (budget <= 0) { return ""; }
-    if (budget >= config.maxTokens) { budget = config.maxTokens - 1; }
-    if (budget <= 0) { return ""; }
+    if (budget <= 0) {
+      return "";
+    }
+    if (budget >= config.maxTokens) {
+      budget = config.maxTokens - 1;
+    }
+    if (budget <= 0) {
+      return "";
+    }
     return ",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":" + `${budget}` + "}";
   }
   if (config.thinking == "low" || config.thinking == "medium" || config.thinking == "high") {
@@ -500,7 +573,9 @@ export function thinkingJson(provider: string, config: ModelConfigRow): string {
 function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: string, turns: Turn[], tools: ToolSpec[]): string {
   let asked = thinkingJson(model.provider, config);
   let temperature = config.temperature;
-  if (asked != "" && model.provider == "anthropic") { temperature = 1; }
+  if (asked != "" && model.provider == "anthropic") {
+    temperature = 1;
+  }
   let body = "{\"model\":" + JSON.stringify(model.apiName)
     + ",\"messages\":" + messagesJson(model.provider, systemPrompt, turns)
     + ",\"max_tokens\":" + `${config.maxTokens}`
@@ -510,12 +585,16 @@ function requestBody(model: ModelRow, config: ModelConfigRow, systemPrompt: stri
     body = body + ",\"system\":" + JSON.stringify(systemPrompt);
   }
   let declared = toolsJson(model.provider, tools);
-  if (declared != "") { body = body + ",\"tools\":" + declared; }
+  if (declared != "") {
+    body = body + ",\"tools\":" + declared;
+  }
   return body + "}";
 }
 
 export function stopReasonOf(provider: string, body: string): string {
-  if (provider == "anthropic") { return jsonText(body, "stop_reason"); }
+  if (provider == "anthropic") {
+    return jsonText(body, "stop_reason");
+  }
   return jsonText(body, "finish_reason");
 }
 
@@ -526,8 +605,10 @@ export function wasTruncated(provider: string, body: string): bool {
 
 export function truncationProblem(provider: string, body: string, maxTokens: int): string {
   let reason = stopReasonOf(provider, body);
-  if (!wasTruncated(provider, body)) { return ""; }
-  return "the model ran out of room before it finished this reply (it stopped on \"" + reason
+  if (!wasTruncated(provider, body)) {
+    return "";
+  }
+  return "the model ran out of room before it finished this Respond (it stopped on \"" + reason
     + "\"), so nothing was kept: ask for less at a time, or raise this model config's max_tokens, currently "
     + `${maxTokens}` + ".";
 }
@@ -541,7 +622,9 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
     while (b < blocks.length) {
       if (jsonText(blocks[b], "type") == "tool_use") {
         let input = jsonRaw(blocks[b], "input");
-        if (input == "" && jsonFind(blocks[b], "input") < 0) { input = "{}"; }
+        if (input == "" && jsonFind(blocks[b], "input") < 0) {
+          input = "{}";
+        }
         if (jsonComplete(input)) {
           out.push(toolCall(jsonText(blocks[b], "id"), jsonText(blocks[b], "name"), input));
         }
@@ -558,8 +641,12 @@ export function toolCallsFrom(provider: string, body: string): ToolCall[] {
     if (fn != "") {
       let raw = jsonRaw(fn, "arguments");
       let args = raw;
-      if (raw.startsWith("\"")) { args = jsonText(fn, "arguments"); }
-      if (args == "") { args = "{}"; }
+      if (raw.startsWith("\"")) {
+        args = jsonText(fn, "arguments");
+      }
+      if (args == "") {
+        args = "{}";
+      }
       if (jsonComplete(args)) {
         out.push(toolCall(jsonText(calls[i], "id"), jsonText(fn, "name"), args));
       }
@@ -598,31 +685,45 @@ export function assistantThinking(provider: string, body: string): string {
     return "";
   }
   let reasoned = jsonStringMember(body, "reasoning_content");
-  if (reasoned.found && reasoned.text != "") { return reasoned.text; }
+  if (reasoned.found && reasoned.text != "") {
+    return reasoned.text;
+  }
   let plain = jsonStringMember(body, "reasoning");
-  if (plain.found) { return plain.text; }
+  if (plain.found) {
+    return plain.text;
+  }
   let inline = assistantText(provider, body);
-  if (inline.found) { return inlineThinking(inline.text); }
+  if (inline.found) {
+    return inlineThinking(inline.text);
+  }
   return "";
 }
 
 export function inlineThinking(text: string): string {
   let open = text.indexOf("<think>");
-  if (open < 0 || text.slice(0, open).trim() != "") { return ""; }
+  if (open < 0 || text.slice(0, open).trim() != "") {
+    return "";
+  }
   let close = text.indexOf("</think>", open);
-  if (close < 0) { return ""; }
+  if (close < 0) {
+    return "";
+  }
   return text.slice(open + 7, close).trim();
 }
 
 export function withoutInlineThinking(text: string): string {
-  if (inlineThinking(text) == "") { return text; }
+  if (inlineThinking(text) == "") {
+    return text;
+  }
   let close = text.indexOf("</think>");
   return text.slice(close + 8).trim();
 }
 
 export function replyText(provider: string, body: string): string {
   let found = assistantText(provider, body);
-  if (!found.found) { return body; }
+  if (!found.found) {
+    return body;
+  }
   return withoutInlineThinking(found.text);
 }
 
@@ -668,7 +769,9 @@ function assembledBody(content: string, reasoning: string, frags: CallFragment[]
   let calls = "";
   let i: int = 0;
   while (i < frags.length) {
-    if (i > 0) { calls = calls + ","; }
+    if (i > 0) {
+      calls = calls + ",";
+    }
     calls = calls + "{\"id\":" + JSON.stringify(frags[i].id)
       + ",\"type\":\"function\",\"function\":{\"name\":" + JSON.stringify(frags[i].name)
       + ",\"arguments\":" + JSON.stringify(frags[i].args) + "}}";
@@ -676,15 +779,21 @@ function assembledBody(content: string, reasoning: string, frags: CallFragment[]
   }
   let message = "{\"role\":\"assistant\",\"content\":" + JSON.stringify(content)
     + ",\"reasoning_content\":" + JSON.stringify(reasoning);
-  if (frags.length > 0) { message = message + ",\"tool_calls\":[" + calls + "]"; }
+  if (frags.length > 0) {
+    message = message + ",\"tool_calls\":[" + calls + "]";
+  }
   return "{\"choices\":[{\"finish_reason\":" + JSON.stringify(finish)
     + ",\"message\":" + message + "}}]}";
 }
 
 export function sseData(line: string): string {
-  if (!line.startsWith("data:")) { return ""; }
+  if (!line.startsWith("data:")) {
+    return "";
+  }
   let rest = line.slice(5, line.length);
-  while (rest.startsWith(" ")) { rest = rest.slice(1, rest.length); }
+  while (rest.startsWith(" ")) {
+    rest = rest.slice(1, rest.length);
+  }
   return rest;
 }
 
@@ -718,7 +827,9 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     let drained = "";
     while (!s.done()) {
       let line = s.readLine();
-      if (s.done()) { break; }
+      if (s.done()) {
+        break;
+      }
       drained = drained + line;
     }
     s.close();
@@ -747,11 +858,15 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
     }
     let line = s.readLine();
     if (line == "") {
-      if (s.done()) { break; }
+      if (s.done()) {
+        break;
+      }
       continue;
     }
     let data = sseData(line);
-    if (data == "" || data == "[DONE]") { continue; }
+    if (data == "" || data == "[DONE]") {
+      continue;
+    }
 
     let delta = jsonRaw(data, "delta");
     if (delta != "") {
@@ -761,7 +876,9 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
         onThinking(reasoning, content);
       }
       let thought = jsonText(delta, "reasoning_content");
-      if (thought == "") { thought = jsonText(delta, "reasoning"); }
+      if (thought == "") {
+        thought = jsonText(delta, "reasoning");
+      }
       if (thought != "") {
         reasoning = reasoning + thought;
         onThinking(reasoning, content);
@@ -777,7 +894,9 @@ export function streamTurns(model: ModelRow, config: ModelConfigRow, systemPromp
       }
     }
     let reason = jsonText(data, "finish_reason");
-    if (reason != "") { finish = reason; }
+    if (reason != "") {
+      finish = reason;
+    }
     let usage = jsonRaw(data, "usage");
     if (usage != "") {
       inTokens = parseInt(jsonRaw(usage, "prompt_tokens"), 10) ?? inTokens;

@@ -120,7 +120,9 @@ export function thoughtsMapping(): DbRepository {
 }
 
 export function recordThought(db: Db, threadId: string, seq: int, depth: int, rotation: int, text: string, now: string): void {
-  if (threadId == "" || text == "") { return; }
+  if (threadId == "" || text == "") {
+    return;
+  }
   let row: Thought = {
     id: threadId + ":" + `${seq}` + ":d" + `${depth}` + ":r" + `${rotation}`,
     threadId: threadId, seq: seq, depth: depth, rotation: rotation, text: text, createdAt: now,
@@ -153,23 +155,35 @@ export function stepId(threadId: string, seq: int, depth: int, idx: int): string
 }
 
 export function argsPreview(args: string): string {
-  if (args.length <= ARGS_PREVIEW) { return args; }
+  if (args.length <= ARGS_PREVIEW) {
+    return args;
+  }
   let cut = ARGS_PREVIEW - 3;
-  while (cut > 0 && continuationByte(args.charCodeAt(cut))) { cut = cut - 1; }
+  while (cut > 0 && continuationByte(args.charCodeAt(cut))) {
+    cut = cut - 1;
+  }
   return args.slice(0, cut) + "...";
 }
 
 export function resultPreview(text: string): string {
-  if (text.length <= RESULT_PREVIEW) { return text; }
+  if (text.length <= RESULT_PREVIEW) {
+    return text;
+  }
   let cut = RESULT_PREVIEW - 3;
-  while (cut > 0 && continuationByte(text.charCodeAt(cut))) { cut = cut - 1; }
+  while (cut > 0 && continuationByte(text.charCodeAt(cut))) {
+    cut = cut - 1;
+  }
   return text.slice(0, cut) + "...";
 }
 
 export function resultForCard(text: string): string {
-  if (text.length <= RESULT_FOR_CARD) { return text; }
+  if (text.length <= RESULT_FOR_CARD) {
+    return text;
+  }
   let cut = RESULT_FOR_CARD - 3;
-  while (cut > 0 && continuationByte(text.charCodeAt(cut))) { cut = cut - 1; }
+  while (cut > 0 && continuationByte(text.charCodeAt(cut))) {
+    cut = cut - 1;
+  }
   return text.slice(0, cut) + "...";
 }
 
@@ -180,18 +194,26 @@ function continuationByte(b: int): bool {
 export const EDIT_KEEP: int = 1500;
 
 function editCut(text: string): string {
-  if (text.length <= EDIT_KEEP) { return text; }
+  if (text.length <= EDIT_KEEP) {
+    return text;
+  }
   let cut = EDIT_KEEP;
-  while (cut > 0 && continuationByte(text.charCodeAt(cut))) { cut = cut - 1; }
+  while (cut > 0 && continuationByte(text.charCodeAt(cut))) {
+    cut = cut - 1;
+  }
   return text.slice(0, cut);
 }
 
 function lineCount(text: string): int {
-  if (text == "") { return 0; }
+  if (text == "") {
+    return 0;
+  }
   let n: int = 1;
   let i: int = 0;
   while (i < text.length) {
-    if (text.charAt(i) == "\n") { n = n + 1; }
+    if (text.charAt(i) == "\n") {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -212,8 +234,12 @@ export function stepArgsAt(name: string, args: string, line: int, changed: strin
       + ",\"cut\":" + (kept.length < source.length ? "true" : "false")
       + ",\"changed\":" + (changed == "" ? "[]" : changed) + "}";
   }
-  if (name != "edit_artifact") { return argsPreview(args); }
-  if (jsonFind(args, "old") < 0 || jsonFind(args, "new") < 0) { return argsPreview(args); }
+  if (name != "edit_artifact") {
+    return argsPreview(args);
+  }
+  if (jsonFind(args, "old") < 0 || jsonFind(args, "new") < 0) {
+    return argsPreview(args);
+  }
   let oldText = jsonText(args, "old");
   let newText = jsonText(args, "new");
   let keptOld = editCut(oldText);
@@ -285,7 +311,9 @@ export function rotations(steps: LiveStep[]): int {
   let seen: int = 0;
   let i: int = 0;
   while (i < steps.length) {
-    if (steps[i].rotation + 1 > seen) { seen = steps[i].rotation + 1; }
+    if (steps[i].rotation + 1 > seen) {
+      seen = steps[i].rotation + 1;
+    }
     i = i + 1;
   }
   return seen;
@@ -301,7 +329,9 @@ export function stepsOfRound(db: Db, threadId: string, seq: int): LiveStep[] {
 export function roundRunning(steps: LiveStep[]): bool {
   let i: int = 0;
   while (i < steps.length) {
-    if (steps[i].endedAt == "") { return true; }
+    if (steps[i].endedAt == "") {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -319,8 +349,12 @@ export function latestRound(db: Db, threadId: string): int {
   let thought = JSON.parse<Thought[]>(
     listOrdered(db, thoughtsMapping(), { where: "thread_id = " + placeholderAt(db, 1), args: args, order: keys }));
   let best: int = -1;
-  if (stepped.length > 0) { best = stepped[0].seq; }
-  if (thought.length > 0 && thought[0].seq > best) { best = thought[0].seq; }
+  if (stepped.length > 0) {
+    best = stepped[0].seq;
+  }
+  if (thought.length > 0 && thought[0].seq > best) {
+    best = thought[0].seq;
+  }
   return best;
 }
 
@@ -362,21 +396,29 @@ function partialsMapping(): DbRepository {
 }
 
 export function clearPartial(db: Db, threadId: string, now: string): void {
-  if (threadId == "") { return; }
+  if (threadId == "") {
+    return;
+  }
   let row: PartialRow = { id: threadId, seq: -1, text: "", updatedAt: now };
   persist(db, partialsMapping(), JSON.stringify(row));
 }
 
 export function recordPartial(db: Db, threadId: string, seq: int, text: string, now: string): void {
-  if (threadId == "" || text == "") { return; }
+  if (threadId == "" || text == "") {
+    return;
+  }
   let row: PartialRow = { id: threadId, seq: seq, text: text, updatedAt: now };
   persist(db, partialsMapping(), JSON.stringify(row));
 }
 
 export function partialOf(db: Db, threadId: string, seq: int): string {
   let held = findById(db, partialsMapping(), threadId);
-  if (held == "") { return ""; }
+  if (held == "") {
+    return "";
+  }
   let row: PartialRow = JSON.parse<PartialRow>(held);
-  if (seq >= 0 && row.seq != seq) { return ""; }
+  if (seq >= 0 && row.seq != seq) {
+    return "";
+  }
   return row.text;
 }

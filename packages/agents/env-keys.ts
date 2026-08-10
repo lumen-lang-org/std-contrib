@@ -5,8 +5,12 @@ import { storeCredential, credentialFor, forgetCredential } from "./credentials.
 
 export const MAX_ENV_KEYS_PER_ENV: int = 20;
 let envKeyPerEnvChosen: int = 0;
-export function envKeyLimitOverride(perEnv: int): void { envKeyPerEnvChosen = perEnv; }
-function envKeyPerEnv(): int { return envKeyPerEnvChosen > 0 ? envKeyPerEnvChosen : MAX_ENV_KEYS_PER_ENV; }
+export function envKeyLimitOverride(perEnv: int): void {
+  envKeyPerEnvChosen = perEnv;
+}
+function envKeyPerEnv(): int {
+  return envKeyPerEnvChosen > 0 ? envKeyPerEnvChosen : MAX_ENV_KEYS_PER_ENV;
+}
 export const MAX_ENV_KEY_NAME: int = 64;
 export const MAX_ENV_KEY_VALUE: int = 4096;
 
@@ -58,32 +62,46 @@ const RESERVED: string[] = [
 function reserved(name: string): bool {
   let i: int = 0;
   while (i < RESERVED.length) {
-    if (RESERVED[i] == name) { return true; }
+    if (RESERVED[i] == name) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
 }
 
 function nameIsShaped(name: string): bool {
-  if (name.length == 0) { return false; }
+  if (name.length == 0) {
+    return false;
+  }
   let i: int = 0;
   while (i < name.length) {
     let c = name.charCodeAt(i);
     let letter = (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
     let digit = c >= 48 && c <= 57;
     let under = c == 95;
-    if (i == 0 && !(letter || under)) { return false; }
-    if (i > 0 && !(letter || digit || under)) { return false; }
+    if (i == 0 && !(letter || under)) {
+      return false;
+    }
+    if (i > 0 && !(letter || digit || under)) {
+      return false;
+    }
     i = i + 1;
   }
   return true;
 }
 
 export function refuseEnvKey(row: EnvKeyRow, value: string): string {
-  if (row.owner == "") { return "an environment key has to belong to somebody"; }
-  if (row.imageId == "") { return "an environment key belongs to one environment — none was named"; }
+  if (row.owner == "") {
+    return "an environment key has to belong to somebody";
+  }
+  if (row.imageId == "") {
+    return "an environment key belongs to one environment — none was named";
+  }
   let name = row.name.trim();
-  if (name == "") { return "an environment key needs a name — it is what the script reads"; }
+  if (name == "") {
+    return "an environment key needs a name — it is what the script reads";
+  }
   if (name.length > MAX_ENV_KEY_NAME) {
     return "\"" + name.slice(0, 20) + "...\" is too long a name for a variable";
   }
@@ -114,9 +132,13 @@ export function envKeysOwnedBy(db: Db, owner: string): string {
 
 export function envKeyById(db: Db, id: string, owner: string): EnvKeyRow {
   let doc = findById(db, envKeysMapping(), id);
-  if (doc == "") { return emptyEnvKey(); }
+  if (doc == "") {
+    return emptyEnvKey();
+  }
   let row: EnvKeyRow = JSON.parse<EnvKeyRow>(doc);
-  if (row.owner != owner) { return emptyEnvKey(); }
+  if (row.owner != owner) {
+    return emptyEnvKey();
+  }
   return row;
 }
 
@@ -124,7 +146,9 @@ export function envKeyByName(db: Db, name: string, owner: string, imageId: strin
   let rows = JSON.parse<EnvKeyRow[]>(envKeysOf(db, owner, imageId));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].name == name.trim()) { return rows[i]; }
+    if (rows[i].name == name.trim()) {
+      return rows[i];
+    }
     i = i + 1;
   }
   return emptyEnvKey();
@@ -154,7 +178,9 @@ export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
     lastUsedAt: "",
   };
   let wrong = refuseEnvKey(row, ask.value);
-  if (wrong != "") { return { id: "", problem: wrong }; }
+  if (wrong != "") {
+    return { id: "", problem: wrong };
+  }
   if (envKeyByName(db, row.name, row.owner, row.imageId).id != "") {
     return { id: "", problem: "there is already a key called \"" + row.name + "\" in this environment — delete it first, or pick another name" };
   }
@@ -165,7 +191,9 @@ export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
   let stored = storeCredential(db, {
     provider: refOf(row.id), apiKey: ask.value, masterKey: ask.master, now: ask.now,
   });
-  if (stored != "") { return { id: "", problem: stored }; }
+  if (stored != "") {
+    return { id: "", problem: stored };
+  }
   let written = persist(db, envKeysMapping(), JSON.stringify(row));
   if (!written.ok) {
     forgetCredential(db, refOf(row.id));
@@ -176,7 +204,9 @@ export function createEnvKey(db: Db, ask: EnvKeyWrite): EnvKeyMade {
 
 export function forgetEnvKey(db: Db, id: string, owner: string): bool {
   let row = envKeyById(db, id, owner);
-  if (row.id == "") { return false; }
+  if (row.id == "") {
+    return false;
+  }
   forgetCredential(db, refOf(row.id));
   deleteById(db, envKeysMapping(), row.id);
   return true;
@@ -188,7 +218,9 @@ export function envKeyFileBody(db: Db, owner: string, imageId: string, master: s
   let i: int = 0;
   while (i < rows.length) {
     let value = credentialFor(db, refOf(rows[i].id), master);
-    if (value != "") { out = out + rows[i].name + "=" + value + "\n"; }
+    if (value != "") {
+      out = out + rows[i].name + "=" + value + "\n";
+    }
     i = i + 1;
   }
   return out;

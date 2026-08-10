@@ -196,20 +196,32 @@ export function timingOf(graph: WfGraph, zone: string, nowMs: number): WfTiming 
 }
 
 export function refuseWorkflow(row: WorkflowRow): string {
-  if (row.name.trim() == "") { return "a workflow needs a name for the list"; }
-  if (row.agentId == "") { return "a workflow needs an agent to run as"; }
+  if (row.name.trim() == "") {
+    return "a workflow needs a name for the list";
+  }
+  if (row.agentId == "") {
+    return "a workflow needs an agent to run as";
+  }
   if (row.tz != "" && !knownZone(row.tz)) {
     return "\"" + row.tz + "\" is not a timezone this server knows";
   }
   let parsed = parseGraph(row.graph);
-  if (!parsed.ok) { return parsed.error; }
+  if (!parsed.ok) {
+    return parsed.error;
+  }
   let wrong = refuseGraph(parsed.graph);
-  if (wrong != "") { return wrong; }
+  if (wrong != "") {
+    return wrong;
+  }
   if (row.kind != "manual" && row.kind != "every" && row.kind != "once") {
     return "a workflow runs \"manual\", \"every\" or \"once\", not \"" + row.kind + "\"";
   }
-  if (row.kind == "every" && row.cronExpr == "") { return "a repeating workflow needs a schedule"; }
-  if (row.kind == "once" && stampMs(row.nextAt) <= 0.0) { return "a one-off workflow needs the instant it should run at"; }
+  if (row.kind == "every" && row.cronExpr == "") {
+    return "a repeating workflow needs a schedule";
+  }
+  if (row.kind == "once" && stampMs(row.nextAt) <= 0.0) {
+    return "a one-off workflow needs the instant it should run at";
+  }
   return "";
 }
 
@@ -235,7 +247,9 @@ export function enabledWorkflowCount(db: Db, owner: string): int {
   let n: int = 0;
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].enabled) { n = n + 1; }
+    if (rows[i].enabled) {
+      n = n + 1;
+    }
     i = i + 1;
   }
   return n;
@@ -303,8 +317,12 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
     + " ORDER BY next_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
     + " RETURNING id, owner, agent_id, model_choice_id, name, description,"
     + " graph, kind, cron_expr, tz, next_at, failures, run_count, published_graph";
-  if (!db.query(sql, [now, now, stale])) { return none; }
-  if (db.rows() == 0) { return none; }
+  if (!db.query(sql, [now, now, stale])) {
+    return none;
+  }
+  if (db.rows() == 0) {
+    return none;
+  }
   let got: WorkflowRow = {
     id: db.value(0, 0),
     owner: db.value(0, 1),

@@ -55,7 +55,9 @@ function editAmbiguous(path: string, version: int, found: ArtifactHit[], tooMany
 }
 
 export function editArtifact(db: Db, edit: ArtifactEdit): ArtifactEdited {
-  if (edit.threadId == "") { return editRefusal("an artifact belongs to a thread"); }
+  if (edit.threadId == "") {
+    return editRefusal("an artifact belongs to a thread");
+  }
   if (edit.oldText == "") {
     return editRefusal("old is empty, and empty text would match everywhere; send the exact text to replace, verbatim from the current version");
   }
@@ -63,7 +65,9 @@ export function editArtifact(db: Db, edit: ArtifactEdit): ArtifactEdited {
     return editRefusal("old and new are identical; nothing would change, and a version that changes nothing is not saved");
   }
   let badNote = labelProblem("note", edit.note, ARTIFACT_NOTE_MAX);
-  if (badNote != "") { return editRefusal(badNote); }
+  if (badNote != "") {
+    return editRefusal(badNote);
+  }
   return editAttempt(db, edit, 1);
 }
 
@@ -71,7 +75,9 @@ function editAttempt(db: Db, edit: ArtifactEdit, attempt: int): ArtifactEdited {
   let path = normalScope(edit.path);
 
   let opened = beginTransaction(db);
-  if (!opened.ok) { return editRefusal("the edit could not be saved; try again"); }
+  if (!opened.ok) {
+    return editRefusal("the edit could not be saved; try again");
+  }
 
   let artifact = getArtifact(db, edit.threadId, path);
   if (artifact.id == "") {
@@ -221,13 +227,19 @@ function editAttempt(db: Db, edit: ArtifactEdit, attempt: int): ArtifactEdited {
 
 function editLineStartAt(body: string, at: int): int {
   let i = at;
-  while (i > 0 && body.charAt(i - 1) != "\n") { i = i - 1; }
+  while (i > 0 && body.charAt(i - 1) != "\n") {
+    i = i - 1;
+  }
   return i;
 }
 
 function editLineStopAt(body: string, at: int): int {
   let i = at;
-  while (i < body.length && body.charAt(i) != "\n") { i = i + 1; }
-  if (i > 0 && body.charAt(i - 1) == "\r") { return i - 1; }
+  while (i < body.length && body.charAt(i) != "\n") {
+    i = i + 1;
+  }
+  if (i > 0 && body.charAt(i - 1) == "\r") {
+    return i - 1;
+  }
   return i;
 }

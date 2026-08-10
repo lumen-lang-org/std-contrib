@@ -172,7 +172,10 @@ test("every failure path lands on a config, because the run must still happen", 
 test("a note stays short enough to sit on a run card", () => {
   let essay = "";
   let i: int = 0;
-  while (i < 400) { essay = essay + "the user seems to want something careful here. "; i = i + 1; }
+  while (i < 400) {
+    essay = essay + "the user seems to want something careful here. ";
+    i = i + 1;
+  }
   let d = decide(said(essay));
   expect(d.fellBack);
   expect(d.note.length <= 203);
@@ -358,7 +361,10 @@ test("tool results are not shown to a classifier", () => {
 test("a long turn and a long message are both cut", () => {
   let long = "";
   let i: int = 0;
-  while (i < 5000) { long = long + "x"; i = i + 1; }
+  while (i < 5000) {
+    long = long + "x";
+    i = i + 1;
+  }
   let turns: Turn[] = [];
   turns.push(userTurn(long));
   let ask: RouteAsk = { userText: long, tail: turns, previousKey: "" };

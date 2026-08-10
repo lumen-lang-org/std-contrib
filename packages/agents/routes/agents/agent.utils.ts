@@ -1,5 +1,5 @@
 import { AgentRun } from "../../run.ts";
-import { RunResult } from "./agents.dto.ts";
+import { RunResult } from "./dtos/run-result.dto.ts";
 
 // A scope reads like a path, so it cannot travel in one: `/` is written `~` in
 // the URL and put back here.

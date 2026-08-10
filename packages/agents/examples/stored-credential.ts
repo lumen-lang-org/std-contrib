@@ -16,7 +16,10 @@ type ConfigView = {
 function main(): void {
   let master = masterKey();
   let problem = masterKeyProblem(master);
-  if (problem != "") { console.error(problem); return; }
+  if (problem != "") {
+    console.error(problem);
+    return;
+  }
 
   let db = sqlite();
   let cfg: DbConfig = { filename: "/tmp/agents_stored.db" };
@@ -35,7 +38,10 @@ function main(): void {
   let fromEnv = process.env("MISTRAL_API_KEY") ?? "";
   if (fromEnv != "") {
     let stored = storeCredential(db, { provider: "mistral", apiKey: fromEnv, masterKey: master, now: "2026-07-25" });
-    if (stored != "") { console.error(stored); return; }
+    if (stored != "") {
+      console.error(stored);
+      return;
+    }
   }
   console.log("stored for " + providersWithCredentials(db).join(", "));
 

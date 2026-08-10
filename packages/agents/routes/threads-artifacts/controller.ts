@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, badRequest, createdJson, noContent, notFound, okJson, param } from "../../../rest/server.ts";
+import { Reply, Request, BadRequest, CreatedJson, NoContent, NotFound, OkJson, param } from "../../../rest/server.ts";
 import { callerTags, stamp } from "../../api-core.ts";
 import { ArtifactRow, TURN_SEQ_NONE, TurnArtifact, artifactsByTurn, artifactsForTurn, artifactsMapping, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
 import { normalScope } from "../../knowledge.ts";
@@ -17,11 +17,15 @@ function artifactAtSlot(db: Db, threadId: string, slot: int): ArtifactRow {
     id: "", threadId: "", slot: -1, path: "", title: "", kind: "", mime: "",
     currentVersion: 0, previewToken: "", createdAt: "", updatedAt: "",
   };
-  if (slot < 0) { return absent; }
+  if (slot < 0) {
+    return absent;
+  }
   let rows = listArtifacts(db, threadId);
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].slot == slot) { return rows[i]; }
+    if (rows[i].slot == slot) {
+      return rows[i];
+    }
     i = i + 1;
   }
   return absent;
@@ -55,10 +59,10 @@ export class ArtifactApi {
     this.db = db;
   }
 
-  @get("/")
+  @Get("/")
   list(req: Request, @PathVariable("id") id: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let rows = listArtifacts(this.db, id);
     let out: ArtifactView[] = [];
@@ -67,16 +71,16 @@ export class ArtifactApi {
       out.push(artifactView(rows[i]));
       i = i + 1;
     }
-    return okJson(out);
+    return OkJson(out);
   }
 
-  @post("/")
+  @Post("/")
   create(req: Request, @PathVariable("id") id: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     if (req.body == "") {
-      return badRequest("a body is required: {\"path\":\"/report.html\",\"title\":\"Q3\",\"content\":\"...\",\"note\":\"\"}");
+      return BadRequest("a body is required: {\"path\":\"/report.html\",\"title\":\"Q3\",\"content\":\"...\",\"note\":\"\"}");
     }
     let body: ArtifactPost = JSON.parse<ArtifactPost>(req.body);
     let written = putArtifact(this.db, {
@@ -85,29 +89,39 @@ export class ArtifactApi {
       mustCreate: false,
       turnSeq: TURN_SEQ_NONE, now: stamp(),
     });
-    if (!written.ok) { return badRequest(written.problem); }
+    if (!written.ok) {
+      return BadRequest(written.problem);
+    }
     let v: ArtifactCreated = {
       slot: written.slot,
       path: normalScope(body.path),
       version: written.version,
       previewToken: written.previewToken,
     };
-    return createdJson(v);
+    return CreatedJson(v);
   }
 
-  @post("/from-template")
+  @Post("/from-template")
   fromTemplate(req: Request, @PathVariable("id") id: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
-    if (req.body == "") { return badRequest(TEMPLATE_BODY_HELP); }
+    if (req.body == "") {
+      return BadRequest(TEMPLATE_BODY_HELP);
+    }
     let asked: TemplatePost = JSON.parse<TemplatePost>(req.body);
     let templateId = asked.templateId;
-    if (templateId == "") { return badRequest(TEMPLATE_BODY_HELP); }
+    if (templateId == "") {
+      return BadRequest(TEMPLATE_BODY_HELP);
+    }
     let held = findById(this.db, templatesMapping(), templateId);
-    if (held == "") { return notFound("template " + templateId); }
+    if (held == "") {
+      return NotFound("template " + templateId);
+    }
     let tpl: TemplateRow = JSON.parse<TemplateRow>(held);
-    if (tpl.visibility != "public") { return notFound("template " + templateId); }
+    if (tpl.visibility != "public") {
+      return NotFound("template " + templateId);
+    }
 
     let where = "template_id = " + placeholderAt(this.db, 1);
     let listed = listWhere(this.db, templateFilesMapping(), where, [templateId]);
@@ -134,15 +148,15 @@ export class ArtifactApi {
       wrote: wrote,
       refused: refused,
     };
-    return createdJson(v);
+    return CreatedJson(v);
   }
 
-  @get("/by-turn")
+  @Get("/by-turn")
   byTurn(req: Request,
          @PathVariable("id") id: string,
          @RequestParam("turn", "") turn: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let rows: TurnArtifact[] = [];
     if (turn == "") {
@@ -164,34 +178,40 @@ export class ArtifactApi {
       out.push(each);
       i = i + 1;
     }
-    return okJson(out);
+    return OkJson(out);
   }
 
-  @get("/:slot")
+  @Get("/:slot")
   find(req: Request,
        @PathVariable("id") id: string,
        @PathVariable("slot") slot: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let artifact = artifactAtSlot(this.db, id, slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + slot); }
+    if (artifact.id == "") {
+      return NotFound("artifact " + slot);
+    }
     let v: ArtifactView = artifactView(artifact);
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @get("/:slot/versions/:n")
+  @Get("/:slot/versions/:n")
   version(req: Request,
           @PathVariable("id") id: string,
           @PathVariable("slot") slot: string,
           @PathVariable("n") n: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let artifact = artifactAtSlot(this.db, id, slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + slot); }
+    if (artifact.id == "") {
+      return NotFound("artifact " + slot);
+    }
     let row = getVersion(this.db, artifact.id, parseInt(n) ?? 0);
-    if (row.id == "") { return notFound("version " + n); }
+    if (row.id == "") {
+      return NotFound("version " + n);
+    }
     let v: ArtifactVersionView = {
       slot: artifact.slot,
       path: artifact.path,
@@ -203,29 +223,35 @@ export class ArtifactApi {
       createdAt: row.createdAt,
       content: row.body,
     };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @get("/:slot/pdf")
+  @Get("/:slot/pdf")
   pdf(req: Request,
       @PathVariable("id") id: string,
       @PathVariable("slot") slot: string,
       @RequestParam("v", "") asked: int): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let artifact = artifactAtSlot(this.db, id, slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + slot); }
+    if (artifact.id == "") {
+      return NotFound("artifact " + slot);
+    }
     let version = asked > 0 ? asked : artifact.currentVersion;
     let row = getVersion(this.db, artifact.id, version);
-    if (row.id == "") { return notFound("version " + `${version}`); }
+    if (row.id == "") {
+      return NotFound("version " + `${version}`);
+    }
 
     let ask: OfficeRenderAsk = {
       artifactId: artifact.id, version: version,
       path: artifact.path, body: row.body, now: stamp(),
     };
     let made = officeRender(this.db, ask);
-    if (!made.ok) { return badRequest(made.problem); }
+    if (!made.ok) {
+      return BadRequest(made.problem);
+    }
     let v: ArtifactPdfView = {
       slot: artifact.slot,
       path: artifact.path,
@@ -233,22 +259,24 @@ export class ArtifactApi {
       cached: made.cached,
       pdf: made.body,
     };
-    let out = okJson(v);
+    let out = OkJson(v);
     if (asked > 0) {
       out.headers.set("cache-control", "private, max-age=31536000, immutable");
     }
     return out;
   }
 
-  @post("/:slot/rotate")
+  @Post("/:slot/rotate")
   rotate(req: Request,
          @PathVariable("id") id: string,
          @PathVariable("slot") slot: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let artifact = artifactAtSlot(this.db, id, slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + slot); }
+    if (artifact.id == "") {
+      return NotFound("artifact " + slot);
+    }
 
     let now = stamp();
     let mine = jsonList(listWhere(this.db, artifactsMapping(),
@@ -258,13 +286,17 @@ export class ArtifactApi {
     while (i < mine.length) {
       let each: ArtifactRow = JSON.parse<ArtifactRow>(mine[i]);
       let token = crypto.randomUUID();
-      if (each.id == artifact.id) { fresh = token; }
+      if (each.id == artifact.id) {
+        fresh = token;
+      }
       let turned = executeWith(this.db,
         "UPDATE artifacts SET preview_token = " + placeholderAt(this.db, 1)
         + ", updated_at = " + placeholderAt(this.db, 2)
         + " WHERE id = " + placeholderAt(this.db, 3),
         [token, now, each.id]);
-      if (!turned.ok) { return badRequest("the links could not be replaced; try again"); }
+      if (!turned.ok) {
+        return BadRequest("the links could not be replaced; try again");
+      }
       i = i + 1;
     }
     let v: ArtifactRotated = {
@@ -272,20 +304,24 @@ export class ArtifactApi {
       previewToken: fresh,
       replaced: mine.length,
     };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @del("/:slot")
+  @Delete("/:slot")
   remove(req: Request,
          @PathVariable("id") id: string,
          @PathVariable("slot") slot: string): Reply {
     if (ownedThread(this.db, id, callerTags(req)) == "") {
-      return notFound("thread " + id);
+      return NotFound("thread " + id);
     }
     let artifact = artifactAtSlot(this.db, id, slotParam(req));
-    if (artifact.id == "") { return notFound("artifact " + slot); }
+    if (artifact.id == "") {
+      return NotFound("artifact " + slot);
+    }
     let problem = deleteArtifact(this.db, id, artifact.path);
-    if (problem != "") { return badRequest(problem); }
-    return noContent();
+    if (problem != "") {
+      return BadRequest(problem);
+    }
+    return NoContent();
   }
 }

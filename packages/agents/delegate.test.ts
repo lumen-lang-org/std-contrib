@@ -21,7 +21,9 @@ import { storeCredential } from "./credentials.ts";
 
 let database: Db = sqlite();
 
-function testKey(): string { return "0123456789abcdef0123456789abcdef"; }
+function testKey(): string {
+  return "0123456789abcdef0123456789abcdef";
+}
 
 function agent(id: string, name: string, description: string): void {
   let a: AgentRow = { id: id, agentName: name, description: description, modelConfigId: "c1", promptId: "p1", scriptImageId: "", isDefault: false, enabled: true, updatedAt: "t" };

@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { View, view, render } from "../../../press/template.ts";
 import { placeholderAt } from "../../../plume/plume.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, header, notFound, param, reply } from "../../../rest/server.ts";
+import { Reply, Request, header, NotFound, param, Respond } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { ArtifactRow, findByToken, getArtifact, getVersion, imageMediaType } from "../../artifacts.ts";
 import { officeRender, officeRenderExt } from "../../office-render.ts";
@@ -13,32 +13,48 @@ function previewHost(): string {
   let configured = process.env("AGENTS_PREVIEW_HOST") ?? "";
   let text = configured.trim().toLowerCase();
   let mark = text.indexOf("://");
-  if (mark >= 0) { return text.substring(mark + 3, text.length); }
+  if (mark >= 0) {
+    return text.substring(mark + 3, text.length);
+  }
   return text;
 }
 
 function onPreviewHost(req: Request): bool {
   let configured = previewHost();
-  if (configured == "") { return false; }
+  if (configured == "") {
+    return false;
+  }
   let asked = header(req, "host").trim().toLowerCase();
-  if (asked == "") { return false; }
+  if (asked == "") {
+    return false;
+  }
   return asked == configured;
 }
 
 function previewOrigin(): string {
   let configured = (process.env("AGENTS_PREVIEW_HOST") ?? "").trim().toLowerCase();
-  if (configured == "") { return ""; }
-  if (configured.indexOf("://") >= 0) { return configured; }
+  if (configured == "") {
+    return "";
+  }
+  if (configured.indexOf("://") >= 0) {
+    return configured;
+  }
   let host = previewHost();
   let name = host;
   let colon = host.indexOf(":");
-  if (colon >= 0) { name = host.substring(0, colon); }
-  if (name == "localhost" || name == "127.0.0.1") { return "http://" + host; }
+  if (colon >= 0) {
+    name = host.substring(0, colon);
+  }
+  if (name == "localhost" || name == "127.0.0.1") {
+    return "http://" + host;
+  }
   return "https://" + host;
 }
 
 function previewCsp(req: Request): string {
-  if (!onPreviewHost(req)) { return PREVIEW_CSP_CLOSED; }
+  if (!onPreviewHost(req)) {
+    return PREVIEW_CSP_CLOSED;
+  }
   let origin = previewOrigin();
   return "default-src 'none'"
     + "; script-src 'unsafe-inline' " + origin
@@ -50,7 +66,9 @@ function previewCsp(req: Request): string {
 }
 
 function previewType(req: Request, mime: string): string {
-  if (!onPreviewHost(req)) { return "text/plain; charset=utf-8"; }
+  if (!onPreviewHost(req)) {
+    return "text/plain; charset=utf-8";
+  }
   return mime;
 }
 
@@ -74,8 +92,12 @@ function previewStamp(db: Db, threadId: string): string {
   let sql = "SELECT COUNT(*) FROM artifact_versions"
     + " JOIN artifacts ON artifacts.id = artifact_versions.artifact_id"
     + " WHERE artifacts.thread_id = " + placeholderAt(db, 1);
-  if (!db.query(sql, [threadId])) { return "0"; }
-  if (db.rows() == 0) { return "0"; }
+  if (!db.query(sql, [threadId])) {
+    return "0";
+  }
+  if (db.rows() == 0) {
+    return "0";
+  }
   return db.value(0, 0);
 }
 
@@ -97,7 +119,9 @@ function previewImagePage(artifact: ArtifactRow, b64: string): string {
 }
 
 function previewPresentable(req: Request, artifact: ArtifactRow, body: string): ArtifactRow {
-  if (artifact.kind != "image" || !onPreviewHost(req)) { return artifact; }
+  if (artifact.kind != "image" || !onPreviewHost(req)) {
+    return artifact;
+  }
   let asPage: ArtifactRow = {
     id: artifact.id, threadId: artifact.threadId, slot: artifact.slot,
     path: artifact.path, title: artifact.title, kind: artifact.kind,
@@ -108,7 +132,7 @@ function previewPresentable(req: Request, artifact: ArtifactRow, body: string): 
 }
 
 function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: string): Reply {
-  let answer = reply(200, body, previewType(req, artifact.mime));
+  let answer = Respond(200, body, previewType(req, artifact.mime));
   answer.headers.set("content-security-policy", previewCsp(req));
   answer.headers.set("x-content-type-options", "nosniff");
   answer.headers.set("referrer-policy", "no-referrer");
@@ -117,7 +141,7 @@ function previewReply(req: Request, artifact: ArtifactRow, body: string, cache: 
 }
 
 function previewBytes(req: Request, bytes: string, mime: string, cache: string): Reply {
-  let answer = reply(200, bytes, mime);
+  let answer = Respond(200, bytes, mime);
   answer.headers.set("content-security-policy", previewCsp(req));
   answer.headers.set("x-content-type-options", "nosniff");
   answer.headers.set("referrer-policy", "no-referrer");
@@ -159,20 +183,28 @@ export class PreviewApi {
     this.db = db;
   }
 
-  @get("/:token")
+  @Get("/:token")
   preview(req: Request, @PathVariable("token") token: string,
           @RequestParam("v", "") asked: int): Reply {
     let artifact = findByToken(this.db, token);
-    if (artifact.id == "") { return notFound("artifact"); }
+    if (artifact.id == "") {
+      return NotFound("artifact");
+    }
     if (asked < 1) {
       let newest = nextVersion(this.db, artifact.id) - 1;
       let current = getVersion(this.db, artifact.id, newest);
-      if (current.id == "") { current = getVersion(this.db, artifact.id, artifact.currentVersion); }
-      if (current.id == "") { return notFound("artifact"); }
+      if (current.id == "") {
+        current = getVersion(this.db, artifact.id, artifact.currentVersion);
+      }
+      if (current.id == "") {
+        return NotFound("artifact");
+      }
       return previewLiveReply(this.db, req, artifact, current.body, "no-store");
     }
     let row = getVersion(this.db, artifact.id, asked);
-    if (row.id == "") { return notFound("artifact"); }
+    if (row.id == "") {
+      return NotFound("artifact");
+    }
     let pinnedRow = previewPresentable(req, artifact, row.body);
     let pinnedBody = row.body;
     if (pinnedRow.kind == "image" && pinnedRow.mime.startsWith("text/html")) {
@@ -181,21 +213,27 @@ export class PreviewApi {
     return previewReply(req, pinnedRow, pinnedBody, "private, max-age=31536000, immutable");
   }
 
-  @get("/:token/*path")
+  @Get("/:token/*path")
   sibling(req: Request, @PathVariable("token") token: string,
           @PathVariable("path") path: string): Reply {
     let artifact = findByToken(this.db, token);
-    if (artifact.id == "") { return notFound("artifact"); }
+    if (artifact.id == "") {
+      return NotFound("artifact");
+    }
     if (path == "__version") {
-      let stamp = reply(200, previewStamp(this.db, artifact.threadId), "text/plain; charset=utf-8");
+      let stamp = Respond(200, previewStamp(this.db, artifact.threadId), "text/plain; charset=utf-8");
       stamp.headers.set("access-control-allow-origin", "*");
       stamp.headers.set("cache-control", "no-store");
       return stamp;
     }
     let found = getArtifact(this.db, artifact.threadId, path);
-    if (found.id == "") { return notFound("artifact"); }
+    if (found.id == "") {
+      return NotFound("artifact");
+    }
     let row = getVersion(this.db, found.id, found.currentVersion);
-    if (row.id == "") { return notFound("artifact"); }
+    if (row.id == "") {
+      return NotFound("artifact");
+    }
     return previewLiveReply(this.db, req, found, row.body, "no-store");
   }
 }

@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, badRequest, noContent, notFound, okJson, problem } from "../../../rest/server.ts";
+import { Reply, BadRequest, NoContent, NotFound, OkJson, Refused } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { credentialFor, forgetCredential, masterKey, masterKeyProblem, providersWithCredentials, storeCredential } from "../../credentials.ts";
 import { KeyBody, ProviderStatus } from "./types.ts";
@@ -16,34 +16,38 @@ export class ProviderApi {
     this.master = master;
   }
 
-  @get("/")
+  @Get("/")
   list(): Reply {
     let names: string[] = providersWithCredentials(this.db);
-    return okJson(names);
+    return OkJson(names);
   }
 
-  @get("/:provider")
+  @Get("/:provider")
   status(@PathVariable("provider") provider: string): Reply {
     let usable = credentialFor(this.db, provider, this.master) != "";
     let v: ProviderStatus = { provider: provider, configured: usable };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @put("/:provider/key")
+  @Put("/:provider/key")
   setKey(@PathVariable("provider") provider: string, @Valid @RequestBody body: KeyBody): Reply {
     let problem = masterKeyProblem(this.master);
-    if (problem != "") { return badRequest(problem); }
+    if (problem != "") {
+      return BadRequest(problem);
+    }
     let stored = storeCredential(this.db, { provider: provider, apiKey: body.apiKey, masterKey: this.master, now: stamp() });
-    if (stored != "") { return badRequest(stored); }
+    if (stored != "") {
+      return BadRequest(stored);
+    }
     let v: ProviderStatus = { provider: provider, configured: true };
-    return okJson(v);
+    return OkJson(v);
   }
 
-  @del("/:provider/key")
+  @Delete("/:provider/key")
   clearKey(@PathVariable("provider") provider: string): Reply {
     if (!forgetCredential(this.db, provider)) {
-      return notFound("no key for " + provider);
+      return NotFound("no key for " + provider);
     }
-    return noContent();
+    return NoContent();
   }
 }

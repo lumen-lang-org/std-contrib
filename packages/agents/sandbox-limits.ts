@@ -45,10 +45,18 @@ export function refuseSandboxLimits(l: SandboxLimits): string {
   if (l.memoryMb != 0 && l.memoryMb < 128) {
     return "a container under 128 MB will not start most images — set 0 for the default, or at least 128";
   }
-  if (l.cpus != 0 && l.cpus > 64) { return "that is more CPUs than any host here has — set 0 for the default"; }
-  if (l.pidLimit != 0 && l.pidLimit < 16) { return "a pid limit under 16 kills a shell that forks — set 0 for the default"; }
-  if (l.wallSeconds != 0 && l.wallSeconds < 5) { return "a wall clock under 5 seconds kills nearly every script — set 0 for the default"; }
-  if (l.wallSeconds > 3600) { return "an hour is the most a single script may run — set a smaller number"; }
+  if (l.cpus != 0 && l.cpus > 64) {
+    return "that is more CPUs than any host here has — set 0 for the default";
+  }
+  if (l.pidLimit != 0 && l.pidLimit < 16) {
+    return "a pid limit under 16 kills a shell that forks — set 0 for the default";
+  }
+  if (l.wallSeconds != 0 && l.wallSeconds < 5) {
+    return "a wall clock under 5 seconds kills nearly every script — set 0 for the default";
+  }
+  if (l.wallSeconds > 3600) {
+    return "an hour is the most a single script may run — set a smaller number";
+  }
   if (l.envsGlobal != 0 && l.envsPerOwner != 0 && l.envsGlobal < l.envsPerOwner) {
     return "the global ceiling is below the per-owner cap, so no single person could reach their own limit — raise it or set it to 0";
   }
@@ -65,9 +73,13 @@ export function applySandboxLimits(db: Db): void {
 
 export function saveSandboxLimits(db: Db, l: SandboxLimits): string {
   let wrong = refuseSandboxLimits(l);
-  if (wrong != "") { return wrong; }
+  if (wrong != "") {
+    return wrong;
+  }
   let stored = writeSetting(db, SETTING_KEY, JSON.stringify(l));
-  if (stored != "") { return stored; }
+  if (stored != "") {
+    return stored;
+  }
   applySandboxLimits(db);
   return "";
 }

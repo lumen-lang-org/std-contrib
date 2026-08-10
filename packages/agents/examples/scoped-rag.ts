@@ -34,9 +34,15 @@ function main(): void {
   let plan = schemaPlan(db);
   let extra = knowledgePlan(db);
   let e: int = 0;
-  while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  while (e < extra.length) {
+    plan.push(extra[e]);
+    e = e + 1;
+  }
   let ran = migrate(db, plan);
-  if (!ran.ok) { console.log("migrate: " + ran.error); return; }
+  if (!ran.ok) {
+    console.log("migrate: " + ran.error);
+    return;
+  }
 
   let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   let embed: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
@@ -50,7 +56,10 @@ function main(): void {
 
   let embedder = embeddingModel(db, "e1");
   let made = createDocuments(db, embedder);
-  if (made != "") { console.log("documents: " + made); return; }
+  if (made != "") {
+    console.log("documents: " + made);
+    return;
+  }
 
   let stored = credentialFor(db, "mistral", master);
   let engineering = uploadDocument(db, embedder, "plume_relations", "/engineering/plume",
@@ -108,7 +117,10 @@ function ask(db: Db, master: string, agentId: string, question: string): void {
     i = i + 1;
   }
   let n: int = 0;
-  while (n < run.notes.length) { console.log("   note  " + run.notes[n]); n = n + 1; }
+  while (n < run.notes.length) {
+    console.log("   note  " + run.notes[n]);
+    n = n + 1;
+  }
   console.log("   said  " + run.text);
 }
 

@@ -67,7 +67,9 @@ function viewOf(row: ApiKeyRow): ApiKeyView {
 function isJouleScope(s: string): bool {
   let i: int = 0;
   while (i < JOULE_SCOPES.length) {
-    if (JOULE_SCOPES[i] == s) { return true; }
+    if (JOULE_SCOPES[i] == s) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -79,7 +81,9 @@ export function cleanScopes(raw: string): string {
   let i: int = 0;
   while (i < parts.length) {
     let t = parts[i].trim().toLowerCase();
-    if (t == "*") { return "*"; }
+    if (t == "*") {
+      return "*";
+    }
     if (t != "" && isJouleScope(t)) {
       out = out == "" ? t : out + "," + t;
     }
@@ -98,7 +102,9 @@ export function scopeList(scopes: string): string[] {
   let i: int = 0;
   while (i < parts.length) {
     let t = parts[i].trim();
-    if (t != "") { out.push(t); }
+    if (t != "") {
+      out.push(t);
+    }
     i = i + 1;
   }
   return out;
@@ -107,8 +113,12 @@ export function scopeList(scopes: string): string[] {
 export function hasScope(granted: string[], required: string): bool {
   let i: int = 0;
   while (i < granted.length) {
-    if (granted[i] == "*") { return true; }
-    if (granted[i] == required) { return true; }
+    if (granted[i] == "*") {
+      return true;
+    }
+    if (granted[i] == required) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -117,25 +127,40 @@ export function hasScope(granted: string[], required: string): bool {
 export function apiKeysOf(db: Db, owner: string): string {
   let keys: DbOrder[] = [{ column: "created_at" }];
   let listed = listOrdered(db, apiKeysMapping(), { where: "owner = " + db.placeholder, args: [owner], order: keys });
-  if (listed == "" || listed == "[]") { return "[]"; }
+  if (listed == "" || listed == "[]") {
+    return "[]";
+  }
   let rows = JSON.parse<ApiKeyRow[]>(listed);
   let views: ApiKeyView[] = [];
   let i: int = 0;
-  while (i < rows.length) { views.push(viewOf(rows[i])); i = i + 1; }
+  while (i < rows.length) {
+    views.push(viewOf(rows[i]));
+    i = i + 1;
+  }
   return JSON.stringify(views);
 }
 
 function keysOwnedCount(db: Db, owner: string): int {
   let listed = listOrdered(db, apiKeysMapping(), { where: "owner = " + db.placeholder, args: [owner] });
-  if (listed == "" || listed == "[]") { return 0; }
+  if (listed == "" || listed == "[]") {
+    return 0;
+  }
   return JSON.parse<ApiKeyRow[]>(listed).length;
 }
 
 export function refuseApiKey(db: Db, owner: string, name: string, scopes: string): string {
-  if (owner == "") { return "signing in is what makes a key yours to keep"; }
-  if (name.trim() == "") { return "a key needs a name to be told apart from your others"; }
-  if (name.length > MAX_KEY_NAME) { return "\"" + name.slice(0, 20) + "...\" is too long a name"; }
-  if (scopes.trim() == "") { return "a key needs at least one product scope: search, retrieve or suggest"; }
+  if (owner == "") {
+    return "signing in is what makes a key yours to keep";
+  }
+  if (name.trim() == "") {
+    return "a key needs a name to be told apart from your others";
+  }
+  if (name.length > MAX_KEY_NAME) {
+    return "\"" + name.slice(0, 20) + "...\" is too long a name";
+  }
+  if (scopes.trim() == "") {
+    return "a key needs at least one product scope: search, retrieve or suggest";
+  }
   if (keysOwnedCount(db, owner) >= MAX_KEYS_PER_OWNER) {
     return "that is " + `${MAX_KEYS_PER_OWNER}` + " keys already — revoke one before minting another";
   }
@@ -182,15 +207,21 @@ export function mintApiKey(db: Db, owner: string, name: string, scopesRaw: strin
 
 export function apiKeyById(db: Db, id: string, owner: string): ApiKeyRow {
   let doc = findById(db, apiKeysMapping(), id);
-  if (doc == "") { return emptyApiKey(); }
+  if (doc == "") {
+    return emptyApiKey();
+  }
   let row: ApiKeyRow = JSON.parse<ApiKeyRow>(doc);
-  if (row.owner != owner) { return emptyApiKey(); }
+  if (row.owner != owner) {
+    return emptyApiKey();
+  }
   return row;
 }
 
 export function forgetApiKey(db: Db, id: string, owner: string): bool {
   let row = apiKeyById(db, id, owner);
-  if (row.id == "") { return false; }
+  if (row.id == "") {
+    return false;
+  }
   deleteById(db, apiKeysMapping(), id);
   return true;
 }
@@ -203,19 +234,29 @@ export type ApiKeyAuth = {
 };
 
 function looksLikeKey(secret: string): bool {
-  if (secret.length < 12) { return false; }
-  if (secret.slice(0, 3) != "jl_") { return false; }
+  if (secret.length < 12) {
+    return false;
+  }
+  if (secret.slice(0, 3) != "jl_") {
+    return false;
+  }
   return secret.indexOf("_", 3) > 3;
 }
 
 export function verifyApiKey(db: Db, secret: string): ApiKeyAuth {
   let miss: ApiKeyAuth = { ok: false, owner: "", keyId: "", scopes: [] };
-  if (!looksLikeKey(secret)) { return miss; }
+  if (!looksLikeKey(secret)) {
+    return miss;
+  }
   let hash = crypto.sha256(secret);
   let listed = listWhere(db, apiKeysMapping(), "key_hash = " + db.placeholder, [hash]);
-  if (listed == "" || listed == "[]") { return miss; }
+  if (listed == "" || listed == "[]") {
+    return miss;
+  }
   let rows = JSON.parse<ApiKeyRow[]>(listed);
-  if (rows.length == 0) { return miss; }
+  if (rows.length == 0) {
+    return miss;
+  }
   let row = rows[0];
   let auth: ApiKeyAuth = { ok: true, owner: row.owner, keyId: row.id, scopes: scopeList(row.scopes) };
   return auth;

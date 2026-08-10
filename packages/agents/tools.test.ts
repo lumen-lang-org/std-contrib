@@ -131,7 +131,9 @@ function artifactFresh(): void {
 function specNamed(specs: ToolSpec[], name: string): int {
   let i: int = 0;
   while (i < specs.length) {
-    if (specs[i].name == name) { return i; }
+    if (specs[i].name == name) {
+      return i;
+    }
     i = i + 1;
   }
   return -1;
@@ -314,7 +316,10 @@ function scriptFresh(): void {
   let plan = artifactPlan(database);
   let more = envPlan(database);
   let m: int = 0;
-  while (m < more.length) { plan.push(more[m]); m = m + 1; }
+  while (m < more.length) {
+    plan.push(more[m]);
+    m = m + 1;
+  }
   migrate(database, plan);
 }
 
@@ -323,12 +328,16 @@ const FAKE_LOG = "/tmp/agents_tools_fake/argv.log";
 const FAKE_CTR = "/tmp/agents_tools_fake/ctr";
 
 function fakeDocker(script: string): void {
-  if (!fs.existsSync(FAKE_DIR)) { fs.mkdirSync(FAKE_DIR, true); }
+  if (!fs.existsSync(FAKE_DIR)) {
+    fs.mkdirSync(FAKE_DIR, true);
+  }
   let bin = FAKE_DIR + "/docker";
   fs.writeFileSync(bin, script);
   fs.chmodSync(bin, 493);
   fs.writeFileSync(FAKE_LOG, "");
-  if (fs.existsSync(FAKE_CTR)) { fs.rmSync(FAKE_CTR, true); }
+  if (fs.existsSync(FAKE_CTR)) {
+    fs.rmSync(FAKE_CTR, true);
+  }
   envDockerOverride(bin);
 }
 
@@ -657,7 +666,10 @@ test("a short word does not match everything", () => {
 test("the cap holds, so one broad query cannot undo the deferring", () => {
   let many: string[] = [];
   let i: int = 0;
-  while (i < 30) { many.push("issue_tool_" + `${i}`); i = i + 1; }
+  while (i < 30) {
+    many.push("issue_tool_" + `${i}`);
+    i = i + 1;
+  }
   let got = findTools(waiting(many), "issue", 8);
   expect(got.found.length == 8);
 });

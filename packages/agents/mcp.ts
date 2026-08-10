@@ -15,26 +15,46 @@ export type McpCall = {
 
 function envelopeMember(document: string, key: string): string {
   let i: int = 0;
-  while (i < document.length && jsonBlank(document.charAt(i))) { i = i + 1; }
-  if (i >= document.length || document.charAt(i) != "{") { return ""; }
+  while (i < document.length && jsonBlank(document.charAt(i))) {
+    i = i + 1;
+  }
+  if (i >= document.length || document.charAt(i) != "{") {
+    return "";
+  }
   i = i + 1;
   while (i < document.length) {
     while (i < document.length) {
       let ch = document.charAt(i);
-      if (!jsonBlank(ch) && ch != ",") { break; }
+      if (!jsonBlank(ch) && ch != ",") {
+        break;
+      }
       i = i + 1;
     }
-    if (i >= document.length || document.charAt(i) == "}") { return ""; }
-    if (document.charAt(i) != "\"") { return ""; }
+    if (i >= document.length || document.charAt(i) == "}") {
+      return "";
+    }
+    if (document.charAt(i) != "\"") {
+      return "";
+    }
     let name = jsonValueAt(document, i);
-    if (name.length < 2) { return ""; }
+    if (name.length < 2) {
+      return "";
+    }
     i = i + name.length;
-    while (i < document.length && jsonBlank(document.charAt(i))) { i = i + 1; }
-    if (i >= document.length || document.charAt(i) != ":") { return ""; }
+    while (i < document.length && jsonBlank(document.charAt(i))) {
+      i = i + 1;
+    }
+    if (i >= document.length || document.charAt(i) != ":") {
+      return "";
+    }
     i = i + 1;
     let value = jsonValueAt(document, i);
-    if (value == "") { return ""; }
-    if (jsonUnescape(name.slice(1, name.length - 1)) == key) { return value; }
+    if (value == "") {
+      return "";
+    }
+    if (jsonUnescape(name.slice(1, name.length - 1)) == key) {
+      return value;
+    }
     i = i + value.length;
   }
   return "";
@@ -48,10 +68,14 @@ export type RpcFailure = {
 export function rpcFailure(document: string): RpcFailure {
   let none: RpcFailure = { failed: false, message: "" };
   let raw = envelopeMember(document, "error");
-  if (raw == "" || raw == "null") { return none; }
+  if (raw == "" || raw == "null") {
+    return none;
+  }
   let said = jsonText(raw, "message");
   let sentence = "the server refused the call";
-  if (said != "") { sentence = sentence + ": " + said; }
+  if (said != "") {
+    sentence = sentence + ": " + said;
+  }
   let refused: RpcFailure = { failed: true, message: sentence };
   return refused;
 }
@@ -69,7 +93,9 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
     headers.set(name, extra.get(name) ?? "");
   }
   let body = "{\"jsonrpc\":\"2.0\",\"id\":" + `${id}` + ",\"method\":" + JSON.stringify(method);
-  if (params != "") { body = body + ",\"params\":" + params; }
+  if (params != "") {
+    body = body + ",\"params\":" + params;
+  }
   body = body + "}";
 
   let res = http.request(endpoint, "POST", body, headers);
@@ -83,7 +109,7 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
       error: "HTTP " + `${res.status}` + (said == "" ? "" : ": " + said) };
     return bad;
   }
-  let envelope = jsonOf(res.body);
+  let envelope = JsonOf(res.body);
   let refused = rpcFailure(envelope);
   if (refused.failed) {
     let rpcErr: McpCall = { ok: false, text: envelope, error: refused.message };
@@ -93,28 +119,40 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
   return good;
 }
 
-export function jsonOf(body: string): string {
+export function JsonOf(body: string): string {
   let text = body.trim();
-  if (text == "" || text.startsWith("{") || text.startsWith("[")) { return text; }
+  if (text == "" || text.startsWith("{") || text.startsWith("[")) {
+    return text;
+  }
   let found = "";
   let rest = text;
   while (true) {
     let at = rest.indexOf("data:");
-    if (at < 0) { break; }
+    if (at < 0) {
+      break;
+    }
     rest = rest.slice(at + 5, rest.length);
     let end = rest.indexOf("\n");
     let line = (end < 0 ? rest : rest.slice(0, end)).trim();
-    if (line.startsWith("{")) { found = line; }
-    if (end < 0) { break; }
+    if (line.startsWith("{")) {
+      found = line;
+    }
+    if (end < 0) {
+      break;
+    }
     rest = rest.slice(end + 1, rest.length);
   }
-  if (found != "") { return found; }
+  if (found != "") {
+    return found;
+  }
   return text;
 }
 
 export function authHeaders(server: McpServerRow, token: string): Map<string, string> {
   let out = new Map<string, string>();
-  if (token == "" || server.authKind == "none" || server.authKind == "") { return out; }
+  if (token == "" || server.authKind == "none" || server.authKind == "") {
+    return out;
+  }
   if (server.authKind == "bearer" || server.authKind == "oauth") {
     out.set("authorization", "Bearer " + token);
     return out;
@@ -144,7 +182,9 @@ export type ToolListing = {
 
 export function toolListing(server: McpServerRow, token: string): ToolListing {
   let out: McpTool[] = [];
-  if (!server.enabled) { return { tools: out, problem: "this server is switched off" }; }
+  if (!server.enabled) {
+    return { tools: out, problem: "this server is switched off" };
+  }
   if (server.transport != "http") {
     return { tools: out, problem: "this speaks http; \"" + server.transport + "\" needs a subprocess it cannot spawn" };
   }
@@ -196,7 +236,9 @@ export function resultText(document: string): string {
   while (i < blocks.length) {
     if (jsonText(blocks[i], "type") == "text") {
       let piece = jsonText(blocks[i], "text");
-      if (out != "") { out = out + "\n"; }
+      if (out != "") {
+        out = out + "\n";
+      }
       out = out + piece;
     }
     i = i + 1;
@@ -206,14 +248,22 @@ export function resultText(document: string): string {
 
 export function callTool(server: McpServerRow, toolName: string, args: string, token: string): McpCall {
   let body = args;
-  if (body == "") { body = "{}"; }
+  if (body == "") {
+    body = "{}";
+  }
   let params = "{\"name\":" + JSON.stringify(toolName) + ",\"arguments\":" + body + "}";
   let answered = rpcWith(server.endpoint, authHeaders(server, token), 3, "tools/call", params);
-  if (!answered.ok) { return answered; }
+  if (!answered.ok) {
+    return answered;
+  }
   let failed = jsonRaw(answered.text, "isError") == "true";
   let value = resultText(answered.text);
-  if (value == "") { value = answered.text; }
+  if (value == "") {
+    value = answered.text;
+  }
   let text: McpCall = { ok: !failed, text: value, error: "" };
-  if (failed) { text = { ok: false, text: value, error: "the tool reported an error" }; }
+  if (failed) {
+    text = { ok: false, text: value, error: "the tool reported an error" };
+  }
   return text;
 }

@@ -41,18 +41,28 @@ function quotedRight(text: string): bool {
   while (i < text.length) {
     let ch = text.charAt(i);
     if (inString) {
-      if (escaped) { escaped = false; }
-      else if (ch == "\\") { escaped = true; }
+      if (escaped) {
+        escaped = false;
+      }
+      else if (ch == "\\") {
+        escaped = true;
+      }
       else if (ch == "\"") {
         inString = false;
         let j = i + 1;
-        while (j < text.length && (text.charAt(j) == " " || text.charAt(j) == "\n")) { j = j + 1; }
+        while (j < text.length && (text.charAt(j) == " " || text.charAt(j) == "\n")) {
+          j = j + 1;
+        }
         if (j < text.length) {
           let next = text.charAt(j);
-          if (next != "," && next != ":" && next != "}" && next != "]") { return false; }
+          if (next != "," && next != ":" && next != "}" && next != "]") {
+            return false;
+          }
         }
       }
-    } else if (ch == "\"") { inString = true; }
+    } else if (ch == "\"") {
+      inString = true;
+    }
     i = i + 1;
   }
   return !inString;

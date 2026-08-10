@@ -52,7 +52,9 @@ export function enqueue(db: Db, source: string, scope: string, modelId: string, 
     status: JOB_QUEUED, chunks: 0, error: "", createdAt: now, updatedAt: now,
   };
   let written = persist(db, indexJobsMapping(), JSON.stringify(row));
-  if (!written.ok) { return ""; }
+  if (!written.ok) {
+    return "";
+  }
   return id;
 }
 
@@ -66,8 +68,12 @@ export function claimNext(db: Db, now: string): IndexJobRow {
     + " WHERE id = (SELECT id FROM index_jobs WHERE status = " + placeholderAt(db, 3)
     + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
     + " RETURNING id, source, scope, model_id, body";
-  if (!db.query(sql, [JOB_INDEXING, now, JOB_QUEUED])) { return none; }
-  if (db.rows() == 0) { return none; }
+  if (!db.query(sql, [JOB_INDEXING, now, JOB_QUEUED])) {
+    return none;
+  }
+  if (db.rows() == 0) {
+    return none;
+  }
   let claimed: IndexJobRow = {
     id: db.value(0, 0), source: db.value(0, 1), scope: db.value(0, 2),
     modelId: db.value(0, 3), body: db.value(0, 4),
@@ -102,7 +108,9 @@ export function pendingJobs(db: Db, scope: string): IndexJobRow[] {
     args = [JOB_INDEXED, "", scope];
   }
   sql = sql + " ORDER BY created_at";
-  if (!db.query(sql, args)) { return out; }
+  if (!db.query(sql, args)) {
+    return out;
+  }
   let i: int = 0;
   while (i < db.rows()) {
     let row: IndexJobRow = {

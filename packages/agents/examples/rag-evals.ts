@@ -37,12 +37,21 @@ function main(): void {
   let plan = schemaPlan(db);
   let extra = knowledgePlan(db);
   let e: int = 0;
-  while (e < extra.length) { plan.push(extra[e]); e = e + 1; }
+  while (e < extra.length) {
+    plan.push(extra[e]);
+    e = e + 1;
+  }
   let traces = tracePlan(db);
   let t: int = 0;
-  while (t < traces.length) { plan.push(traces[t]); t = t + 1; }
+  while (t < traces.length) {
+    plan.push(traces[t]);
+    t = t + 1;
+  }
   let ran = migrate(db, plan);
-  if (!ran.ok) { console.log("migrate: " + ran.error); return; }
+  if (!ran.ok) {
+    console.log("migrate: " + ran.error);
+    return;
+  }
 
   let chat: ModelRow = { id: "m1", label: "Mistral Small", apiName: "mistral-small-latest", provider: "mistral", kind: "chat", dimensions: 0, baseUrl: "", enabled: true };
   let embed: ModelRow = { id: "e1", label: "Mistral Embed", apiName: "mistral-embed", provider: "mistral", kind: "embedding", dimensions: 1024, baseUrl: "", enabled: true };
@@ -56,7 +65,10 @@ function main(): void {
 
   let embedder = embeddingModel(db, "e1");
   let made = createDocuments(db, embedder);
-  if (made != "") { console.log("documents: " + made); return; }
+  if (made != "") {
+    console.log("documents: " + made);
+    return;
+  }
 
   let stored = credentialFor(db, "mistral", master);
   let engineering = uploadDocument(db, embedder, "plume_relations", "/engineering/plume",
@@ -124,16 +136,26 @@ function main(): void {
   master: master,
   maxItems: 50,
 }, tracerFor(db, master));
-  if (!out.ok) { console.log("refused   " + out.error); db.close(); return; }
+  if (!out.ok) {
+    console.log("refused   " + out.error);
+    db.close();
+    return;
+  }
 
   let i: int = 0;
   while (i < out.results.length) {
     let r = out.results[i];
     let mark = "PASS";
-    if (!r.ran) { mark = "FAIL"; } else if (r.score < 0.7) { mark = "MISS"; }
+    if (!r.ran) {
+      mark = "FAIL";
+    } else if (r.score < 0.7) {
+      mark = "MISS";
+    }
     console.log(mark + "  answer " + `${r.score}` + "  retrieval " + `${r.scopeScore}` + "   " + r.question);
     console.log("      read      " + r.usedScopes.join(", "));
-    if (r.missingScopes.length > 0) { console.log("      NOT read  " + r.missingScopes.join(", ")); }
+    if (r.missingScopes.length > 0) {
+      console.log("      NOT read  " + r.missingScopes.join(", "));
+    }
     console.log("      said      " + r.answer.slice(0, 88));
     i = i + 1;
   }

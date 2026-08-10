@@ -62,7 +62,9 @@ export function emptyDocumentFile(): DocumentFileRow {
 
 export function findDocumentFile(db: Db, scope: string, source: string): DocumentFileRow {
   let document = findById(db, documentFilesMapping(), documentFileId(scope, source));
-  if (document == "") { return emptyDocumentFile(); }
+  if (document == "") {
+    return emptyDocumentFile();
+  }
   let row: DocumentFileRow = JSON.parse<DocumentFileRow>(document);
   return row;
 }
@@ -70,7 +72,9 @@ export function findDocumentFile(db: Db, scope: string, source: string): Documen
 export function sourcesWithFiles(db: Db, scope: string): string[] {
   let out: string[] = [];
   let sql = "SELECT source FROM document_files WHERE scope = " + placeholderAt(db, 1);
-  if (!db.query(sql, [normalScope(scope)])) { return out; }
+  if (!db.query(sql, [normalScope(scope)])) {
+    return out;
+  }
   let i: int = 0;
   while (i < db.rows()) {
     out.push(db.value(i, 0));
@@ -82,7 +86,9 @@ export function sourcesWithFiles(db: Db, scope: string): string[] {
 export function holdsSource(names: string[], source: string): bool {
   let i: int = 0;
   while (i < names.length) {
-    if (names[i] == source) { return true; }
+    if (names[i] == source) {
+      return true;
+    }
     i = i + 1;
   }
   return false;

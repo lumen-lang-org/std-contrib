@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Reply, Request, notFound, ok } from "../../../rest/server.ts";
+import { Reply, Request, NotFound, Ok } from "../../../rest/server.ts";
 import { callerTags } from "../../api-core.ts";
 import { ownedRun } from "../../runlog.ts";
 
@@ -13,10 +13,12 @@ export class RunApi {
     this.db = db;
   }
 
-  @get("/:id")
+  @Get("/:id")
   find(req: Request, @PathVariable("id") id: string): Reply {
     let document = ownedRun(this.db, id, callerTags(req));
-    if (document == "") { return notFound("run " + id); }
-    return ok(document);
+    if (document == "") {
+      return NotFound("run " + id);
+    }
+    return Ok(document);
   }
 }

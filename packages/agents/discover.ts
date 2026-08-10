@@ -10,21 +10,27 @@ import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 
 function freshHours(): int {
   let said = process.env["AGENTS_DISCOVER_FRESH_HOURS"] ?? "";
-  if (said == "") { return 48; }
+  if (said == "") {
+    return 48;
+  }
   let n = parseInt(said, 10) ?? 48;
   return n < 1 ? 1 : n;
 }
 
 function readCap(): int {
   let said = process.env["AGENTS_DISCOVER_READ"] ?? "";
-  if (said == "") { return 80; }
+  if (said == "") {
+    return 80;
+  }
   let n = parseInt(said, 10) ?? 80;
   return n < 1 ? 1 : n;
 }
 
 function storyCap(): int {
   let said = process.env["AGENTS_DISCOVER_STORIES"] ?? "";
-  if (said == "") { return 12; }
+  if (said == "") {
+    return 12;
+  }
   let n = parseInt(said, 10) ?? 12;
   return n < 1 ? 1 : n;
 }
@@ -123,7 +129,9 @@ export function discoverTextMapping(): DbRepository {
 
 export function discoverText(db: Db, name: string): string {
   let held = findById(db, discoverTextMapping(), name);
-  if (held == "") { return ""; }
+  if (held == "") {
+    return "";
+  }
   return jsonText(held, "value");
 }
 
@@ -131,7 +139,9 @@ export function setDiscoverText(db: Db, name: string, value: string, now: string
   let row = "{\"id\":" + JSON.stringify(name) + ",\"value\":" + JSON.stringify(value)
     + ",\"updatedAt\":" + JSON.stringify(now) + "}";
   let written = persist(db, discoverTextMapping(), row);
-  if (!written.ok) { return written.error; }
+  if (!written.ok) {
+    return written.error;
+  }
   return "";
 }
 
@@ -162,10 +172,18 @@ const CC_LETTERS: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 export function geoCode(said: string): string {
   let s = said.trim().toUpperCase();
-  if (s.length != 2) { return ""; }
-  if (CC_LETTERS.indexOf(s.slice(0, 1)) < 0) { return ""; }
-  if (CC_LETTERS.indexOf(s.slice(1, 2)) < 0) { return ""; }
-  if (s == "XX" || s == "ZZ") { return ""; }
+  if (s.length != 2) {
+    return "";
+  }
+  if (CC_LETTERS.indexOf(s.slice(0, 1)) < 0) {
+    return "";
+  }
+  if (CC_LETTERS.indexOf(s.slice(1, 2)) < 0) {
+    return "";
+  }
+  if (s == "XX" || s == "ZZ") {
+    return "";
+  }
   return s;
 }
 
@@ -177,17 +195,25 @@ export function allFeeds(db: Db): DiscoverFeed[] {
 
 export function ensureGeoFeed(db: Db, country: string): void {
   let cc = geoCode(country);
-  if (cc == "") { return; }
+  if (cc == "") {
+    return;
+  }
   let id = "geo:" + cc.toLowerCase();
-  if (findById(db, discoverFeedsMapping(), id) != "") { return; }
+  if (findById(db, discoverFeedsMapping(), id) != "") {
+    return;
+  }
   let all = allFeeds(db);
   let placed: int = 0;
   let i: int = 0;
   while (i < all.length) {
-    if (all[i].country != "") { placed = placed + 1; }
+    if (all[i].country != "") {
+      placed = placed + 1;
+    }
     i = i + 1;
   }
-  if (placed >= MAX_GEO_FEEDS) { return; }
+  if (placed >= MAX_GEO_FEEDS) {
+    return;
+  }
   let row: DiscoverFeed = {
     id: id, topic: "Local news", query: "news", lang: "", country: cc,
     enabled: true, digestedAt: "",
@@ -258,13 +284,19 @@ type Hit = {
 };
 
 function effectiveStamp(h: Hit): string {
-  if (h.published_at.length >= 19) { return h.published_at; }
-  if (h.first_seen.length >= 19) { return h.first_seen; }
+  if (h.published_at.length >= 19) {
+    return h.published_at;
+  }
+  if (h.first_seen.length >= 19) {
+    return h.first_seen;
+  }
   return h.fetched_at;
 }
 
 function recent(stamp: string, cutoff: string): bool {
-  if (stamp.length < 19 || cutoff.length < 19) { return false; }
+  if (stamp.length < 19 || cutoff.length < 19) {
+    return false;
+  }
   return stamp.slice(0, 19) >= cutoff.slice(0, 19);
 }
 
@@ -287,7 +319,9 @@ function cutoffText(): string {
   let mp = (5 * doy + 2) / 153;
   let d = doy - (153 * mp + 2) / 5 + 1;
   let m = mp < 10 ? mp + 3 : mp - 9;
-  if (m <= 2) { y = y + 1; }
+  if (m <= 2) {
+    y = y + 1;
+  }
 
   return `${y}` + "-" + pad2(m) + "-" + pad2(d)
     + "T" + pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss);
@@ -301,13 +335,23 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   let none: Hit[] = [];
   let url = searchApiBase() + "/search?q=" + urlEncode(query) + "&k=" + `${cap}`
     + "&sort=recent&since=" + `${freshHours()}` + "h";
-  if (query != "*") { url = url + "&match=any"; }
-  if (lang != "") { url = url + "&lang=" + urlEncode(lang); }
-  if (country != "") { url = url + "&country=" + urlEncode(country); }
+  if (query != "*") {
+    url = url + "&match=any";
+  }
+  if (lang != "") {
+    url = url + "&lang=" + urlEncode(lang);
+  }
+  if (country != "") {
+    url = url + "&country=" + urlEncode(country);
+  }
   let res = http.request(url, "GET", "", new Map<string, string>());
-  if (!res.ok || res.status != 200) { return none; }
+  if (!res.ok || res.status != 200) {
+    return none;
+  }
   let raw = jsonRaw(res.body, "results");
-  if (raw == "") { return none; }
+  if (raw == "") {
+    return none;
+  }
   let rows = jsonList(raw);
   let hits: Hit[] = [];
   let r: int = 0;
@@ -326,7 +370,9 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
       score: 0,
       image: jsonText(rows[r], "image"),
     };
-    if (one.url != "") { hits.push(one); }
+    if (one.url != "") {
+      hits.push(one);
+    }
     r = r + 1;
   }
 
@@ -334,7 +380,9 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
   let kept: Hit[] = [];
   let i: int = 0;
   while (i < hits.length) {
-    if (recent(effectiveStamp(hits[i]), cutoff)) { kept.push(hits[i]); }
+    if (recent(effectiveStamp(hits[i]), cutoff)) {
+      kept.push(hits[i]);
+    }
     i = i + 1;
   }
 
@@ -344,10 +392,14 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
     let k: int = 0;
     while (k < kept.length) {
       if (!taken(out, kept[k].url)
-          && (best < 0 || effectiveStamp(kept[k]) > effectiveStamp(kept[best]))) { best = k; }
+          && (best < 0 || effectiveStamp(kept[k]) > effectiveStamp(kept[best]))) {
+            best = k;
+          }
       k = k + 1;
     }
-    if (best < 0) { break; }
+    if (best < 0) {
+      break;
+    }
     out.push(kept[best]);
   }
   return out;
@@ -356,7 +408,9 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
 function taken(rows: Hit[], url: string): bool {
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].url == url) { return true; }
+    if (rows[i].url == url) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -385,7 +439,9 @@ function hostOf(url: string): string {
   let rest = start < 0 ? url : url.slice(start + 3);
   let slash = rest.indexOf("/");
   let host = slash < 0 ? rest : rest.slice(0, slash);
-  if (host.startsWith("www.")) { host = host.slice(4); }
+  if (host.startsWith("www.")) {
+    host = host.slice(4);
+  }
   return host;
 }
 
@@ -395,12 +451,22 @@ function withoutImages(text: string): string {
   while (i < text.length) {
     if (i + 1 < text.length && text.charAt(i) == "!" && text.charAt(i + 1) == "[") {
       let alt = text.indexOf("](", i);
-      if (alt < 0) { out = out + text.slice(i); return out; }
+      if (alt < 0) {
+        out = out + text.slice(i);
+        return out;
+      }
       let shut = text.indexOf(")", alt);
-      if (shut < 0) { out = out + text.slice(i); return out; }
+      if (shut < 0) {
+        out = out + text.slice(i);
+        return out;
+      }
       i = shut + 1;
-      while (i < text.length && text.charAt(i) == "\n") { i = i + 1; }
-      if (out.length > 0 && !out.endsWith("\n\n")) { out = out + "\n\n"; }
+      while (i < text.length && text.charAt(i) == "\n") {
+        i = i + 1;
+      }
+      if (out.length > 0 && !out.endsWith("\n\n")) {
+        out = out + "\n\n";
+      }
     } else {
       out = out + text.charAt(i);
       i = i + 1;
@@ -431,7 +497,9 @@ function bodyFor(story: DiscoverStory, hits: Hit[]): string {
         }
         p = p + 1;
       }
-      if (wrote) { out = out + "[Read on " + hostOf(url) + "](" + url + ")\n\n"; }
+      if (wrote) {
+        out = out + "[Read on " + hostOf(url) + "](" + url + ")\n\n";
+      }
       s = s + 1;
     }
   }
@@ -453,7 +521,9 @@ function bodyFor(story: DiscoverStory, hits: Hit[]): string {
     }
   }
 
-  if (out.length > BODY_CHARS) { out = out.slice(0, BODY_CHARS) + "…\n"; }
+  if (out.length > BODY_CHARS) {
+    out = out.slice(0, BODY_CHARS) + "…\n";
+  }
   return out;
 }
 
@@ -479,25 +549,39 @@ function titlesFor(story: DiscoverStory, hits: Hit[]): string {
     let found: string = "";
     let h: int = 0;
     while (h < hits.length) {
-      if (hits[h].url == story.sources[s]) { found = hits[h].title; h = hits.length; }
-      else { h = h + 1; }
+      if (hits[h].url == story.sources[s]) {
+        found = hits[h].title;
+        h = hits.length;
+      }
+      else {
+        h = h + 1;
+      }
     }
     out = out + found.replaceAll("\n", " ");
-    if (s + 1 < story.sources.length) { out = out + "\n"; }
+    if (s + 1 < story.sources.length) {
+      out = out + "\n";
+    }
     s = s + 1;
   }
   return out;
 }
 
 function readingMinutes(body: string): int {
-  if (body == "") { return 0; }
+  if (body == "") {
+    return 0;
+  }
   let words: int = 0;
   let inWord: bool = false;
   let i: int = 0;
   while (i < body.length) {
     let c = body.charAt(i);
     let space = c == " " || c == "\n" || c == "\t" || c == "\r";
-    if (space) { inWord = false; } else if (!inWord) { words = words + 1; inWord = true; }
+    if (space) {
+      inWord = false;
+    } else if (!inWord) {
+      words = words + 1;
+      inWord = true;
+    }
     i = i + 1;
   }
   let mins = words / 220;
@@ -525,19 +609,37 @@ function stem(text: string): string {
 }
 
 function langName(code: string): string {
-  if (code == "ar") { return "Arabic"; }
-  if (code == "fr") { return "French"; }
-  if (code == "en") { return "English"; }
-  if (code == "de") { return "German"; }
-  if (code == "tr") { return "Turkish"; }
-  if (code == "es") { return "Spanish"; }
-  if (code == "it") { return "Italian"; }
-  if (code == "pt") { return "Portuguese"; }
+  if (code == "ar") {
+    return "Arabic";
+  }
+  if (code == "fr") {
+    return "French";
+  }
+  if (code == "en") {
+    return "English";
+  }
+  if (code == "de") {
+    return "German";
+  }
+  if (code == "tr") {
+    return "Turkish";
+  }
+  if (code == "es") {
+    return "Spanish";
+  }
+  if (code == "it") {
+    return "Italian";
+  }
+  if (code == "pt") {
+    return "Portuguese";
+  }
   return code;
 }
 
 function digestPromptWith(override: string, topic: string, count: int, outLang: string): string {
-  if (override.trim() == "") { return digestPrompt(topic, count, outLang); }
+  if (override.trim() == "") {
+    return digestPrompt(topic, count, outLang);
+  }
   let out = override.replaceAll("{topic}", topic).replaceAll("{count}", `${count}`);
   out = out.replaceAll("{language}", outLang == "" ? "the language of the sources" : langName(outLang));
   return out;
@@ -546,15 +648,31 @@ function digestPromptWith(override: string, topic: string, count: int, outLang: 
 function scriptOk(text: string, outLang: string): bool {
   let lo: int = 0;
   let hi: int = 0;
-  if (outLang == "ar" || outLang == "fa" || outLang == "ur") { lo = 216; hi = 219; }
-  else if (outLang == "he") { lo = 214; hi = 215; }
-  else if (outLang == "el") { lo = 206; hi = 207; }
-  else if (outLang == "ru" || outLang == "uk" || outLang == "bg") { lo = 208; hi = 209; }
-  else { return true; }
+  if (outLang == "ar" || outLang == "fa" || outLang == "ur") {
+    lo = 216;
+    hi = 219;
+  }
+  else if (outLang == "he") {
+    lo = 214;
+    hi = 215;
+  }
+  else if (outLang == "el") {
+    lo = 206;
+    hi = 207;
+  }
+  else if (outLang == "ru" || outLang == "uk" || outLang == "bg") {
+    lo = 208;
+    hi = 209;
+  }
+  else {
+    return true;
+  }
   let i: int = 0;
   while (i < text.length) {
     let c = text.charCodeAt(i);
-    if (c >= lo && c <= hi) { return true; }
+    if (c >= lo && c <= hi) {
+      return true;
+    }
     i = i + 1;
   }
   return false;
@@ -637,14 +755,22 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
     };
     return r;
   };
-  if (hits.length == 0) { return said("nothing fresh in the index for this topic"); }
+  if (hits.length == 0) {
+    return said("nothing fresh in the index for this topic");
+  }
 
   let modelDoc = findById(db, modelsMapping(), modelId);
-  if (modelDoc == "") { return said("no model " + modelId); }
+  if (modelDoc == "") {
+    return said("no model " + modelId);
+  }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
-  if (!model.enabled) { return said(model.label + " is disabled"); }
+  if (!model.enabled) {
+    return said(model.label + " is disabled");
+  }
   let key = credentialFor(db, model.provider, master);
-  if (key == "") { return said("no credential for " + model.provider); }
+  if (key == "") {
+    return said("no credential for " + model.provider);
+  }
 
   let config: ModelConfigRow = {
     id: "", modelId: model.id, temperature: 0.2, maxTokens: 12000, topP: 1.0,
@@ -656,12 +782,16 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   while (tries < 3) {
     if (asked.ok) {
       let peek = replyText(model.provider, asked.text).trim();
-      if (peek.indexOf("{") >= 0) { break; }
+      if (peek.indexOf("{") >= 0) {
+        break;
+      }
     }
     asked = complete(model, config, digestPromptWith(written, topic, storyCap(), lang), asLines(hits), key);
     tries = tries + 1;
   }
-  if (!asked.ok) { return said("the model did not answer"); }
+  if (!asked.ok) {
+    return said("the model did not answer");
+  }
 
   let text = replyText(model.provider, asked.text).trim();
   let open = text.indexOf("{");
@@ -681,7 +811,11 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   let wrongLang: int = 0;
   let w: int = 0;
   while (w < parsed.length) {
-    if (!scriptOk(parsed[w].headline, lang)) { wrongLang = wrongLang + 1; w = w + 1; continue; }
+    if (!scriptOk(parsed[w].headline, lang)) {
+      wrongLang = wrongLang + 1;
+      w = w + 1;
+      continue;
+    }
     let text = bodyFor(parsed[w], hits);
     let one: WrittenStory = {
       story: parsed[w], body: text, readMinutes: readingMinutes(text),
@@ -739,7 +873,9 @@ export function asArticleContext(row: DiscoverRow, topic: string): string {
     + row.summary + "\n\n"
     + "Sources: " + row.sources.replaceAll("\n", ", ") + "\n"
     + "Fetched: " + row.fetchedAt + "\n";
-  if (row.body != "") { out = out + "\n" + row.body + "\n"; }
+  if (row.body != "") {
+    out = out + "\n" + row.body + "\n";
+  }
   return out;
 }
 
@@ -757,30 +893,46 @@ const READABLE_PROMPT: string = "You are given the raw text a web crawler extrac
   + "6. Answer with the markdown only. No preamble, no code fence, no explanation of what you did.";
 
 export function readable(db: Db, raw: string, modelId: string, master: string): string {
-  if (raw == "") { return ""; }
+  if (raw == "") {
+    return "";
+  }
   let modelDoc = findById(db, modelsMapping(), modelId);
-  if (modelDoc == "") { return ""; }
+  if (modelDoc == "") {
+    return "";
+  }
   let model: ModelRow = JSON.parse<ModelRow>(modelDoc);
-  if (!model.enabled) { return ""; }
+  if (!model.enabled) {
+    return "";
+  }
   let key = credentialFor(db, model.provider, master);
-  if (key == "") { return ""; }
+  if (key == "") {
+    return "";
+  }
 
   let config: ModelConfigRow = {
     id: "", modelId: model.id, temperature: 0.0, maxTokens: 8000, topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
   let asked = complete(model, config, READABLE_PROMPT, raw, key);
-  if (!asked.ok) { return ""; }
+  if (!asked.ok) {
+    return "";
+  }
   let out = replyText(model.provider, asked.text).trim();
 
   if (out.startsWith("```")) {
     let firstBreak = out.indexOf("\n");
-    if (firstBreak > 0) { out = out.slice(firstBreak + 1); }
-    if (out.endsWith("```")) { out = out.slice(0, out.length - 3); }
+    if (firstBreak > 0) {
+      out = out.slice(firstBreak + 1);
+    }
+    if (out.endsWith("```")) {
+      out = out.slice(0, out.length - 3);
+    }
     out = out.trim();
   }
 
-  if (out.length < raw.length / 2) { return ""; }
+  if (out.length < raw.length / 2) {
+    return "";
+  }
   return out;
 }
 
@@ -806,24 +958,37 @@ export function readableSoFar(db: Db, feedId: string): Map<string, string> {
 
 export function carriedOver(kept: Map<string, string>, id: string, body: string): string {
   let held = kept.get(id) ?? "";
-  if (held == "") { return ""; }
+  if (held == "") {
+    return "";
+  }
   let cut = held.indexOf(CARRY_SEP);
-  if (cut < 0) { return ""; }
-  if (held.slice(0, cut) != body) { return ""; }
+  if (cut < 0) {
+    return "";
+  }
+  if (held.slice(0, cut) != body) {
+    return "";
+  }
   return held.slice(cut + CARRY_SEP.length);
 }
 
 export function unreadableStories(db: Db, limit: int): DiscoverRow[] {
   let keys: DbOrder[] = [{ column: "made_at" }];
   let rows = JSON.parse<DiscoverRow[]>(listOrdered(db, discoverStoriesMapping(), { where: "body <> '' AND body_md = ''", order: keys }));
-  if (rows.length <= limit) { return rows; }
+  if (rows.length <= limit) {
+    return rows;
+  }
   let some: DiscoverRow[] = [];
   let i: int = 0;
-  while (i < limit) { some.push(rows[i]); i = i + 1; }
+  while (i < limit) {
+    some.push(rows[i]);
+    i = i + 1;
+  }
   return some;
 }
 
-export function discoverModelId(): string { return digestModelId(); }
+export function discoverModelId(): string {
+  return digestModelId();
+}
 
 export function withReadableBody(row: DiscoverRow, md: string): DiscoverRow {
   let better: DiscoverRow = {
@@ -838,7 +1003,9 @@ export function withReadableBody(row: DiscoverRow, md: string): DiscoverRow {
 
 function digestEveryMs(): int {
   let said = process.env["AGENTS_DISCOVER_EVERY_MS"] ?? "";
-  if (said == "") { return 1800000; }
+  if (said == "") {
+    return 1800000;
+  }
   let n = parseInt(said, 10) ?? 1800000;
   return n < 60000 ? 60000 : n;
 }
@@ -846,8 +1013,12 @@ function digestEveryMs(): int {
 export function refreshFeed(db: Db, feed: DiscoverFeed, master: string): string {
   let told = digest(db, feed.topic, feed.query, feed.lang, feed.country,
     digestModelId(), master);
-  if (told.problem != "") { return told.problem; }
-  if (told.stories.length == 0) { return "nothing worth a card"; }
+  if (told.problem != "") {
+    return told.problem;
+  }
+  if (told.stories.length == 0) {
+    return "nothing worth a card";
+  }
 
   let now = `${Date.now()}`;
   let kept = readableSoFar(db, feed.id);

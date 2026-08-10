@@ -1,5 +1,5 @@
 import { base64Url, challengeFor, consentUrl, formEncode, newState, newVerifier, originOf, pathOf, urlEncode } from "./mcp-oauth.ts";
-import { jsonOf } from "./mcp.ts";
+import { JsonOf } from "./mcp.ts";
 
 test("the challenge matches the RFC's own worked example", () => {
   expect(challengeFor("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
@@ -99,21 +99,21 @@ test("an authorize endpoint that already has a query keeps it", () => {
 
 test("an SSE-framed reply is unwrapped to its envelope", () => {
   let framed = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}\n\n";
-  expect(jsonOf(framed) == "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}");
+  expect(JsonOf(framed) == "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}");
 });
 
 test("a plain JSON body is left exactly as it is", () => {
-  expect(jsonOf("{\"jsonrpc\":\"2.0\",\"id\":1}") == "{\"jsonrpc\":\"2.0\",\"id\":1}");
-  expect(jsonOf("  {\"a\":1}  ") == "{\"a\":1}");
+  expect(JsonOf("{\"jsonrpc\":\"2.0\",\"id\":1}") == "{\"jsonrpc\":\"2.0\",\"id\":1}");
+  expect(JsonOf("  {\"a\":1}  ") == "{\"a\":1}");
 });
 
 test("the reply wins over the notifications before it", () => {
   let stream = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n"
     + "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"list_issues\"}]}}\n\n";
-  expect(jsonOf(stream).indexOf("list_issues") > 0);
-  expect(jsonOf(stream).indexOf("progress") < 0);
+  expect(JsonOf(stream).indexOf("list_issues") > 0);
+  expect(JsonOf(stream).indexOf("progress") < 0);
 });
 
 test("something that is neither is handed back rather than swallowed", () => {
-  expect(jsonOf("<html>bad gateway</html>") == "<html>bad gateway</html>");
+  expect(JsonOf("<html>bad gateway</html>") == "<html>bad gateway</html>");
 });

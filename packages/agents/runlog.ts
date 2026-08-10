@@ -160,7 +160,9 @@ export function recordRun(db: Db, wrote: RunRecord): string {
     createdAt: `${Date.now()}`,
   };
   let written = persist(db, runsMapping(), JSON.stringify(row));
-  if (!written.ok) { return ""; }
+  if (!written.ok) {
+    return "";
+  }
 
   let i: int = 0;
   while (i < run.steps.length) {
@@ -188,14 +190,21 @@ export function runsOf(db: Db, agentId: string, tags: string[], limit: int): str
   if (mine != "") {
     where = where + " AND " + mine;
     let i: int = 0;
-    while (i < tags.length) { args.push(tags[i]); i = i + 1; }
+    while (i < tags.length) {
+      args.push(tags[i]);
+      i = i + 1;
+    }
   }
   return pageOrdered(db, runsMapping(), { where: where, args: args, order: keys, limit: limit, offset: 0 });
 }
 
 export function ownedRun(db: Db, runId: string, tags: string[]): string {
   let document = findById(db, runsFull(db), runId);
-  if (document == "") { return ""; }
-  if (!documentIsOwned(document, tags)) { return ""; }
+  if (document == "") {
+    return "";
+  }
+  if (!documentIsOwned(document, tags)) {
+    return "";
+  }
   return document;
 }

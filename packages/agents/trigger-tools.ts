@@ -67,19 +67,25 @@ function botSaid(db: Db, owner: string, said: string): TriggerBotRow {
   let rows = JSON.parse<TriggerBotRow[]>(botsOf(db, owner));
   let i: int = 0;
   while (i < rows.length) {
-    if (rows[i].id == said) { return rows[i]; }
+    if (rows[i].id == said) {
+      return rows[i];
+    }
     i = i + 1;
   }
   let found: int = -1;
   i = 0;
   while (i < rows.length) {
     if (rows[i].name.toLowerCase() == said.toLowerCase()) {
-      if (found >= 0) { return emptyish(); }
+      if (found >= 0) {
+        return emptyish();
+      }
       found = i;
     }
     i = i + 1;
   }
-  if (found >= 0) { return rows[found]; }
+  if (found >= 0) {
+    return rows[found];
+  }
   return emptyish();
 }
 
@@ -97,7 +103,9 @@ function workflowSaid(db: Db, owner: string, said: string): WorkflowRow {
   let doc = findById(db, workflowsMapping(), said);
   if (doc != "") {
     let row: WorkflowRow = JSON.parse<WorkflowRow>(doc);
-    if (row.owner == owner) { return row; }
+    if (row.owner == owner) {
+      return row;
+    }
   }
   let sql = "SELECT id FROM workflows WHERE owner = " + db.placeholder
     + " AND LOWER(name) = " + placeholderAt(db, 2);
@@ -125,7 +133,9 @@ export function describeBot(db: Db, bot: TriggerBotRow, nowMs: number): string {
   if (testingDraft(bot, nowMs)) {
     line = line + "\n  TESTING THE DRAFT — every message walks unpublished edits until the window ends";
   }
-  if (bot.lastError != "") { line = line + "\n  last problem: " + bot.lastError; }
+  if (bot.lastError != "") {
+    line = line + "\n  last problem: " + bot.lastError;
+  }
   return line;
 }
 
@@ -152,9 +162,13 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
   }
 
   let said = jsonText(call.args, "bot").trim();
-  if (said == "") { return no("say which bot: {\"bot\":\"...\"} — list_bots shows them."); }
+  if (said == "") {
+    return no("say which bot: {\"bot\":\"...\"} — list_bots shows them.");
+  }
   let bot = botSaid(db, call.owner, said);
-  if (bot.id == "") { return no("no bot by that name or id — list_bots shows them."); }
+  if (bot.id == "") {
+    return no("no bot by that name or id — list_bots shows them.");
+  }
 
   if (call.name == "change_bot") {
     let flowSaid = jsonText(call.args, "workflow").trim();
@@ -162,7 +176,9 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
     let note = "";
     if (flowSaid != "") {
       let flow = workflowSaid(db, call.owner, flowSaid);
-      if (flow.id == "") { return no("no workflow called \"" + flowSaid + "\" — list_workflows shows them."); }
+      if (flow.id == "") {
+        return no("no workflow called \"" + flowSaid + "\" — list_workflows shows them.");
+      }
       workflowId = flow.id;
       if ((flow.publishedGraph ?? "") == "" && flow.graph == "") {
         return no("\"" + flow.name + "\" has nothing to run yet.");
@@ -190,8 +206,12 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
   }
 
   let minutes = parseInt(jsonRaw(call.args, "minutes").trim(), 10) ?? 5;
-  if (minutes < 0) { minutes = 0; }
-  if (minutes > 30) { minutes = 30; }
+  if (minutes < 0) {
+    minutes = 0;
+  }
+  if (minutes > 30) {
+    minutes = 30;
+  }
   let until = minutes == 0 ? "" : `${(call.nowMs as i64) + (minutes as i64) * 60000}`;
   let sql = "UPDATE trigger_bots SET draft_until = " + db.placeholder
     + ", updated_at = " + placeholderAt(db, 2)

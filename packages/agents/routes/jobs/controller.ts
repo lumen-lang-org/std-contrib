@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Guarded, Reply, Request, ok } from "../../../rest/server.ts";
+import { Guarded, Reply, Request, Ok } from "../../../rest/server.ts";
 import { pgOnly } from "../../guards.ts";
 import { IndexJobRow, pendingJobs } from "../../indexing.ts";
 import { JobView } from "./types.ts";
@@ -22,15 +22,17 @@ function jobView(r: IndexJobRow): JobView {
 export class JobApi {
   db: Db;
 
-  constructor(db: Db) { this.db = db; }
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   needsPg(): Guarded {
     return pgOnly(this.db, "jobs need PostgreSQL (pgvector); this runs on " + this.db.name);
   }
 
-  @get("/")
+  @Get("/")
   @Guard(needsPg)
   list(req: Request): Reply {
-    return ok(JSON.stringify(pendingJobs(this.db, "").map(jobView)));
+    return Ok(JSON.stringify(pendingJobs(this.db, "").map(jobView)));
   }
 }

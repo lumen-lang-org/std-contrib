@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { appliedHighWater } from "../../../plume/migrate.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Bound } from "../../../rest/plan.ts";
-import { Reply, Request, ok } from "../../../rest/server.ts";
+import { Reply, Request, Ok } from "../../../rest/server.ts";
 import { boolJson, stamp } from "../../api-core.ts";
 import { envDockerUp } from "../../environments.ts";
 
@@ -23,8 +23,8 @@ export class HealthApi {
     this.db = db;
   }
 
-  @get("/")
+  @Get("/")
   show(req: Request): Reply {
-    return ok(healthJson(this.db, stamp()));
+    return Ok(healthJson(this.db, stamp()));
   }
 }

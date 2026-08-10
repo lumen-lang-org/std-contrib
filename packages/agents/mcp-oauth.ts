@@ -1,9 +1,15 @@
 import { jsonText, jsonRaw, jsonList } from "./scan.ts";
 
 function hexValue(ch: string): int {
-  if (ch >= "0" && ch <= "9") { return ch.charCodeAt(0) - 48; }
-  if (ch >= "a" && ch <= "f") { return ch.charCodeAt(0) - 87; }
-  if (ch >= "A" && ch <= "F") { return ch.charCodeAt(0) - 55; }
+  if (ch >= "0" && ch <= "9") {
+    return ch.charCodeAt(0) - 48;
+  }
+  if (ch >= "a" && ch <= "f") {
+    return ch.charCodeAt(0) - 87;
+  }
+  if (ch >= "A" && ch <= "F") {
+    return ch.charCodeAt(0) - 55;
+  }
   return -1;
 }
 
@@ -13,7 +19,9 @@ function bytesFromHex(hex: string): string {
   while (i + 1 < hex.length) {
     let hi = hexValue(hex.charAt(i));
     let lo = hexValue(hex.charAt(i + 1));
-    if (hi < 0 || lo < 0) { return out; }
+    if (hi < 0 || lo < 0) {
+      return out;
+    }
     out = out + String.fromCharCode(hi * 16 + lo);
     i = i + 2;
   }
@@ -25,18 +33,30 @@ export function base64Url(b64: string): string {
   let i: int = 0;
   while (i < b64.length) {
     let c = b64.charAt(i);
-    if (c == "+") { out = out + "-"; }
-    else if (c == "/") { out = out + "_"; }
-    else if (c != "=") { out = out + c; }
+    if (c == "+") {
+      out = out + "-";
+    }
+    else if (c == "/") {
+      out = out + "_";
+    }
+    else if (c != "=") {
+      out = out + c;
+    }
     i = i + 1;
   }
   return out;
 }
 
 function unreserved(ch: string): bool {
-  if (ch >= "a" && ch <= "z") { return true; }
-  if (ch >= "A" && ch <= "Z") { return true; }
-  if (ch >= "0" && ch <= "9") { return true; }
+  if (ch >= "a" && ch <= "z") {
+    return true;
+  }
+  if (ch >= "A" && ch <= "Z") {
+    return true;
+  }
+  if (ch >= "0" && ch <= "9") {
+    return true;
+  }
   return ch == "-" || ch == "." || ch == "_" || ch == "~";
 }
 
@@ -62,8 +82,12 @@ export function formEncode(fields: Map<string, string>): string {
   let out = "";
   for (const name of fields.keys()) {
     let value = fields.get(name) ?? "";
-    if (value == "") { continue; }
-    if (out != "") { out = out + "&"; }
+    if (value == "") {
+      continue;
+    }
+    if (out != "") {
+      out = out + "&";
+    }
     out = out + urlEncode(name) + "=" + urlEncode(value);
   }
   return out;
@@ -72,31 +96,49 @@ export function formEncode(fields: Map<string, string>): string {
 export function originOf(url: string): string {
   let text = url.trim();
   let mark = text.indexOf("://");
-  if (mark < 0) { return ""; }
+  if (mark < 0) {
+    return "";
+  }
   let scheme = text.slice(0, mark).toLowerCase();
-  if (scheme != "http" && scheme != "https") { return ""; }
+  if (scheme != "http" && scheme != "https") {
+    return "";
+  }
   let rest = text.slice(mark + 3, text.length);
   let cut = rest.length;
   let slash = rest.indexOf("/");
-  if (slash >= 0 && slash < cut) { cut = slash; }
+  if (slash >= 0 && slash < cut) {
+    cut = slash;
+  }
   let question = rest.indexOf("?");
-  if (question >= 0 && question < cut) { cut = question; }
+  if (question >= 0 && question < cut) {
+    cut = question;
+  }
   let authority = rest.slice(0, cut);
-  if (authority == "") { return ""; }
+  if (authority == "") {
+    return "";
+  }
   return scheme + "://" + authority;
 }
 
 export function pathOf(url: string): string {
   let origin = originOf(url);
-  if (origin == "") { return ""; }
+  if (origin == "") {
+    return "";
+  }
   let rest = url.trim().slice(origin.length, url.trim().length);
   let cut = rest.length;
   let question = rest.indexOf("?");
-  if (question >= 0 && question < cut) { cut = question; }
+  if (question >= 0 && question < cut) {
+    cut = question;
+  }
   let fragment = rest.indexOf("#");
-  if (fragment >= 0 && fragment < cut) { cut = fragment; }
+  if (fragment >= 0 && fragment < cut) {
+    cut = fragment;
+  }
   let path = rest.slice(0, cut);
-  if (path == "/") { return ""; }
+  if (path == "/") {
+    return "";
+  }
   return path;
 }
 
@@ -130,34 +172,50 @@ function fetchJson(url: string): string {
   let headers = new Map<string, string>();
   headers.set("accept", "application/json");
   let res = http.request(url, "GET", "", headers);
-  if (!res.ok) { return ""; }
-  if (res.status != 200) { return ""; }
+  if (!res.ok) {
+    return "";
+  }
+  if (res.status != 200) {
+    return "";
+  }
   let body = res.body.trim();
-  if (!body.startsWith("{")) { return ""; }
+  if (!body.startsWith("{")) {
+    return "";
+  }
   return body;
 }
 
 export function resourceIssuer(endpoint: string): string {
   let origin = originOf(endpoint);
-  if (origin == "") { return ""; }
+  if (origin == "") {
+    return "";
+  }
   let document = fetchJson(origin + "/.well-known/oauth-protected-resource" + pathOf(endpoint));
   if (document == "") {
     document = fetchJson(origin + "/.well-known/oauth-protected-resource");
   }
-  if (document == "") { return origin; }
+  if (document == "") {
+    return origin;
+  }
   let servers = jsonList(jsonRaw(document, "authorization_servers"));
-  if (servers.length == 0) { return origin; }
+  if (servers.length == 0) {
+    return origin;
+  }
   let first = servers[0].trim();
   if (first.startsWith("\"") && first.length > 1) {
     first = first.slice(1, first.length - 1);
   }
-  if (first == "") { return origin; }
+  if (first == "") {
+    return origin;
+  }
   return first;
 }
 
 export function discover(endpoint: string): Discovery {
   let issuer = resourceIssuer(endpoint);
-  if (issuer == "") { return noDiscovery("\"" + endpoint + "\" is not an http(s) address"); }
+  if (issuer == "") {
+    return noDiscovery("\"" + endpoint + "\" is not an http(s) address");
+  }
 
   let origin = originOf(issuer);
   let path = pathOf(issuer);
@@ -181,8 +239,12 @@ export function discover(endpoint: string): Discovery {
         let s: int = 0;
         while (s < offered.length) {
           let one = offered[s].trim();
-          if (one.startsWith("\"") && one.length > 1) { one = one.slice(1, one.length - 1); }
-          if (one != "") { scopes = scopes == "" ? one : scopes + " " + one; }
+          if (one.startsWith("\"") && one.length > 1) {
+            one = one.slice(1, one.length - 1);
+          }
+          if (one != "") {
+            scopes = scopes == "" ? one : scopes + " " + one;
+          }
           s = s + 1;
         }
         let found: Discovery = {
@@ -275,16 +337,24 @@ function tokenCall(tokenUrl: string, fields: Map<string, string>): Grant {
   headers.set("content-type", "application/x-www-form-urlencoded");
   headers.set("accept", "application/json");
   let res = http.request(tokenUrl, "POST", formEncode(fields), headers);
-  if (!res.ok) { return noGrant("no answer from " + tokenUrl); }
+  if (!res.ok) {
+    return noGrant("no answer from " + tokenUrl);
+  }
   if (res.status != 200) {
     let code = jsonText(res.body, "error");
     let said = jsonText(res.body, "error_description");
-    if (said != "") { return noGrant(said); }
-    if (code != "") { return noGrant(tokenUrl + " refused the exchange: " + code); }
+    if (said != "") {
+      return noGrant(said);
+    }
+    if (code != "") {
+      return noGrant(tokenUrl + " refused the exchange: " + code);
+    }
     return noGrant(tokenUrl + " refused the exchange: HTTP " + `${res.status}`);
   }
   let access = jsonText(res.body, "access_token");
-  if (access == "") { return noGrant(tokenUrl + " answered without an access_token"); }
+  if (access == "") {
+    return noGrant(tokenUrl + " answered without an access_token");
+  }
   let seconds: int = parseInt(jsonRaw(res.body, "expires_in").trim()) ?? 0;
   return { accessToken: access, refreshToken: jsonText(res.body, "refresh_token"),
            expiresIn: seconds, problem: "" };

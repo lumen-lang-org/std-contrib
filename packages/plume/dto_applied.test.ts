@@ -9,8 +9,8 @@
 //
 // # What this program may import, and why it is not "anything"
 //
-// Both decorator modules declare a `Description` type of their own, because the
-// compiler parses a decorator's module alone and requires the name `Description`
+// Both decorator modules declare a `EntityDescription` type of their own, because the
+// compiler parses a decorator's module alone and requires the name `EntityDescription`
 // in it. That makes them coexist on one condition, which this file meets and
 // which is easy to break: **at most one of entity.ts and dto.ts may be linked
 // into the program**, and the other must be imported for its decorator alone.
@@ -22,7 +22,7 @@
 // `FieldDescription`, anything — links entity.ts too, and the compile stops
 // with:
 //
-//   dto.ts:75:1: error: type 'Description' is declared by both entity.ts and
+//   dto.ts:75:1: error: type 'EntityDescription' is declared by both entity.ts and
 //   dto.ts [E_DUPLICATE_TYPE]
 //
 // dto.ts must be the linked one, because `@dto` cannot be used without

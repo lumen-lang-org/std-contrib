@@ -7,7 +7,7 @@
 //   sh packages/plume/build.sh
 //   cd packages/plume && lumen test entity_live.test.ts
 
-import { Description, FieldDescription, DecoratorUse, entity } from "./entity.ts";
+import { EntityDescription, FieldDescription, DecoratorUse, entity } from "./entity.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { sqlite } from "./sqlite.ts";
 import { DbRepository, DbField, field, repository, connectDatabase, createTable, dropTable, persist, persistMany, findById, listWhere, countWhere, deleteById, findProjected } from "./plume.ts";
@@ -32,14 +32,14 @@ function described(name: string, declared: string, decorators: DecoratorUse[]): 
 }
 
 // What the compiler would hand @entity for the decorated Agent class.
-function agentDescription(): Description {
+function agentDescription(): EntityDescription {
   let fields: FieldDescription[] = [
     described("id", "string", [decoratorUse("id", []), decoratorUse("column", ["id", "text"])]),
     described("agentName", "string", [decoratorUse("column", ["agent_name", "text"])]),
     described("maxSteps", "int", [decoratorUse("column", ["max_steps", "int"])]),
     described("temperature", "number", [decoratorUse("column", ["temperature", "float8"])]),
   ];
-  let d: Description = {
+  let d: EntityDescription = {
     protocol: 1, kind: "class", name: "Agent", args: ["entity_test_agents"],
     file: "agent.ts", line: 1, fields: fields,
   };
