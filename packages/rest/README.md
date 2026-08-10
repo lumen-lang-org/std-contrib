@@ -9,7 +9,7 @@ class AgentController {
   @get("/")       list(req: Request): Reply { ... }
   @get("/:id")    find(req: Request): Reply { ... }
   @post("/")      create(req: Request): Reply { ... }
-  @del("/:id")    remove(req: Request): Reply { ... }
+  @delete("/:id") remove(req: Request): Reply { ... }
 }
 ```
 
@@ -25,9 +25,11 @@ let controllerAgentController: Route[] = [
 ];
 ```
 
-The verbs are `@get`, `@post`, `@put`, `@patch`, `@del` and `@head`. `@del`, not
-`@delete` — `delete` is a reserved word. It is the one place the language shows
-through, and that beats something cleverer. The list itself is `httpMethodOf` in
+The verbs are `@get`, `@post`, `@put`, `@patch`, `@delete` and `@head`. `@del`
+still works and means the same thing, for code written when this package
+believed `delete` was unavailable — it is not: a decorator is an ordinary
+imported name, and `delete` is only special to the lexer when deciding whether a
+following `/` opens a regex. The list itself is `httpMethodOf` in
 `controller.ts`, so adding `@options` is editing that function rather than the
 language: the compiler knows the decorator protocol, never the vocabulary.
 
