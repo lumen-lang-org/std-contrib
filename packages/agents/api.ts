@@ -25,7 +25,7 @@ import { TaskApi } from "./routes/tasks/controller.ts";
 import { DocumentApi } from "./routes/documents/controller.ts";
 import { PreviewApi } from "./routes/preview/controller.ts";
 import { ArtifactApi } from "./routes/threads-artifacts/artifact.controller.ts";
-import { WorkspaceApi } from "./routes/threads-files/controller.ts";
+import { WorkspaceApi } from "./routes/threads-files/file.controller.ts";
 import { ConnectApi } from "./routes/connect/controller.ts";
 import { ServerApi } from "./routes/servers/server.controller.ts";
 import { AuthProviderApi } from "./routes/auth-providers/controller.ts";
