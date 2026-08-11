@@ -3,6 +3,7 @@ import { DbField, DbRepository, field, repository, execute, executeWith, findByI
 import { Migration, migration } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping } from "./schema.ts";
 import { Embedding, embedText } from "./provider.ts";
+import { documentRepository } from "./routes/documents/entities/document.entity.ts";
 
 export type DocumentRow = {
   id: string,
@@ -50,13 +51,7 @@ export type Retrieval = {
 };
 
 export function documentsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("source", "source", "text"),
-    field("scope", "scope", "text"),
-    field("body", "body", "text"),
-  ];
-  return repository({ table: "documents", idField: "id", idColumn: "id", fields: fs });
+  return documentRepository();
 }
 
 export function createDocuments(db: Db, model: ModelRow): string {

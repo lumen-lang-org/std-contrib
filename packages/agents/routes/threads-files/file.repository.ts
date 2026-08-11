@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById } from "../../../plume/plume.ts";
 import { credentialFor } from "../../credentials.ts";
-import { Upload, documentsMapping, embeddingModel } from "../../knowledge.ts";
+import { Upload, embeddingModel } from "../../knowledge.ts";
+import { documentRepository } from "../documents/entities/document.entity.ts";
 import { ownedThread } from "../../threads.ts";
 import { FileWrite, WorkspaceFileRow, deleteFile, getFile, listFiles, promoteFile, putFile } from "../../workspace.ts";
 
@@ -31,7 +32,7 @@ export class FileRepository {
   }
 
   document(documentId: string): string {
-    return findById(this.database, documentsMapping(), documentId);
+    return findById(this.database, documentRepository(), documentId);
   }
 
   embeddingUsable(modelId: string): bool {

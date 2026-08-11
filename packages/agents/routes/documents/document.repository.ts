@@ -3,7 +3,8 @@ import { DbResult, deleteWhere, persist, placeholderAt } from "../../../plume/pl
 import { credentialFor } from "../../credentials.ts";
 import { DocumentFileRow, documentFilesMapping, findDocumentFile, forgetDocumentFiles, sourcesWithFiles } from "../../document-files.ts";
 import { IndexJobRow, enqueue, pendingJobs } from "../../indexing.ts";
-import { SourceListing, createDocuments, documentsMapping, embeddingModel, listSources } from "../../knowledge.ts";
+import { SourceListing, createDocuments, embeddingModel, listSources } from "../../knowledge.ts";
+import { documentRepository } from "./entities/document.entity.ts";
 
 export class DocumentRepository {
   database: Db;
@@ -56,7 +57,7 @@ export class DocumentRepository {
   }
 
   deleteBySource(source: string): DbResult {
-    return deleteWhere(this.database, documentsMapping(), "source = " + placeholderAt(this.database, 1), [source]);
+    return deleteWhere(this.database, documentRepository(), "source = " + placeholderAt(this.database, 1), [source]);
   }
 
   forgetFiles(source: string): void {
