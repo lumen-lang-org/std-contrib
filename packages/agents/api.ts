@@ -55,7 +55,7 @@ import { QuotaApi } from "./routes/quota/controller.ts";
 import { LibraryApi } from "./routes/library/controller.ts";
 import { RunApi } from "./routes/runs/run.controller.ts";
 import { UsageApi } from "./routes/usage/usage.controller.ts";
-import { BannerApi } from "./routes/banner/controller.ts";
+import { BannerApi } from "./routes/banner/banner.controller.ts";
 import { mcpRosterPlan } from "./mcp-roster.ts";
 import { ModelPick, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread } from "./threads.ts";
 import { trustsProxyAuth, identityUnreadable, owningTag, holdsOwner } from "./owner.ts";
