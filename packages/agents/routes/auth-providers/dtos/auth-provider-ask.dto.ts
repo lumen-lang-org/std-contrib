@@ -1,27 +1,4 @@
-import { validated, Rule } from "../../../validation/validation.ts";
-
-export type AuthProviderView = {
-  id: string,
-  label: string,
-  kind: string,
-  issuer: string,
-  clientId: string,
-  scopes: string,
-  enabled: bool,
-  configured: bool,
-};
-
-export type AuthProviderResolvedView = {
-  id: string,
-  label: string,
-  kind: string,
-  issuer: string,
-  clientId: string,
-  clientSecret: string,
-  scopes: string,
-};
-
-export type AuthProviderSecretStored = { configured: bool };
+import { validated, Rule } from "../../../../validation/validation.ts";
 
 @validated
 export class AuthProviderAsk {
@@ -52,15 +29,5 @@ export class AuthProviderAsk {
     this.clientId = clientId;
     this.scopes = scopes;
     this.enabled = enabled;
-  }
-}
-
-@validated
-export class AuthProviderSecretAsk {
-  @required("a client secret is required")
-  clientSecret: string;
-
-  constructor(clientSecret: string) {
-    this.clientSecret = clientSecret;
   }
 }
