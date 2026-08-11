@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbRepository, DbResult, deleteById, existsById, listOrdered, persist } from "../../../plume/plume.ts";
-import { toolCardsMapping } from "../../toolcards.ts";
+import { toolCardRepository } from "./entities/tool-card.entity.ts";
 
 export class ToolCardRepository {
   database: Db;
@@ -8,7 +8,7 @@ export class ToolCardRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.cards = toolCardsMapping();
+    this.cards = toolCardRepository();
   }
 
   listing(): string {

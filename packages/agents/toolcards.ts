@@ -1,7 +1,8 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbRepository, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
+import { DbRepository, createTableSql, listOrdered, listWhere } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { pluginOn } from "./plugincards.ts";
+import { toolCardRepository } from "./routes/tool-cards/entities/tool-card.entity.ts";
 
 export type ToolCardRow = {
   id: string,
@@ -14,16 +15,7 @@ export type ToolCardRow = {
 };
 
 export function toolCardsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("pluginId", "plugin_id", "text"),
-    field("toolName", "tool_name", "text"),
-    field("marker", "marker", "text"),
-    field("payload", "payload", "text"),
-    field("hint", "hint", "text"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({ table: "tool_cards", idField: "id", idColumn: "id", fields: fs });
+  return toolCardRepository();
 }
 
 export function toolCardsPlan(db: Db): Migration[] {
