@@ -23,7 +23,8 @@ import { forgetAgent } from "./routes/agents/agent.service.ts";
 import { decodedSize } from "./routes/documents/controller.ts";
 import { healthJson } from "./routes/healthz/controller.ts";
 import { choicesJson, modelDestinationFault, modelFault } from "./routes/models/controller.ts";
-import { forgetServer, serverDestinationFault } from "./routes/servers/controller.ts";
+import { forgetServer, serverDestinationFault } from "./routes/servers/server.service.ts";
+import { ServerBody } from "./routes/servers/dtos/server-body.dto.ts";
 import { skillFileFault, skillFault } from "./routes/skills/controller.ts";
 import { traceDestinationFault } from "./routes/tracing/controller.ts";
 import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson, askedChoice, choiceFault } from "./api-core.ts";
@@ -109,8 +110,8 @@ function modelRow(id: string, provider: string, kind: string, baseUrl: string): 
   return m;
 }
 
-function mcpRow(id: string, endpoint: string): McpServerRow {
-  let s: McpServerRow = {
+function mcpRow(id: string, endpoint: string): ServerBody {
+  let s: ServerBody = {
     id: id, serverName: "demo " + id, transport: "http", endpoint: endpoint,
     authKind: "bearer", authHeader: "", enabled: true,
   };

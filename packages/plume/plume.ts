@@ -1101,6 +1101,34 @@ export function unlinkAllPointingAt(db: Db, m: ManyThrough, id: string): DbResul
     + " WHERE " + m.linkForeignColumn + " = " + db.placeholder, [id]);
 }
 
+// Named columns of one row. The by-id verbs above write a whole document, which
+// is the wrong shape for "set just these two": a read-modify-write of the whole
+// row lets a concurrent write to a column you never touched be clobbered, and
+// it turns a missing row into an insert rather than a no-op.
+export type DbAssignment = { column: string, value: string };
+
+export type DbWrite = { id: string, values: DbAssignment[] };
+
+export function setOn(db: Db, repo: DbRepository, write: DbWrite): DbResult {
+  if (write.values.length == 0) {
+    return dbOk(0);
+  }
+  let sql = "UPDATE " + repo.table + " SET ";
+  let args: string[] = [];
+  let i: int = 0;
+  while (i < write.values.length) {
+    if (i > 0) {
+      sql = sql + ", ";
+    }
+    sql = sql + write.values[i].column + " = " + placeholderAt(db, i + 1);
+    args.push(write.values[i].value);
+    i = i + 1;
+  }
+  sql = sql + " WHERE " + repo.idColumn + " = " + placeholderAt(db, write.values.length + 1);
+  args.push(write.id);
+  return executeWith(db, sql, args);
+}
+
 // One column, every row. Rare and blunt on purpose: it exists for "only one row
 // may be the default", where claiming the flag takes it from whoever held it.
 export function setEvery(db: Db, repo: DbRepository, column: string, value: string): DbResult {

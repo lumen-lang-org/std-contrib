@@ -27,7 +27,7 @@ import { PreviewApi } from "./routes/preview/controller.ts";
 import { ArtifactApi } from "./routes/threads-artifacts/controller.ts";
 import { WorkspaceApi } from "./routes/threads-files/controller.ts";
 import { ConnectApi } from "./routes/connect/controller.ts";
-import { ServerApi } from "./routes/servers/controller.ts";
+import { ServerApi } from "./routes/servers/server.controller.ts";
 import { AuthProviderApi } from "./routes/auth-providers/controller.ts";
 import { PluginApi } from "./routes/plugins/controller.ts";
 import { PromptApi } from "./routes/prompts/controller.ts";
