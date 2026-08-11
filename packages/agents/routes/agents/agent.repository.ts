@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, persist, setEvery, unlink, unlinkAllPointingAt, unlinkAllOwnedBy } from "../../../plume/plume.ts";
-import { AgentRetrievalRow, agentRetrievalMapping, agentScopes, embeddingModel, grantScope, revokeScope } from "../../knowledge.ts";
+import { AgentRetrievalRow, agentScopes, embeddingModel, grantScope, revokeScope } from "../../knowledge.ts";
 import { agentRepository } from "./entities/agent.entity.ts";
+import { agentRetrievalRepository } from "./entities/agent-retrieval.entity.ts";
 import { mcpServerRepository } from "../servers/entities/mcp-server.entity.ts";
 import { modelConfigRepository } from "../model-configs/entities/model-config.entity.ts";
 import { modelRepository } from "../models/entities/model.entity.ts";
@@ -103,11 +104,11 @@ export class AgentRepository {
   }
 
   saveRetrieval(row: AgentRetrievalRow): DbResult {
-    return persist(this.database, agentRetrievalMapping(), JSON.stringify(row));
+    return persist(this.database, agentRetrievalRepository(), JSON.stringify(row));
   }
 
   retrieval(id: string): string {
-    return findById(this.database, agentRetrievalMapping(), id);
+    return findById(this.database, agentRetrievalRepository(), id);
   }
 
   webRag(id: string): AgentWebRagRow {
@@ -137,7 +138,7 @@ export class AgentRepository {
       unlinkAllOwnedBy(this.database, linkOf(this.agents, "servers"), id),
       unlinkAllOwnedBy(this.database, linkOf(this.agents, "skills"), id),
       unlinkAllOwnedBy(this.database, linkOf(this.agents, "scopes"), id),
-      deleteById(this.database, agentRetrievalMapping(), id),
+      deleteById(this.database, agentRetrievalRepository(), id),
       deleteById(this.database, agentRepository(), id),
     ];
     let i: int = 0;

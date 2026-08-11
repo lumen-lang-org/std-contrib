@@ -1,9 +1,10 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbRepository, field, repository, execute, executeWith, findById, placeholderAt, safeIdentifier, createTableSql } from "../plume/plume.ts";
+import { DbRepository, execute, executeWith, findById, placeholderAt, safeIdentifier, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping } from "./schema.ts";
 import { Embedding, embedText } from "./provider.ts";
 import { documentRepository } from "./routes/documents/entities/document.entity.ts";
+import { agentRetrievalRepository } from "./routes/agents/entities/agent-retrieval.entity.ts";
 
 export type DocumentRow = {
   id: string,
@@ -543,19 +544,7 @@ export type AgentRetrievalRow = {
 };
 
 export function agentRetrievalMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("agentId", "agent_id", "text"),
-    field("embeddingModelId", "embedding_model_id", "text"),
-    field("topK", "top_k", "int"),
-    field("maxDistance", "max_distance", "float8"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({
-    table: "agent_retrieval",
-    idField: "agentId",
-    idColumn: "agent_id",
-    fields: fs,
-  });
+  return agentRetrievalRepository();
 }
 
 export function knowledgePlan(db: Db): Migration[] {
