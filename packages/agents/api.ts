@@ -21,7 +21,7 @@ import { ToolCardApi } from "./routes/tool-cards/tool-card.controller.ts";
 import { McpServerApi } from "./routes/mcp-server/controller.ts";
 import { PlaygroundApi } from "./routes/playground/controller.ts";
 import { V1Api } from "./routes/v1/controller.ts";
-import { TaskApi } from "./routes/tasks/controller.ts";
+import { TaskApi } from "./routes/tasks/task.controller.ts";
 import { DocumentApi } from "./routes/documents/controller.ts";
 import { PreviewApi } from "./routes/preview/controller.ts";
 import { ArtifactApi } from "./routes/threads-artifacts/artifact.controller.ts";
