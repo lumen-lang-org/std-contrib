@@ -21,7 +21,7 @@ import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile
 import { migrationFault, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
 import { forgetAgent } from "./routes/agents/agent.service.ts";
 import { decodedSize } from "./routes/documents/document.utils.ts";
-import { healthJson } from "./routes/healthz/controller.ts";
+import { HealthService } from "./routes/healthz/health.service.ts";
 import { StoredModel } from "./routes/models/dtos/stored-model.dto.ts";
 import { ModelService, modelDestinationFault } from "./routes/models/model.service.ts";
 import { modelFault } from "./routes/models/model.utils.ts";
@@ -627,7 +627,7 @@ test("the probe answers without the token, and nothing else does", () => {
 
 test("healthz says which build, how far the schema got, and whether docker is there", () => {
   expect(fresh() == "");
-  let said = healthJson(database, "1700000000000");
+  let said = new HealthService(database).status("1700000000000");
   expect(said.indexOf("\"version\":\"") >= 0);
   expect(said.indexOf("\"migration\":\"115\"") >= 0);
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);

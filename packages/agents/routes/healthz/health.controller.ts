@@ -1,30 +1,20 @@
 import { Db } from "../../../plume/driver.ts";
-import { appliedHighWater } from "../../../plume/migrate.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Bound } from "../../../rest/plan.ts";
-import { Reply, Request, Ok } from "../../../rest/server.ts";
-import { boolJson, stamp } from "../../api-core.ts";
-import { envDockerUp } from "../../environments.ts";
-
-const API_VERSION: string = "0.2.0";
-
-export function healthJson(db: Db, now: string): string {
-  return "{\"version\":" + JSON.stringify(API_VERSION)
-    + ",\"migration\":" + JSON.stringify(appliedHighWater(db))
-    + ",\"docker\":" + boolJson(envDockerUp(now)) + "}";
-}
+import { Reply, Ok } from "../../../rest/server.ts";
+import { stamp } from "../../api-core.ts";
+import { HealthService } from "./health.service.ts";
 
 @controller("/healthz")
 @bindings
 export class HealthApi {
-  db: Db;
+  health: HealthService;
 
-  constructor(db: Db) {
-    this.db = db;
+  constructor(database: Db) {
+    this.health = new HealthService(database);
   }
 
   @Get("/")
-  show(req: Request): Reply {
-    return Ok(healthJson(this.db, stamp()));
+  show(): Reply {
+    return Ok(this.health.status(stamp()));
   }
 }
