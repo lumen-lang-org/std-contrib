@@ -55,10 +55,22 @@ export type EntityDescription = {
 // The argument at `index` of the decorator named `name` on a field, or an
 // empty string. A missing decorator and a missing argument are the same
 // answer, because both mean the field did not say.
+// A field decorator's spelling is a convention, not a rule: @hasOne and
+// @HasOne name the same thing, compared ignoring the first letter's case so
+// existing classes do not have to be rewritten when the convention changes.
+function sameDecorator(actual: string, expected: string): bool {
+  if (actual.length == 0 || expected.length == 0) {
+    return actual == expected;
+  }
+  return actual.length == expected.length
+    && actual.slice(0, 1).toLowerCase() == expected.slice(0, 1).toLowerCase()
+    && actual.slice(1) == expected.slice(1);
+}
+
 export function fieldArg(f: FieldDescription, name: string, index: int): string {
   let i: int = 0;
   while (i < f.decorators.length) {
-    if (f.decorators[i].name == name) {
+    if (sameDecorator(f.decorators[i].name, name)) {
       if (index < f.decorators[i].args.length) {
         return f.decorators[i].args[index];
       }
@@ -72,7 +84,7 @@ export function fieldArg(f: FieldDescription, name: string, index: int): string 
 export function fieldHas(f: FieldDescription, name: string): bool {
   let i: int = 0;
   while (i < f.decorators.length) {
-    if (f.decorators[i].name == name) {
+    if (sameDecorator(f.decorators[i].name, name)) {
       return true;
     }
     i = i + 1;

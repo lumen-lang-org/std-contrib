@@ -3,17 +3,17 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("skill_files")
 export class SkillFile {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("skill_id", "text")
+  @Column("skill_id", "text")
   skillId: string;
 
-  @column("path", "text")
+  @Column("path", "text")
   path: string;
 
-  @column("body", "text")
+  @Column("body", "text")
   body: string;
 
   constructor(id: string, skillId: string, path: string, body: string) {

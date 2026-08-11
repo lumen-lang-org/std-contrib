@@ -1,8 +1,8 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, Required } from "../../../../validation/validation.ts";
 
 @validated
 export class ScopeGrant {
-  @required("a scope is required")
+  @Required("a scope is required")
   scope: string;
 
   constructor(scope: string) {

@@ -3,20 +3,20 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("script_images")
 export class ScriptImage {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("label", "text")
+  @Column("label", "text")
   label: string;
 
-  @column("image", "text")
+  @Column("image", "text")
   image: string;
 
-  @column("enabled", "bool")
+  @Column("enabled", "bool")
   enabled: bool;
 
-  @column("summary", "text")
+  @Column("summary", "text")
   summary: string;
 
   constructor(id: string, label: string, image: string, enabled: bool, summary: string) {

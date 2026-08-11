@@ -3,23 +3,23 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("plugins")
 export class Plugin {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("plugin_name", "text")
+  @Column("plugin_name", "text")
   pluginName: string;
 
-  @column("description", "text")
+  @Column("description", "text")
   description: string;
 
-  @column("source_url", "text")
+  @Column("source_url", "text")
   sourceUrl: string;
 
-  @column("version", "text")
+  @Column("version", "text")
   version: string;
 
-  @column("installed_at", "text")
+  @Column("installed_at", "text")
   installedAt: string;
 
   constructor(id: string, pluginName: string, description: string, sourceUrl: string,

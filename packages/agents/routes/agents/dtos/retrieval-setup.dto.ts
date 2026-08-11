@@ -1,11 +1,11 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, Max, Min } from "../../../../validation/validation.ts";
 
 @validated
 export class RetrievalSetup {
   embeddingModelId: string;
 
-  @min(1, "topK must be between 1 and 100")
-  @max(100, "topK must be between 1 and 100")
+  @Min(1, "topK must be between 1 and 100")
+  @Max(100, "topK must be between 1 and 100")
   topK: int;
 
   maxDistance: number;

@@ -1,20 +1,20 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, OneOf, Required } from "../../../../validation/validation.ts";
 
 @validated
 export class ModelAsk {
-  @required("an \"id\" is required")
+  @Required("an \"id\" is required")
   id: string;
 
-  @required("a model needs a label")
+  @Required("a model needs a label")
   label: string;
 
-  @required("a model needs the provider's own name for it")
+  @Required("a model needs the provider's own name for it")
   apiName: string;
 
   provider: string;
 
-  @required("a model is chat or embedding")
-  @oneOf("chat,embedding", "a model is chat or embedding")
+  @Required("a model is chat or embedding")
+  @OneOf("chat,embedding", "a model is chat or embedding")
   kind: string;
 
   dimensions: int;

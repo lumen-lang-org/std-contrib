@@ -1,10 +1,10 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, Min, Required } from "../../../../validation/validation.ts";
 
 @validated
 export class EnvTemplateAsk {
   id: string;
 
-  @required("a template needs a name — it is what the catalog shows")
+  @Required("a template needs a name — it is what the catalog shows")
   name: string;
 
   summary: string;
@@ -15,7 +15,7 @@ export class EnvTemplateAsk {
 
   dockerfile: string;
 
-  @min(0, "featuredRank is 0 (not featured) or a positive position")
+  @Min(0, "featuredRank is 0 (not featured) or a positive position")
   featuredRank: int;
 
   constructor(id: string, name: string, summary: string, tags: string,

@@ -53,7 +53,10 @@ test("a missing required field is named with its own message", () => {
 test("every fault comes back, not just the first", () => {
   let long = "";
   let i: int = 0;
-  while (i < 210) { long = long + "x"; i = i + 1; }
+  while (i < 210) {
+    long = long + "x";
+    i = i + 1;
+  }
   let f = faults(rules(), "{\"siteKey\":\"" + long + "\",\"secret\":\"s\",\"tries\":99}");
   expect(f.length == 2);
   expect(f[0].said == "that is not a site key");
@@ -63,7 +66,10 @@ test("every fault comes back, not just the first", () => {
 test("a rule with no message of its own still says something useful", () => {
   let long = "";
   let i: int = 0;
-  while (i < 410) { long = long + "y"; i = i + 1; }
+  while (i < 410) {
+    long = long + "y";
+    i = i + 1;
+  }
   let f = faults(rules(), "{\"siteKey\":\"k\",\"secret\":\"" + long + "\",\"tries\":1}");
   expect(f.length == 1);
   expect(f[0].said.indexOf("longer than 400 bytes") >= 0);
@@ -78,7 +84,9 @@ test("faults are a list a client can read", () => {
 class Pick {
   @oneOf("turnstile,hcaptcha,recaptcha", "provider must be turnstile, hcaptcha or recaptcha")
   provider: string;
-  constructor(provider: string) { this.provider = provider; }
+  constructor(provider: string) {
+    this.provider = provider;
+  }
 }
 
 test("oneOf holds a list and refuses anything outside it", () => {

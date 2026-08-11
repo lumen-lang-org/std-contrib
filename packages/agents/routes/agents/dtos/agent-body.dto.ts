@@ -1,12 +1,12 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, MaxLength, Required } from "../../../../validation/validation.ts";
 
 @validated
 export class AgentBody {
-  @required("an \"id\" is required")
+  @Required("an \"id\" is required")
   id: string;
 
-  @required("an agent needs a name")
-  @maxLength(48, "an agent name is at most 48 characters")
+  @Required("an agent needs a name")
+  @MaxLength(48, "an agent name is at most 48 characters")
   agentName: string;
 
   description: string;

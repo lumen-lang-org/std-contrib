@@ -3,53 +3,53 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("agents")
 export class Agent {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("agent_name", "text")
+  @Column("agent_name", "text")
   agentName: string;
 
-  @column("description", "text")
+  @Column("description", "text")
   description: string;
 
-  @column("model_config_id", "text")
+  @Column("model_config_id", "text")
   modelConfigId: string;
 
-  @column("prompt_id", "text")
+  @Column("prompt_id", "text")
   promptId: string;
 
-  @column("enabled", "bool")
+  @Column("enabled", "bool")
   enabled: bool;
 
-  @column("script_image_id", "text")
+  @Column("script_image_id", "text")
   scriptImageId: string;
 
-  @column("is_default", "bool")
+  @Column("is_default", "bool")
   isDefault: bool;
 
-  @column("updated_at", "text")
+  @Column("updated_at", "text")
   updatedAt: string;
 
-  @hasOne("prompts", "prompt_id", "id", "id, prompt_name AS \"promptName\", version, body")
+  @HasOne("prompts", "prompt_id", "id", "id, prompt_name AS \"promptName\", version, body")
   prompt: string;
 
-  @hasOne("model_configs", "model_config_id", "id", "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking")
+  @HasOne("model_configs", "model_config_id", "id", "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking")
   config: string;
 
-  @hasManyThrough("mcp_servers", "id", "agent_mcp_servers", "agent_id", "server_id", "id",
+  @HasManyThrough("mcp_servers", "id", "agent_mcp_servers", "agent_id", "server_id", "id",
                   "id, server_name AS \"serverName\", transport, endpoint, {bool:enabled} AS \"enabled\"")
   servers: string;
 
-  @hasManyThrough("agents", "id", "agent_sub_agents", "parent_id", "child_id", "id",
+  @HasManyThrough("agents", "id", "agent_sub_agents", "parent_id", "child_id", "id",
                   "id, agent_name AS \"agentName\", {bool:enabled} AS \"enabled\"")
   subAgents: string;
 
-  @hasManyThrough("skills", "id", "agent_skills", "agent_id", "skill_id", "id",
+  @HasManyThrough("skills", "id", "agent_skills", "agent_id", "skill_id", "id",
                   "id, skill_name AS \"skillName\", description")
   skills: string;
 
-  @hasManyThrough("agent_scopes", "scope", "agent_scopes", "agent_id", "scope", "id", "scope")
+  @HasManyThrough("agent_scopes", "scope", "agent_scopes", "agent_id", "scope", "id", "scope")
   scopes: string;
 
   constructor(id: string, agentName: string, description: string, modelConfigId: string,

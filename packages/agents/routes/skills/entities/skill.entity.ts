@@ -3,32 +3,32 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("skills")
 export class Skill {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("skill_name", "text")
+  @Column("skill_name", "text")
   skillName: string;
 
-  @column("description", "text")
+  @Column("description", "text")
   description: string;
 
-  @column("body", "text")
+  @Column("body", "text")
   body: string;
 
-  @column("updated_at", "text")
+  @Column("updated_at", "text")
   updatedAt: string;
 
-  @column("visibility", "text")
+  @Column("visibility", "text")
   visibility: string;
 
-  @column("featured_rank", "int")
+  @Column("featured_rank", "int")
   featuredRank: int;
 
-  @column("source", "text")
+  @Column("source", "text")
   source: string;
 
-  @column("source_url", "text")
+  @Column("source_url", "text")
   sourceUrl: string;
 
   constructor(id: string, skillName: string, description: string, body: string,

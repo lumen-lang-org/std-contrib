@@ -3,11 +3,11 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("settings")
 export class Setting {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("value", "text")
+  @Column("value", "text")
   value: string;
 
   constructor(id: string, value: string) {

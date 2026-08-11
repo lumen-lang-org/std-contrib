@@ -3,26 +3,26 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("mcp_servers")
 export class McpServer {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("server_name", "text")
+  @Column("server_name", "text")
   serverName: string;
 
-  @column("transport", "text")
+  @Column("transport", "text")
   transport: string;
 
-  @column("endpoint", "text")
+  @Column("endpoint", "text")
   endpoint: string;
 
-  @column("auth_kind", "text")
+  @Column("auth_kind", "text")
   authKind: string;
 
-  @column("auth_header", "text")
+  @Column("auth_header", "text")
   authHeader: string;
 
-  @column("enabled", "bool")
+  @Column("enabled", "bool")
   enabled: bool;
 
   constructor(id: string, serverName: string, transport: string, endpoint: string,

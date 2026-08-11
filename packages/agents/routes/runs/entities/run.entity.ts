@@ -3,62 +3,62 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("runs")
 export class Run {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("agent_id", "text")
+  @Column("agent_id", "text")
   agentId: string;
 
-  @column("thread_id", "text")
+  @Column("thread_id", "text")
   threadId: string;
 
-  @column("owner", "text")
+  @Column("owner", "text")
   owner: string;
 
-  @column("input_tokens", "int")
+  @Column("input_tokens", "int")
   inputTokens: int;
 
-  @column("output_tokens", "int")
+  @Column("output_tokens", "int")
   outputTokens: int;
 
-  @column("model_choice_id", "text")
+  @Column("model_choice_id", "text")
   modelChoiceId: string;
 
-  @column("route_note", "text")
+  @Column("route_note", "text")
   routeNote: string;
 
-  @column("agent_name", "text")
+  @Column("agent_name", "text")
   agentName: string;
 
-  @column("prompt_version", "int")
+  @Column("prompt_version", "int")
   promptVersion: int;
 
-  @column("model_api_name", "text")
+  @Column("model_api_name", "text")
   modelApiName: string;
 
-  @column("question", "text")
+  @Column("question", "text")
   question: string;
 
-  @column("answer", "text")
+  @Column("answer", "text")
   answer: string;
 
-  @column("ok", "bool")
+  @Column("ok", "bool")
   ok: bool;
 
-  @column("stop_reason", "text")
+  @Column("stop_reason", "text")
   stopReason: string;
 
-  @column("rounds", "int")
+  @Column("rounds", "int")
   rounds: int;
 
-  @column("error", "text")
+  @Column("error", "text")
   error: string;
 
-  @column("created_at", "text")
+  @Column("created_at", "text")
   createdAt: string;
 
-  @hasMany("run_steps", "id", "run_id",
+  @HasMany("run_steps", "id", "run_id",
            "step_index AS \"stepIndex\", tool, server, args, result, {bool:ok} AS \"ok\"")
   steps: string;
 

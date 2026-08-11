@@ -3,32 +3,32 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("model_choices")
 export class ModelChoice {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("label", "text")
+  @Column("label", "text")
   label: string;
 
-  @column("description", "text")
+  @Column("description", "text")
   description: string;
 
-  @column("kind", "text")
+  @Column("kind", "text")
   kind: string;
 
-  @column("config_id", "text")
+  @Column("config_id", "text")
   configId: string;
 
-  @column("router_id", "text")
+  @Column("router_id", "text")
   routerId: string;
 
-  @column("tier", "text")
+  @Column("tier", "text")
   tier: string;
 
-  @column("enabled", "bool")
+  @Column("enabled", "bool")
   enabled: bool;
 
-  @column("menu_rank", "int")
+  @Column("menu_rank", "int")
   rank: int;
 
   constructor(id: string, label: string, description: string, kind: string, configId: string,

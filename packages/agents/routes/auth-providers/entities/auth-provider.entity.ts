@@ -3,26 +3,26 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("auth_providers")
 export class AuthProvider {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("label", "text")
+  @Column("label", "text")
   label: string;
 
-  @column("kind", "text")
+  @Column("kind", "text")
   kind: string;
 
-  @column("issuer", "text")
+  @Column("issuer", "text")
   issuer: string;
 
-  @column("client_id", "text")
+  @Column("client_id", "text")
   clientId: string;
 
-  @column("scopes", "text")
+  @Column("scopes", "text")
   scopes: string;
 
-  @column("enabled", "bool")
+  @Column("enabled", "bool")
   enabled: bool;
 
   constructor(id: string, label: string, kind: string, issuer: string, clientId: string,

@@ -3,38 +3,38 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("model_configs")
 export class ModelConfig {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("model_id", "text")
+  @Column("model_id", "text")
   modelId: string;
 
-  @column("temperature", "float8")
+  @Column("temperature", "float8")
   temperature: number;
 
-  @column("max_tokens", "int")
+  @Column("max_tokens", "int")
   maxTokens: int;
 
-  @column("top_p", "float8")
+  @Column("top_p", "float8")
   topP: number;
 
-  @column("extra", "text")
+  @Column("extra", "text")
   extra: string;
 
-  @column("thinking", "text")
+  @Column("thinking", "text")
   thinking: string;
 
-  @column("label", "text")
+  @Column("label", "text")
   label: string;
 
-  @column("selectable", "bool")
+  @Column("selectable", "bool")
   selectable: bool;
 
-  @column("menu_rank", "int")
+  @Column("menu_rank", "int")
   rank: int;
 
-  @hasOne("models", "model_id", "id", "id, label, api_name AS \"apiName\", provider, {bool:enabled} AS \"enabled\"")
+  @HasOne("models", "model_id", "id", "id, label, api_name AS \"apiName\", provider, {bool:enabled} AS \"enabled\"")
   model: string;
 
   constructor(id: string, modelId: string, temperature: number, maxTokens: int, topP: number,

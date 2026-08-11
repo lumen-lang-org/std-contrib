@@ -3,20 +3,20 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("template_files")
 export class TemplateFile {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("template_id", "text")
+  @Column("template_id", "text")
   templateId: string;
 
-  @column("path", "text")
+  @Column("path", "text")
   path: string;
 
-  @column("title", "text")
+  @Column("title", "text")
   title: string;
 
-  @column("body", "text")
+  @Column("body", "text")
   body: string;
 
   constructor(id: string, templateId: string, path: string, title: string, body: string) {

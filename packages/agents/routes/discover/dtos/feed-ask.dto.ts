@@ -1,14 +1,14 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, Required } from "../../../../validation/validation.ts";
 
 @validated
 export class FeedAsk {
-  @required("a feed needs an id, a topic and a query")
+  @Required("a feed needs an id, a topic and a query")
   id: string;
 
-  @required("a feed needs an id, a topic and a query")
+  @Required("a feed needs an id, a topic and a query")
   topic: string;
 
-  @required("a feed needs an id, a topic and a query")
+  @Required("a feed needs an id, a topic and a query")
   query: string;
 
   lang: string;

@@ -1,19 +1,19 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, OneOf, Required } from "../../../../validation/validation.ts";
 
 @validated
 export class AuthProviderAsk {
-  @required("a provider needs an id — it is what the callback URL carries")
+  @Required("a provider needs an id — it is what the callback URL carries")
   id: string;
 
-  @required("a provider needs a label — it is what the sign-in button says")
+  @Required("a provider needs a label — it is what the sign-in button says")
   label: string;
 
-  @oneOf("oidc,github", "kind is 'oidc' or 'github'")
+  @OneOf("oidc,github", "kind is 'oidc' or 'github'")
   kind: string;
 
   issuer: string;
 
-  @required("a client id is required")
+  @Required("a client id is required")
   clientId: string;
 
   scopes: string;

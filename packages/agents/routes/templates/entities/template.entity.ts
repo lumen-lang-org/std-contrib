@@ -3,26 +3,26 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("templates")
 export class Template {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("label", "text")
+  @Column("label", "text")
   label: string;
 
-  @column("description", "text")
+  @Column("description", "text")
   description: string;
 
-  @column("kind", "text")
+  @Column("kind", "text")
   kind: string;
 
-  @column("skill_name", "text")
+  @Column("skill_name", "text")
   skillName: string;
 
-  @column("visibility", "text")
+  @Column("visibility", "text")
   visibility: string;
 
-  @column("featured_rank", "int")
+  @Column("featured_rank", "int")
   featuredRank: int;
 
   constructor(id: string, label: string, description: string, kind: string, skillName: string,

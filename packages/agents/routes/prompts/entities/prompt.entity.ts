@@ -3,20 +3,20 @@ import { DbRepository } from "../../../../plume/plume.ts";
 
 @entity("prompts")
 export class Prompt {
-  @id
-  @column("id", "text")
+  @Id
+  @Column("id", "text")
   id: string;
 
-  @column("prompt_name", "text")
+  @Column("prompt_name", "text")
   promptName: string;
 
-  @column("version", "int")
+  @Column("version", "int")
   version: int;
 
-  @column("body", "text")
+  @Column("body", "text")
   body: string;
 
-  @column("created_at", "text")
+  @Column("created_at", "text")
   createdAt: string;
 
   constructor(id: string, promptName: string, version: int, body: string, createdAt: string) {

@@ -1,18 +1,18 @@
-import { validated, Rule } from "../../../../validation/validation.ts";
+import { Rule, validated, Max, Min, OneOf } from "../../../../validation/validation.ts";
 
 @validated
 export class WebRagSetup {
   enabled: bool;
 
-  @min(1, "topK must be between 1 and 20 — the index caps at 20")
-  @max(20, "topK must be between 1 and 20 — the index caps at 20")
+  @Min(1, "topK must be between 1 and 20 — the index caps at 20")
+  @Max(20, "topK must be between 1 and 20 — the index caps at 20")
   topK: int;
 
-  @min(500, "maxChars must be between 500 and 100000")
-  @max(100000, "maxChars must be between 500 and 100000")
+  @Min(500, "maxChars must be between 500 and 100000")
+  @Max(100000, "maxChars must be between 500 and 100000")
   maxChars: int;
 
-  @oneOf("verbatim,generated", "queryMode must be verbatim or generated")
+  @OneOf("verbatim,generated", "queryMode must be verbatim or generated")
   queryMode: string;
 
   queryModelId: string;
