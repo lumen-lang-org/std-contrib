@@ -42,7 +42,7 @@ import { DiscoverApi } from "./routes/discover/discover.controller.ts";
 import { TemplateApi } from "./routes/templates/template.controller.ts";
 import { TriggerApi } from "./routes/triggers/trigger.controller.ts";
 import { ProjectApi } from "./routes/projects/controller.ts";
-import { EnvironmentApi } from "./routes/environments/controller.ts";
+import { EnvironmentApi } from "./routes/environments/environment.controller.ts";
 import { CaptchaApi } from "./routes/captcha/controller.ts";
 import { EnvKeyApi } from "./routes/env-keys/controller.ts";
 import { EnvTemplateApi } from "./routes/env-templates/controller.ts";
