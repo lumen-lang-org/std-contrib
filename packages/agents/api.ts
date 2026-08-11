@@ -50,7 +50,7 @@ import { ApiKeyApi } from "./routes/api-keys/api-key.controller.ts";
 import { JobApi } from "./routes/jobs/job.controller.ts";
 import { SandboxLimitsApi } from "./routes/sandbox-limits/sandbox-limits.controller.ts";
 import { ScopeApi } from "./routes/scopes/scope.controller.ts";
-import { QuotaApi } from "./routes/quota/controller.ts";
+import { QuotaApi } from "./routes/quota/quota.controller.ts";
 import { LibraryApi } from "./routes/library/library.controller.ts";
 import { RunApi } from "./routes/runs/run.controller.ts";
 import { UsageApi } from "./routes/usage/usage.controller.ts";
