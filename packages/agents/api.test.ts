@@ -20,7 +20,7 @@ import { beginStep, stepsOfThread } from "./steps.ts";
 import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
 import { migrationFault, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
 import { forgetAgent } from "./routes/agents/agent.service.ts";
-import { decodedSize } from "./routes/documents/controller.ts";
+import { decodedSize } from "./routes/documents/document.utils.ts";
 import { healthJson } from "./routes/healthz/controller.ts";
 import { StoredModel } from "./routes/models/dtos/stored-model.dto.ts";
 import { ModelService, modelDestinationFault } from "./routes/models/model.service.ts";
