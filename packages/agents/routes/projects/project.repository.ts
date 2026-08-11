@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbRepository, DbResult, deleteById, existsById, findById, persist } from "../../../plume/plume.ts";
 import { PROJECT_FILES_KEY, projectsMapping, projectsOf, releaseThreads, rememberFilesThread } from "../../projects.ts";
-import { openThread, rememberRouteKey, threadsMapping } from "../../threads.ts";
+import { openThread, rememberRouteKey } from "../../threads.ts";
+import { threadRepository } from "../threads/entities/thread.entity.ts";
 
 export class ProjectRepository {
   database: Db;
@@ -30,7 +31,7 @@ export class ProjectRepository {
   }
 
   filesThreadExists(threadId: string): bool {
-    return existsById(this.database, threadsMapping(), threadId);
+    return existsById(this.database, threadRepository(), threadId);
   }
 
   openFilesThread(owner: string, now: string): string {

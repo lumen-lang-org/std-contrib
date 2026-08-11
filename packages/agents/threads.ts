@@ -12,6 +12,7 @@ import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, AgentRow, age
 import { RouteAsk, candidatesFrom, indexOfKey, routeTurn, withoutAddresses } from "./router.ts";
 import { credentialFor } from "./credentials.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
+import { threadRepository } from "./routes/threads/entities/thread.entity.ts";
 
 export type ThreadRow = {
   id: string,
@@ -46,18 +47,7 @@ function threadsMappingV1(): DbRepository {
 }
 
 export function threadsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("agentId", "agent_id", "text"),
-    field("owner", "owner", "text"),
-    field("modelChoiceId", "model_choice_id", "text"),
-    field("routeKey", "route_key", "text"),
-    field("title", "title", "text"),
-    field("replayable", "replayable", "bool"),
-    field("projectId", "project_id", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "threads", idField: "id", idColumn: "id", fields: fs });
+  return threadRepository();
 }
 
 export function threadTurnsMapping(): DbRepository {
