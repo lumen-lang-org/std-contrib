@@ -19,7 +19,7 @@ import { HealthApi } from "./routes/healthz/controller.ts";
 import { CardPluginApi } from "./routes/card-plugins/card-plugin.controller.ts";
 import { ToolCardApi } from "./routes/tool-cards/tool-card.controller.ts";
 import { McpServerApi } from "./routes/mcp-server/mcp-server.controller.ts";
-import { PlaygroundApi } from "./routes/playground/controller.ts";
+import { PlaygroundApi } from "./routes/playground/playground.controller.ts";
 import { V1Api } from "./routes/v1/v1.controller.ts";
 import { TaskApi } from "./routes/tasks/task.controller.ts";
 import { DocumentApi } from "./routes/documents/document.controller.ts";
