@@ -1,4 +1,4 @@
-import { validated, Rule } from "../../../validation/validation.ts";
+import { validated, Rule } from "../../../../validation/validation.ts";
 
 @validated
 export class EnvTemplateAsk {
