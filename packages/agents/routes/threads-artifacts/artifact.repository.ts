@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbAssignment, DbRepository, DbResult, findById, listWhere, placeholderAt, setOn } from "../../../plume/plume.ts";
-import { ArtifactRow, ArtifactVersionRow, ArtifactWrite, ArtifactWritten, TurnArtifact, artifactsByTurn, artifactsForTurn, artifactsMapping, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
+import { ArtifactRow, ArtifactVersionRow, ArtifactWrite, ArtifactWritten, TurnArtifact, artifactsByTurn, artifactsForTurn, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
+import { artifactRepository } from "./entities/artifact.entity.ts";
 import { OfficeRenderAsk, OfficeRendered, officeRender } from "../../office-render.ts";
 import { jsonList } from "../../scan.ts";
 import { ownedThread } from "../../threads.ts";
@@ -11,7 +12,7 @@ export class ArtifactRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.artifacts = artifactsMapping();
+    this.artifacts = artifactRepository();
   }
 
   threadOwner(threadId: string, tags: string[]): string {

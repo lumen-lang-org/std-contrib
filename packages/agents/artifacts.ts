@@ -4,6 +4,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { artifactBytesMax, threadBytesMax } from "./caps.ts";
 import { normalScope } from "./knowledge.ts";
 import { ownerClause } from "./owner.ts";
+import { artifactRepository } from "./routes/threads-artifacts/entities/artifact.entity.ts";
 
 export const ARTIFACT_MAX: int = artifactBytesMax();
 
@@ -45,20 +46,7 @@ export type ArtifactVersionRow = {
 };
 
 export function artifactsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("slot", "slot", "int"),
-    field("path", "path", "text"),
-    field("title", "title", "text"),
-    field("kind", "kind", "text"),
-    field("mime", "mime", "text"),
-    field("currentVersion", "current_version", "int"),
-    field("previewToken", "preview_token", "text"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "artifacts", idField: "id", idColumn: "id", fields: fs });
+  return artifactRepository();
 }
 
 export function artifactVersionsMapping(): DbRepository {
