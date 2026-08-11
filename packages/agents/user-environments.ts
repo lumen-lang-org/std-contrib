@@ -1,7 +1,8 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { envDockerBin } from "./environments.ts";
+import { userEnvironmentRepository } from "./routes/environments/entities/user-environment.entity.ts";
 
 function foldName(n: string): string {
   return n.toLowerCase().replaceAll("-", "").replaceAll("_", "").replaceAll(" ", "").replaceAll("+", "");
@@ -44,16 +45,7 @@ export type UserEnvRow = {
 };
 
 export function userEnvsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("name", "name", "text"),
-    field("image", "image", "text"),
-    field("source", "source", "text"),
-    field("dockerfile", "dockerfile", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "user_environments", idField: "id", idColumn: "id", fields: fs });
+  return userEnvironmentRepository();
 }
 
 export function userEnvsPlan(db: Db): Migration[] {

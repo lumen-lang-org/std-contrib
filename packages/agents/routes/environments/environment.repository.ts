@@ -5,10 +5,11 @@ import { EnvTemplateRow, emptyEnvTemplate } from "../../env-templates.ts";
 import { EnvOwnedRow, envDrop, envImagePresent, envOwned } from "../../environments.ts";
 import { scriptImage } from "../../run-script.ts";
 import { threadOwner } from "../../threads.ts";
-import { UserEnvMade, UserEnvRow, UserEnvWrite, createUserEnv, forgetUserEnv, userEnvById, userEnvsMapping, userEnvsOf } from "../../user-environments.ts";
+import { UserEnvMade, UserEnvRow, UserEnvWrite, createUserEnv, forgetUserEnv, userEnvById, userEnvsOf } from "../../user-environments.ts";
 import { ScriptImageView } from "./dtos/script-image-view.dto.ts";
 import { scriptImageRepository } from "../script-images/entities/script-image.entity.ts";
 import { envTemplateRepository } from "../env-templates/entities/env-template.entity.ts";
+import { userEnvironmentRepository } from "./entities/user-environment.entity.ts";
 
 export class EnvironmentRepository {
   database: Db;
@@ -51,7 +52,7 @@ export class EnvironmentRepository {
   }
 
   one(id: string): string {
-    return findById(this.database, userEnvsMapping(), id);
+    return findById(this.database, userEnvironmentRepository(), id);
   }
 
   ownedRow(id: string, owner: string): UserEnvRow {
