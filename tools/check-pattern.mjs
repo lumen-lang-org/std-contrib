@@ -13,7 +13,7 @@
 // across the engine" are one command, not a reading exercise.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, basename, extname } from "node:path";
+import { join, basename, extname, dirname, resolve, relative } from "node:path";
 
 const ENGINE = "packages/agents";
 const ROUTES = join(ENGINE, "routes");
@@ -37,6 +37,27 @@ const lines = (p) => read(p).split("\n");
 // snapshot, so these are exempt by design rather than by oversight.
 const isSnapshot = (name) => /V\d+$/.test(name);
 
+// Every top-level packages/agents/*.ts file (not a route, not a package) that
+// owns table access the old way: a field()-mapped DbRepository, or CRUD verbs
+// (persist/executeWith/deleteById/...) called anywhere in the file. A
+// repository.ts that imports FROM one of these hasn't adopted the Repository
+// pattern — it has delegated to the thing the pattern replaces.
+function legacyMappingModules() {
+  const found = new Set();
+  const root = resolve(ENGINE);
+  for (const name of existsSync(root) ? readdirSync(root) : []) {
+    const full = join(root, name);
+    if (extname(full) !== ".ts" || statSync(full).isDirectory()) continue;
+    if (name.endsWith(".test.ts")) continue;
+    const src = read(full);
+    const ownsMapping = /: DbRepository \{[\s\S]*?field\(/.test(src);
+    const runsCrud = /\b(persist|executeWith|deleteById|deleteWhere|listOrdered|findById)\(/.test(src);
+    if (ownsMapping || runsCrud) found.add(full);
+  }
+  return found;
+}
+const LEGACY_MODULES = legacyMappingModules();
+
 const rules = [
   {
     id: "mapping-not-entity",
@@ -53,6 +74,23 @@ const rules = [
         const line = src.slice(0, m.index).split("\n").length;
         found.push({ line, detail: m[1] });
       }
+      return found;
+    },
+  },
+  {
+    id: "repository-delegates-to-legacy-module",
+    what: "a *.repository.ts importing from a top-level module instead of owning an @entity",
+    scan(path) {
+      if (!path.endsWith(".repository.ts")) return [];
+      const found = [];
+      lines(path).forEach((l, i) => {
+        const m = l.match(/^import\s*\{[^}]*\}\s*from\s*"([^"]+)"/);
+        if (!m || !m[1].startsWith(".")) return;
+        const target = resolve(dirname(path), m[1]);
+        if (LEGACY_MODULES.has(target)) {
+          found.push({ line: i + 1, detail: `${basename(target)}: ${l.trim().slice(0, 70)}` });
+        }
+      });
       return found;
     },
   },
