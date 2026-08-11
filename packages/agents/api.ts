@@ -44,7 +44,7 @@ import { TriggerApi } from "./routes/triggers/trigger.controller.ts";
 import { ProjectApi } from "./routes/projects/project.controller.ts";
 import { EnvironmentApi } from "./routes/environments/environment.controller.ts";
 import { CaptchaApi } from "./routes/captcha/captcha.controller.ts";
-import { EnvKeyApi } from "./routes/env-keys/controller.ts";
+import { EnvKeyApi } from "./routes/env-keys/env-key.controller.ts";
 import { EnvTemplateApi } from "./routes/env-templates/controller.ts";
 import { SecretApi } from "./routes/secrets/controller.ts";
 import { ApiKeyApi } from "./routes/api-keys/controller.ts";
