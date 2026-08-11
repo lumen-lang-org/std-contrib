@@ -28,7 +28,7 @@ import { modelFault } from "./routes/models/model.utils.ts";
 import { forgetServer, serverDestinationFault } from "./routes/servers/server.service.ts";
 import { ServerBody } from "./routes/servers/dtos/server-body.dto.ts";
 import { skillFileFault, skillFault } from "./routes/skills/skill.utils.ts";
-import { traceDestinationFault } from "./routes/tracing/controller.ts";
+import { traceDestinationFault } from "./routes/tracing/trace.service.ts";
 import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson, askedChoice, choiceFault } from "./api-core.ts";
 
 let database: Db = sqlite();

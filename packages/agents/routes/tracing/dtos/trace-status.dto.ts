@@ -1,7 +1,3 @@
-export type TraceSecret = { secretKey: string };
-
-export type TraceStatusOff = { configured: bool, active: bool };
-
 export type TraceStatus = {
   configured: bool,
   active: bool,
