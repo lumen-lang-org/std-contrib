@@ -23,7 +23,7 @@ import { PlaygroundApi } from "./routes/playground/controller.ts";
 import { V1Api } from "./routes/v1/controller.ts";
 import { TaskApi } from "./routes/tasks/task.controller.ts";
 import { DocumentApi } from "./routes/documents/document.controller.ts";
-import { PreviewApi } from "./routes/preview/controller.ts";
+import { PreviewApi } from "./routes/preview/preview.controller.ts";
 import { ArtifactApi } from "./routes/threads-artifacts/artifact.controller.ts";
 import { WorkspaceApi } from "./routes/threads-files/file.controller.ts";
 import { ConnectApi } from "./routes/connect/connect.controller.ts";
