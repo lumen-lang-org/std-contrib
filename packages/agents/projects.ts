@@ -3,6 +3,7 @@ import { DbField, DbOrder, DbRepository, createTableSql, executeWith, field, fin
 import { Migration, migration } from "../plume/migrate.ts";
 import { jsonText } from "./scan.ts";
 import { ArtifactRow, getVersion, listArtifacts } from "./artifacts.ts";
+import { projectRepository } from "./routes/projects/entities/project.entity.ts";
 
 export type ProjectRow = {
   id: string,
@@ -14,15 +15,7 @@ export type ProjectRow = {
 };
 
 export function projectsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("name", "name", "text"),
-    field("instructions", "instructions", "text"),
-    field("filesThreadId", "files_thread_id", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "projects", idField: "id", idColumn: "id", fields: fs });
+  return projectRepository();
 }
 
 function projectsMappingV1(): DbRepository {

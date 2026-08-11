@@ -1,8 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbRepository, DbResult, deleteById, existsById, findById, persist } from "../../../plume/plume.ts";
-import { PROJECT_FILES_KEY, projectsMapping, projectsOf, releaseThreads, rememberFilesThread } from "../../projects.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, listOrdered, persist } from "../../../plume/plume.ts";
+import { PROJECT_FILES_KEY, releaseThreads, rememberFilesThread } from "../../projects.ts";
 import { openThread, rememberRouteKey } from "../../threads.ts";
 import { threadRepository } from "../threads/entities/thread.entity.ts";
+import { projectRepository } from "./entities/project.entity.ts";
 
 export class ProjectRepository {
   database: Db;
@@ -10,11 +11,16 @@ export class ProjectRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.projects = projectsMapping();
+    this.projects = projectRepository();
   }
 
   listing(owner: string): string {
-    return projectsOf(this.database, owner);
+    let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
+    return listOrdered(this.database, this.projects, {
+      where: "owner = " + this.database.placeholder,
+      args: [owner],
+      order: keys,
+    });
   }
 
   one(id: string): string {
