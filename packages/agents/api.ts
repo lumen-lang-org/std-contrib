@@ -40,7 +40,7 @@ import { ProviderApi } from "./routes/providers/controller.ts";
 import { WorkflowApi } from "./routes/workflows/workflow.controller.ts";
 import { DiscoverApi } from "./routes/discover/controller.ts";
 import { TemplateApi } from "./routes/templates/template.controller.ts";
-import { TriggerApi } from "./routes/triggers/controller.ts";
+import { TriggerApi } from "./routes/triggers/trigger.controller.ts";
 import { ProjectApi } from "./routes/projects/controller.ts";
 import { EnvironmentApi } from "./routes/environments/controller.ts";
 import { CaptchaApi } from "./routes/captcha/controller.ts";
