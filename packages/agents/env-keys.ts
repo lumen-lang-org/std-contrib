@@ -1,7 +1,8 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
+import { envKeyRepository } from "./routes/env-keys/entities/env-key.entity.ts";
 
 export const MAX_ENV_KEYS_PER_ENV: int = 20;
 let envKeyPerEnvChosen: int = 0;
@@ -24,15 +25,7 @@ export type EnvKeyRow = {
 };
 
 export function envKeysMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("imageId", "image_id", "text"),
-    field("name", "name", "text"),
-    field("createdAt", "created_at", "text"),
-    field("lastUsedAt", "last_used_at", "text"),
-  ];
-  return repository({ table: "env_keys", idField: "id", idColumn: "id", fields: fs });
+  return envKeyRepository();
 }
 
 export function envKeysPlan(db: Db): Migration[] {
