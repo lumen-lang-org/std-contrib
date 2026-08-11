@@ -7,7 +7,7 @@ import { scriptImage } from "../../run-script.ts";
 import { threadOwner } from "../../threads.ts";
 import { UserEnvMade, UserEnvRow, UserEnvWrite, createUserEnv, forgetUserEnv, userEnvById, userEnvsMapping, userEnvsOf } from "../../user-environments.ts";
 import { ScriptImageView } from "./dtos/script-image-view.dto.ts";
-import { scriptImageRepository } from "./entities/script-image.entity.ts";
+import { scriptImageRepository } from "../script-images/entities/script-image.entity.ts";
 
 export class EnvironmentRepository {
   database: Db;
