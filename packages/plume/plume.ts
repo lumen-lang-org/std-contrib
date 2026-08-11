@@ -1157,6 +1157,61 @@ export function setOn(db: Db, repo: DbRepository, write: DbWrite): DbResult {
   return executeWith(db, sql, args);
 }
 
+// Named columns of every row a predicate matches, in one statement. setOn
+// reaches one row by id; this is the "disable the others" shape, and doing it
+// as a read plus one setOn per row is not the same thing: a row inserted
+// between the read and the writes escapes, and a failure halfway leaves some
+// rows changed. The predicate is data rather than a SQL string so a caller
+// still writes no SQL, and the operator is checked against a fixed list.
+export type DbMatch = { column: string, operator: string, value: string };
+
+export type DbSweep = { values: DbAssignment[], match: DbMatch[] };
+
+function comparison(operator: string): string {
+  if (operator == "=" || operator == "<>" || operator == "<"
+      || operator == ">" || operator == "<=" || operator == ">=") {
+    return operator;
+  }
+  return "";
+}
+
+export function setWhere(db: Db, repo: DbRepository, sweep: DbSweep): DbResult {
+  if (sweep.values.length == 0) {
+    return dbOk(0);
+  }
+  let sql = "UPDATE " + repo.table + " SET ";
+  let args: string[] = [];
+  let i: int = 0;
+  while (i < sweep.values.length) {
+    if (i > 0) {
+      sql = sql + ", ";
+    }
+    if (boolField(repo, sweep.values[i].column)) {
+      sql = sql + sweep.values[i].column + " = " + boolLiteral(db, sweep.values[i].value);
+    } else {
+      sql = sql + sweep.values[i].column + " = " + placeholderAt(db, args.length + 1);
+      args.push(sweep.values[i].value);
+    }
+    i = i + 1;
+  }
+  let j: int = 0;
+  while (j < sweep.match.length) {
+    let how = comparison(sweep.match[j].operator);
+    if (how == "") {
+      return dbErr("no such comparison: " + sweep.match[j].operator);
+    }
+    sql = sql + (j == 0 ? " WHERE " : " AND ") + sweep.match[j].column + " " + how;
+    if (boolField(repo, sweep.match[j].column)) {
+      sql = sql + " " + boolLiteral(db, sweep.match[j].value);
+    } else {
+      sql = sql + " " + placeholderAt(db, args.length + 1);
+      args.push(sweep.match[j].value);
+    }
+    j = j + 1;
+  }
+  return executeWith(db, sql, args);
+}
+
 // One column, every row. Rare and blunt on purpose: it exists for "only one row
 // may be the default", where claiming the flag takes it from whoever held it.
 export function setEvery(db: Db, repo: DbRepository, column: string, value: string): DbResult {

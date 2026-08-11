@@ -1,20 +1,4 @@
-import { validated, Rule } from "../../../validation/validation.ts";
-
-export type ModelTestFailed = { ok: bool, error: string };
-
-export type EmbeddingProbe = {
-  ok: bool,
-  dimensions: int,
-  declared: int,
-  error: string,
-};
-
-export type ChatProbe = {
-  ok: bool,
-  reply: string,
-  inputTokens: int,
-  outputTokens: int,
-};
+import { validated, Rule } from "../../../../validation/validation.ts";
 
 @validated
 export class ModelAsk {

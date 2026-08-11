@@ -8,7 +8,7 @@
 //   sh packages/plume/build.sh
 //   cd packages/plume && lumen test sqlite.test.ts
 
-import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, setOn, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
+import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, setOn, setWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { sqlite, sqliteConnection, sqliteVersion } from "./sqlite.ts";
 
@@ -513,4 +513,49 @@ test("setOn leaves the columns it was not given alone", () => {
   setOn(database, repo, { id: "f2", values: [{ column: "enabled", value: "false" }] });
   let after: Flagged = JSON.parse<Flagged>(findById(database, repo, "f2"));
   expect(after.label == "untouched");
+});
+
+test("setWhere changes every row a predicate matches, in one statement", () => {
+  connectDatabase(database, testConfig());
+  let repo = flaggedRepo();
+  dropTable(database, repo);
+  createTable(database, repo);
+  let a: Flagged = { id: "f1", enabled: true, label: "keep" };
+  let b: Flagged = { id: "f2", enabled: true, label: "keep" };
+  let c: Flagged = { id: "f3", enabled: true, label: "other" };
+  persist(database, repo, JSON.stringify(a));
+  persist(database, repo, JSON.stringify(b));
+  persist(database, repo, JSON.stringify(c));
+
+  let done = setWhere(database, repo, {
+    values: [{ column: "enabled", value: "false" }],
+    match: [{
+      column: "label",
+      operator: "=",
+      value: "keep",
+    }, {
+      column: "id",
+      operator: "<>",
+      value: "f1",
+    }],
+  });
+  expect(done.ok);
+
+  let one: Flagged = JSON.parse<Flagged>(findById(database, repo, "f1"));
+  let two: Flagged = JSON.parse<Flagged>(findById(database, repo, "f2"));
+  let three: Flagged = JSON.parse<Flagged>(findById(database, repo, "f3"));
+  expect(one.enabled);
+  expect(!two.enabled);
+  expect(three.enabled);
+});
+
+test("setWhere refuses a comparison it does not know", () => {
+  connectDatabase(database, testConfig());
+  let repo = flaggedRepo();
+  let refused = setWhere(database, repo, {
+    values: [{ column: "label", value: "x" }],
+    match: [{ column: "id", operator: "; DROP TABLE", value: "f1" }],
+  });
+  expect(!refused.ok);
+  expect(refused.error.indexOf("no such comparison") >= 0);
 });

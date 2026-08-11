@@ -22,7 +22,9 @@ import { migrationFault, bearerRefused, askedPick, configInUse, mergedConfig, co
 import { forgetAgent } from "./routes/agents/agent.service.ts";
 import { decodedSize } from "./routes/documents/controller.ts";
 import { healthJson } from "./routes/healthz/controller.ts";
-import { choicesJson, modelDestinationFault, modelFault } from "./routes/models/controller.ts";
+import { StoredModel } from "./routes/models/dtos/stored-model.dto.ts";
+import { ModelService, modelDestinationFault } from "./routes/models/model.service.ts";
+import { modelFault } from "./routes/models/model.utils.ts";
 import { forgetServer, serverDestinationFault } from "./routes/servers/server.service.ts";
 import { ServerBody } from "./routes/servers/dtos/server-body.dto.ts";
 import { skillFileFault, skillFault } from "./routes/skills/skill.utils.ts";
@@ -102,8 +104,8 @@ function fresh(): string {
   return fault;
 }
 
-function modelRow(id: string, provider: string, kind: string, baseUrl: string): ModelRow {
-  let m: ModelRow = {
+function modelRow(id: string, provider: string, kind: string, baseUrl: string): StoredModel {
+  let m: StoredModel = {
     id: id, label: "L " + id, apiName: "some-model", provider: provider,
     kind: kind, dimensions: kind == "embedding" ? 1024 : 0,
     baseUrl: baseUrl, enabled: true, contextTokens: 0 };
@@ -177,7 +179,7 @@ test("an edit that leaves the address alone is allowed", () => {
     masterKey: testKey(),
     now: "t",
   });
-  let renamed: ModelRow = {
+  let renamed: StoredModel = {
     id: "m1", label: "A better label", apiName: "mistral-small-latest", provider: "mistral",
     kind: "chat", dimensions: 0, baseUrl: "", enabled: false, contextTokens: 0 };
   expect(modelDestinationFault(database, renamed) == "");
@@ -706,7 +708,8 @@ function seedMenu(): void {
 test("the menu is the enabled rows in rank order, and never names the config behind one", () => {
   expect(fresh() == "");
   seedMenu();
-  let wire = choicesJson(enabledChoices(database));
+  let menu = new ModelService(database, "");
+  let wire = menu.choices();
 
   expect(wire.indexOf("\"Auto\"") < wire.indexOf("\"Thinking\""));
   expect(wire.indexOf("\"Thinking\"") < wire.indexOf("\"Fast\""));
