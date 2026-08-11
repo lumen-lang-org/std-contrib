@@ -1,4 +1,4 @@
-import { SandboxLimits } from "../../sandbox-limits.ts";
+import { SandboxLimits } from "../../../sandbox-limits.ts";
 
 export type SandboxLimitsView = {
   limits: SandboxLimits,
