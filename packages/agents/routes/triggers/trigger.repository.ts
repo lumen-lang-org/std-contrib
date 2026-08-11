@@ -1,9 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, setOn } from "../../../plume/plume.ts";
 import { CredentialWrite, forgetCredential, storeCredential } from "../../credentials.ts";
-import { queuedFor, triggerInboxMapping } from "../../triggers.ts";
+import { queuedFor } from "../../triggers.ts";
 import { workflowsMapping } from "../../workflow-store.ts";
 import { triggerBotRepository } from "./entities/trigger-bot.entity.ts";
+import { triggerInboxRepository } from "./entities/trigger-inbox.entity.ts";
 
 export class TriggerRepository {
   database: Db;
@@ -65,7 +66,7 @@ export class TriggerRepository {
 
   forget(id: string): string {
     let steps: DbResult[] = [
-      deleteWhere(this.database, triggerInboxMapping(), "bot_id = " + this.database.placeholder, [id]),
+      deleteWhere(this.database, triggerInboxRepository(), "bot_id = " + this.database.placeholder, [id]),
       deleteById(this.database, this.bots, id),
     ];
     let i: int = 0;

@@ -2,6 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { triggerBotRepository } from "./routes/triggers/entities/trigger-bot.entity.ts";
+import { triggerInboxRepository } from "./routes/triggers/entities/trigger-inbox.entity.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { stampMs } from "./tasks.ts";
 
@@ -96,26 +97,7 @@ function triggerInboxMappingV1(): DbRepository {
 }
 
 export function triggerInboxMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("botId", "bot_id", "text"),
-    field("workflowId", "workflow_id", "text"),
-    field("updateId", "update_id", "text"),
-    field("chatId", "chat_id", "text"),
-    field("input", "input", "text"),
-    field("status", "status", "text"),
-    field("threadId", "thread_id", "text"),
-    field("fileName", "file_name", "text"),
-    field("fileBody", "file_body", "text"),
-    field("speaker", "speaker", "text"),
-    field("runId", "run_id", "text"),
-    field("answer", "answer", "text"),
-    field("error", "error", "text"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "trigger_inbox", idField: "id", idColumn: "id", fields: fs });
+  return triggerInboxRepository();
 }
 
 export type TriggerOutboxRow = {
