@@ -30,7 +30,7 @@ import { ConnectApi } from "./routes/connect/connect.controller.ts";
 import { ServerApi } from "./routes/servers/server.controller.ts";
 import { AuthProviderApi } from "./routes/auth-providers/auth-provider.controller.ts";
 import { PluginApi } from "./routes/plugins/plugin.controller.ts";
-import { PromptApi } from "./routes/prompts/controller.ts";
+import { PromptApi } from "./routes/prompts/prompt.controller.ts";
 import { ModelApi } from "./routes/models/model.controller.ts";
 import { SkillApi } from "./routes/skills/skill.controller.ts";
 import { ScriptImageApi } from "./routes/script-images/script-image.controller.ts";
