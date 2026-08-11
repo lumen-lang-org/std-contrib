@@ -1,0 +1,15 @@
+export type DiscoverStoryView = {
+  id: string,
+  feedId: string,
+  rank: int,
+  headline: string,
+  summary: string,
+  sources: string,
+  sourceTitles: string,
+  fetchedAt: string,
+  why: string,
+  madeAt: string,
+  image: string,
+  readMinutes: int,
+  hasBody: bool,
+};
