@@ -1,41 +1,22 @@
 import { rpc } from "../../../jsonrpc/decorator.ts";
 import { METHOD_NOT_FOUND, RpcReply, jsonArrayOf, jsonObjectOf, rpcFailed, rpcOk, rpcRaw } from "../../../jsonrpc/rpc.ts";
 import { Db } from "../../../plume/driver.ts";
-import { agentTools, callAgentTool } from "../../agent-tools.ts";
-import { callKnowledgeTool, knowledgeTools } from "../../knowledge-tools.ts";
-import { callProjectTool, projectTools } from "../../project-tools.ts";
-import { ToolSpec } from "../../provider.ts";
+import { callAgentTool } from "../../agent-tools.ts";
+import { callKnowledgeTool } from "../../knowledge-tools.ts";
+import { callProjectTool } from "../../project-tools.ts";
 import { jsonRaw, jsonText } from "../../scan.ts";
-import { callTaskTool, taskTools } from "../../task-tools.ts";
-import { callTriggerTool, triggerTools } from "../../trigger-tools.ts";
-import { callWorkflowTool, workflowTools } from "../../workflow-tools.ts";
+import { callTaskTool } from "../../task-tools.ts";
+import { callTriggerTool } from "../../trigger-tools.ts";
+import { callWorkflowTool } from "../../workflow-tools.ts";
 import { FileToolResult } from "../../workspace.ts";
-import { McpAcknowledged, McpCallResult, McpInitializeResult } from "./types.ts";
+import { McpAcknowledged } from "./dtos/mcp-acknowledged.dto.ts";
+import { McpCallResult } from "./dtos/mcp-call-result.dto.ts";
+import { McpInitializeResult } from "./dtos/mcp-initialize-result.dto.ts";
+import { mcpExportedTools } from "./mcp-server.utils.ts";
 
-export function mcpExportedTools(): ToolSpec[] {
-  let out: ToolSpec[] = [];
-  let families: ToolSpec[][] = [
-    taskTools(), workflowTools(), triggerTools(), agentTools(),
-    knowledgeTools(), projectTools(),
-  ];
-  let f: int = 0;
-  while (f < families.length) {
-    let one = families[f];
-    let i: int = 0;
-    while (i < one.length) {
-      if (one[i].name != "set_banner") {
-        out.push(one[i]);
-      }
-      i = i + 1;
-    }
-    f = f + 1;
-  }
-  return out;
-}
-
-export function mcpDispatch(db: Db, owner: string, name: string, args: string): FileToolResult {
+export function mcpDispatch(database: Db, owner: string, name: string, args: string): FileToolResult {
   let nowMs = Date.now() as number;
-  let scheduled = callTaskTool(db, {
+  let scheduled = callTaskTool(database, {
     owner: owner,
     agentId: "",
     modelChoiceId: "",
@@ -46,7 +27,7 @@ export function mcpDispatch(db: Db, owner: string, name: string, args: string): 
   if (scheduled.handled) {
     return scheduled;
   }
-  let flowed = callWorkflowTool(db, {
+  let flowed = callWorkflowTool(database, {
     owner: owner,
     agentId: "",
     name: name,
@@ -56,11 +37,11 @@ export function mcpDispatch(db: Db, owner: string, name: string, args: string): 
   if (flowed.handled) {
     return flowed;
   }
-  let botted = callTriggerTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
+  let botted = callTriggerTool(database, { owner: owner, name: name, args: args, nowMs: nowMs });
   if (botted.handled) {
     return botted;
   }
-  let selfed = callAgentTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
+  let selfed = callAgentTool(database, { owner: owner, name: name, args: args, nowMs: nowMs });
   if (selfed.handled) {
     return selfed;
   }
@@ -74,11 +55,11 @@ export function mcpDispatch(db: Db, owner: string, name: string, args: string): 
     };
     return barred;
   }
-  let known = callKnowledgeTool(db, { owner: owner, name: name, args: args, nowMs: nowMs });
+  let known = callKnowledgeTool(database, { owner: owner, name: name, args: args, nowMs: nowMs });
   if (known.handled) {
     return known;
   }
-  let grouped = callProjectTool(db, {
+  let grouped = callProjectTool(database, {
     owner: owner,
     threadId: "",
     name: name,
@@ -94,11 +75,11 @@ export function mcpDispatch(db: Db, owner: string, name: string, args: string): 
 
 @rpc
 export class McpMethods {
-  db: Db;
+  database: Db;
   owner: string;
 
-  constructor(db: Db, owner: string) {
-    this.db = db;
+  constructor(database: Db, owner: string) {
+    this.database = database;
     this.owner = owner;
   }
 
@@ -142,7 +123,7 @@ export class McpMethods {
     if (args == "") {
       args = "{}";
     }
-    let done = mcpDispatch(this.db, this.owner, name, args);
+    let done = mcpDispatch(this.database, this.owner, name, args);
     if (!done.handled) {
       return rpcFailed(METHOD_NOT_FOUND, "no tool named " + name);
     }

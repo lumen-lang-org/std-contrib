@@ -1,25 +1,20 @@
 import { Db } from "../../../plume/driver.ts";
 import { sqlite } from "../../../plume/sqlite.ts";
-import { Reply, Request } from "../../../rest/server.ts";
-import { McpServerApi } from "./controller.ts";
+import { Mount, Reply, dispatchMounted } from "../../../rest/server.ts";
+import { McpServerApi } from "./mcp-server.controller.ts";
 
 let database: Db = sqlite();
 
-function asked(body: string): Request {
-  let req: Request = {
-    method: "POST",
-    path: "/mcp-server",
-    body: body,
-    headers: new Map<string, string>(),
-    params: new Map<string, string>(),
-    query: new Map<string, string>(),
-  };
-  return req;
+function noHeaders(): Map<string, string> {
+  return new Map<string, string>();
+}
+
+function mounted(): Mount[] {
+  return [new McpServerApi(database)];
 }
 
 function answering(body: string): Reply {
-  let api = new McpServerApi(database);
-  return api.rpc(asked(body));
+  return dispatchMounted(mounted(), "POST", "/mcp-server", body, noHeaders());
 }
 
 test("initialize answers the handshake byte for byte", () => {
