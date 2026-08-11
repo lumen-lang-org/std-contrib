@@ -1,21 +1,24 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbRepository, findById, listWhere, placeholderAt } from "../../../plume/plume.ts";
 import { EnvKeyRow, envKeysOf, forgetEnvKey } from "../../env-keys.ts";
-import { EnvTemplateRow, envTemplateById } from "../../env-templates.ts";
+import { EnvTemplateRow, emptyEnvTemplate } from "../../env-templates.ts";
 import { EnvOwnedRow, envDrop, envImagePresent, envOwned } from "../../environments.ts";
 import { scriptImage } from "../../run-script.ts";
 import { threadOwner } from "../../threads.ts";
 import { UserEnvMade, UserEnvRow, UserEnvWrite, createUserEnv, forgetUserEnv, userEnvById, userEnvsMapping, userEnvsOf } from "../../user-environments.ts";
 import { ScriptImageView } from "./dtos/script-image-view.dto.ts";
 import { scriptImageRepository } from "../script-images/entities/script-image.entity.ts";
+import { envTemplateRepository } from "../env-templates/entities/env-template.entity.ts";
 
 export class EnvironmentRepository {
   database: Db;
   scriptImages: DbRepository;
+  envTemplates: DbRepository;
 
   constructor(database: Db) {
     this.database = database;
     this.scriptImages = scriptImageRepository();
+    this.envTemplates = envTemplateRepository();
   }
 
   own(owner: string): UserEnvRow[] {
@@ -36,7 +39,11 @@ export class EnvironmentRepository {
   }
 
   template(id: string): EnvTemplateRow {
-    return envTemplateById(this.database, id);
+    let doc = findById(this.database, this.envTemplates, id);
+    if (doc == "") {
+      return emptyEnvTemplate();
+    }
+    return JSON.parse<EnvTemplateRow>(doc);
   }
 
   create(ask: UserEnvWrite): UserEnvMade {

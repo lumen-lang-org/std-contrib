@@ -1,6 +1,7 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, persist, repository } from "../plume/plume.ts";
+import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { envTemplateRepository } from "./routes/env-templates/entities/env-template.entity.ts";
 
 export const MAX_TEMPLATE_NAME: int = 60;
 export const MAX_TEMPLATE_SUMMARY: int = 400;
@@ -20,18 +21,7 @@ export type EnvTemplateRow = {
 };
 
 export function envTemplatesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("name", "name", "text"),
-    field("summary", "summary", "text"),
-    field("tags", "tags", "text"),
-    field("source", "source", "text"),
-    field("image", "image", "text"),
-    field("dockerfile", "dockerfile", "text"),
-    field("featuredRank", "featured_rank", "int"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "env_templates", idField: "id", idColumn: "id", fields: fs });
+  return envTemplateRepository();
 }
 
 export function envTemplatesPlan(db: Db): Migration[] {
