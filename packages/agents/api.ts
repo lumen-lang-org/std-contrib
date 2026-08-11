@@ -17,7 +17,7 @@ import { jsonList, jsonText, jsonFind, jsonRaw } from "./scan.ts";
 import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceFault } from "./api-core.ts";
 import { HealthApi } from "./routes/healthz/controller.ts";
 import { CardPluginApi } from "./routes/card-plugins/card-plugin.controller.ts";
-import { ToolCardApi } from "./routes/tool-cards/controller.ts";
+import { ToolCardApi } from "./routes/tool-cards/tool-card.controller.ts";
 import { McpServerApi } from "./routes/mcp-server/controller.ts";
 import { PlaygroundApi } from "./routes/playground/controller.ts";
 import { V1Api } from "./routes/v1/controller.ts";
