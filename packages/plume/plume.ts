@@ -1109,6 +1109,25 @@ export type DbAssignment = { column: string, value: string };
 
 export type DbWrite = { id: string, values: DbAssignment[] };
 
+function boolField(repo: DbRepository, column: string): bool {
+  let i: int = 0;
+  while (i < repo.fields.length) {
+    if (repo.fields[i].column == column && repo.fields[i].sqlType == "bool") {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
+function boolLiteral(db: Db, value: string): string {
+  let yes = value == "true" || value == "1" || value == "TRUE";
+  if (db.name == "postgres") {
+    return yes ? "true" : "false";
+  }
+  return yes ? "1" : "0";
+}
+
 export function setOn(db: Db, repo: DbRepository, write: DbWrite): DbResult {
   if (write.values.length == 0) {
     return dbOk(0);
@@ -1120,11 +1139,20 @@ export function setOn(db: Db, repo: DbRepository, write: DbWrite): DbResult {
     if (i > 0) {
       sql = sql + ", ";
     }
-    sql = sql + write.values[i].column + " = " + placeholderAt(db, i + 1);
-    args.push(write.values[i].value);
+    // A bool is not text. SQLite has no boolean type and its read path is
+    // CASE WHEN <column> THEN 'true' ELSE 'false', which reads the string
+    // 'false' as true — so binding "false" as text would turn "disable this"
+    // into "enable it". The value is ours, not the caller's, and it is
+    // narrowed to one of two literals before it reaches the statement.
+    if (boolField(repo, write.values[i].column)) {
+      sql = sql + write.values[i].column + " = " + boolLiteral(db, write.values[i].value);
+    } else {
+      sql = sql + write.values[i].column + " = " + placeholderAt(db, args.length + 1);
+      args.push(write.values[i].value);
+    }
     i = i + 1;
   }
-  sql = sql + " WHERE " + repo.idColumn + " = " + placeholderAt(db, write.values.length + 1);
+  sql = sql + " WHERE " + repo.idColumn + " = " + placeholderAt(db, args.length + 1);
   args.push(write.id);
   return executeWith(db, sql, args);
 }

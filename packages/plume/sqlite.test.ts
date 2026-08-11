@@ -8,7 +8,7 @@
 //   sh packages/plume/build.sh
 //   cd packages/plume && lumen test sqlite.test.ts
 
-import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
+import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, setOn, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember } from "./plume.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { sqlite, sqliteConnection, sqliteVersion } from "./sqlite.ts";
 
@@ -466,4 +466,51 @@ test("the suite leaves nothing behind", () => {
   dropTable(database, agentRepo());
     closeDatabase(database);
   expect(true);
+});
+
+// A bool column written through setOn must come back as a bool. SQLite has no
+// boolean type: the read path is CASE WHEN enabled THEN 'true' ELSE 'false',
+// which reads the TEXT 'false' as truthy and the TEXT 'true' as truthy too. A
+// setOn that bound every value as text would therefore turn "disable this row"
+// into "enable it", silently, on the one driver most of the tests run against.
+type Flagged = { id: string, enabled: bool, label: string };
+
+function flaggedRepo(): DbRepository {
+  let fields: DbField[] = [
+    field("id", "id", "text"),
+    field("enabled", "enabled", "bool"),
+    field("label", "label", "text"),
+  ];
+  return repository({ table: "plume_test_flagged", idField: "id", idColumn: "id", fields: fields });
+}
+
+test("setOn writes a bool a bool read can answer", () => {
+  connectDatabase(database, testConfig());
+  let repo = flaggedRepo();
+  dropTable(database, repo);
+  createTable(database, repo);
+  let row: Flagged = { id: "f1", enabled: true, label: "keep me" };
+  expect(persist(database, repo, JSON.stringify(row)).ok);
+
+  expect(setOn(database, repo, { id: "f1", values: [{ column: "enabled", value: "false" }] }).ok);
+  let off: Flagged = JSON.parse<Flagged>(findById(database, repo, "f1"));
+  expect(!off.enabled);
+  expect(off.label == "keep me");
+
+  expect(setOn(database, repo, { id: "f1", values: [{ column: "enabled", value: "true" }] }).ok);
+  let on: Flagged = JSON.parse<Flagged>(findById(database, repo, "f1"));
+  expect(on.enabled);
+  expect(on.label == "keep me");
+});
+
+test("setOn leaves the columns it was not given alone", () => {
+  connectDatabase(database, testConfig());
+  let repo = flaggedRepo();
+  dropTable(database, repo);
+  createTable(database, repo);
+  let row: Flagged = { id: "f2", enabled: true, label: "untouched" };
+  persist(database, repo, JSON.stringify(row));
+  setOn(database, repo, { id: "f2", values: [{ column: "enabled", value: "false" }] });
+  let after: Flagged = JSON.parse<Flagged>(findById(database, repo, "f2"));
+  expect(after.label == "untouched");
 });

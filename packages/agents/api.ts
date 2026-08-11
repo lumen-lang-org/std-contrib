@@ -37,7 +37,7 @@ import { ScriptImageApi } from "./routes/script-images/controller.ts";
 import { TraceApi } from "./routes/tracing/controller.ts";
 import { AgentApi } from "./routes/agents/agent.controller.ts";
 import { ProviderApi } from "./routes/providers/controller.ts";
-import { WorkflowApi } from "./routes/workflows/controller.ts";
+import { WorkflowApi } from "./routes/workflows/workflow.controller.ts";
 import { DiscoverApi } from "./routes/discover/controller.ts";
 import { TemplateApi } from "./routes/templates/controller.ts";
 import { TriggerApi } from "./routes/triggers/controller.ts";
