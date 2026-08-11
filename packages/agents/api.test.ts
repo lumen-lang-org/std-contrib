@@ -25,7 +25,7 @@ import { healthJson } from "./routes/healthz/controller.ts";
 import { choicesJson, modelDestinationFault, modelFault } from "./routes/models/controller.ts";
 import { forgetServer, serverDestinationFault } from "./routes/servers/server.service.ts";
 import { ServerBody } from "./routes/servers/dtos/server-body.dto.ts";
-import { skillFileFault, skillFault } from "./routes/skills/controller.ts";
+import { skillFileFault, skillFault } from "./routes/skills/skill.utils.ts";
 import { traceDestinationFault } from "./routes/tracing/controller.ts";
 import { bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, guestTag, guestQuotaJson, askedChoice, choiceFault } from "./api-core.ts";
 

@@ -32,7 +32,7 @@ import { AuthProviderApi } from "./routes/auth-providers/controller.ts";
 import { PluginApi } from "./routes/plugins/controller.ts";
 import { PromptApi } from "./routes/prompts/controller.ts";
 import { ModelApi } from "./routes/models/controller.ts";
-import { SkillApi } from "./routes/skills/controller.ts";
+import { SkillApi } from "./routes/skills/skill.controller.ts";
 import { ScriptImageApi } from "./routes/script-images/controller.ts";
 import { TraceApi } from "./routes/tracing/controller.ts";
 import { AgentApi } from "./routes/agents/agent.controller.ts";
