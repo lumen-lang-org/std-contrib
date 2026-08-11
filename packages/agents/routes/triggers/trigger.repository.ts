@@ -1,8 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, persist, setOn } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, setOn } from "../../../plume/plume.ts";
 import { CredentialWrite, forgetCredential, storeCredential } from "../../credentials.ts";
-import { botsOf, queuedFor, triggerBotsMapping, triggerInboxMapping } from "../../triggers.ts";
+import { queuedFor, triggerInboxMapping } from "../../triggers.ts";
 import { workflowsMapping } from "../../workflow-store.ts";
+import { triggerBotRepository } from "./entities/trigger-bot.entity.ts";
 
 export class TriggerRepository {
   database: Db;
@@ -10,11 +11,16 @@ export class TriggerRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.bots = triggerBotsMapping();
+    this.bots = triggerBotRepository();
   }
 
   listing(owner: string): string {
-    return botsOf(this.database, owner);
+    let keys: DbOrder[] = [{ column: "name" }];
+    return listOrdered(this.database, this.bots, {
+      where: "owner = " + this.database.placeholder,
+      args: [owner],
+      order: keys,
+    });
   }
 
   one(id: string): string {

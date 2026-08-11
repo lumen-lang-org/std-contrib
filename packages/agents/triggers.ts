@@ -1,6 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { triggerBotRepository } from "./routes/triggers/entities/trigger-bot.entity.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { stampMs } from "./tasks.ts";
 
@@ -72,26 +73,7 @@ function triggerBotsMappingV1(): DbRepository {
 }
 
 export function triggerBotsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("kind", "kind", "text"),
-    field("name", "name", "text"),
-    field("workflowId", "workflow_id", "text"),
-    field("credentialRef", "credential_ref", "text"),
-    field("offset", "cursor_offset", "text"),
-    field("leaseBy", "lease_by", "text"),
-    field("leaseUntil", "lease_until", "text"),
-    field("enabled", "enabled", "bool"),
-    field("runsToday", "runs_today", "int"),
-    field("dayStartedAt", "day_started_at", "text"),
-    field("lastAt", "last_at", "text"),
-    field("lastError", "last_error", "text"),
-    field("draftUntil", "draft_until", "text"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "trigger_bots", idField: "id", idColumn: "id", fields: fs });
+  return triggerBotRepository();
 }
 
 function triggerInboxMappingV1(): DbRepository {
