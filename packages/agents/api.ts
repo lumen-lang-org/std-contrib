@@ -47,7 +47,7 @@ import { CaptchaApi } from "./routes/captcha/captcha.controller.ts";
 import { EnvKeyApi } from "./routes/env-keys/env-key.controller.ts";
 import { EnvTemplateApi } from "./routes/env-templates/controller.ts";
 import { SecretApi } from "./routes/secrets/secret.controller.ts";
-import { ApiKeyApi } from "./routes/api-keys/controller.ts";
+import { ApiKeyApi } from "./routes/api-keys/api-key.controller.ts";
 import { JobApi } from "./routes/jobs/job.controller.ts";
 import { SandboxLimitsApi } from "./routes/sandbox-limits/controller.ts";
 import { ScopeApi } from "./routes/scopes/controller.ts";
