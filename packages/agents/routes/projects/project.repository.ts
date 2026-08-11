@@ -1,0 +1,47 @@
+import { Db } from "../../../plume/driver.ts";
+import { DbRepository, DbResult, deleteById, existsById, findById, persist } from "../../../plume/plume.ts";
+import { PROJECT_FILES_KEY, projectsMapping, projectsOf, releaseThreads, rememberFilesThread } from "../../projects.ts";
+import { openThread, rememberRouteKey, threadsMapping } from "../../threads.ts";
+
+export class ProjectRepository {
+  database: Db;
+  projects: DbRepository;
+
+  constructor(database: Db) {
+    this.database = database;
+    this.projects = projectsMapping();
+  }
+
+  listing(owner: string): string {
+    return projectsOf(this.database, owner);
+  }
+
+  one(id: string): string {
+    return findById(this.database, this.projects, id);
+  }
+
+  save(document: string): DbResult {
+    return persist(this.database, this.projects, document);
+  }
+
+  remove(id: string): DbResult {
+    releaseThreads(this.database, id);
+    return deleteById(this.database, this.projects, id);
+  }
+
+  filesThreadExists(threadId: string): bool {
+    return existsById(this.database, threadsMapping(), threadId);
+  }
+
+  openFilesThread(owner: string, now: string): string {
+    return openThread(this.database, { agentId: PROJECT_FILES_KEY, owner: owner, now: now });
+  }
+
+  markFilesThreadRoute(threadId: string): string {
+    return rememberRouteKey(this.database, threadId, PROJECT_FILES_KEY);
+  }
+
+  noteFilesThread(id: string, threadId: string): string {
+    return rememberFilesThread(this.database, id, threadId);
+  }
+}
