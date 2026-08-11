@@ -1,9 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, persist, setOn } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, setOn } from "../../../plume/plume.ts";
 import { WfGraph } from "../../../workflow/workflow.ts";
 import { graphSecretFault } from "../../secrets.ts";
-import { enabledWorkflowCount, workflowRunsMapping, workflowRunsOf, workflowsMapping, workflowsOf } from "../../workflow-store.ts";
+import { enabledWorkflowCount, workflowRunsMapping, workflowRunsOf } from "../../workflow-store.ts";
 import { agentRepository } from "../agents/entities/agent.entity.ts";
+import { workflowRepository } from "./entities/workflow.entity.ts";
 
 export class WorkflowRepository {
   database: Db;
@@ -11,11 +12,16 @@ export class WorkflowRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.workflows = workflowsMapping();
+    this.workflows = workflowRepository();
   }
 
   listing(owner: string): string {
-    return workflowsOf(this.database, owner);
+    let keys: DbOrder[] = [{ column: "updated_at", direction: "desc" }];
+    return listOrdered(this.database, this.workflows, {
+      where: "owner = " + this.database.placeholder,
+      args: [owner],
+      order: keys,
+    });
   }
 
   one(id: string): string {

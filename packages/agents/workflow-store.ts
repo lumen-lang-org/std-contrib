@@ -4,6 +4,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
 import { knownZone } from "../cron/cron.ts";
+import { workflowRepository } from "./routes/workflows/entities/workflow.entity.ts";
 
 export const MAX_WORKFLOWS_PER_OWNER: int = 10;
 export const MAX_GRAPH_CHARS: int = 65536;
@@ -78,33 +79,7 @@ function workflowsMappingV1(): DbRepository {
 }
 
 export function workflowsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("agentId", "agent_id", "text"),
-    field("modelChoiceId", "model_choice_id", "text"),
-    field("name", "name", "text"),
-    field("description", "description", "text"),
-    field("graph", "graph", "text"),
-    field("kind", "kind", "text"),
-    field("cronExpr", "cron_expr", "text"),
-    field("tz", "tz", "text"),
-    field("nextAt", "next_at", "text"),
-    field("runningSince", "running_since", "text"),
-    field("enabled", "enabled", "bool"),
-    field("failures", "failures", "int"),
-    field("pausedReason", "paused_reason", "text"),
-    field("lastRunAt", "last_run_at", "text"),
-    field("lastRunId", "last_run_id", "text"),
-    field("lastStatus", "last_status", "text"),
-    field("lastError", "last_error", "text"),
-    field("runCount", "run_count", "int"),
-    field("publishedGraph", "published_graph", "text"),
-    field("publishedAt", "published_at", "text"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "workflows", idField: "id", idColumn: "id", fields: fs });
+  return workflowRepository();
 }
 
 export function workflowRunsMapping(): DbRepository {
