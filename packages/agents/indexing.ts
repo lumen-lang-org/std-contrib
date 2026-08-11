@@ -1,6 +1,7 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbRepository, persist, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { indexJobRepository } from "./routes/jobs/entities/index-job.entity.ts";
 
 export const JOB_QUEUED: string = "queued";
 export const JOB_INDEXING: string = "indexing";
@@ -21,19 +22,7 @@ export type IndexJobRow = {
 };
 
 export function indexJobsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("source", "source", "text"),
-    field("scope", "scope", "text"),
-    field("modelId", "model_id", "text"),
-    field("body", "body", "text"),
-    field("status", "status", "text"),
-    field("chunks", "chunks", "int"),
-    field("error", "error", "text"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "index_jobs", idField: "id", idColumn: "id", fields: fs });
+  return indexJobRepository();
 }
 
 export function indexingPlan(db: Db): Migration[] {
