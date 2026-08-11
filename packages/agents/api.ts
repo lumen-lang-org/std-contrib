@@ -16,7 +16,7 @@ import { jsonId, createFault } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonRaw } from "./scan.ts";
 import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceFault } from "./api-core.ts";
 import { HealthApi } from "./routes/healthz/controller.ts";
-import { CardPluginApi } from "./routes/card-plugins/controller.ts";
+import { CardPluginApi } from "./routes/card-plugins/card-plugin.controller.ts";
 import { ToolCardApi } from "./routes/tool-cards/controller.ts";
 import { McpServerApi } from "./routes/mcp-server/controller.ts";
 import { PlaygroundApi } from "./routes/playground/controller.ts";
@@ -1176,31 +1176,7 @@ function refViews(refs: WireRef[]): RefView[] {
 
 
 
-function injectSource(manifest: string, url: string, rendererUrl: string, rendererSource: string): string {
-  let trimmed = manifest.trim();
-  if (!trimmed.startsWith("{")) {
-    return trimmed;
-  }
-  return "{\"sourceUrl\":" + JSON.stringify(url)
-    + ",\"rendererUrl\":" + JSON.stringify(rendererUrl)
-    + ",\"rendererSource\":" + JSON.stringify(rendererSource)
-    + "," + trimmed.slice(1);
-}
 
-function resolveAgainst(base: string, ref: string): string {
-  if (ref.startsWith("https://") || ref.startsWith("http://")) {
-    return ref;
-  }
-  let cut = base.lastIndexOf("/");
-  if (cut < 0) {
-    return ref;
-  }
-  let dir = base.slice(0, cut);
-  if (ref.startsWith("./")) {
-    return dir + ref.slice(1);
-  }
-  return dir + "/" + ref;
-}
 
 
 
