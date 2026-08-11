@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { findById } from "../../../plume/plume.ts";
-import { SecretMade, SecretWrite, createSecret, forgetSecret, secretsMapping, secretsOf } from "../../secrets.ts";
+import { SecretMade, SecretWrite, createSecret, forgetSecret, secretsOf } from "../../secrets.ts";
+import { secretRepository } from "./entities/secret.entity.ts";
 
 export class SecretRepository {
   database: Db;
@@ -14,7 +15,7 @@ export class SecretRepository {
   }
 
   one(id: string): string {
-    return findById(this.database, secretsMapping(), id);
+    return findById(this.database, secretRepository(), id);
   }
 
   create(write: SecretWrite): SecretMade {

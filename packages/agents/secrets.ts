@@ -3,6 +3,7 @@ import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, find
 import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, secretIds } from "../workflow/workflow.ts";
 import { destinationOf, storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
+import { secretRepository } from "./routes/secrets/entities/secret.entity.ts";
 
 export const MAX_SECRETS_PER_OWNER: int = 20;
 export const MAX_SECRET_NAME: int = 60;
@@ -20,17 +21,7 @@ export type SecretRow = {
 };
 
 export function secretsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("name", "name", "text"),
-    field("header", "header", "text"),
-    field("destination", "destination", "text"),
-    field("category", "category", "text"),
-    field("createdAt", "created_at", "text"),
-    field("lastUsedAt", "last_used_at", "text"),
-  ];
-  return repository({ table: "secrets", idField: "id", idColumn: "id", fields: fs });
+  return secretRepository();
 }
 
 export function secretsPlan(db: Db): Migration[] {
