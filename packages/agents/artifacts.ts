@@ -158,6 +158,12 @@ function extensionOf(path: string): string {
 
 export function kindOf(path: string): string {
   let ext = extensionOf(path);
+  // Before the plain json below, which this would otherwise answer: a Vega-Lite
+  // spec is json whose whole point is that it is drawn rather than read.
+  let lower = path.toLowerCase();
+  if (lower.endsWith(".vl.json") || lower.endsWith(".vg.json")) {
+    return "chart";
+  }
   if (ext == "html" || ext == "htm") {
     return "html";
   }
@@ -188,6 +194,9 @@ export function kindOf(path: string): string {
   // draws it, and a change is a diff of a few lines rather than a new image.
   if (ext == "mmd" || ext == "mermaid") {
     return "mermaid";
+  }
+  if (ext == "dot" || ext == "gv") {
+    return "graphviz";
   }
   if (ext == "puml" || ext == "plantuml" || ext == "pu" || ext == "iuml") {
     return "plantuml";
