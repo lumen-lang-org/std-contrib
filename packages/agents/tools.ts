@@ -380,7 +380,7 @@ export const FILE_FENCE: string = "You can also create a file directly in your r
   + "info line names a path, like ```html path=/index.html title=Landing page — the fenced body is saved as a new "
   + "artifact and your reply keeps a one-line reference in its place. The first word after the backticks is the "
   + "language, path= takes the path as one word, and title= runs to the end of the line. A fence can only CREATE "
-  + "a file that does not exist yet, and only of an inert kind: .html, .svg, .md, .json or .txt. Updating a path "
+  + "a file that does not exist yet, and only of an inert kind: .html, .svg, .md, .json, .txt, .mmd or .puml. Updating a path "
   + "that already exists, and writing a script or stylesheet of any kind, must go through the write_artifact tool "
   + "— a fence that tries either is refused, and the refusal is noted. A fence without path= is ordinary quoted "
   + "code and is left alone. If you fence one new path twice in a reply, the last body is the one saved; if you "
@@ -399,7 +399,7 @@ export function artifactTools(): ToolSpec[] {
     + "A path-carrying code fence in your Respond (```html path=/index.html) can create a new inert file the same way, but only this tool can update an existing path or write a script or stylesheet; when a reply names one path through both, this tool wins. "
     + SELF_CONTAINED,
     "{\"type\":\"object\",\"properties\":{"
-    + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot and dash; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt or a source suffix.\"},"
+    + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot and dash; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt, .mmd (a Mermaid diagram, drawn from its source), .puml (a PlantUML diagram, same) or a source suffix.\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"What to call it where artifacts are listed.\"},"
     + "\"content\":{\"type\":\"string\",\"description\":\"The whole body. This is not a patch: what you send is the new version, entire.\"},"
     + "\"note\":{\"type\":\"string\",\"description\":\"Why this version exists, in a few words. Empty is fine for a first draft.\"}},"

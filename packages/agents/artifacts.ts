@@ -184,6 +184,14 @@ export function kindOf(path: string): string {
   if (ext == "txt" || ext == "csv" || ext == "log") {
     return "text";
   }
+  // A diagram is source, not a picture: the model writes the text, the console
+  // draws it, and a change is a diff of a few lines rather than a new image.
+  if (ext == "mmd" || ext == "mermaid") {
+    return "mermaid";
+  }
+  if (ext == "puml" || ext == "plantuml" || ext == "pu" || ext == "iuml") {
+    return "plantuml";
+  }
   if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" || ext == "webp") {
     return "image";
   }
