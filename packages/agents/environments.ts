@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 
 export const ENV_IDLE_MS: int = 900000;
@@ -11,11 +11,52 @@ export type EnvRow = {
   image: string,
   network: int,
   status: string,
+  /** The name this environment answers to on the wire: 16 hex characters, one
+   *  DNS label, and nothing about the conversation it belongs to. Every
+   *  published environment is its own origin, so this is what separates them. */
+  slug: string,
+  /** The port docker published on the host, or 0 when this environment serves
+   *  nothing. Docker picks it, and picks a new one on every restart, which is
+   *  why the gateway looks it up rather than remembering it. */
+  hostPort: int,
+  /** The port inside the container that hostPort reaches. */
+  servePort: int,
+  /** What to run inside to make it serve. Kept because a container outlives
+   *  neither a restart nor a machine, and an environment that comes back with
+   *  nothing running in it is serving a port that answers nothing. */
+  serveCmd: string,
+  /** The container's own clock at the last sync, in epoch seconds. Its clock
+   *  and not this one's: the comparison happens over there. */
+  syncAt: string,
   createdAt: string,
   lastUsedAt: string,
 };
 
 export function envMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("threadId", "thread_id", "text"),
+    field("name", "name", "text"),
+    field("image", "image", "text"),
+    field("network", "network", "int"),
+    field("status", "status", "text"),
+    field("slug", "slug", "text"),
+    field("hostPort", "host_port", "int"),
+    field("servePort", "serve_port", "int"),
+    field("serveCmd", "serve_cmd", "text"),
+    field("syncAt", "sync_at", "text"),
+    field("createdAt", "created_at", "text"),
+    field("lastUsedAt", "last_used_at", "text"),
+  ];
+  return repository({ table: "environments", idField: "id", idColumn: "id", fields: fs });
+}
+
+// The shape migration 64 created, frozen. Building that statement from the
+// live mapping instead would mean a fresh database gets every later column at
+// CREATE time and then fails the ALTERs that add them, while the databases
+// that have been running since 64 still need those ALTERs — the same reason
+// runlog keeps a runsMappingV1.
+function envMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("threadId", "thread_id", "text"),
@@ -31,7 +72,21 @@ export function envMapping(): DbRepository {
 
 export function envPlan(db: Db): Migration[] {
   let plan: Migration[] = [
-    migration("64", "script environments", createTableSql(db, envMapping())),
+    migration("64", "script environments", createTableSql(db, envMappingV1())),
+    migration("116", "an environment may publish a port",
+      "ALTER TABLE environments ADD COLUMN host_port " + dialectType(db, "int") + " NOT NULL DEFAULT 0"),
+    migration("117", "and says which port inside it that reaches",
+      "ALTER TABLE environments ADD COLUMN serve_port " + dialectType(db, "int") + " NOT NULL DEFAULT 0"),
+    migration("118", "an environment answers to a name of its own",
+      "ALTER TABLE environments ADD COLUMN slug " + db.textType + " NOT NULL DEFAULT ''"),
+    // Partial, because every row that predates the column carries '' and a
+    // plain unique index would refuse the second one on the way in.
+    migration("119", "and no two environments share it",
+      "CREATE UNIQUE INDEX IF NOT EXISTS environments_by_slug ON environments (slug) WHERE slug <> ''"),
+    migration("122", "an environment remembers what makes it serve",
+      "ALTER TABLE environments ADD COLUMN serve_cmd " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("123", "and when its workspace was last brought back",
+      "ALTER TABLE environments ADD COLUMN sync_at " + db.textType + " NOT NULL DEFAULT ''"),
   ];
   return plan;
 }
@@ -136,11 +191,46 @@ function envSafeBytes(text: string): string {
   return out;
 }
 
+type EnvRun = {
+  container: string,
+  threadId: string,
+  image: string,
+  network: bool,
+  serve: bool,
+};
+
+type EnvKeep = {
+  threadId: string,
+  name: string,
+  image: string,
+  network: bool,
+  status: string,
+  slug: string,
+  hostPort: int,
+  servePort: int,
+  serveCmd: string,
+  syncAt: string,
+  createdAt: string,
+  lastUsedAt: string,
+};
+
 export type EnvEnsure = {
   threadId: string,
   name: string,
   image: string,
   network: bool,
+  /** Publish a port, so the gateway can reach a server running inside. A
+   *  published environment is a networked one: docker will not publish a port
+   *  from a container that has no network at all. */
+  serve: bool,
+  /** The command that makes it serve, run when the container is made and
+   *  again whenever it comes back. Empty leaves the container idle. */
+  command: string,
+  /** Whether to run it now. A caller that is about to fill the workspace asks
+   *  for the container without starting anything, fills it, then asks again —
+   *  otherwise the command runs against an empty directory, fails, and its
+   *  death races the start that would have worked. */
+  start: bool,
   now: string,
 };
 
@@ -149,17 +239,31 @@ export type EnvEnsured = {
   container: string,
   created: bool,
   warmed: bool,
+  slug: string,
+  hostPort: int,
+  /** Whether something inside is listening yet. A project that is still
+   *  installing is running and answering nothing, which is not a failure. */
+  answering: bool,
   fault: string,
 };
 
 function envRefused(fault: string): EnvEnsured {
-  let r: EnvEnsured = { ok: false, container: "", created: false, warmed: false, fault: fault };
+  let r: EnvEnsured = {
+    ok: false, container: "", created: false, warmed: false, slug: "", hostPort: 0,
+    answering: false, fault: fault,
+  };
   return r;
 }
 
 export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   if (e.threadId == "") {
     return envRefused("an environment belongs to a conversation, and this call names none");
+  }
+  if (e.serve && !e.network) {
+    return envRefused("an environment that serves a port needs a network: docker publishes no port from a container that has none");
+  }
+  if (e.serve && envBindAddr() == "") {
+    return envRefused("this deployment publishes no environment ports — set AGENTS_ENV_BIND to the one address the gateway reaches, never 0.0.0.0");
   }
   let name = e.name == "" ? "main" : e.name;
   let container = envContainerName(e.threadId, name);
@@ -169,48 +273,152 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     if (e.image == "") {
       return envRefused("an environment needs an image to build its container from");
     }
-    let made = envDocker(envRunArgs(container, e.threadId, e.image, e.network));
+    let make: EnvRun = {
+      container: container, threadId: e.threadId, image: e.image,
+      network: e.network, serve: e.serve,
+    };
+    let made = envMake(make);
     if (made.status != 0) {
       return envRefused(envDockerFault("create the environment", made));
     }
-    envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
-    envSave(db, e.threadId, name, e.image, e.network, "running", e.now, e.now);
+    if (e.start) {
+      envStart(container, e.command);
+    }
+    let opened = e.serve ? envPublished(container) : 0;
+    if (opened != 0) {
+      envForward(opened, envForwardHost());
+    }
+    let slug = envSlugNew();
+    envSave(db, {
+      threadId: e.threadId, name: name, image: e.image, network: e.network,
+      status: "running", slug: slug,
+      hostPort: opened, servePort: e.serve ? envServePort() : 0,
+      serveCmd: e.command, syncAt: "",
+      createdAt: e.now, lastUsedAt: e.now,
+    });
     let fresh: EnvEnsured = {
       ok: true,
       container: container,
       created: true,
       warmed: false,
+      slug: slug,
+      hostPort: opened,
+      answering: e.serve && envAnswering(opened),
       fault: "",
     };
     return fresh;
   }
 
   let row = JSON.parse<EnvRow>(held);
+  let serves = e.serve || row.servePort != 0;
+  let make: EnvRun = {
+    container: container, threadId: e.threadId, image: row.image,
+    network: row.network != 0 || serves, serve: serves,
+  };
   let created = false;
   let warmed = false;
-  if (!envRunning(container)) {
+  // A port binding is fixed when the container is made, so an environment built
+  // without one cannot be handed a port: it is rebuilt instead. The workspace
+  // is a volume and survives that.
+  if (e.serve && row.servePort == 0) {
+    envDocker(["rm", "-f", container]);
+    let rebuilt = envMake(make);
+    if (rebuilt.status != 0) {
+      return envRefused(envDockerFault("rebuild the environment so it can serve", rebuilt));
+    }
+    created = true;
+  } else if (!envRunning(container)) {
     let started = envDocker(["start", container]);
     if (started.status == 0) {
       warmed = true;
     } else {
       envDocker(["rm", "-f", container]);
-      let remade = envDocker(envRunArgs(container, e.threadId, row.image, row.network != 0));
+      let remade = envMake(make);
       if (remade.status != 0) {
         return envRefused(envDockerFault("start the environment", remade));
       }
-      envDocker(["exec", container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
       created = true;
     }
   }
-  envSave(db, row.threadId, row.name, row.image, row.network != 0, "running", row.createdAt, e.now);
+  // Asked rather than remembered: docker hands out a fresh ephemeral port on
+  // every start, and the probe below reaches the container through this.
+  let opened = serves ? envPublished(container) : 0;
+  // The port moved, so the forward carrying the old one carries nothing.
+  if (row.hostPort != 0 && row.hostPort != opened) {
+    envUnforward(row.hostPort);
+  }
+  if (opened != 0) {
+    envForward(opened, envForwardHost());
+  }
+  let command = e.command != "" ? e.command : row.serveCmd;
+  // Not created-or-warmed: a container restarted behind this process's back is
+  // running and empty, which that test reads as healthy.
+  if (e.start && command != "" && (created || warmed || !envAnswering(opened))) {
+    envStart(container, command);
+  }
+  // Rows made before environments had names of their own get one here, rather
+  // than in a migration that would have to invent randomness in SQL.
+  let slug = row.slug == "" ? envSlugNew() : row.slug;
+  envSave(db, {
+    threadId: row.threadId, name: row.name, image: row.image,
+    network: row.network != 0 || serves, status: "running", slug: slug,
+    hostPort: opened, servePort: serves ? envServePort() : 0,
+    serveCmd: command, syncAt: row.syncAt,
+    createdAt: row.createdAt, lastUsedAt: e.now,
+  });
   let back: EnvEnsured = {
     ok: true,
     container: container,
     created: created,
     warmed: warmed,
+    slug: slug,
+    hostPort: opened,
+    answering: serves && envAnswering(opened),
     fault: "",
   };
   return back;
+}
+
+/** Run what makes an environment serve. Only ever called when the container
+ *  was just made or just started, which is precisely when nothing is running
+ *  inside it — calling it on every ensure would stack a second server on a port
+ *  the first one holds. */
+function envStart(container: string, command: string): void {
+  if (command == "") {
+    return;
+  }
+  envDocker(["exec", "-d", container, "sh", "-lc", command]);
+}
+
+/** Whether anything is listening yet, asked from here rather than inside.
+ *
+ *  The first version ran nc, /dev/tcp or ss in the container, and a slim Node
+ *  image has none of the three — its sh is dash, where /dev/tcp is not a thing.
+ *  So it answered "no" for a server that was serving perfectly, and every
+ *  ensure started a second copy on a port the first one held. This asks the way
+ *  the gateway does: through the forward, from this host. Any answer counts,
+ *  404 included — the question is whether something is on the port. */
+let envProbeChosen: string = "";
+
+export function envProbeOverride(bin: string): void {
+  envProbeChosen = bin;
+}
+
+function envProbeBin(): string {
+  return envProbeChosen != "" ? envProbeChosen : "curl";
+}
+
+function envAnswering(port: int): bool {
+  if (port == 0) {
+    return false;
+  }
+  let where = envReachAddr();
+  if (where == "") {
+    return false;
+  }
+  let asked = child_process.spawnSync(envProbeBin(),
+    ["-s", "-o", "/dev/null", "-m", "2", "http://" + where + ":" + `${port}` + "/"]);
+  return asked.status == 0;
 }
 
 function envRunning(container: string): bool {
@@ -221,10 +429,53 @@ function envRunning(container: string): bool {
   return envFirstLine(seen.stdout).trim() == "true";
 }
 
-function envSave(db: Db, threadId: string, name: string, image: string, network: bool, status: string, createdAt: string, lastUsedAt: string): void {
+/** Sixteen hex characters: one DNS label, no dashes to lose, and nothing in it
+ *  that says which conversation or which person this environment belongs to. */
+function envSlugNew(): string {
+  let raw = crypto.randomUUID();
+  let out = "";
+  let i: int = 0;
+  while (i < raw.length && out.length < 16) {
+    let c = raw.charCodeAt(i);
+    if ((c >= 48 && c <= 57) || (c >= 97 && c <= 102)) {
+      out = out + raw.charAt(i);
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+/** The environment a hostname names, or an empty row. The gateway's whole
+ *  routing decision starts here. */
+export function envBySlug(db: Db, slug: string): EnvRow {
+  let none: EnvRow = {
+    id: "", threadId: "", name: "", image: "", network: 0, status: "",
+    slug: "", hostPort: 0, servePort: 0, serveCmd: "", syncAt: "",
+    createdAt: "", lastUsedAt: "",
+  };
+  if (slug == "") {
+    return none;
+  }
+  let keys: DbOrder[] = [{ column: "id" }];
+  let listed = listOrdered(db, envMapping(), {
+    where: "slug = " + placeholderAt(db, 1),
+    args: [slug],
+    order: keys,
+  });
+  if (listed == "" || listed == "[]") {
+    return none;
+  }
+  let rows = JSON.parse<EnvRow[]>(listed);
+  return rows.length == 0 ? none : rows[0];
+}
+
+function envSave(db: Db, k: EnvKeep): void {
   let row: EnvRow = {
-    id: threadId + ":" + name, threadId: threadId, name: name, image: image,
-    network: network ? 1 : 0, status: status, createdAt: createdAt, lastUsedAt: lastUsedAt,
+    id: k.threadId + ":" + k.name, threadId: k.threadId, name: k.name, image: k.image,
+    network: k.network ? 1 : 0, status: k.status, slug: k.slug,
+    hostPort: k.hostPort, servePort: k.servePort, serveCmd: k.serveCmd,
+    syncAt: k.syncAt,
+    createdAt: k.createdAt, lastUsedAt: k.lastUsedAt,
   };
   persist(db, envMapping(), JSON.stringify(row));
 }
@@ -251,9 +502,232 @@ function envCapPids(): int {
   return envCapPidsChosen > 0 ? envCapPidsChosen : 256;
 }
 
-function envRunArgs(container: string, threadId: string, image: string, network: bool): string[] {
+const ENV_SERVE_PORT: int = 3000;
+
+let envBindChosen: string = "";
+
+export function envBindOverride(addr: string): void {
+  envBindChosen = addr;
+}
+
+/** The one address a published environment port is bound to, and empty when
+ *  this deployment publishes none. Empty is the default on purpose: a
+ *  deployment cannot expose a dev server by forgetting to configure this. */
+export function envBindAddr(): string {
+  let addr = envBindChosen != "" ? envBindChosen : (process.env("AGENTS_ENV_BIND") ?? "").trim();
+  // Every interface the sandbox host has includes the public one, which would
+  // put a container the model wrote code into on the internet, with the
+  // gateway and its whole grant check bypassed. Refused rather than trusted.
+  if (addr == "0.0.0.0" || addr == "::" || addr == "*") {
+    return "";
+  }
+  return addr;
+}
+
+let envReachChosen: string = "";
+
+export function envReachOverride(addr: string): void {
+  envReachChosen = addr;
+}
+
+/** The address the gateway uses to get to a published port, which is not always
+ *  the address docker bound it to.
+ *
+ *  Here they differ, and for a reason worth writing down: environments run on
+ *  another machine, and the tailnet between the two permits port 22 and nothing
+ *  else, so every service on it is reached through an ssh forward bound to this
+ *  host's docker bridge. Docker binds on that machine; the gateway arrives on
+ *  this one. Defaults to the bind address, which is right when they are the
+ *  same machine. */
+export function envReachAddr(): string {
+  let addr = envReachChosen != "" ? envReachChosen : (process.env("AGENTS_ENV_REACH") ?? "").trim();
+  return addr != "" ? addr : envBindAddr();
+}
+
+/** The port a serving environment listens on inside its container. One number
+ *  for the deployment, so a template can hard-code it and the gateway need not
+ *  care which framework is behind it. */
+export function envServePort(): int {
+  let chosen = envDigits(process.env("AGENTS_ENV_SERVE_PORT") ?? "");
+  return chosen > 0 ? chosen : ENV_SERVE_PORT;
+}
+
+// Docker chose the host port, so docker is asked what it chose: `docker port`
+// answers "100.109.60.43:49154", and answers differently after a restart.
+function envPublished(container: string): int {
+  let asked = envDocker(["port", container, `${envServePort()}` + "/tcp"]);
+  if (asked.status != 0) {
+    return 0;
+  }
+  let line = envFirstLine(asked.stdout);
+  let at: int = line.length - 1;
+  while (at >= 0 && line.charCodeAt(at) != 58) {
+    at = at - 1;
+  }
+  if (at < 0) {
+    return 0;
+  }
+  return envDigits(line.slice(at + 1));
+}
+
+let envForwardChosen: string = "";
+
+export function envForwardOverride(bin: string): void {
+  envForwardChosen = bin;
+}
+
+function envForwardBin(): string {
+  if (envForwardChosen != "") {
+    return envForwardChosen;
+  }
+  return process.env("AGENTS_ENV_SSH") ?? "ssh";
+}
+
+/** The machine environments run on, as ssh knows it. Empty when they run here,
+ *  in which case there is nothing to carry and no forward to open. */
+function envForwardHost(): string {
+  let url = (process.env("DOCKER_HOST") ?? "").trim();
+  if (!url.startsWith("ssh://")) {
+    return "";
+  }
+  return url.slice(6);
+}
+
+/** Carry a published port across to the address the gateway arrives on.
+ *
+ *  The tailnet between the two machines permits port 22 and nothing else, so a
+ *  port over there is reachable here only through an ssh forward. Opening it is
+ *  part of publishing: an environment whose port nothing carries is running and
+ *  unreachable, which is the most confusing state it could be in.
+ *
+ *  Idempotent by asking the kernel rather than by remembering: whoever else
+ *  holds that address and port, one is enough. */
+function envForward(port: int, remote: string): bool {
+  if (port == 0 || remote == "") {
+    return false;
+  }
+  let reach = envReachAddr();
+  // Never every interface. This forward is the only way in and it should stay
+  // that way; ExitOnForwardFailure makes a refused bind a failure rather than a
+  // process that sits there forwarding nothing.
+  if (reach == "" || reach == "0.0.0.0" || reach == "::" || reach == "*") {
+    return false;
+  }
+  let where = reach + ":" + `${port}`;
+  if (envListening(where)) {
+    return true;
+  }
+  let made = child_process.spawnSync(envForwardBin(), envForwardArgs(where, port, remote));
+  return made.status == 0;
+}
+
+/** Built apart from the spawning so the shape of the forward can be asserted:
+ *  which address it binds, which port it carries, and that a refused bind is a
+ *  failure rather than a process forwarding nothing. */
+export function envForwardArgs(where: string, port: int, remote: string): string[] {
+  let args: string[] = [
+    "-f", "-N",
+    "-o", "ExitOnForwardFailure=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+    "-o", "ServerAliveInterval=30",
+    "-L", where + ":127.0.0.1:" + `${port}`,
+    remote,
+  ];
+  return args;
+}
+
+function envListening(where: string): bool {
+  let asked = child_process.spawnSync("ss", ["-ltn"]);
+  if (asked.status != 0) {
+    return false;
+  }
+  return asked.stdout.indexOf(" " + where + " ") >= 0;
+}
+
+/** Close the forward carrying a port that is no longer worth carrying.
+ *
+ *  Every restart moves the published port, so without this each one leaves an
+ *  ssh process and a listening socket behind: after a day of restarts the box
+ *  holds a hundred forwards to ports nothing answers on. */
+function envUnforward(port: int): bool {
+  if (port == 0) {
+    return false;
+  }
+  let reach = envReachAddr();
+  if (reach == "") {
+    return false;
+  }
+  let asked = child_process.spawnSync("ss", ["-ltnp"]);
+  if (asked.status != 0) {
+    return false;
+  }
+  let pid = envForwardPid(asked.stdout, reach + ":" + `${port}`);
+  if (pid == 0) {
+    return false;
+  }
+  let killed = child_process.spawnSync("kill", [`${pid}`]);
+  return killed.status == 0;
+}
+
+/** The process holding one address, read out of `ss -ltnp`. Written apart from
+ *  the killing so the parsing can be tested: killing the wrong pid because a
+ *  line was misread is not a mistake worth making twice. */
+export function envForwardPid(listing: string, where: string): int {
+  let lines = listing.split("\n");
+  let i: int = 0;
+  while (i < lines.length) {
+    let line = lines[i];
+    if (line.indexOf(" " + where + " ") >= 0) {
+      let at = line.indexOf("pid=");
+      if (at >= 0) {
+        let from = at + 4;
+        let to = from;
+        while (to < line.length) {
+          let c = line.charCodeAt(to);
+          if (c < 48 || c > 57) {
+            break;
+          }
+          to = to + 1;
+        }
+        return envDigits(line.slice(from, to));
+      }
+      return 0;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+function envDigits(text: string): int {
+  let trimmed = text.trim();
+  if (trimmed == "") {
+    return 0;
+  }
+  let out: int = 0;
+  let i: int = 0;
+  while (i < trimmed.length) {
+    let c = trimmed.charCodeAt(i);
+    if (c < 48 || c > 57) {
+      return 0;
+    }
+    out = out * 10 + (c - 48);
+    i = i + 1;
+  }
+  return out;
+}
+
+function envMake(r: EnvRun): EnvDockerReply {
+  let made = envDocker(envRunArgs(r));
+  if (made.status == 0) {
+    envDocker(["exec", r.container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
+  }
+  return made;
+}
+
+function envRunArgs(r: EnvRun): string[] {
+  let container = r.container;
   let out: string[] = ["run", "-d", "--name", container];
-  out.push("-v"); out.push(envWorkspaceVolume(threadId) + ":/workspace");
+  out.push("-v"); out.push(envWorkspaceVolume(r.threadId) + ":/workspace");
   out.push("--memory"); out.push(`${envCapMemMb()}` + "m");
   out.push("--cpus"); out.push(`${envCapCpus()}`);
   out.push("--pids-limit"); out.push(`${envCapPids()}`);
@@ -265,12 +739,19 @@ function envRunArgs(container: string, threadId: string, image: string, network:
   out.push("--cap-add"); out.push("FOWNER");
   out.push("--cap-add"); out.push("SETUID");
   out.push("--cap-add"); out.push("SETGID");
-  if (!network) {
+  // Bound to one address, never to every interface: the gateway is the only
+  // thing that should be able to reach a container, and this is where that is
+  // decided. `ip::port` asks docker for an ephemeral host port on that address.
+  if (r.serve && envBindAddr() != "") {
+    out.push("-p");
+    out.push(envBindAddr() + "::" + `${envServePort()}`);
+  }
+  if (!r.network && !r.serve) {
     out.push("--network");
     out.push("none");
   }
   out.push("--entrypoint"); out.push("sleep");
-  out.push(image); out.push("infinity");
+  out.push(r.image); out.push("infinity");
   return out;
 }
 
@@ -301,12 +782,62 @@ export function envIdle(db: Db, s: EnvSweep): int {
     let row = rows[i];
     if (!envStampLess(deadline, row.lastUsedAt)) {
       envDocker(["stop", envContainerName(row.threadId, row.name)]);
-      envSave(db, row.threadId, row.name, row.image, row.network != 0, "stopped", row.createdAt, row.lastUsedAt);
+      envUnforward(row.hostPort);
+      // The published port goes with the container. Leaving the old number in
+      // the row would point the gateway at whatever takes that port next.
+      envSave(db, {
+        threadId: row.threadId, name: row.name, image: row.image,
+        network: row.network != 0, status: "stopped", slug: row.slug,
+        hostPort: 0, servePort: row.servePort, serveCmd: row.serveCmd,
+        syncAt: row.syncAt,
+        createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
+      });
       stopped = stopped + 1;
     }
     i = i + 1;
   }
   return stopped;
+}
+
+/** Re-open the forwards for everything already serving.
+ *
+ *  `ssh -f` daemonizes but stays in this process's cgroup, so a restart of the
+ *  engine takes every forward with it and each live environment becomes a name
+ *  that answers nothing until something touches it. The port is asked for again
+ *  rather than taken from the row: a container that restarted while this
+ *  process was down is on a different one. */
+export function envReforward(db: Db, now: string): int {
+  let keys: DbOrder[] = [{ column: "id" }];
+  let listed = listOrdered(db, envMapping(), {
+    where: "status = " + placeholderAt(db, 1) + " AND serve_port > 0",
+    args: ["running"],
+    order: keys,
+  });
+  if (listed == "" || listed == "[]") {
+    return 0;
+  }
+  let rows = JSON.parse<EnvRow[]>(listed);
+  let carried: int = 0;
+  let i: int = 0;
+  while (i < rows.length) {
+    let row = rows[i];
+    let container = envContainerName(row.threadId, row.name);
+    let opened = envRunning(container) ? envPublished(container) : 0;
+    if (opened != 0 && envForward(opened, envForwardHost())) {
+      carried = carried + 1;
+    }
+    if (opened != row.hostPort) {
+      envSave(db, {
+        threadId: row.threadId, name: row.name, image: row.image,
+        network: row.network != 0, status: opened == 0 ? "stopped" : "running",
+        slug: row.slug, hostPort: opened, servePort: row.servePort,
+        serveCmd: row.serveCmd, syncAt: row.syncAt,
+        createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
+      });
+    }
+    i = i + 1;
+  }
+  return carried;
 }
 
 export function envForget(db: Db, threadId: string): void {
@@ -323,6 +854,37 @@ export function envForget(db: Db, threadId: string): void {
   deleteWhere(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId]);
 }
 
+/** Record how far a sync got, taking the stamp from the container's own clock.
+ *  Written after the copy, never before: a sync-in touches every file it writes
+ *  and the next sweep would read its own work back as changes. */
+/** Every environment that is running and publishes a port, whoever owns it.
+ *  The workspace sweep runs for the deployment, not for a reader. */
+export function envServing(db: Db): EnvRow[] {
+  let keys: DbOrder[] = [{ column: "id" }];
+  let listed = listOrdered(db, envMapping(), {
+    where: "status = " + placeholderAt(db, 1) + " AND serve_port > 0",
+    args: ["running"],
+    order: keys,
+  });
+  if (listed == "" || listed == "[]") {
+    let none: EnvRow[] = [];
+    return none;
+  }
+  return JSON.parse<EnvRow[]>(listed);
+}
+
+export function envMarkSynced(db: Db, row: EnvRow, stamp: string): void {
+  if (stamp == "") {
+    return;
+  }
+  envSave(db, {
+    threadId: row.threadId, name: row.name, image: row.image,
+    network: row.network != 0, status: row.status, slug: row.slug,
+    hostPort: row.hostPort, servePort: row.servePort, serveCmd: row.serveCmd,
+    syncAt: stamp, createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
+  });
+}
+
 export function envList(db: Db, threadId: string): EnvRow[] {
   let keys: DbOrder[] = [{ column: "name" }];
   let listed = listOrdered(db, envMapping(), {
@@ -337,7 +899,32 @@ export function envList(db: Db, threadId: string): EnvRow[] {
   return JSON.parse<EnvRow[]>(listed);
 }
 
-function envStampLess(a: string, b: string): bool {
+/** One of a conversation's environments by name, or an empty row.
+ *
+ *  What it serves is a property of the conversation, so whoever is asked to
+ *  show it again — a person, or the model through serve_env — reads the
+ *  command back rather than inventing a second one. */
+export function envNamed(db: Db, threadId: string, name: string): EnvRow {
+  let held = envList(db, threadId);
+  let i: int = 0;
+  while (i < held.length) {
+    if (held[i].name == name) {
+      return held[i];
+    }
+    i = i + 1;
+  }
+  let none: EnvRow = {
+    id: "", threadId: "", name: "", image: "", network: 0, status: "",
+    slug: "", hostPort: 0, servePort: 0, serveCmd: "", syncAt: "",
+    createdAt: "", lastUsedAt: "",
+  };
+  return none;
+}
+
+/** Millisecond stamps are decimal strings here, so they are compared by length
+ *  and then by digit. Exported because the grants beside this file expire on
+ *  the same clock and must not invent a second answer. */
+export function envStampLess(a: string, b: string): bool {
   let sa = envStripZeros(a);
   let sb = envStripZeros(b);
   if (sa == "" || sb == "") {
@@ -415,6 +1002,17 @@ export type EnvOwnedRow = {
   name: string,
   image: string,
   status: string,
+  /** Present only when this environment serves: the name it answers to, which
+   *  is what the console needs to offer a way in. */
+  slug: string,
+  serving: bool,
+  /** Whether it has a server at all, running or asleep.
+   *
+   *  Apart from `serving`, which is only true while a port is published: the
+   *  idle sweep stops a container after fifteen minutes, and a console that
+   *  reads the two as one thing takes the button away rather than offering to
+   *  wake it — the conversation still has its app. */
+  servable: bool,
   createdAt: string,
   lastUsedAt: string,
 };
@@ -422,7 +1020,7 @@ export type EnvOwnedRow = {
 export function envOwned(db: Db, owner: string): EnvOwnedRow[] {
   let out: EnvOwnedRow[] = [];
   if (!db.query(
-    "SELECT e.thread_id, t.title, e.name, e.image, e.status, e.created_at, e.last_used_at"
+    "SELECT e.thread_id, t.title, e.name, e.image, e.status, e.created_at, e.last_used_at, e.slug, e.host_port, e.serve_port"
       + " FROM environments e JOIN threads t ON t.id = e.thread_id"
       + " WHERE t.owner = " + placeholderAt(db, 1)
       + " ORDER BY e.last_used_at DESC, e.created_at DESC", [owner])) {
@@ -438,6 +1036,11 @@ export function envOwned(db: Db, owner: string): EnvOwnedRow[] {
       status: db.value(i, 4),
       createdAt: db.value(i, 5),
       lastUsedAt: db.value(i, 6),
+      slug: db.value(i, 7),
+      // A row can be running and serving nothing: publishing a port is a
+      // separate decision, and only a published one has a way in to offer.
+      serving: envDigits(db.value(i, 8)) != 0,
+      servable: envDigits(db.value(i, 9)) != 0,
     };
     out.push(row);
     i = i + 1;

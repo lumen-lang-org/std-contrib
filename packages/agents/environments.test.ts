@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, EnvOwnedRow } from "./environments.ts";
+import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, EnvOwnedRow } from "./environments.ts";
 
 let database: Db = sqlite();
 
@@ -79,7 +79,7 @@ function clearLog(): void {
 }
 
 function ensure(threadId: string, name: string, image: string, now: string): EnvEnsured {
-  let e: EnvEnsure = { threadId: threadId, name: name, image: image, network: false, now: now };
+  let e: EnvEnsure = { threadId: threadId, name: name, image: image, network: false, serve: false, command: "", start: true, now: now };
   return envEnsure(database, e);
 }
 
@@ -375,15 +375,18 @@ test("envOwned lists a person's containers with their conversations' titles, and
   fresh();
   withThreads();
   dockerFine();
-  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, now: "1000" });
+  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, now: "1000" });
   envEnsure(database, {
     threadId: "t2",
     name: "office",
     image: "img:2",
     network: true,
+    serve: false,
+    command: "",
+    start: true,
     now: "2000",
   });
-  envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, now: "3000" });
+  envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, now: "3000" });
   let mine = envOwned(database, "o1");
   expect(mine.length == 2);
   expect(mine[0].threadTitle == "Weather digest" || mine[1].threadTitle == "Weather digest");
@@ -399,12 +402,15 @@ test("envDrop takes the container and row, and the workspace volume with the las
   fresh();
   withThreads();
   dockerFine();
-  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, now: "1000" });
+  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, now: "1000" });
   envEnsure(database, {
     threadId: "t1",
     name: "office",
     image: "img:2",
     network: true,
+    serve: false,
+    command: "",
+    start: true,
     now: "1000",
   });
   fs.writeFileSync(FAKE_LOG, "");
@@ -426,4 +432,438 @@ test("envImagePresent asks the daemon and believes the answer", () => {
   expect(!envImagePresent(""));
   fakeDocker("#!/bin/sh\necho \"$@\" >> " + FAKE_LOG + "\nexit 1\n");
   expect(!envImagePresent("img:ghost"));
+});
+
+const GATEWAY_SIDE = "100.109.60.43";
+
+function dockerServing(atPort: string): void {
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
+    + "if [ \"$1\" = \"port\" ]; then echo \"" + GATEWAY_SIDE + ":" + atPort + "\"; fi\n"
+    + "exit 0\n");
+}
+
+function serve(threadId: string, now: string): EnvEnsured {
+  let e: EnvEnsure = {
+    threadId: threadId, name: "web", image: "node:22", network: true, serve: true, command: "", start: true, now: now,
+  };
+  return envEnsure(database, e);
+}
+
+function onlyEnv(threadId: string): EnvRow {
+  let rows = envList(database, threadId);
+  return rows[0];
+}
+
+test("a serving environment publishes one port, bound to the address the gateway reaches", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  let up = serve("t1", "1700000000000");
+
+  expect(up.ok);
+  expect(up.hostPort == 49154);
+  let made = argvLines()[0];
+  expect(made.indexOf("-p " + GATEWAY_SIDE + "::3000") > 0);
+  expect(made.indexOf("--network none") < 0);
+  expect(onlyEnv("t1").hostPort == 49154);
+  expect(onlyEnv("t1").servePort == 3000);
+  envBindOverride("");
+});
+
+test("0.0.0.0 is not a bind address, so a slip in the config exposes nothing", () => {
+  fresh();
+  envBindOverride("0.0.0.0");
+  dockerServing("49154");
+  let up = serve("t1", "1700000000000");
+
+  expect(!up.ok);
+  expect(up.fault.indexOf("0.0.0.0") > 0);
+  expect(envBindAddr() == "");
+  expect(argvLines().length == 0);
+  expect(envList(database, "t1").length == 0);
+  envBindOverride("");
+});
+
+test("an environment that serves a port is refused one with no network", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  let e: EnvEnsure = {
+    threadId: "t1", name: "web", image: "node:22", network: false, serve: true, command: "", start: true, now: "1700000000000",
+  };
+  let up = envEnsure(database, e);
+
+  expect(!up.ok);
+  expect(up.fault.indexOf("network") > 0);
+  expect(argvLines().length == 0);
+  envBindOverride("");
+});
+
+test("a warm environment's port is asked for again, because docker moves it on every start", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  expect(serve("t1", "1700000000000").hostPort == 49154);
+
+  dockerServing("49200");
+  let again = serve("t1", "1700000060000");
+
+  expect(again.hostPort == 49200);
+  expect(onlyEnv("t1").hostPort == 49200);
+  // Reused, not rebuilt: the port moved without the container doing so.
+  expect(!again.created);
+  envBindOverride("");
+});
+
+test("the idle sweep takes the published port with the container", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  expect(serve("t1", "1000000000000").hostPort == 49154);
+
+  expect(sweep("1700000000000", ENV_IDLE_MS) == 1);
+
+  let row = onlyEnv("t1");
+  expect(row.status == "stopped");
+  expect(row.hostPort == 0);
+  // The port inside is the deployment's contract and outlives the container.
+  expect(row.servePort == 3000);
+  envBindOverride("");
+});
+
+test("an environment built without a port is rebuilt to gain one, and keeps its workspace", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  let plain: EnvEnsure = {
+    threadId: "t1", name: "web", image: "node:22", network: true, serve: false, command: "", start: true, now: "1700000000000",
+  };
+  expect(envEnsure(database, plain).hostPort == 0);
+  expect(argvLines()[0].indexOf("-p ") < 0);
+  clearLog();
+
+  let up = serve("t1", "1700000060000");
+
+  expect(up.created);
+  expect(up.hostPort == 49154);
+  expect(argvLines()[0].indexOf("rm -f") == 0);
+  let remade = argvLines()[1];
+  expect(remade.indexOf("-p " + GATEWAY_SIDE + "::3000") > 0);
+  // The rebuild mounts the same volume, which is where the work lives.
+  expect(remade.indexOf("agents-ws-t1:/workspace") > 0);
+  envBindOverride("");
+});
+
+test("a script environment asks for no port and is given none", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  let up = ensure("t1", "", "python:3.12-slim", "1700000000000");
+
+  expect(up.hostPort == 0);
+  expect(argvLines()[0].indexOf("-p ") < 0);
+  expect(onlyEnv("t1").servePort == 0);
+  expect(envServePort() == 3000);
+  envBindOverride("");
+});
+
+test("an environment is given a name of its own: one DNS label, saying nothing about the thread", () => {
+  fresh();
+  dockerFine();
+  let made = ensure("t1", "main", "python:3.12-slim", "1700000000000");
+
+  expect(made.slug.length == 16);
+  expect(made.slug.indexOf("t1") < 0);
+  let i: int = 0;
+  while (i < made.slug.length) {
+    let c = made.slug.charCodeAt(i);
+    expect((c >= 48 && c <= 57) || (c >= 97 && c <= 102));
+    i = i + 1;
+  }
+  expect(onlyEnv("t1").slug == made.slug);
+
+  // A second environment is a second name, because it is a second origin.
+  let other = ensure("t1", "web", "node:22", "1700000001000");
+  expect(other.slug != made.slug);
+});
+
+test("a hostname finds its environment, and an unknown one finds nothing", () => {
+  fresh();
+  dockerFine();
+  let made = ensure("t1", "main", "python:3.12-slim", "1700000000000");
+
+  let found = envBySlug(database, made.slug);
+  expect(found.threadId == "t1");
+  expect(found.name == "main");
+
+  expect(envBySlug(database, "0123456789abcdef").threadId == "");
+  expect(envBySlug(database, "").threadId == "");
+});
+
+test("an environment made before names existed is given one when it is next used", () => {
+  fresh();
+  dockerFine();
+  expect(ensure("t1", "main", "python:3.12-slim", "1700000000000").slug.length == 16);
+  execute(database, "UPDATE environments SET slug = ''");
+  expect(onlyEnv("t1").slug == "");
+
+  let back = ensure("t1", "main", "python:3.12-slim", "1700000005000");
+
+  expect(back.slug.length == 16);
+  expect(onlyEnv("t1").slug == back.slug);
+});
+
+test("a published port is carried across by a forward that binds one address only", () => {
+  let args = envForwardArgs("172.17.0.1:32768", 32768, "joule-sandbox-env");
+
+  expect(args.indexOf("-N") >= 0);
+  expect(args.indexOf("ExitOnForwardFailure=yes") >= 0);
+  // The whole point: this address and no other. A forward bound to every
+  // interface would put the container on the internet past the gateway.
+  expect(args.indexOf("172.17.0.1:32768:127.0.0.1:32768") >= 0);
+  expect(args.indexOf("0.0.0.0:32768:127.0.0.1:32768") < 0);
+  expect(args[args.length - 1] == "joule-sandbox-env");
+});
+
+function servingWith(command: string, now: string): EnvEnsured {
+  let e: EnvEnsure = {
+    threadId: "t1", name: "web", image: "node:22", network: true, serve: true,
+    command: command, start: true, now: now,
+  };
+  return envEnsure(database, e);
+}
+
+test("what makes an environment serve is run when it is made, and kept", () => {
+  fresh();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  let up = servingWith("npm run dev", "1700000000000");
+
+  expect(up.ok);
+  let started = argvLines()[2];
+  expect(started.indexOf("exec -d agents-env-t1-web sh -lc npm run dev") == 0);
+  expect(onlyEnv("t1").serveCmd == "npm run dev");
+  envBindOverride("");
+});
+
+test("a container that comes back is served again, and one that never left is not", () => {
+  fresh();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(servingWith("npm run dev", "1700000000000").ok);
+  probeSays(true);
+  clearLog();
+
+  // Still running and answering: starting the command again would stack a
+  // second server on a port the first one holds.
+  expect(servingWith("", "1700000005000").ok);
+  let quiet = argvLines();
+  let i: int = 0;
+  while (i < quiet.length) {
+    expect(quiet[i].indexOf("exec -d") < 0);
+    i = i + 1;
+  }
+
+  // Stopped behind our back, so it is started and so is what it serves — with
+  // the command the row kept, which this call does not repeat.
+  dockerStoppedBehindOurBack();
+  probeSays(false);
+  clearLog();
+  let back = servingWith("", "1700000010000");
+  expect(back.warmed);
+  let again = argvLines();
+  let saw = false;
+  let j: int = 0;
+  while (j < again.length) {
+    if (again[j].indexOf("exec -d agents-env-t1-web sh -lc npm run dev") == 0) {
+      saw = true;
+    }
+    j = j + 1;
+  }
+  expect(saw);
+  expect(onlyEnv("t1").serveCmd == "npm run dev");
+  envProbeOverride("");
+  envBindOverride("");
+});
+
+test("an environment with nothing to serve is left idle", () => {
+  fresh();
+  dockerFine();
+  let up = ensure("t1", "main", "python:3.12-slim", "1700000000000");
+
+  expect(up.ok);
+  let asked = argvLines();
+  let i: int = 0;
+  while (i < asked.length) {
+    expect(asked[i].indexOf("exec -d") < 0);
+    i = i + 1;
+  }
+  expect(onlyEnv("t1").serveCmd == "");
+});
+
+const SS_LISTING = "State  Recv-Q Send-Q Local Address:Port  Peer Address:Port Process\n"
+  + "LISTEN 0      5      172.17.0.1:32769    0.0.0.0:*   users:((\"python3\",pid=1111,fd=3))\n"
+  + "LISTEN 0      128    172.17.0.1:32770    0.0.0.0:*   users:((\"ssh\",pid=3046088,fd=6))\n"
+  + "LISTEN 0      128    127.0.0.1:8100      0.0.0.0:*   users:((\"api\",pid=2222,fd=9))\n";
+
+test("the process holding a forward is found by its address and nothing else", () => {
+  expect(envForwardPid(SS_LISTING, "172.17.0.1:32770") == 3046088);
+  expect(envForwardPid(SS_LISTING, "172.17.0.1:32769") == 1111);
+  // A port nothing holds, and a near-miss that must not match: killing the
+  // wrong pid because a line was misread is the failure worth ruling out.
+  expect(envForwardPid(SS_LISTING, "172.17.0.1:32771") == 0);
+  expect(envForwardPid(SS_LISTING, "17.0.1:32770") == 0);
+  expect(envForwardPid("", "172.17.0.1:32770") == 0);
+});
+
+test("the list a person sees says which of their environments can be opened", () => {
+  fresh();
+  withThreads();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
+    network: true, serve: true, command: "", start: true, now: "1000" }).ok);
+  expect(ensure("t2", "main", "python:3.12-slim", "2000").ok);
+
+  let mine = envOwned(database, "o1");
+  expect(mine.length == 2);
+  let i: int = 0;
+  while (i < mine.length) {
+    if (mine[i].name == "web") {
+      expect(mine[i].serving);
+      expect(mine[i].servable);
+      expect(mine[i].slug.length == 16);
+    } else {
+      // Running, and serving nothing: there is no way in to offer.
+      expect(!mine[i].serving);
+      expect(!mine[i].servable);
+    }
+    i = i + 1;
+  }
+  envBindOverride("");
+});
+
+test("an environment asleep is still one with a server in it", () => {
+  fresh();
+  withThreads();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
+    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+
+  // Fifteen minutes later nobody has touched it, so the sweep stops it and the
+  // published port goes with the container.
+  let s: EnvSweep = { now: `${1000 + ENV_IDLE_MS + 1}`, idleMs: ENV_IDLE_MS };
+  expect(envIdle(database, s) == 1);
+
+  let mine = envOwned(database, "o1");
+  expect(mine.length == 1);
+  // Not serving — there is no port to reach. Still servable, which is what
+  // keeps the button on screen offering to wake it rather than vanishing.
+  expect(!mine[0].serving);
+  expect(mine[0].servable);
+  envBindOverride("");
+});
+
+test("a restart carries the live environments back, and leaves the rest alone", () => {
+  fresh();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
+    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+  // A script sandbox: running, serving nothing, and no forward to carry.
+  expect(ensure("t2", "main", "python:3.12-slim", "2000").ok);
+  clearLog();
+
+  // The container moved while this process was down.
+  dockerServing("49200");
+  expect(envReforward(database, "3000") >= 0);
+
+  let web = envList(database, "t1")[0];
+  expect(web.hostPort == 49200);
+  expect(web.serveCmd == "npm run dev");
+  // Asked docker where it is now rather than trusting the row.
+  let asked = argvLines();
+  let sawPort = false;
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i].indexOf("port agents-env-t1-web") == 0) { sawPort = true; }
+    // Nothing is done about the one that serves nothing.
+    expect(asked[i].indexOf("agents-env-t2-main") < 0);
+    i = i + 1;
+  }
+  expect(sawPort);
+  envBindOverride("");
+});
+
+/** The probe is a curl from this host now, so the tests fake that rather than
+ *  docker: answering and not-answering are the two states worth pinning. */
+function probeSays(answering: bool): void {
+  let bin = FAKE_DIR + "/probe";
+  fs.writeFileSync(bin, "#!/bin/sh\nexit " + (answering ? "0" : "1") + "\n");
+  fs.chmodSync(bin, 493);
+  envProbeOverride(bin);
+}
+
+function dockerRunningButEmpty(atPort: string): void {
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
+    + "if [ \"$1\" = \"port\" ]; then echo \"" + GATEWAY_SIDE + ":" + atPort + "\"; fi\n"
+    // The probe: `exec <container> sh -c ...`, which is the one exec that is
+    // not `exec -d`. Nothing is listening, so it fails.
+    + "if [ \"$1\" = \"exec\" ] && [ \"$2\" != \"-d\" ]; then exit 1; fi\n"
+    + "exit 0\n");
+}
+
+test("a container running with nothing inside is served again, whatever its state says", () => {
+  fresh();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(servingWith("npm run dev", "1700000000000").ok);
+
+  // docker restart: still running, and empty. The old created-or-warmed test
+  // saw a healthy container and started nothing.
+  dockerServing("49154");
+  probeSays(false);
+  clearLog();
+  let back = servingWith("", "1700000005000");
+
+  expect(back.ok);
+  expect(!back.created);
+  expect(!back.warmed);
+  let started = false;
+  let asked = argvLines();
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i].indexOf("exec -d agents-env-t1-web sh -lc npm run dev") == 0) {
+      started = true;
+    }
+    i = i + 1;
+  }
+  expect(started);
+});
+
+test("a container that is answering is left to get on with it", () => {
+  fresh();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(servingWith("npm run dev", "1700000000000").ok);
+  probeSays(true);
+  clearLog();
+
+  expect(servingWith("", "1700000005000").ok);
+
+  let asked = argvLines();
+  let i: int = 0;
+  while (i < asked.length) {
+    expect(asked[i].indexOf("exec -d") < 0);
+    i = i + 1;
+  }
+  envProbeOverride("");
+  envBindOverride("");
 });
