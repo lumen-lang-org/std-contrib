@@ -214,10 +214,13 @@ test("forgetting a thread removes its rows and its containers, and only its own"
   envForget(database, "t1");
 
   let asked = argvLines();
-  expect(asked.length == 3);
+  // Each container, then the network it had to itself, then the shared volume.
+  expect(asked.length == 5);
   expect(asked[0] == "rm -f agents-env-t1-main");
-  expect(asked[1] == "rm -f agents-env-t1-web");
-  expect(asked[2] == "volume rm -f agents-ws-t1");
+  expect(asked[1] == "network rm agents-net-t1-main");
+  expect(asked[2] == "rm -f agents-env-t1-web");
+  expect(asked[3] == "network rm agents-net-t1-web");
+  expect(asked[4] == "volume rm -f agents-ws-t1");
 
   expect(envList(database, "t1").length == 0);
   expect(envList(database, "t2").length == 1);
@@ -465,11 +468,62 @@ test("a serving environment publishes one port, bound to the address the gateway
 
   expect(up.ok);
   expect(up.hostPort == 49154);
-  let made = argvLines()[0];
+  let lines = argvLines();
+  // The network is made before the container that joins it.
+  expect(lines[0] == "network create agents-net-t1-web");
+  let made = lines[1];
   expect(made.indexOf("-p " + GATEWAY_SIDE + "::3000") > 0);
+  // Its own network, never the default bridge: everything on that bridge can
+  // reach everything else on it, which is how one conversation's container
+  // came to be able to fetch another conversation's page.
+  expect(made.indexOf("--network agents-net-t1-web") > 0);
   expect(made.indexOf("--network none") < 0);
+  expect(made.indexOf("--network bridge") < 0);
   expect(onlyEnv("t1").hostPort == 49154);
   expect(onlyEnv("t1").servePort == 3000);
+  envBindOverride("");
+});
+
+test("an environment cannot reach another, because it is alone on its network", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  expect(serve("t1", "1700000000000").ok);
+  expect(serve("t2", "1700000000001").ok);
+
+  let asked = argvLines();
+  let first = "";
+  let second = "";
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i].startsWith("run -d --name agents-env-t1-web")) { first = asked[i]; }
+    if (asked[i].startsWith("run -d --name agents-env-t2-web")) { second = asked[i]; }
+    i = i + 1;
+  }
+  expect(first != "" && second != "");
+  expect(first.indexOf("--network agents-net-t1-web") > 0);
+  expect(second.indexOf("--network agents-net-t2-web") > 0);
+  envBindOverride("");
+});
+
+test("dropping an environment takes its network with it", () => {
+  fresh();
+  envBindOverride(GATEWAY_SIDE);
+  dockerServing("49154");
+  expect(serve("t1", "1700000000000").ok);
+  clearLog();
+  expect(envDrop(database, "t1", "web"));
+
+  let asked = argvLines();
+  // A network per environment is a network leaked per environment otherwise,
+  // and docker's address pool is not endless.
+  let removed = false;
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i] == "network rm agents-net-t1-web") { removed = true; }
+    i = i + 1;
+  }
+  expect(removed);
   envBindOverride("");
 });
 
@@ -542,7 +596,8 @@ test("an environment built without a port is rebuilt to gain one, and keeps its 
     threadId: "t1", name: "web", image: "node:22", network: true, serve: false, command: "", start: true, now: "1700000000000",
   };
   expect(envEnsure(database, plain).hostPort == 0);
-  expect(argvLines()[0].indexOf("-p ") < 0);
+  // [0] is the network, [1] the container.
+  expect(argvLines()[1].indexOf("-p ") < 0);
   clearLog();
 
   let up = serve("t1", "1700000060000");
@@ -550,7 +605,9 @@ test("an environment built without a port is rebuilt to gain one, and keeps its 
   expect(up.created);
   expect(up.hostPort == 49154);
   expect(argvLines()[0].indexOf("rm -f") == 0);
-  let remade = argvLines()[1];
+  // The network is created again — idempotently, since the rebuild keeps it.
+  expect(argvLines()[1] == "network create agents-net-t1-web");
+  let remade = argvLines()[2];
   expect(remade.indexOf("-p " + GATEWAY_SIDE + "::3000") > 0);
   // The rebuild mounts the same volume, which is where the work lives.
   expect(remade.indexOf("agents-ws-t1:/workspace") > 0);
@@ -643,7 +700,8 @@ test("what makes an environment serve is run when it is made, and kept", () => {
   let up = servingWith("npm run dev", "1700000000000");
 
   expect(up.ok);
-  let started = argvLines()[2];
+  // network create, run, the workspace chown, then the serve command.
+  let started = argvLines()[3];
   expect(started.indexOf("exec -d agents-env-t1-web sh -lc npm run dev") == 0);
   expect(onlyEnv("t1").serveCmd == "npm run dev");
   envBindOverride("");

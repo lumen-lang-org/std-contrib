@@ -194,6 +194,10 @@ function envSafeBytes(text: string): string {
 type EnvRun = {
   container: string,
   threadId: string,
+  /** Carried alongside the container name because the network is named from
+   *  the same pair, and deriving one from the other would be a second place
+   *  the naming could drift. */
+  name: string,
   image: string,
   network: bool,
   serve: bool,
@@ -274,7 +278,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       return envRefused("an environment needs an image to build its container from");
     }
     let make: EnvRun = {
-      container: container, threadId: e.threadId, image: e.image,
+      container: container, threadId: e.threadId, name: name, image: e.image,
       network: e.network, serve: e.serve,
     };
     let made = envMake(make);
@@ -312,7 +316,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   let row = JSON.parse<EnvRow>(held);
   let serves = e.serve || row.servePort != 0;
   let make: EnvRun = {
-    container: container, threadId: e.threadId, image: row.image,
+    container: container, threadId: e.threadId, name: row.name, image: row.image,
     network: row.network != 0 || serves, serve: serves,
   };
   let created = false;
@@ -716,7 +720,43 @@ function envDigits(text: string): int {
   return out;
 }
 
+/** The network one environment gets to itself.
+ *
+ *  Named after the container, because that name is already unique per
+ *  conversation and per environment, and because a slug is not decided until
+ *  after the container exists. */
+export function envNetworkName(threadId: string, name: string): string {
+  return "agents-net-" + envSafeBytes(threadId) + "-" + envSafeBytes(name);
+}
+
+/** One bridge per environment, so no environment can reach another.
+ *
+ *  Deliberately NOT `--internal`. That was the first design, and it fails
+ *  twice: docker publishes no port from an internal network, so the gateway
+ *  cannot reach the dev server at all, and the container has no route out, so
+ *  `npm install` cannot run. Both were measured before this was written.
+ *
+ *  A plain user-defined bridge gives what is actually wanted — docker keeps
+ *  traffic between two of them apart, which is the same mechanism that already
+ *  keeps Langfuse's compose network out of reach — while publishing and
+ *  outbound both keep working. What it does not do is hide the host; that is
+ *  the firewall's job, not docker's. */
+function envNetworkUp(threadId: string, name: string): string {
+  let network = envNetworkName(threadId, name);
+  // Idempotent: `create` on an existing network fails harmlessly, and asking
+  // first would cost a round trip on every ensure.
+  envDocker(["network", "create", network]);
+  return network;
+}
+
+function envNetworkDown(threadId: string, name: string): void {
+  envDocker(["network", "rm", envNetworkName(threadId, name)]);
+}
+
 function envMake(r: EnvRun): EnvDockerReply {
+  if (r.network || r.serve) {
+    envNetworkUp(r.threadId, r.name);
+  }
   let made = envDocker(envRunArgs(r));
   if (made.status == 0) {
     envDocker(["exec", r.container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
@@ -746,10 +786,11 @@ function envRunArgs(r: EnvRun): string[] {
     out.push("-p");
     out.push(envBindAddr() + "::" + `${envServePort()}`);
   }
-  if (!r.network && !r.serve) {
-    out.push("--network");
-    out.push("none");
-  }
+  // Its own network, or none at all. Never the default bridge: everything on
+  // that bridge can reach everything else on it, which is how one
+  // conversation's container came to be able to fetch another's page.
+  out.push("--network");
+  out.push(r.network || r.serve ? envNetworkName(r.threadId, r.name) : "none");
   out.push("--entrypoint"); out.push("sleep");
   out.push(r.image); out.push("infinity");
   return out;
@@ -848,6 +889,7 @@ export function envForget(db: Db, threadId: string): void {
   let i: int = 0;
   while (i < rows.length) {
     envDocker(["rm", "-f", envContainerName(rows[i].threadId, rows[i].name)]);
+    envNetworkDown(rows[i].threadId, rows[i].name);
     i = i + 1;
   }
   envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
@@ -1054,6 +1096,10 @@ export function envDrop(db: Db, threadId: string, name: string): bool {
     return false;
   }
   envDocker(["rm", "-f", envContainerName(threadId, name)]);
+  // The network goes with the container that was the only thing on it. A
+  // network per environment means a leaked network per environment otherwise,
+  // and docker's address pool is not endless.
+  envNetworkDown(threadId, name);
   deleteWhere(db, envMapping(), "id = " + placeholderAt(db, 1), [threadId + ":" + name]);
   if (envList(db, threadId).length == 0) {
     envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
