@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
+import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, outcomeAsk, outcomeFrom, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -37,6 +37,20 @@ function withText(n: WfNode, said: string): WfNode {
     url: n.url, method: n.method, body: n.body,
     query: n.query, test: n.test, needle: n.needle,
     subject: n.subject, schedule: n.schedule, source: n.source,
+  };
+  return out;
+}
+
+// The same node carrying outcomes. Whole again, for the same reason.
+function withCases(n: WfNode, said: string): WfNode {
+  let out: WfNode = {
+    id: n.id, type: n.type, name: n.name, x: n.x, y: n.y,
+    instruction: n.instruction, agentId: n.agentId,
+    serverId: n.serverId, tool: n.tool, args: n.args,
+    url: n.url, method: n.method, body: n.body,
+    query: n.query, test: n.test, needle: n.needle,
+    subject: n.subject, schedule: n.schedule, source: n.source,
+    cases: said,
   };
   return out;
 }
@@ -223,6 +237,48 @@ test("a branch nothing was drawn for ends the walk with what it has", () => {
   expect(done.ok);
   expect(done.answer == "s(go)");
   expect(done.steps.length == 2);
+});
+
+test("a node with outcomes asks for one, and a node without asks for nothing", () => {
+  let plain = node("a", "AGENT");
+  expect(outcomeAsk(plain) == "");
+
+  let branching = withCases(node("b", "AGENT"), "urgent\nroutine");
+  let asked = outcomeAsk(branching);
+  expect(asked.indexOf("OUTCOME:") > 0);
+  expect(asked.indexOf("urgent | routine") > 0);
+});
+
+test("an outcome is read off the last line, and the answer keeps the rest", () => {
+  let said = outcomeFrom("The build is broken and the cause is a missing lockfile.\nOUTCOME: urgent");
+  expect(said.picked == "urgent");
+  expect(said.text == "The build is broken and the cause is a missing lockfile.");
+
+  // What models actually send: the brackets from the instruction, a trailing
+  // full stop, a blank line after.
+  expect(outcomeFrom("done\nOUTCOME: <routine>").picked == "routine");
+  expect(outcomeFrom("done\nOUTCOME: `urgent`.").picked == "urgent");
+  expect(outcomeFrom("done\nOUTCOME: urgent\n\n").picked == "urgent");
+  expect(outcomeFrom("done\noutcome: urgent").picked == "urgent");
+
+  // The word in passing is not a decision: only the last line counts.
+  let prose = outcomeFrom("The OUTCOME: label is what it prints.\nNothing else.");
+  expect(prose.picked == "");
+  expect(prose.text.indexOf("Nothing else.") > 0);
+
+  // An answer that names nothing keeps every word of itself.
+  let none = outcomeFrom("just an answer");
+  expect(none.picked == "" && none.text == "just an answer");
+});
+
+test("an outcome routes by the rule a switch already uses", () => {
+  let n = withCases(node("b", "AGENT"), "urgent\nroutine");
+  // Case and space are forgiven, because a model will not match exactly.
+  expect(switchBranch(n, outcomeFrom("x\nOUTCOME:  Urgent ").picked) == "urgent");
+  // And anything else — a made-up outcome, or none at all — is else, so a
+  // model ignoring the instruction routes somewhere rather than nowhere.
+  expect(switchBranch(n, outcomeFrom("x\nOUTCOME: whenever").picked) == "else");
+  expect(switchBranch(n, outcomeFrom("no marker here").picked) == "else");
 });
 
 test("templates fill from the walk, and an unknown token stays visible", () => {

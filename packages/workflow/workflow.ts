@@ -337,6 +337,72 @@ export function switchBranch(node: WfNode, value: string): string {
   return SWITCH_ELSE;
 }
 
+export const OUTCOME_MARK: string = "OUTCOME:";
+
+/** What a step is asked to append when its node carries outcomes, and "" when
+ *  it carries none.
+ *
+ *  A node with outcomes is a branch point, and this is how it says which way
+ *  it went. The answer itself still flows on untouched — the outcome is
+ *  chosen alongside it, not parsed out of the prose. That is the thing a
+ *  Switch after an agent got wrong: it made the answer double as a routing
+ *  token, which is why switch subjects end up begging a model to reply in one
+ *  word. */
+export function outcomeAsk(node: WfNode): string {
+  let all = casesOf(node);
+  if (all.length == 0) {
+    return "";
+  }
+  return "\n\nWhen you have answered, end with one final line naming which of"
+    + " these the answer is, and nothing else on that line:\n"
+    + OUTCOME_MARK + " <" + all.join(" | ") + ">";
+}
+
+export type WfOutcome = {
+  /** The answer with the outcome line taken off. */
+  text: string,
+  /** What it named, before it is matched against the cases. "" if it named
+   *  nothing, which is the model ignoring the instruction and lands on else. */
+  picked: string,
+};
+
+/** The outcome read off the end of an answer, and the answer without it.
+ *
+ *  Only the last non-empty line is considered, so an answer that discusses
+ *  the word OUTCOME in passing does not accidentally route on it. */
+export function outcomeFrom(said: string): WfOutcome {
+  let lines = said.split("\n");
+  let last: int = lines.length - 1;
+  while (last >= 0 && lines[last].trim() == "") {
+    last = last - 1;
+  }
+  if (last < 0) {
+    let none: WfOutcome = { text: said, picked: "" };
+    return none;
+  }
+  let line = lines[last].trim();
+  if (!line.toUpperCase().startsWith(OUTCOME_MARK)) {
+    let plain: WfOutcome = { text: said, picked: "" };
+    return plain;
+  }
+  let picked = line.slice(OUTCOME_MARK.length).trim();
+  // Models like to wrap the value in the brackets the instruction showed.
+  while (picked.startsWith("<") || picked.startsWith("`") || picked.startsWith("\"")) {
+    picked = picked.slice(1);
+  }
+  while (picked.endsWith(">") || picked.endsWith("`") || picked.endsWith("\"") || picked.endsWith(".")) {
+    picked = picked.slice(0, picked.length - 1);
+  }
+  let kept: string[] = [];
+  let i: int = 0;
+  while (i < last) {
+    kept.push(lines[i]);
+    i = i + 1;
+  }
+  let out: WfOutcome = { text: kept.join("\n").trim(), picked: picked.trim() };
+  return out;
+}
+
 export function knownType(kind: string): bool {
   let i: int = 0;
   while (i < KNOWN.length) {
@@ -1133,8 +1199,16 @@ function walkOn(graph: WfGraph, input: string, first: WfNode, ctx0: WalkCtx, ste
     }
     let to = nextId(graph, at.id, did.branch);
     if (to == "") {
-      // A branch nothing was drawn for, or a node somebody left dangling:
-      // the walk is over and what it has is the answer.
+      // A branch nothing was drawn for, or a node somebody left dangling: the
+      // walk is over and what it has is the answer.
+      //
+      // This looked like a trap worth closing while outcomes were being added
+      // — a node that gains outcomes keeps an edge labelled "", matches no
+      // outcome, and ends the run early looking successful. It is not: a
+      // CONDITION with only "yes" wired is how a graph says "if no, we are
+      // done", and it is tested. The fix for the outcome case belongs in the
+      // editor, which knows an edge is about to be orphaned and can relabel
+      // it, rather than here, where it would break drawings that are correct.
       let done: Walked = { ok: true, answer: did.output, error: "", steps: steps };
       return done;
     }

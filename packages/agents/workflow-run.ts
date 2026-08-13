@@ -1,6 +1,6 @@
 import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
-import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, emptyNode, fill, headerLines, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
+import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, casesOf, emptyNode, fill, headerLines, outcomeAsk, outcomeFrom, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
@@ -86,6 +86,21 @@ function decide(node: WfNode, ctx: WalkCtx): StepResult {
 function route(node: WfNode, ctx: WalkCtx): StepResult {
   let subject = node.subject == "" ? ctx.prev : fill(node.subject, ctx);
   return stepBranch(ctx.prev, switchBranch(node, subject));
+}
+
+/** What a step answers when its node carries outcomes.
+ *
+ *  The text flows on as it always did; the branch is the outcome named on the
+ *  last line, matched by the same rule a switch uses — so an outcome nobody
+ *  drew an edge for, or none at all, lands on else rather than stopping the
+ *  walk. A node with no outcomes is untouched and answers exactly as before.
+ */
+function outcomeStep(node: WfNode, said: StepResult): StepResult {
+  if (!said.ok || casesOf(node).length == 0) {
+    return said;
+  }
+  let read = outcomeFrom(said.output);
+  return stepBranch(read.text, switchBranch(node, read.picked));
 }
 
 function askModel(db: Db, agent: AgentRow, master: string, prompt: string): StepResult {
@@ -333,7 +348,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
     }
     if (node.type == "LLM") {
       let said = fill(node.instruction, ctx);
-      return withInput(askModel(db, agent, ask.master, said), said);
+      return withInput(outcomeStep(node, askModel(db, agent, ask.master, said + outcomeAsk(node))), said);
     }
     if (node.type == "WEB_SEARCH") {
       let asked = fill(node.query, ctx);
@@ -399,7 +414,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       return withInput(stepOk(ctx.prev), saying);
     }
     if (node.type == "AGENT") {
-      let said = fill(node.instruction, ctx);
+      let said = fill(node.instruction, ctx) + outcomeAsk(node);
       if (node.agentId != "" && node.agentId != row.agentId) {
         let alone: Turn[] = [];
         let noChunks: string[] = [];
@@ -419,7 +434,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
         if (!asked.ok) {
           return inThread(withInput(stepFailed(asked.error), said), threadId);
         }
-        return inThread(withInput(stepOk(asked.text), said), threadId);
+        return inThread(withInput(outcomeStep(node, stepOk(asked.text)), said), threadId);
       }
       let turn: ThreadAsk = {
         userText: said,
@@ -433,7 +448,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       if (!answered.run.ok) {
         return inThread(withInput(stepFailed(answered.run.error), said), threadId);
       }
-      return inThread(withInput(stepOk(answered.text), said), threadId);
+      return inThread(withInput(outcomeStep(node, stepOk(answered.text)), said), threadId);
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
   };
