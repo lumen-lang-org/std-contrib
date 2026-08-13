@@ -63,7 +63,14 @@ import { runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } 
 import { workspacePlan } from "./workspace.ts";
 import { TURN_SEQ_NONE, artifactPlan } from "./artifacts.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
-import { EnvSweep, ENV_IDLE_MS, envPlan, envIdle } from "./environments.ts";
+import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envMarkSynced, envReforward, envServing } from "./environments.ts";
+import { envGrantsPlan, envGrantSweep } from "./env-grants.ts";
+import { envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
+
+// How often a serving environment's workspace is read back. Its own cadence,
+// far shorter than the idle sweep: a person editing a file wants it recorded in
+// seconds, not at the end of a session.
+const WORKSPACE_SWEEP_MS: int = 15000;
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { indexingPlan } from "./indexing.ts";
 import { knowledgePlan } from "./knowledge.ts";
@@ -644,7 +651,55 @@ type ReplayableThreadView = {
   createdAt: string,
   title: string,
   replayable: bool,
+  /** What the conversation opens with, and whether taking it gives you
+   *  something running. A starting point is chosen from a card, and a card
+   *  with only a title says nothing about what is behind it. */
+  blurb: string,
+  runs: bool,
 };
+
+/** The line a starting point is chosen by: what was asked for, in the words of
+ *  whoever prepared it. The request rather than the reply — a reply describes
+ *  what was built, and by then the reader has already had to decide. */
+function threadBlurb(db: Db, threadId: string): string {
+  let said = threadMessageRows(db, threadId);
+  let blurb = "";
+  let i: int = 0;
+  while (i < said.length) {
+    if (said[i].role == "user" && said[i].text.trim() != "") {
+      blurb = said[i].text;
+      break;
+    }
+    if (blurb == "" && said[i].text.trim() != "") {
+      blurb = said[i].text;
+    }
+    i = i + 1;
+  }
+  blurb = blurb.split("\n").join(" ").trim();
+  if (blurb.length <= 180) {
+    return blurb;
+  }
+  // Cut at a space, so the card does not end mid-word.
+  let cut = blurb.slice(0, 180);
+  let back = cut.lastIndexOf(" ");
+  if (back > 120) {
+    cut = cut.slice(0, back);
+  }
+  return cut + "…";
+}
+
+/** Whether taking this conversation gives you something running. */
+function threadServes(db: Db, threadId: string): bool {
+  let held = envList(db, threadId);
+  let i: int = 0;
+  while (i < held.length) {
+    if (held[i].serveCmd != "" && held[i].servePort != 0) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
 
 type ReplayableSetView = {
   id: string,
@@ -654,6 +709,10 @@ type ReplayableSetView = {
 type RemixedView = {
   id: string,
   files: int,
+  turns: int,
+  /** Whether this fork came up with a server of its own, so the console knows
+   *  to open the panel on it rather than leaving the reader to find it. */
+  serves: bool,
 };
 
 type ThreadRowView = {
@@ -789,6 +848,8 @@ class ThreadApi {
       let one: ReplayableThreadView = {
         id: rows[i].id, agentId: rows[i].agentId, createdAt: rows[i].createdAt,
         title: rows[i].title, replayable: true,
+        blurb: threadBlurb(this.db, rows[i].id),
+        runs: threadServes(this.db, rows[i].id),
       };
       out.push(one);
       i = i + 1;
@@ -820,7 +881,36 @@ class ThreadApi {
     if (made.threadId == "") {
       return NotFound(made.fault);
     }
-    let v: RemixedView = { id: made.threadId, files: made.files };
+    // A fork carries the environment as well as the files: a starting point
+    // that came up running should come up running for whoever takes it.
+    let from = envList(this.db, id);
+    let serves = false;
+    let f: int = 0;
+    while (f < from.length) {
+      let was = from[f];
+      f = f + 1;
+      if (was.servePort == 0 || was.serveCmd == "") {
+        continue;
+      }
+      let up = envEnsure(this.db, {
+        threadId: made.threadId, name: was.name, image: was.image,
+        network: true, serve: true, command: was.serveCmd, start: false,
+        now: stamp(),
+      });
+      if (!up.ok) {
+        continue;
+      }
+      serves = true;
+      // The container is made empty and the files are the fork's own, so they
+      // go in here. Left out, the serve that follows finds nothing to serve:
+      // the route that usually materialises does it only for a container it
+      // created itself, and this one was already there by then.
+      if (up.created) {
+        envMaterialise(this.db, up.slug, "/tmp/agents-env-" + up.slug);
+      }
+    }
+    let v: RemixedView = { id: made.threadId, files: made.files,
+      turns: made.turns, serves: serves };
     return CreatedJson(v);
   }
 
@@ -1268,12 +1358,14 @@ function stepViews(live: LiveStep[]): StepView[] {
 }
 
 
-function digestLoop(master: string, everyMs: int): int {
+function digestLoop(master: string, everyMs: int, lane: int, lanes: int): int {
   try {
     let db = openDatabase();
     while (true) {
       let feeds = allFeeds(db);
-      let i: int = 0;
+      // This lane's stride through the list. Lane 0 of 1 is every feed, which
+      // is the single-threaded pass this replaced.
+      let i: int = lane;
       while (i < feeds.length) {
         if (feeds[i].enabled) {
           let fault = refreshFeed(db, feeds[i], master);
@@ -1281,7 +1373,7 @@ function digestLoop(master: string, everyMs: int): int {
             console.error("discover: " + feeds[i].id + ": " + fault);
           }
         }
-        i = i + 1;
+        i = i + lanes;
       }
       process.sleep(everyMs);
     }
@@ -1289,6 +1381,24 @@ function digestLoop(master: string, everyMs: int): int {
     console.error("discover: the digest pass stopped");
   }
   return 0;
+}
+
+/* How many feeds to digest at once.
+ *
+ * One unless an operator says otherwise, so a deployment that sets nothing runs
+ * the pass it ran before. Worth raising only where the model behind the digest
+ * batches - a hosted API or vLLM - and worth leaving alone where it does not,
+ * because lanes against a one-at-a-time server only move the queue. */
+function discoverLanes(): int {
+  let said = process.env["AGENTS_DISCOVER_LANES"] ?? "";
+  if (said == "") {
+    return 1;
+  }
+  let n = parseInt(said, 10) ?? 1;
+  if (n < 1) {
+    return 1;
+  }
+  return n > 8 ? 8 : n;
 }
 
 function discoverEveryMs(): int {
@@ -1307,6 +1417,16 @@ function sweepLoop(idleMs: int): int {
   try {
     let db = openDatabase();
     let every = idleMs > 0 ? idleMs : ENV_IDLE_MS;
+    // Before the first sleep, because every forward died with the last process.
+    try {
+      let carried = envReforward(db, `${Date.now()}`);
+      if (carried > 0) {
+        console.log(`carried ${carried} serving environment(s) back`);
+      }
+    }
+    catch (e) {
+      console.error("environment forwards: " + e.message);
+    }
     while (true) {
       if (idleMs > 0) {
         try {
@@ -1322,7 +1442,20 @@ function sweepLoop(idleMs: int): int {
       catch (e) {
         console.error("environment sweep: " + e.message);
       }
-      process.sleep(every);
+      // Its own cadence, and much shorter: the idle sweep decides what to stop
+      // every fifteen minutes, while a person editing a file wants it recorded
+      // in seconds rather than at the end of a session.
+      let waited: int = 0;
+      while (waited < every) {
+        try {
+          sweepWorkspaces(db);
+        }
+        catch (e) {
+          console.error("workspace sweep: " + e.message);
+        }
+        process.sleep(WORKSPACE_SWEEP_MS);
+        waited = waited + WORKSPACE_SWEEP_MS;
+      }
     }
   } catch (e) {
     console.error("thread sweep: no connection of its own — " + e.message);
@@ -1330,11 +1463,46 @@ function sweepLoop(idleMs: int): int {
   return 0;
 }
 
+/** Everything a serving environment has written since the last sweep, brought
+ *  back as artifact versions. The stamp is taken before the find and recorded
+ *  after, so a file written while the sweep runs is caught by the next one
+ *  rather than missed by both. */
+function sweepWorkspaces(db: Db): void {
+  let rows = envServing(db);
+  if (rows.length == 0) {
+    return;
+  }
+  let i: int = 0;
+  while (i < rows.length) {
+    let row = rows[i];
+    i = i + 1;
+    let stamp = envSyncClock(row);
+    if (stamp == "") {
+      // Silent skips are how the last two bugs hid. If the container will not
+      // say what time it is, the sync cannot run and somebody should know.
+      console.error(`workspace ${row.threadId}:${row.name} — its clock did not answer`);
+      continue;
+    }
+    let carried = envSyncOut(db, row, row.syncAt, `${Date.now()}`);
+    envMarkSynced(db, row, stamp);
+    if (carried.changed.length > 0) {
+      console.log(`brought ${carried.changed.length} file(s) back from ${row.threadId}:${row.name}`);
+    }
+  }
+}
+
 function sweepIdleEnvironments(db: Db): void {
-  let s: EnvSweep = { now: `${Date.now()}`, idleMs: ENV_IDLE_MS };
+  let now = `${Date.now()}`;
+  let s: EnvSweep = { now: now, idleMs: ENV_IDLE_MS };
   let stopped = envIdle(db, s);
   if (stopped > 0) {
     console.log(`stopped ${stopped} idle environment(s)`);
+  }
+  // A grant lives a minute; its row should not outlive the day, and this is
+  // the sweep that is already running.
+  let lapsed = envGrantSweep(db, now);
+  if (lapsed > 0) {
+    console.log(`cleared ${lapsed} lapsed environment grant(s)`);
   }
 }
 
@@ -1357,7 +1525,13 @@ function openDatabase(): Db {
   return db;
 }
 
-export function migrationFault(db: Db): string {
+/** Every plan this deployment runs, composed into one.
+ *
+ *  Its own function so a test can ask how far the schema should get without
+ *  holding a copy of the number: migrate refuses a plan that is missing steps
+ *  the history holds, so there is exactly one of these and nobody may pass a
+ *  subset. */
+export function wholePlan(db: Db): Migration[] {
   let plan = schemaPlan(db);
   let extra = runLogPlan(db);
   let e: int = 0;
@@ -1437,6 +1611,12 @@ export function migrationFault(db: Db): string {
     plan.push(envs[ev]);
     ev = ev + 1;
   }
+  let grants = envGrantsPlan(db);
+  let gr: int = 0;
+  while (gr < grants.length) {
+    plan.push(grants[gr]);
+    gr = gr + 1;
+  }
   let scheduled = tasksPlan(db);
   let st: int = 0;
   while (st < scheduled.length) {
@@ -1503,6 +1683,11 @@ export function migrationFault(db: Db): string {
     plan.push(keys[kp]);
     kp = kp + 1;
   }
+  return plan;
+}
+
+export function migrationFault(db: Db): string {
+  let plan = wholePlan(db);
   let ran = migrate(db, plan);
   if (ran.ok) {
     applySandboxLimits(db);
@@ -1752,7 +1937,15 @@ function main(): void {
   Worker.run(() => sweepLoop(sweepIdle));
   let discoverEvery = discoverEveryMs();
   if (discoverEvery > 0) {
-    Worker.run(() => digestLoop(master, discoverEvery));
+    let lanes = discoverLanes();
+    let started: int = 0;
+    while (started < lanes) {
+      // Bound per iteration: the lambda outlives this loop and must not read a
+      // counter that has moved on by the time the worker runs.
+      let lane = started;
+      Worker.run(() => digestLoop(master, discoverEvery, lane, lanes));
+      started = started + 1;
+    }
   }
 
   let mounts: Mount[] = [

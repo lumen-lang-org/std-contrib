@@ -272,14 +272,14 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  expect(r.applied == 62);
+  expect(r.applied == 65);
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
 });
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 62);
+  expect(migrate(database, schemaPlan(database)).applied == 65);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 

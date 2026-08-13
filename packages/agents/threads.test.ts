@@ -1,5 +1,5 @@
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, nameThread, titlingConfigId, titleThread } from "./threads.ts";
+import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, threadMessageRows, nameThread, titlingConfigId, titleThread } from "./threads.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
 import { projectsPlan } from "./projects.ts";
 import { artifactPlan, putArtifact, listArtifacts, TURN_SEQ_NONE } from "./artifacts.ts";
@@ -452,6 +452,7 @@ function ask(threadId: string, choiceId: string): ThreadReply {
     tracer: noTracer(),
     pick: said,
     think: false,
+    scope: "",
   });
 }
 
@@ -462,6 +463,7 @@ function asks(threadId: string): ThreadReply {
     tracer: noTracer(),
     pick: inheritedPick(),
     think: false,
+    scope: "",
   });
 }
 
@@ -899,6 +901,36 @@ test("a remix copies the files, under the new owner, and leaves the source alone
   expect(copied[0].currentVersion == 1);
 
   expect(listArtifacts(database, source).length == 1);
+});
+
+test("a remix carries the transcript and the name, because that is what was offered", () => {
+  freshThreads();
+  let source = openThread(database, { agentId: "a1", owner: "alice", now: "1000000000000" });
+  let prepared: Turn[] = [
+    userTurn("Set up a React app with Vite and TypeScript, and serve it."),
+    assistantTurn("It is running, and the panel beside this conversation is showing it.", []),
+  ];
+  appendTurns(database, source, prepared, 0);
+  nameThread(database, source, "React");
+  markReplayable(database, source, true);
+
+  let made = remixThread(database, { sourceId: source, owner: "bob", now: "1000000000001" });
+  expect(made.fault == "");
+  expect(made.turns == 2);
+
+  let copied = threadMessageRows(database, made.threadId);
+  expect(copied.length == 2);
+  expect(copied[0].role == "user");
+  expect(copied[0].text.startsWith("Set up a React app"));
+  expect(copied[1].role == "assistant");
+  // Numbered from zero under the new thread, or the next round written into it
+  // collides with a seq the source happened to use.
+  expect(copied[0].seq == 0 && copied[1].seq == 1);
+
+  let mine = findById(database, threadsMapping(), made.threadId);
+  let row: ThreadRow = JSON.parse<ThreadRow>(mine);
+  expect(row.title == "React");
+  expect(!row.replayable);
 });
 
 test("what falls out of the replay is summarised, not silently dropped", () => {

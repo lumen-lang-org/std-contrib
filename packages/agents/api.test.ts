@@ -18,7 +18,7 @@ import { putFile, getFile, listFiles } from "./workspace.ts";
 import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
-import { migrationFault, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { migrationFault, wholePlan, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
 import { forgetAgent } from "./routes/agents/agent.service.ts";
 import { decodedSize } from "./routes/documents/document.utils.ts";
 import { HealthService } from "./routes/healthz/health.service.ts";
@@ -83,7 +83,14 @@ function fresh(): string {
   execute(database, "DROP TABLE IF EXISTS trigger_inbox");
   execute(database, "DROP TABLE IF EXISTS trigger_outbox");
   execute(database, "DROP TABLE IF EXISTS trigger_bots");
+  // Dropped like the rest, because the columns added after migration 79 make a
+  // leftover table fail its own ALTER on the next run: "duplicate column name:
+  // image", reported as a plan that did not run and 39 tests that never ran.
+  execute(database, "DROP TABLE IF EXISTS template_files");
+  execute(database, "DROP TABLE IF EXISTS templates");
   execute(database, "DROP TABLE IF EXISTS env_keys");
+  execute(database, "DROP TABLE IF EXISTS env_grants");
+  execute(database, "DROP TABLE IF EXISTS environments");
   execute(database, "DROP TABLE IF EXISTS user_environments");
   execute(database, "DROP TABLE IF EXISTS env_templates");
   execute(database, "DROP TABLE IF EXISTS mcp_tool_roster");
@@ -629,7 +636,22 @@ test("healthz says which build, how far the schema got, and whether docker is th
   expect(fresh() == "");
   let said = new HealthService(database).status("1700000000000");
   expect(said.indexOf("\"version\":\"") >= 0);
-  expect(said.indexOf("\"migration\":\"115\"") >= 0);
+  // Asked of the plan rather than written down: a literal here goes stale on
+  // the next migration and reports a healthy schema as a broken test. It sat
+  // at 122 through five of them.
+  // The highest in the plan, not the last one in it: the plans are composed in
+  // the order the packages are listed, so 80 sits after 126.
+  let plan = wholePlan(database);
+  let high: int = 0;
+  let i: int = 0;
+  while (i < plan.length) {
+    let v = parseInt(plan[i].version) ?? 0;
+    if (v > high) {
+      high = v;
+    }
+    i = i + 1;
+  }
+  expect(said.indexOf("\"migration\":\"" + `${high}` + "\"") >= 0);
   expect(said.indexOf("\"docker\":true") >= 0 || said.indexOf("\"docker\":false") >= 0);
 });
 
