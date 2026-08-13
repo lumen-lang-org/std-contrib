@@ -138,6 +138,34 @@ test("a condition branches and nothing else does", () => {
   expect(refuse(unsaid).indexOf("yes") >= 0);
 });
 
+test("a step with outcomes may branch, and only on its own outcomes", () => {
+  let deciding = withCases(node("a", "AGENT"), "urgent\nroutine");
+  let drawn = graphOf(
+    [node("s", "START"), deciding, node("p", "LLM"), node("q", "LLM"), node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "p", "urgent"),
+     edge("e3", "a", "q", "routine"), edge("e4", "p", "z", ""), edge("e5", "q", "z", "")]);
+  expect(refuse(drawn) == "");
+
+  // A label that is none of its outcomes is an edge left behind by a rename,
+  // and would simply never be taken — so it is named rather than ignored.
+  let stale = graphOf(
+    [node("s", "START"), deciding, node("p", "LLM"), node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "p", "whenever"), edge("e3", "p", "z", "")]);
+  expect(refuse(stale).indexOf("whenever") >= 0);
+
+  // else is always available, as it is for a switch.
+  let fallback = graphOf(
+    [node("s", "START"), deciding, node("p", "LLM"), node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "p", "else"), edge("e3", "p", "z", "")]);
+  expect(refuse(fallback) == "");
+
+  // And a step with no outcomes still may not branch — the rule that was
+  // there before outcomes existed.
+  let plain = graphOf([node("s", "START"), node("a", "AGENT"), node("z", "END")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "z", "yes")]);
+  expect(refuse(plain).indexOf("outcomes") >= 0);
+});
+
 test("a cycle is refused before it can run forever", () => {
   let loop = graphOf(
     [node("s", "START"), node("a", "AGENT"), node("b", "LLM"), node("z", "END")],

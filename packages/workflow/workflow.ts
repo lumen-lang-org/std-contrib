@@ -765,9 +765,29 @@ export function refuse(graph: WfGraph): string {
         : "nothing connects INTO a trigger — it is where the workflow begins";
     }
     if (from.type == "END") { return "nothing connects OUT of an END step"; }
-    if (edge.when != "" && from.type != "CONDITION" && from.type != "SWITCH") {
-      return "only a CONDITION or a SWITCH branches — the edge out of "
+    // A step that carries outcomes branches on them, the same way a switch
+    // branches on its cases. Anything else with a labelled edge is a drawing
+    // mistake, and the sentence names what may branch.
+    let branches = from.type == "CONDITION" || from.type == "SWITCH" || casesOf(from).length > 0;
+    if (edge.when != "" && !branches) {
+      return "only a CONDITION, a SWITCH, or a step with outcomes branches — the edge out of "
         + (from.name == "" ? from.id : from.name) + " cannot carry \"" + edge.when + "\"";
+    }
+    if (edge.when != "" && from.type != "CONDITION" && from.type != "SWITCH") {
+      // Its outcomes, or else. A label that is neither is an edge left behind
+      // by an outcome somebody renamed, and it would never be taken.
+      let known = edge.when == SWITCH_ELSE;
+      let all = casesOf(from);
+      let c: int = 0;
+      while (c < all.length) {
+        if (all[c] == edge.when) { known = true; }
+        c = c + 1;
+      }
+      if (!known) {
+        return "\"" + edge.when + "\" is not an outcome of "
+          + (from.name == "" ? from.id : from.name) + " — its outcomes are "
+          + all.join(", ") + ", or \"" + SWITCH_ELSE + "\"";
+      }
     }
     if (from.type == "CONDITION") {
       if (edge.when == "") { return "each edge out of a condition says which way — \"yes\" or \"no\""; }
