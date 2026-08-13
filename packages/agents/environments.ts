@@ -31,6 +31,20 @@ export function envApparmorProfile(): string {
   return (process.env("AGENTS_ENV_APPARMOR") ?? "").trim();
 }
 
+/** Which container runtime to use, or "" for the daemon's default.
+ *
+ *  For gVisor: `runsc` puts a user-space kernel between the container and the
+ *  host, which is the layer you want the day somebody else's image runs here.
+ *  Off unless asked for, because that day has not come — the images are
+ *  operator-chosen — and because it costs syscall performance and does not
+ *  support io_uring.
+ *
+ *  The flag is here rather than the runtime, so turning it on is a variable
+ *  and a daemon that declares `runsc`, not a change to this file. */
+export function envRuntime(): string {
+  return (process.env("AGENTS_ENV_RUNTIME") ?? "").trim();
+}
+
 export const ENV_RUN_DIR: string = "/artifacts";
 export const ENV_SKILLS_DIR: string = "/skills";
 
@@ -851,6 +865,10 @@ function envMake(r: EnvRun): EnvDockerReply {
 function envRunArgs(r: EnvRun): string[] {
   let container = r.container;
   let out: string[] = ["run", "-d", "--name", container];
+  let runtime = envRuntime();
+  if (runtime != "") {
+    out.push("--runtime"); out.push(runtime);
+  }
   out.push("-v"); out.push(envWorkspaceVolume(r.threadId) + ":/workspace");
   out.push("--memory"); out.push(`${envCapMemMb()}` + "m");
   out.push("--cpus"); out.push(`${envCapCpus()}`);

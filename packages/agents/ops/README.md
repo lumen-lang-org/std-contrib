@@ -73,3 +73,32 @@ is loaded into the kernel that runs the container. The seccomp profile is the
 other way round. Two security options, two machines — worth saying twice,
 because getting it backwards produces an error that names a file and not a
 machine.
+
+## gVisor, when it is wanted
+
+Not on. The images a sandbox runs are operator-chosen, and gVisor's layer —
+a user-space kernel between the container and the host — is what you want the
+day a person can bring their own. It costs syscall performance and does not
+support io_uring.
+
+The engine side is already wired: set `AGENTS_ENV_RUNTIME=runsc` and every
+environment container is created with `--runtime runsc`. Unset, the daemon's
+own runtime is used and nothing is passed.
+
+The machine side needs a privileged hand on the sandbox VM:
+
+```
+curl -fsSLO https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc
+curl -fsSLO https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc.sha512
+sha512sum -c runsc.sha512
+sudo install -m 0755 runsc /usr/local/bin/runsc
+
+# /etc/docker/daemon.json — additive, keep live-restore true
+#   "runtimes": { "runsc": { "path": "/usr/local/bin/runsc" } }
+sudo systemctl restart docker
+```
+
+Declaring a runtime changes nothing for containers that do not ask for it, so
+this is safe to install ahead of deciding to use it. Back the file up first,
+and test one real workload — a vite install and dev server — under
+`--runtime=runsc` before setting the variable.

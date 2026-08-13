@@ -485,6 +485,9 @@ test("a serving environment publishes one port, bound to the address the gateway
   // stands — the flag is opt-in, never a half-written path.
   expect(made.indexOf("seccomp=") < 0);
   expect(made.indexOf("apparmor=") < 0);
+  // And no runtime: unasked-for, the daemon's own is used. A half-configured
+  // runtime name would fail every container at creation.
+  expect(made.indexOf("--runtime") < 0);
   expect(made.indexOf("--user 65534:65534") > 0);
   expect(made.indexOf("--cap-drop ALL") > 0);
   expect(made.indexOf("--cap-add") < 0);
