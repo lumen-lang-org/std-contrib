@@ -12,6 +12,15 @@ const ENV_HOME: string = "/home/sandbox";
 /** The two paths a script sandbox is handed on every run. Named here because
  *  they are mounted here and cleared in run-script.ts, and a path spelled
  *  twice is a path that drifts. */
+/** A seccomp profile to run sandboxes under, or "" for docker's default.
+ *
+ *  Read from the environment because the docker CLI resolves this path on the
+ *  side it runs on — here, not on the machine the container lands on. That is
+ *  the opposite of every other path in this file and cost a puzzled minute. */
+export function envSeccompProfile(): string {
+  return (process.env("AGENTS_ENV_SECCOMP") ?? "").trim();
+}
+
 export const ENV_RUN_DIR: string = "/artifacts";
 export const ENV_SKILLS_DIR: string = "/skills";
 
@@ -838,6 +847,14 @@ function envRunArgs(r: EnvRun): string[] {
   out.push("--pids-limit"); out.push(`${envCapPids()}`);
   out.push("--shm-size"); out.push("512m");
   out.push("--security-opt"); out.push("no-new-privileges");
+  // Docker's default profile with the syscalls a sandbox has no business
+  // making taken out of it — mount, ptrace, unshare, setns, bpf and the
+  // module and kexec families. Measured against the real workload first: a
+  // vite install and dev server come up unchanged under it.
+  let seccomp = envSeccompProfile();
+  if (seccomp != "") {
+    out.push("--security-opt"); out.push("seccomp=" + seccomp);
+  }
   out.push("--cap-drop"); out.push("ALL");
   if (r.serve) {
     // A serving environment is the one exposed on its own hostname, and it is

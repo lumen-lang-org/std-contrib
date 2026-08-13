@@ -481,6 +481,9 @@ test("a serving environment publishes one port, bound to the address the gateway
   let made = lines[2];
   // Hardened: no root, no capabilities, and an image it cannot rewrite.
   expect(made.indexOf("--read-only") > 0);
+  // No profile configured in a test, so none is passed and docker's default
+  // stands — the flag is opt-in, never a half-written path.
+  expect(made.indexOf("seccomp=") < 0);
   expect(made.indexOf("--user 65534:65534") > 0);
   expect(made.indexOf("--cap-drop ALL") > 0);
   expect(made.indexOf("--cap-add") < 0);
