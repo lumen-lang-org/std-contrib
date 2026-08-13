@@ -68,3 +68,17 @@ packages/agents/scheduler.*
 # demand — a cache, not code.
 packages/agents/script-cache/
 *.wasm
+
+# A copy of a secrets file is a secrets file. `.env` is ignored above, and
+# `.env.bak-pre-envs` was not — this repository is public, so that one file
+# would have published the master key and the database password to anyone who
+# cared to look. Ignored by shape rather than by name, because the next copy
+# will be called something else.
+.env.bak*
+.env.*.bak
+*.env.bak*
+
+# Scratch copies kept beside a file while it is being rewritten
+# (discover.ts.bak-showbiz and friends). Never source.
+*.ts.bak-*
+*.ts.bak
