@@ -26,6 +26,22 @@ function readCap(): int {
   return n < 1 ? 1 : n;
 }
 
+/* How much room to reserve for the answer.
+ *
+ * A constant until now, and the wrong shape for one: the window has to hold the
+ * snippets and the reply together, so every token reserved here is a token the
+ * digest cannot spend on evidence. 12000 was sized for a 131k model and became
+ * the binding constraint the day the digest moved to a 24k local one - it is
+ * why READ had to fall from 80 to 40. A real pass emits about 2k. */
+function answerTokens(): int {
+  let said = process.env["AGENTS_DISCOVER_MAX_TOKENS"] ?? "";
+  if (said == "") {
+    return 12000;
+  }
+  let n = parseInt(said, 10) ?? 12000;
+  return n < 256 ? 256 : n;
+}
+
 function storyCap(): int {
   let said = process.env["AGENTS_DISCOVER_STORIES"] ?? "";
   if (said == "") {
@@ -727,7 +743,7 @@ function digestPrompt(topic: string, count: int, outLang: string): string {
     + "the same event, then emit a card for every group, up to the limit, "
     + "ranked newest first. Importance is not your call - a road closure and "
     + "a cabinet reshuffle both get their card. The only things you may drop "
-    + "are what rules 3 and 4 exclude, and true duplicates of an event you "
+    + "are what rules 3, 4 and 5 exclude, and true duplicates of an event you "
     + "already carded. Do not invent events that are not in the snippets.\n"
     + "3. Drop what is not news: market-research listings, SEO round-ups, "
     + "product pages, undated explainers. A crawl is mostly made of those.\n"
@@ -739,11 +755,19 @@ function digestPrompt(topic: string, count: int, outLang: string): string {
     + "policy, a court ruling that sets a precedent, figures the authorities "
     + "themselves published. The test is whether the story is about an "
     + "institution or about somebody's worst day.\n"
-    + "5. Nothing about a private individual unless they are acting in a "
+    + "5. Drop showbiz. A concert or festival review, how an artist was "
+    + "received, a chart placing, an album or single release, tour dates, "
+    + "award nominations, celebrity relationships, feuds and lifestyle, "
+    + "box-office takings. A cultural event earns a card only when something "
+    + "happened beyond the performance - a cancellation, a funding or "
+    + "licensing decision, a figure the organisers published, an institution "
+    + "acting. Same test as rule 4: an institution, or a personality. This "
+    + "rule lifts when the topic is itself music, film or entertainment.\n"
+    + "6. Nothing about a private individual unless they are acting in a "
     + "public role.\n"
-    + "6. No opinion of your own, on the event or on the coverage."
+    + "7. No opinion of your own, on the event or on the coverage."
     + (outLang == "" ? ""
-      : "\n7. The language rule at the top governs: every headline, summary and "
+      : "\n8. The language rule at the top governs: every headline, summary and "
         + "why in " + langName(outLang) + ", however the sources are written. A "
         + "card in another language is a failed card.");
 }
@@ -777,7 +801,7 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   }
 
   let config: ModelConfigRow = {
-    id: "", modelId: model.id, temperature: 0.2, maxTokens: 12000, topP: 1.0,
+    id: "", modelId: model.id, temperature: 0.2, maxTokens: answerTokens(), topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
   let written = discoverText(db, "digest-prompt");
@@ -794,7 +818,19 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
     tries = tries + 1;
   }
   if (!asked.ok) {
-    return said("the model did not answer");
+    let why = asked.error.length > 200 ? asked.error.slice(0, 200) + "…" : asked.error;
+    return said("the model did not answer (http " + `${asked.status}` + "): " + why);
+  }
+
+  /* What the pass cost, said out loud.
+   *
+   * complete() counts these and nothing read them, so the digest's model spend -
+   * feeds x passes-per-day, the one cost here that grows without anybody
+   * choosing to grow it - could not be measured at all. `counted` is false when
+   * the provider did not say, which is a different claim from zero. */
+  if (asked.counted) {
+    console.log("discover: " + topic + ": " + `${asked.inputTokens}` + " in, "
+      + `${asked.outputTokens}` + " out, " + modelId);
   }
 
   let text = replyText(model.provider, asked.text).trim();

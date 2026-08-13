@@ -892,6 +892,11 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     name: envName,
     image: image,
     network: true,
+    // A script is run and its output collected. Nothing outside asks it for a
+    // page, so it publishes no port.
+    serve: false,
+    command: "",
+    start: true,
     now: run.now,
   };
   let ensured = envEnsure(db, ensure);
