@@ -106,3 +106,28 @@ Declaring a runtime changes nothing for containers that do not ask for it, so
 this is safe to install ahead of deciding to use it. Back the file up first,
 and test one real workload — a vite install and dev server — under
 `--runtime=runsc` before setting the variable.
+
+## The disk watch
+
+`joule-disk-watch.sh` with its unit and timer, on the **engine box** — the one
+running Postgres, the console and the gateway.
+
+```
+sudo install -m 0755 joule-disk-watch.sh /usr/local/sbin/
+sudo install -m 0644 joule-disk-watch.service joule-disk-watch.timer /etc/systemd/system/
+sudo systemctl enable --now joule-disk-watch.timer
+```
+
+Every fifteen minutes it compares `/` against a threshold (80% by default,
+`JOULE_DISK_THRESHOLD` in the unit). Over the line it logs a warning naming
+the four directories that have actually mattered, and **exits non-zero on
+purpose** — a failed unit is visible in `systemctl --failed` long after a log
+line has scrolled away.
+
+It exists because the failure here is silent. This disk has been at 95%, 98%
+and 85% within one day, and an ENOSPC has already stopped Postgres once while
+every page still answered 200. Freeing space buys a week; being told buys the
+difference between a warning and an outage.
+
+It shouts on the box, not to a phone. The trigger bots in this deployment
+could carry it further if that is wanted.
