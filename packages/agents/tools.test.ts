@@ -4,7 +4,7 @@ import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts"
 import { storeCredential } from "./credentials.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, PromptRow, AgentRow, ScriptImageRow, McpServerRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, skillsMapping, skillFilesMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing, MountedTool, findTools, findToolsSpec, stillWaiting } from "./tools.ts";
+import { Mounted, mountTools, toolSpecs, callMounted, serverOf, mountedIndex, agentServers, artifactTools, callArtifactTool, scriptTool, serveTool, callServeTool, scriptTools, scriptEnvNames, jsonSafe, callScriptTool, SKILL_BRIEFING_LINES, agentSkills, skillTools, callSkillTool, skillBriefing, MountedTool, findTools, findToolsSpec, stillWaiting } from "./tools.ts";
 import { userTokenKey } from "./connect.ts";
 import { BRIEFING_LINES, artifactBriefing, artifactPlan, getArtifact, getVersion, putArtifact } from "./artifacts.ts";
 import { envPlan, envDockerOverride } from "./environments.ts";
@@ -813,4 +813,32 @@ test("an exact name beats a passing mention", () => {
 
   let all = findTools(waiting(["list_comments", "list_teams"]), "list teams", 2);
   expect(all.found[0].name == "list_teams");
+});
+
+test("serve_env asks for the command that starts the server and refuses without it", () => {
+  let spec = serveTool();
+  expect(spec.name == "serve_env");
+  // The two mistakes worth naming in the schema rather than discovering at
+  // runtime: the wrong port, and a server bound to localhost inside a container.
+  expect(spec.schema.indexOf("0.0.0.0") > 0);
+  expect(spec.description.indexOf("one visit within a minute") > 0);
+  // Not required, because what a conversation serves belongs to the
+  // conversation: asked to show it again, the model reads the command back
+  // rather than inventing a second one that starts something else.
+  expect(spec.schema.indexOf("\"required\":[]") > 0);
+  expect(spec.description.indexOf("property of the conversation") > 0);
+
+  // With none remembered there is still nothing to run, and the refusal says
+  // so rather than starting an empty container.
+  let none = callServeTool(database, { threadId: "t1", agentId: "", name: "serve_env",
+    args: "{}", turnSeq: 0, now: "1700000000000" });
+  expect(none.handled);
+  expect(!none.ok);
+  expect(none.text.indexOf("command") > 0);
+  expect(none.text.indexOf("none remembered") > 0);
+
+  // Another tool's call is not this tool's business.
+  let other = callServeTool(database, { threadId: "t1", agentId: "", name: "run_script",
+    args: "{\"command\":\"npm run dev\"}", turnSeq: 0, now: "1700000000000" });
+  expect(!other.handled);
 });

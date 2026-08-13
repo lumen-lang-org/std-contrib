@@ -304,8 +304,9 @@ export function readableThread(db: Db, threadId: string, tags: string[]): string
   return row.agentId;
 }
 
-export function threadTurns(db: Db, threadId: string): Turn[] {
-  let out: Turn[] = [];
+/** Every stored turn of a conversation, in order and unfiltered. */
+export function threadTurnRows(db: Db, threadId: string): ThreadTurnRow[] {
+  let none: ThreadTurnRow[] = [];
   let keys: DbOrder[] = [{ column: "seq" }];
   let listed = listOrdered(db, threadTurnsMapping(), {
     where: "thread_id = " + placeholderAt(db, 1),
@@ -313,9 +314,14 @@ export function threadTurns(db: Db, threadId: string): Turn[] {
     order: keys,
   });
   if (listed == "" || listed == "[]") {
-    return out;
+    return none;
   }
-  let rows: ThreadTurnRow[] = JSON.parse<ThreadTurnRow[]>(listed);
+  return JSON.parse<ThreadTurnRow[]>(listed);
+}
+
+export function threadTurns(db: Db, threadId: string): Turn[] {
+  let out: Turn[] = [];
+  let rows = threadTurnRows(db, threadId);
   let i: int = 0;
   while (i < rows.length) {
     out.push(turnOf(rows[i]));
@@ -646,12 +652,41 @@ export type RemixAsk = {
 export type Remixed = {
   threadId: string,
   files: int,
+  turns: int,
   fault: string,
 };
 
 function refusedRemix(why: string): Remixed {
-  let no: Remixed = { threadId: "", files: 0, fault: why };
+  let no: Remixed = { threadId: "", files: 0, turns: 0, fault: why };
   return no;
+}
+
+/** The source's transcript, written under the fork.
+ *
+ *  A starting point is a conversation somebody prepared, so what they wrote is
+ *  half of what is being offered — a fork that carried only the files would
+ *  open on a project with no account of why it is the way it is. Copied row for
+ *  row rather than through appendTurns: a tool call re-encoded on the way
+ *  through is a transcript that reads differently than the one on offer. */
+function remixTurns(db: Db, sourceId: string, threadId: string): int {
+  let held = threadTurnRows(db, sourceId);
+  let seq: int = 0;
+  while (seq < held.length) {
+    let was = held[seq];
+    let row: ThreadTurnRow = {
+      id: threadId + "-" + `${seq}`,
+      threadId: threadId,
+      seq: seq,
+      role: was.role,
+      text: was.text,
+      calls: was.calls,
+      callId: was.callId,
+      toolName: was.toolName,
+    };
+    persist(db, threadTurnsMapping(), JSON.stringify(row));
+    seq = seq + 1;
+  }
+  return seq;
 }
 
 export function remixThread(db: Db, ask: RemixAsk): Remixed {
@@ -687,7 +722,14 @@ export function remixThread(db: Db, ask: RemixAsk): Remixed {
     i = i + 1;
   }
 
-  let made: Remixed = { threadId: fresh, files: files, fault: "" };
+  let turns = remixTurns(db, ask.sourceId, fresh);
+  // Named after what it was forked from, because a starting point's whole
+  // claim is that somebody already decided what this conversation is.
+  if (source.title != "") {
+    nameThread(db, fresh, source.title);
+  }
+
+  let made: Remixed = { threadId: fresh, files: files, turns: turns, fault: "" };
   return made;
 }
 

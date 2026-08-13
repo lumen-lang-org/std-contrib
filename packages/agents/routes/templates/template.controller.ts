@@ -103,4 +103,17 @@ export class TemplateApi {
     out.headers.set("cache-control", "public, max-age=3600");
     return out;
   }
+
+  // Prepares the conversation this starting point is: the project running, the
+  // request that asked for it, and the reply. Offered afterwards, so what
+  // people choose from is a conversation and not a recipe.
+  @Post("/:id/prepare")
+  @Guard(theTemplate)
+  prepare(@PathVariable("id") id: string, @From(owningCaller) owner: string): Reply {
+    let made = this.templates.prepare(id, owner);
+    if (made.fault != "") {
+      return BadRequest(made.fault);
+    }
+    return Ok(made.document);
+  }
 }

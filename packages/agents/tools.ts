@@ -7,6 +7,9 @@ import { ToolSpec, toolSpec } from "./provider.ts";
 import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape } from "./scan.ts";
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
+import { envEnsure, envNamed, envServePort } from "./environments.ts";
+import { envMaterialise } from "./env-sync.ts";
+import { EnvGranted, envGrantMint, envHostFor, envThreadOwner, envZone } from "./env-grants.ts";
 import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts";
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
@@ -745,13 +748,112 @@ export function jsonSafe(text: string): string {
   return out;
 }
 
+export function serveTool(): ToolSpec {
+  return toolSpec("serve_env",
+    "Put a server on the web from this conversation's environment, so the reader can look at what you are building "
+    + "rather than only at what it printed. Give the command that starts it and it runs inside the container, "
+    + "listening on port " + `${envServePort()}` + "; the environment is created if this conversation has none, and "
+    + "started if it is stopped. What it serves is a property of the conversation and not of this call: the command "
+    + "is remembered, run again whenever the container comes back, carried to whoever forks the conversation, and "
+    + "shown to the reader as a button beside the chat. Call it with no command to start again what is already "
+    + "remembered — which is the answer when someone asks to see it and it has gone to sleep. The container is "
+    + "filled from this conversation's files before the command runs, so what you write as an artifact is what "
+    + "gets served. "
+    + "The environment gets a name of its own on the web and its own origin, separate from this console: nothing it "
+    + "serves can read the reader's session, and nothing of the reader's credentials reaches your container. "
+    + "The reply carries that address. It also carries a way in, which is good for one visit within a minute — hand "
+    + "it to the reader as something to click now, and say that reopening it later needs a fresh one, because a link "
+    + "that has been spent reads as broken when it is working exactly as intended. "
+    + "Use this for a dev server, a preview, a documentation site: anything meant to be looked at while it runs. Use "
+    + "run_script instead for work that finishes and hands back output.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"command\":{\"type\":\"string\",\"description\":\"The shell command that starts the server, run in "
+    + "the container with /workspace as HOME. It must listen on port " + `${envServePort()}` + " and on 0.0.0.0, not "
+    + "on localhost: a server bound to localhost inside a container is reachable by nothing. Optional once this "
+    + "conversation has one: leave it out to start again what it already serves, and give it only to change that.\"},"
+    + "\"image\":{\"type\":\"string\",\"description\":\"Which image to build the container from, when this "
+    + "conversation has no environment yet. Optional; the conversation's usual one is used otherwise.\"},"
+    + "\"name\":{\"type\":\"string\",\"description\":\"Which of this conversation's environments serves it. "
+    + "Optional, and 'web' by default — the script sandbox and the dev server are better kept apart.\"}"
+    + "},\"required\":[]}");
+}
+
 export function scriptTools(db: Db): ToolSpec[] {
   let out: ToolSpec[] = [];
   if (!scriptDockerWorks()) {
     return out;
   }
   out.push(scriptTool(scriptEnvNames(db)));
+  // Only where there is a zone to answer on: without one there is no address to
+  // give back, and a tool that cannot succeed is worse than one that is absent.
+  if (envZone() != "") {
+    out.push(serveTool());
+  }
   return out;
+}
+
+export function callServeTool(db: Db, call: ArtifactToolCall): FileToolResult {
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
+  if (call.threadId == "" || call.name != "serve_env") {
+    return not;
+  }
+  let name = jsonText(call.args, "name");
+  if (name == "") {
+    name = "web";
+  }
+  // What this conversation already serves, if anything. The command is a
+  // property of the conversation rather than of the call: asked to show the
+  // app again, a model that has to invent the command a second time invents a
+  // different one, and the reader gets a server that is not the one they were
+  // looking at.
+  let held = envNamed(db, call.threadId, name);
+  let command = jsonText(call.args, "command");
+  if (command == "") {
+    command = held.serveCmd;
+  }
+  if (command == "") {
+    let missing: FileToolResult = {
+      handled: true, ok: false,
+      text: "serve_env needs a member named \"command\" — what starts the server inside the"
+        + " container. This conversation has none remembered yet.",
+      line: 0, changed: "",
+    };
+    return missing;
+  }
+  let owner = envThreadOwner(db, call.threadId);
+  // Made first and filled before anything runs, in the order the console's own
+  // route uses: a container is created empty, and this conversation's files are
+  // artifacts. Starting the server against an empty workspace is how a project
+  // that exists comes up as "cannot find package".
+  let made = envEnsure(db, {
+    threadId: call.threadId, name: name, image: jsonText(call.args, "image"),
+    network: true, serve: true, command: command, start: false, now: call.now,
+  });
+  if (made.ok && made.created) {
+    envMaterialise(db, made.slug, "/tmp/agents-env-" + made.slug);
+  }
+  let up = envEnsure(db, {
+    threadId: call.threadId, name: name, image: jsonText(call.args, "image"),
+    network: true, serve: true, command: command, start: true, now: call.now,
+  });
+  if (!up.ok) {
+    let refused: FileToolResult = { handled: true, ok: false, text: up.fault, line: 0, changed: "" };
+    return refused;
+  }
+  let way: EnvGranted = envGrantMint(db,
+    { threadId: call.threadId, name: name, owner: owner, now: call.now });
+  let said = "This conversation serves \"" + name + "\" at https://" + envHostFor(up.slug)
+    + " , by running: " + command
+    + "\nThat is remembered on the conversation, so it comes back with the container and"
+    + " needs no command next time.";
+  if (way.ok) {
+    said = said + "\nA way in, good for one visit within the next minute: " + way.url;
+    said = said + "\nOpening it later needs a fresh one — say so rather than letting a spent link read as broken.";
+  } else {
+    said = said + "\nNo way in could be minted: " + way.fault;
+  }
+  let done: FileToolResult = { handled: true, ok: true, text: said, line: 0, changed: "" };
+  return done;
 }
 
 export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {

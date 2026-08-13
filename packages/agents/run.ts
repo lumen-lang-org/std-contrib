@@ -3,7 +3,7 @@ import { findById } from "../plume/plume.ts";
 import { AgentRow, PromptRow, ModelRow, ModelConfigRow, modelsMapping, modelConfigsMapping, promptsMapping, agentsMapping, cancelAsked } from "./schema.ts";
 import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationFault, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
+import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, callServeTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
@@ -640,6 +640,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         threadId: threadId, agentId: agentId, name: calls[i].name, args: calls[i].args,
         turnSeq: where.baseSeq, now: now,
       });
+      let served = callServeTool(db, {
+        threadId: threadId, agentId: agentId, name: calls[i].name, args: calls[i].args,
+        turnSeq: where.baseSeq, now: now,
+      });
       let skilled = callSkillTool(db, {
         agentId: agentId, name: calls[i].name, args: calls[i].args,
       });
@@ -710,6 +714,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = scripted.ok;
         resultText = scripted.text;
         from = "scripts";
+        calledTools.push(calls[i].name);
+      } else if (served.handled) {
+        resultOk = served.ok;
+        resultText = served.text;
+        from = "environments";
         calledTools.push(calls[i].name);
       } else if (scheduled.handled) {
         resultOk = scheduled.ok;

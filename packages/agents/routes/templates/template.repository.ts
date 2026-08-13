@@ -2,6 +2,10 @@ import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../plume/plume.ts";
 import { templateFileRepository } from "./entities/template-file.entity.ts";
 import { templateRepository } from "./entities/template.entity.ts";
+import { EnvEnsure, EnvEnsured, envEnsure } from "../../environments.ts";
+import { envHostFor } from "../../env-grants.ts";
+import { ThreadRow, appendTurns, threadsMapping } from "../../threads.ts";
+import { Turn, ToolCall, assistantTurn, userTurn } from "../../provider.ts";
 
 export class TemplateRepository {
   database: Db;
@@ -91,5 +95,42 @@ export class TemplateRepository {
       i = i + 1;
     }
     return "";
+  }
+
+  /** A conversation of this owner's, named after the starting point. */
+  startThread(owner: string, title: string, now: string): string {
+    let id = crypto.randomUUID();
+    let row: ThreadRow = {
+      id: id, agentId: "a-assistant", owner: owner, modelChoiceId: "",
+      routeKey: "", title: title, replayable: false, projectId: "",
+      createdAt: now,
+    };
+    persist(this.database, threadsMapping(), JSON.stringify(row));
+    return id;
+  }
+
+  serveProject(threadId: string, image: string, command: string, now: string): EnvEnsured {
+    let e: EnvEnsure = {
+      threadId: threadId, name: "web", image: image,
+      network: true, serve: true, command: command, start: true, now: now,
+    };
+    return envEnsure(this.database, e);
+  }
+
+  hostFor(slug: string): string {
+    return envHostFor(slug);
+  }
+
+  /** The transcript a prepared conversation opens with: the request, then the
+   *  reply.
+   *
+   *  A user turn here is a real one — it is the request this starting point was
+   *  built to answer, written by whoever prepared it. What would be dishonest
+   *  is putting it in somebody's *fork*, and a fork copies rather than invents,
+   *  so the words stay attached to the person who wrote them. */
+  greet(threadId: string, asked: string, said: string): void {
+    let none: ToolCall[] = [];
+    let turns: Turn[] = [userTurn(asked), assistantTurn(said, none)];
+    appendTurns(this.database, threadId, turns, 0);
   }
 }

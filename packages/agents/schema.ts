@@ -586,9 +586,36 @@ export type TemplateRow = {
   skillName: string,
   visibility: string,
   featuredRank: int,
+  /** A project starting point runs rather than being written out: the image it
+   *  runs in, the command that generates it once, and the command that serves
+   *  it. A scaffold stored as files is a scaffold that rots the day upstream
+   *  changes; these three lines age with the tool that owns them. */
+  image: string,
+  bootstrap: string,
+  serve: string,
 };
 
 export function templatesMapping(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("label", "label", "text"),
+    field("description", "description", "text"),
+    field("kind", "kind", "text"),
+    field("skillName", "skill_name", "text"),
+    field("visibility", "visibility", "text"),
+    field("featuredRank", "featured_rank", "int"),
+    field("image", "image", "text"),
+    field("bootstrap", "bootstrap", "text"),
+    field("serve", "serve", "text"),
+    field("request", "request", "text"),
+  ];
+  return repository({ table: "templates", idField: "id", idColumn: "id", fields: fs });
+}
+
+// The shape migration 79 created, frozen. Built from the live mapping instead,
+// a fresh database would get every later column at CREATE time and then fail
+// the ALTERs that add them — the trap envPlan fell into.
+function templatesMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("label", "label", "text"),
@@ -867,7 +894,15 @@ export function schemaPlan(db: Db): Migration[] {
       + "skill_id " + db.textType + " NOT NULL)"),
     migration("77", "a skill has a visibility",
       "ALTER TABLE skills ADD COLUMN visibility " + db.textType + " NOT NULL DEFAULT 'private'"),
-    migration("79", "templates", createTableSql(db, templatesMapping())),
+    migration("79", "templates", createTableSql(db, templatesMappingV1())),
+    migration("124", "a starting point runs in an image",
+      "ALTER TABLE templates ADD COLUMN image " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("125", "and knows how to generate itself",
+      "ALTER TABLE templates ADD COLUMN bootstrap " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("126", "and how to serve what it generated",
+      "ALTER TABLE templates ADD COLUMN serve " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("127", "and the request the prepared conversation opens with",
+      "ALTER TABLE templates ADD COLUMN request " + db.textType + " NOT NULL DEFAULT ''"),
     migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),

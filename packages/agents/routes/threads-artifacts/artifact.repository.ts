@@ -4,7 +4,7 @@ import { ArtifactRow, ArtifactVersionRow, ArtifactWrite, ArtifactWritten, TurnAr
 import { artifactRepository } from "./entities/artifact.entity.ts";
 import { OfficeRenderAsk, OfficeRendered, officeRender } from "../../office-render.ts";
 import { jsonList } from "../../scan.ts";
-import { ownedThread } from "../../threads.ts";
+import { ownedThread, readableThread } from "../../threads.ts";
 
 export class ArtifactRepository {
   database: Db;
@@ -17,6 +17,10 @@ export class ArtifactRepository {
 
   threadOwner(threadId: string, tags: string[]): string {
     return ownedThread(this.database, threadId, tags);
+  }
+
+  threadReader(threadId: string, tags: string[]): string {
+    return readableThread(this.database, threadId, tags);
   }
 
   listing(threadId: string): ArtifactRow[] {

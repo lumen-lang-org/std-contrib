@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
 import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
-import { artifactAtSlot, threadOwned } from "./artifact.guard.ts";
+import { artifactAtSlot, threadOwned, threadReadable } from "./artifact.guard.ts";
 import { ArtifactService } from "./artifact.service.ts";
 import { slotFromPath, versionFromPath } from "./artifact.utils.ts";
 
@@ -18,12 +18,16 @@ export class ArtifactApi {
     return threadOwned(this.artifacts, request);
   }
 
+  theReadableThread(request: Request): Guarded {
+    return threadReadable(this.artifacts, request);
+  }
+
   theArtifact(request: Request): Guarded {
     return artifactAtSlot(this.artifacts, request);
   }
 
   @Get("/")
-  @Guard(theThread)
+  @Guard(theReadableThread)
   list(@PathVariable("id") id: string): Reply {
     return OkJson(this.artifacts.listing(id));
   }
@@ -52,20 +56,20 @@ export class ArtifactApi {
   }
 
   @Get("/by-turn")
-  @Guard(theThread)
+  @Guard(theReadableThread)
   byTurn(@PathVariable("id") id: string, @RequestParam("turn", "") turn: string): Reply {
     return OkJson(this.artifacts.byTurn(id, turn));
   }
 
   @Get("/:slot")
-  @Guard(theThread)
+  @Guard(theReadableThread)
   @Guard(theArtifact)
   find(@PathVariable("id") id: string, @PathVariable("slot") slot: string): Reply {
     return OkJson(this.artifacts.one(id, slotFromPath(slot)));
   }
 
   @Get("/:slot/versions/:n")
-  @Guard(theThread)
+  @Guard(theReadableThread)
   @Guard(theArtifact)
   version(@PathVariable("id") id: string, @PathVariable("slot") slot: string,
           @PathVariable("n") wanted: string): Reply {
@@ -77,7 +81,7 @@ export class ArtifactApi {
   }
 
   @Get("/:slot/pdf")
-  @Guard(theThread)
+  @Guard(theReadableThread)
   @Guard(theArtifact)
   pdf(@PathVariable("id") id: string, @PathVariable("slot") slot: string,
       @RequestParam("v", "") asked: int): Reply {

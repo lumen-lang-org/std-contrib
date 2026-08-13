@@ -39,6 +39,13 @@ export class ArtifactService {
     return this.repository.threadOwner(threadId, tags) != "";
   }
 
+  /** Whether these files may be read. Wider than owning it: a conversation
+   *  offered as a starting point is meant to be looked inside before it is
+   *  taken, and files nobody may see make a prepared project read as empty. */
+  threadIsReadable(threadId: string, tags: string[]): bool {
+    return this.repository.threadReader(threadId, tags) != "";
+  }
+
   atSlot(threadId: string, slot: int): ArtifactRow {
     if (slot < 0) {
       return noArtifact();
