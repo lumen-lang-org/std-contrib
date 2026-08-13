@@ -521,14 +521,21 @@ test("a script runs in its environment and its changed file lands as the next ve
   expect(rows.length == 1);
   expect(rows[0].name == "main");
   let asked = argvLines();
-  expect(asked[0].indexOf("run -d --name agents-env-t1-main ") == 0);
-  expect(asked[0].indexOf("--pids-limit 256") > 0);
-  expect(asked[0].indexOf("--network none") < 0);
+  // Found rather than indexed: the network and the volume preparation are made
+  // before the container that joins them, so this is no longer the first line.
+  let runline = findLine(asked, "run -d --name agents-env-t1-main ");
+  expect(runline != "");
+  expect(runline.indexOf("--pids-limit 256") > 0);
+  expect(runline.indexOf("--network none") < 0);
+  // A script sandbox is sealed too: the image it was handed cannot be rewritten.
+  expect(runline.indexOf("--read-only") > 0);
   let exline = findLine(asked, "exec --user 0:0");
   expect(exline != "");
   expect(exline.indexOf("--workdir /artifacts") >= 0);
   expect(exline.indexOf("-e HOME=/workspace") >= 0);
-  expect(exline.indexOf("timeout -k 5 60 sh /tmp/lumen-job-") >= 0);
+  // Beside the run directory, not in /tmp: /tmp is a tmpfs now, and docker cp
+  // will not write one on a read-only container.
+  expect(exline.indexOf("timeout -k 5 60 sh /home/sandbox/lumen-job-") >= 0);
   expect(scriptRunningCount() == 0);
 });
 
@@ -795,7 +802,7 @@ test("an agent's curated image is what its containers are built from, with a wor
     mayCreate: false, environment: "", agentId: "a-node", turnSeq: 3, now: "1785200000000",
   });
   expect(ran.ok);
-  expect(argvLines()[0].indexOf("--entrypoint sleep node:22-bookworm infinity") > 0);
+  expect(findLine(argvLines(), "--entrypoint sleep node:22-bookworm infinity") != "");
 });
 
 test("a skill's files are staged at /skills, and an edit is what the next run executes", () => {
@@ -820,7 +827,9 @@ test("a skill's files are staged at /skills, and an edit is what the next run ex
     mayCreate: false, environment: "", agentId: "a1", turnSeq: 3, now: "1785200000000",
   });
   expect(ran.ok);
-  expect(findLine(argvLines(), "exec agents-env-t1-main rm -rf /skills") != "");
+  // Emptied rather than removed: /skills is a mounted volume now, and a
+  // mountpoint cannot be rm -rf'd.
+  expect(findLine(argvLines(), "exec agents-env-t1-main sh -c rm -rf /skills/*") != "");
   let placed = fs.readFileSync(FAKE_CTR + "/skills/read-proto-enums/enums.py");
   expect(placed == "print(1)");
 

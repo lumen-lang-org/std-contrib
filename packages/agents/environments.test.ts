@@ -101,7 +101,7 @@ test("first use creates the container and the row, named main by default", () =>
 
   let asked = argvLines();
   expect(asked.length == 2);
-  expect(asked[0] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[0] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --read-only --tmpfs /tmp:rw,nosuid,size=64m -v agents-run-t1:/artifacts -v agents-skills-t1:/skills -v agents-home-t1:/home/sandbox --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
   expect(asked[1].indexOf("exec agents-env-t1-main sh -c") == 0);
   expect(asked[1].indexOf("/workspace") > 0);
 
@@ -214,14 +214,17 @@ test("forgetting a thread removes its rows and its containers, and only its own"
   envForget(database, "t1");
 
   let asked = argvLines();
-  // Each container, then the network it had to itself, then both volumes.
-  expect(asked.length == 6);
+  // Each container, then the network it had to itself, then every volume the
+  // thread owns — a volume left behind is a volume nobody ever collects.
+  expect(asked.length == 8);
   expect(asked[0] == "rm -f agents-env-t1-main");
   expect(asked[1] == "network rm agents-net-t1-main");
   expect(asked[2] == "rm -f agents-env-t1-web");
   expect(asked[3] == "network rm agents-net-t1-web");
   expect(asked[4] == "volume rm -f agents-ws-t1");
   expect(asked[5] == "volume rm -f agents-home-t1");
+  expect(asked[6] == "volume rm -f agents-run-t1");
+  expect(asked[7] == "volume rm -f agents-skills-t1");
 
   expect(envList(database, "t1").length == 0);
   expect(envList(database, "t2").length == 1);
@@ -237,7 +240,7 @@ test("container names are docker-legal whatever the thread id holds", () => {
   expect(made.ok);
   expect(made.container == "agents-env-t-1-x-main");
   let asked = argvLines();
-  expect(asked[0] == "run -d --name agents-env-t-1-x-main -v agents-ws-t-1-x:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[0] == "run -d --name agents-env-t-1-x-main -v agents-ws-t-1-x:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --read-only --tmpfs /tmp:rw,nosuid,size=64m -v agents-run-t-1-x:/artifacts -v agents-skills-t-1-x:/skills -v agents-home-t-1-x:/home/sandbox --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
 });
 
 test("a docker failure is a fault sentence, not a thrown error and not a row", () => {
@@ -271,7 +274,7 @@ test("a pruned container is recreated from the row's image, reported as created"
   expect(asked[0] == "inspect -f {{.State.Running}} agents-env-t1-main");
   expect(asked[1] == "start agents-env-t1-main");
   expect(asked[2] == "rm -f agents-env-t1-main");
-  expect(asked[3] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[3] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --read-only --tmpfs /tmp:rw,nosuid,size=64m -v agents-run-t1:/artifacts -v agents-skills-t1:/skills -v agents-home-t1:/home/sandbox --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
   expect(asked[4].indexOf("exec agents-env-t1-main sh -c") == 0);
 
   expect(envList(database, "t1")[0].status == "running");

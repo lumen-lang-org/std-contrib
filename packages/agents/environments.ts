@@ -9,6 +9,12 @@ export const ENV_IDLE_MS: int = 900000;
 const ENV_UID: int = 65534;
 const ENV_HOME: string = "/home/sandbox";
 
+/** The two paths a script sandbox is handed on every run. Named here because
+ *  they are mounted here and cleared in run-script.ts, and a path spelled
+ *  twice is a path that drifts. */
+export const ENV_RUN_DIR: string = "/artifacts";
+export const ENV_SKILLS_DIR: string = "/skills";
+
 export type EnvRow = {
   id: string,
   threadId: string,
@@ -505,6 +511,22 @@ export function envHomeVolume(threadId: string): string {
   return "agents-home-" + envSafeBytes(threadId);
 }
 
+/** Where a script sandbox's run directory and its skills live.
+ *
+ *  Volumes rather than directories on the image, for one measured reason:
+ *  `docker cp` refuses every path on a read-only container's rootfs and is
+ *  perfectly happy with a volume mounted inside it. run_script copies a run
+ *  directory and a skill tree in on every call, so those two paths had to
+ *  become volumes before the rootfs could be sealed. The paths themselves do
+ *  not move — /skills/<name>/ is in what the model is told. */
+export function envRunVolume(threadId: string): string {
+  return "agents-run-" + envSafeBytes(threadId);
+}
+
+export function envSkillsVolume(threadId: string): string {
+  return "agents-skills-" + envSafeBytes(threadId);
+}
+
 let envCapMemMbChosen: int = 0;
 let envCapCpusChosen: int = 0;
 let envCapPidsChosen: int = 0;
@@ -834,10 +856,16 @@ function envRunArgs(r: EnvRun): string[] {
     out.push("-e"); out.push("npm_config_cache=" + ENV_HOME + "/.npm");
     out.push("--user"); out.push(`${ENV_UID}` + ":" + `${ENV_UID}`);
   } else {
-    // A script sandbox still runs as root with these five. Its run directory
-    // and its job file are copied to paths on the rootfs, and docker cp will
-    // not write those on a read-only container — so hardening it means moving
-    // /artifacts onto a volume first, which is its own change.
+    // A script sandbox is sealed the same way, and for a stronger reason: the
+    // code it runs is written by a model and runs as root. What it still has
+    // that a serving environment does not is root and these five capabilities,
+    // because a run chowns its own directory and installs its own packages.
+    // Taking those away is a separate change with a different blast radius.
+    out.push("--read-only");
+    out.push("--tmpfs"); out.push("/tmp:rw,nosuid,size=64m");
+    out.push("-v"); out.push(envRunVolume(r.threadId) + ":" + ENV_RUN_DIR);
+    out.push("-v"); out.push(envSkillsVolume(r.threadId) + ":" + ENV_SKILLS_DIR);
+    out.push("-v"); out.push(envHomeVolume(r.threadId) + ":" + ENV_HOME);
     out.push("--cap-add"); out.push("CHOWN");
     out.push("--cap-add"); out.push("DAC_OVERRIDE");
     out.push("--cap-add"); out.push("FOWNER");
@@ -959,6 +987,8 @@ export function envForget(db: Db, threadId: string): void {
   }
   envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
   envDocker(["volume", "rm", "-f", envHomeVolume(threadId)]);
+  envDocker(["volume", "rm", "-f", envRunVolume(threadId)]);
+  envDocker(["volume", "rm", "-f", envSkillsVolume(threadId)]);
   deleteWhere(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId]);
 }
 
@@ -1170,6 +1200,8 @@ export function envDrop(db: Db, threadId: string, name: string): bool {
   if (envList(db, threadId).length == 0) {
     envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
     envDocker(["volume", "rm", "-f", envHomeVolume(threadId)]);
+    envDocker(["volume", "rm", "-f", envRunVolume(threadId)]);
+    envDocker(["volume", "rm", "-f", envSkillsVolume(threadId)]);
   }
   return true;
 }

@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { executeWith, findById, listWhere, placeholderAt, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelFault, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
-import { EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
+import { ENV_RUN_DIR, ENV_SKILLS_DIR, EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { masterKey } from "./credentials.ts";
 import { envKeyFileBody, touchEnvKeys } from "./env-keys.ts";
 import { userEnvByName } from "./user-environments.ts";
@@ -593,7 +593,9 @@ const SCRIPT_UID: string = "0:0";
 
 const SCRIPT_KILL_GRACE: string = "5";
 
-export const SCRIPT_RUN_DIR: string = "/artifacts";
+// The one place this path is decided is environments.ts, which mounts a
+// volume there; this stays as the name the rest of the file already uses.
+export const SCRIPT_RUN_DIR: string = ENV_RUN_DIR;
 
 const SCRIPT_NOTE: string = "run_script";
 
@@ -776,10 +778,21 @@ function scriptBail(container: string, stage: string, why: string): ScriptRan {
 }
 
 function scriptDone(container: string, stage: string, runDir: string, jobAt: string, out: ScriptRan): ScriptRan {
-  scriptDocker(["exec", container, "rm", "-rf", runDir, jobAt]);
+  scriptDocker(["exec", container, "sh", "-c", scriptEmptyCmd(runDir) + "; rm -f " + jobAt]);
   scriptHostDrop(stage);
   scriptRelease(container);
   return out;
+}
+
+/** Empty a directory without removing it.
+ *
+ *  `rm -rf /artifacts` was right while /artifacts was a directory on the image
+ *  and wrong the moment it became a mounted volume: a mountpoint cannot be
+ *  removed, and the run would fail before it started. Dotfiles are matched
+ *  separately because a bare * skips them, and `.[!.]*` is what does not also
+ *  match `..`. */
+export function scriptEmptyCmd(dir: string): string {
+  return "rm -rf " + dir + "/* " + dir + "/.[!.]* 2>/dev/null; true";
 }
 
 let scriptRunSeq: int = 0;
@@ -906,9 +919,16 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
   let recreated = known && ensured.created;
 
   let runDir = SCRIPT_RUN_DIR;
-  let jobAt = "/tmp/lumen-job-" + id + "." + ext;
-  scriptDocker(["exec", container, "rm", "-rf", runDir]);
-  let placed = scriptDocker(["cp", stage + "/files", container + ":" + runDir]);
+  // Beside the run directory rather than in it: /tmp is a tmpfs now, which
+  // docker cp will not write on a read-only container, and anything left in
+  // the run directory is copied back and reconciled into the conversation's
+  // artifacts — the script itself has no business becoming one.
+  let jobAt = "/home/sandbox/lumen-job-" + id + "." + ext;
+  scriptDocker(["exec", container, "sh", "-c", scriptEmptyCmd(runDir)]);
+  // The trailing /. copies the contents into the directory. Without it, and
+  // with the directory now existing because a volume is mounted there, docker
+  // would nest the whole staging folder inside it.
+  let placed = scriptDocker(["cp", stage + "/files/.", container + ":" + runDir]);
   if (placed.status != 0) {
     return scriptDone(container, stage, runDir, jobAt,
       scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("place the run directory", placed)));
@@ -942,8 +962,8 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
       }
       k = k + 1;
     }
-    scriptDocker(["exec", container, "rm", "-rf", "/skills"]);
-    let placedSkills = scriptDocker(["cp", stage + "/skills", container + ":/skills"]);
+    scriptDocker(["exec", container, "sh", "-c", scriptEmptyCmd(ENV_SKILLS_DIR)]);
+    let placedSkills = scriptDocker(["cp", stage + "/skills/.", container + ":" + ENV_SKILLS_DIR]);
     if (placedSkills.status != 0) {
       return scriptDone(container, stage, runDir, jobAt,
         scriptRanFlat(false, "", "", "", recreated, scriptDockerFailed("place the skill files", placedSkills)));
@@ -972,6 +992,13 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     }
   }
   execArgs.push("-e"); execArgs.push("HOME=/workspace");
+  // The rootfs is read-only, so `pip install x` can no longer write to the
+  // image's site-packages. HOME is a volume and PATH below already expects
+  // /workspace/.local/bin, so the install is pointed there rather than left to
+  // fail — a plain `pip install` in somebody's script keeps working.
+  execArgs.push("-e"); execArgs.push("PIP_USER=1");
+  execArgs.push("-e"); execArgs.push("PYTHONUSERBASE=/workspace/.local");
+  execArgs.push("-e"); execArgs.push("npm_config_prefix=/workspace/.local");
   execArgs.push("-e"); execArgs.push("PATH=/workspace/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
   execArgs.push(container);
   execArgs.push("timeout"); execArgs.push("-k"); execArgs.push(SCRIPT_KILL_GRACE);
