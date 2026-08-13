@@ -1,5 +1,9 @@
 # What runs on the sandbox VM
 
+The reasoning behind all of it, and how to check it still holds, is in
+`../SANDBOX-SECURITY.md`. This file is the installer's half: what goes where,
+on which machine.
+
 The engine talks to a second machine over `DOCKER_HOST=ssh://joule-sandbox-env`,
 and every dev-environment container lives there rather than beside the engine.
 These two files belong on that machine, not in the engine's image, which is why
