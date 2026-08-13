@@ -4,6 +4,11 @@ import { Migration, migration } from "../plume/migrate.ts";
 
 export const ENV_IDLE_MS: int = 900000;
 
+/** Who a serving environment runs as, and where its HOME lives. 65534 is
+ *  nobody: it owns nothing on the host and nothing in the image. */
+const ENV_UID: int = 65534;
+const ENV_HOME: string = "/home/sandbox";
+
 export type EnvRow = {
   id: string,
   threadId: string,
@@ -488,6 +493,18 @@ export function envWorkspaceVolume(threadId: string): string {
   return "agents-ws-" + envSafeBytes(threadId);
 }
 
+/** Where a serving environment keeps HOME.
+ *
+ *  A volume of its own rather than a corner of /workspace, because /workspace
+ *  is the project and everything in it becomes an artifact. npm's cache in
+ *  there would be swept back as thousands of files — and, measured, an npm
+ *  cache directory sitting in an otherwise empty project is enough for
+ *  `npm create vite` to decide the directory is not empty and scaffold
+ *  nothing. */
+export function envHomeVolume(threadId: string): string {
+  return "agents-home-" + envSafeBytes(threadId);
+}
+
 let envCapMemMbChosen: int = 0;
 let envCapCpusChosen: int = 0;
 let envCapPidsChosen: int = 0;
@@ -753,12 +770,38 @@ function envNetworkDown(threadId: string, name: string): void {
   envDocker(["network", "rm", envNetworkName(threadId, name)]);
 }
 
+/** Hand this conversation's volumes to the uid its container runs as.
+ *
+ *  A fresh volume belongs to root, and the container that will use it has no
+ *  root and no CHOWN to fix that with. A throwaway container does it instead —
+ *  the only place root touches these volumes, and it is gone before anything
+ *  of the model's runs.
+ *
+ *  Called again after a workspace is materialised, which is the part that is
+ *  easy to miss: `docker cp` writes files owned by the image's own user, not
+ *  by the uid the container was told to run as, so a project restored from
+ *  artifacts arrives readable and not writable. Every install and every edit
+ *  after that fails on permissions, which reads as anything but ownership. */
+export function envOwnVolumes(threadId: string, image: string): void {
+  if (image == "") {
+    return;
+  }
+  envDocker(["run", "--rm", "-u", "0", "--cap-drop", "ALL", "--cap-add", "CHOWN",
+    "-v", envWorkspaceVolume(threadId) + ":/workspace",
+    "-v", envHomeVolume(threadId) + ":" + ENV_HOME,
+    "--entrypoint", "chown", image,
+    "-R", `${ENV_UID}` + ":" + `${ENV_UID}`, "/workspace", ENV_HOME]);
+}
+
 function envMake(r: EnvRun): EnvDockerReply {
   if (r.network || r.serve) {
     envNetworkUp(r.threadId, r.name);
   }
+  if (r.serve) {
+    envOwnVolumes(r.threadId, r.image);
+  }
   let made = envDocker(envRunArgs(r));
-  if (made.status == 0) {
+  if (made.status == 0 && !r.serve) {
     envDocker(["exec", r.container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
   }
   return made;
@@ -774,11 +817,33 @@ function envRunArgs(r: EnvRun): string[] {
   out.push("--shm-size"); out.push("512m");
   out.push("--security-opt"); out.push("no-new-privileges");
   out.push("--cap-drop"); out.push("ALL");
-  out.push("--cap-add"); out.push("CHOWN");
-  out.push("--cap-add"); out.push("DAC_OVERRIDE");
-  out.push("--cap-add"); out.push("FOWNER");
-  out.push("--cap-add"); out.push("SETUID");
-  out.push("--cap-add"); out.push("SETGID");
+  if (r.serve) {
+    // A serving environment is the one exposed on its own hostname, and it is
+    // the one hardened first. Nothing here is theoretical: before this, the
+    // process ran as root and /usr/bin was writable, so code in a sandbox
+    // could replace the node binary in the image it had been given.
+    //
+    // Read-only holds because everything this path writes goes to a volume:
+    // the project to /workspace, HOME to its own. Measured, docker cp refuses
+    // a read-only container's *rootfs* but is happy with a volume mounted
+    // inside it — which is exactly what materialising a workspace does.
+    out.push("--read-only");
+    out.push("--tmpfs"); out.push("/tmp:rw,nosuid,size=64m");
+    out.push("-v"); out.push(envHomeVolume(r.threadId) + ":" + ENV_HOME);
+    out.push("-e"); out.push("HOME=" + ENV_HOME);
+    out.push("-e"); out.push("npm_config_cache=" + ENV_HOME + "/.npm");
+    out.push("--user"); out.push(`${ENV_UID}` + ":" + `${ENV_UID}`);
+  } else {
+    // A script sandbox still runs as root with these five. Its run directory
+    // and its job file are copied to paths on the rootfs, and docker cp will
+    // not write those on a read-only container — so hardening it means moving
+    // /artifacts onto a volume first, which is its own change.
+    out.push("--cap-add"); out.push("CHOWN");
+    out.push("--cap-add"); out.push("DAC_OVERRIDE");
+    out.push("--cap-add"); out.push("FOWNER");
+    out.push("--cap-add"); out.push("SETUID");
+    out.push("--cap-add"); out.push("SETGID");
+  }
   // Bound to one address, never to every interface: the gateway is the only
   // thing that should be able to reach a container, and this is where that is
   // decided. `ip::port` asks docker for an ephemeral host port on that address.
@@ -893,6 +958,7 @@ export function envForget(db: Db, threadId: string): void {
     i = i + 1;
   }
   envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
+  envDocker(["volume", "rm", "-f", envHomeVolume(threadId)]);
   deleteWhere(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId]);
 }
 
@@ -1103,6 +1169,7 @@ export function envDrop(db: Db, threadId: string, name: string): bool {
   deleteWhere(db, envMapping(), "id = " + placeholderAt(db, 1), [threadId + ":" + name]);
   if (envList(db, threadId).length == 0) {
     envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
+    envDocker(["volume", "rm", "-f", envHomeVolume(threadId)]);
   }
   return true;
 }

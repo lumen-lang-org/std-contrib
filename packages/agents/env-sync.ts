@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { EnvRow, envBySlug, envContainerName, envDockerBin, envMarkSynced } from "./environments.ts";
+import { EnvRow, envBySlug, envContainerName, envDockerBin, envMarkSynced, envOwnVolumes } from "./environments.ts";
 import { ArtifactWrite, TURN_SEQ_NONE, binaryKind, getVersion, kindOf, listArtifacts, putArtifact } from "./artifacts.ts";
 
 // The container is a cache; the artifacts are the record.
@@ -287,6 +287,10 @@ export function envMaterialise(db: Db, slug: string, stageDir: string): EnvSynce
   }
   let put = envSyncIn(db, row, stageDir);
   if (put.ok) {
+    // The files just written belong to the image's user, not to the uid the
+    // container runs as — docker cp decides that, and it decides wrong for a
+    // hardened container. Handed over before anything tries to build.
+    envOwnVolumes(row.threadId, row.image);
     envMarkSynced(db, row, envSyncClock(row));
   }
   return put;

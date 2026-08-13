@@ -214,13 +214,14 @@ test("forgetting a thread removes its rows and its containers, and only its own"
   envForget(database, "t1");
 
   let asked = argvLines();
-  // Each container, then the network it had to itself, then the shared volume.
-  expect(asked.length == 5);
+  // Each container, then the network it had to itself, then both volumes.
+  expect(asked.length == 6);
   expect(asked[0] == "rm -f agents-env-t1-main");
   expect(asked[1] == "network rm agents-net-t1-main");
   expect(asked[2] == "rm -f agents-env-t1-web");
   expect(asked[3] == "network rm agents-net-t1-web");
   expect(asked[4] == "volume rm -f agents-ws-t1");
+  expect(asked[5] == "volume rm -f agents-home-t1");
 
   expect(envList(database, "t1").length == 0);
   expect(envList(database, "t2").length == 1);
@@ -469,9 +470,21 @@ test("a serving environment publishes one port, bound to the address the gateway
   expect(up.ok);
   expect(up.hostPort == 49154);
   let lines = argvLines();
-  // The network is made before the container that joins it.
+  // The network is made first, then the volumes are given to the uid that will
+  // use them, then the container joins both.
   expect(lines[0] == "network create agents-net-t1-web");
-  let made = lines[1];
+  expect(lines[1].indexOf("run --rm -u 0") == 0);
+  expect(lines[1].indexOf("chown") > 0);
+  let made = lines[2];
+  // Hardened: no root, no capabilities, and an image it cannot rewrite.
+  expect(made.indexOf("--read-only") > 0);
+  expect(made.indexOf("--user 65534:65534") > 0);
+  expect(made.indexOf("--cap-drop ALL") > 0);
+  expect(made.indexOf("--cap-add") < 0);
+  expect(made.indexOf("HOME=/home/sandbox") > 0);
+  // HOME is a volume of its own: npm's cache inside /workspace would be swept
+  // back as artifacts, and is enough to make `npm create` scaffold nothing.
+  expect(made.indexOf("agents-home-t1:/home/sandbox") > 0);
   expect(made.indexOf("-p " + GATEWAY_SIDE + "::3000") > 0);
   // Its own network, never the default bridge: everything on that bridge can
   // reach everything else on it, which is how one conversation's container
@@ -596,7 +609,8 @@ test("an environment built without a port is rebuilt to gain one, and keeps its 
     threadId: "t1", name: "web", image: "node:22", network: true, serve: false, command: "", start: true, now: "1700000000000",
   };
   expect(envEnsure(database, plain).hostPort == 0);
-  // [0] is the network, [1] the container.
+  // [0] is the network, [1] the container: an environment that serves nothing
+  // gets no volume preparation, because it is not the hardened shape.
   expect(argvLines()[1].indexOf("-p ") < 0);
   clearLog();
 
@@ -607,7 +621,7 @@ test("an environment built without a port is rebuilt to gain one, and keeps its 
   expect(argvLines()[0].indexOf("rm -f") == 0);
   // The network is created again — idempotently, since the rebuild keeps it.
   expect(argvLines()[1] == "network create agents-net-t1-web");
-  let remade = argvLines()[2];
+  let remade = argvLines()[3];
   expect(remade.indexOf("-p " + GATEWAY_SIDE + "::3000") > 0);
   // The rebuild mounts the same volume, which is where the work lives.
   expect(remade.indexOf("agents-ws-t1:/workspace") > 0);
@@ -700,7 +714,7 @@ test("what makes an environment serve is run when it is made, and kept", () => {
   let up = servingWith("npm run dev", "1700000000000");
 
   expect(up.ok);
-  // network create, run, the workspace chown, then the serve command.
+  // network create, the volume chown, run, then the serve command.
   let started = argvLines()[3];
   expect(started.indexOf("exec -d agents-env-t1-web sh -lc npm run dev") == 0);
   expect(onlyEnv("t1").serveCmd == "npm run dev");
