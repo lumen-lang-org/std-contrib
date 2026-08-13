@@ -48,3 +48,28 @@ opt-in and reverting is one line.
 io_uring is worth knowing about: it is absent from docker's default allowlist,
 so it was already denied before this profile existed. Async Lumen programs
 that need it need `seccomp=unconfined`, and that was true yesterday too.
+
+## The AppArmor profile
+
+`apparmor-joule-sandbox` is docker-default's shape — the same `/proc` and
+`/sys` denials — plus this deployment's own: `curl`, `wget`, `nc` and `ssh`
+are refused execution.
+
+That last part is a fence, not a wall. AppArmor is path-based, so a program
+that brings its own client walks around it; and node and python hold sockets
+regardless. It is here for the stray command, which is most of them. It is
+also not redundant: `agents-web:1` ships curl, wget and ssh, and
+`agents-runtime:1` ships curl. The dev image ships none of them.
+
+```
+sudo install -m 0644 apparmor-joule-sandbox /etc/apparmor.d/joule-sandbox
+sudo apparmor_parser -r -W /etc/apparmor.d/joule-sandbox
+# then, in packages/agents/.env
+AGENTS_ENV_APPARMOR=joule-sandbox
+```
+
+This one goes on the **sandbox VM**, not the engine box: an AppArmor profile
+is loaded into the kernel that runs the container. The seccomp profile is the
+other way round. Two security options, two machines — worth saying twice,
+because getting it backwards produces an error that names a file and not a
+machine.

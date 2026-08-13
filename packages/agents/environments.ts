@@ -21,6 +21,16 @@ export function envSeccompProfile(): string {
   return (process.env("AGENTS_ENV_SECCOMP") ?? "").trim();
 }
 
+/** An AppArmor profile for sandboxes, or "" for docker-default.
+ *
+ *  Loaded on the machine the CONTAINER runs on, which is the sandbox VM — the
+ *  opposite of the seccomp profile above, resolved by the docker client here.
+ *  Two security options, two different machines, and the error when you get it
+ *  the wrong way round names a file rather than a machine. */
+export function envApparmorProfile(): string {
+  return (process.env("AGENTS_ENV_APPARMOR") ?? "").trim();
+}
+
 export const ENV_RUN_DIR: string = "/artifacts";
 export const ENV_SKILLS_DIR: string = "/skills";
 
@@ -854,6 +864,13 @@ function envRunArgs(r: EnvRun): string[] {
   let seccomp = envSeccompProfile();
   if (seccomp != "") {
     out.push("--security-opt"); out.push("seccomp=" + seccomp);
+  }
+  // Path-based, so a fence rather than a wall: it refuses curl, wget and ssh,
+  // which the script images ship and the dev image does not. A program that
+  // brings its own client walks around it — this is for the stray command.
+  let armor = envApparmorProfile();
+  if (armor != "") {
+    out.push("--security-opt"); out.push("apparmor=" + armor);
   }
   out.push("--cap-drop"); out.push("ALL");
   if (r.serve) {
