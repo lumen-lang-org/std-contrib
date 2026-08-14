@@ -3,6 +3,7 @@ import { cardClaims } from "./toolcards.ts";
 import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
 import { DbField, DbRepository, DbOrder, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { threadStepRepository } from "./routes/threads/entities/thread-step.entity.ts";
 
 export type LiveStep = {
   id: string,
@@ -29,24 +30,7 @@ export const RESULT_PREVIEW = 700;
 export const RESULT_FOR_CARD = 65536;
 
 export function stepsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("seq", "seq", "int"),
-    field("depth", "depth", "int"),
-    field("rotation", "rotation", "int"),
-    field("idx", "idx", "int"),
-    field("kind", "kind", "text"),
-    field("name", "name", "text"),
-    field("target", "target", "text"),
-    field("args", "args", "text"),
-    field("startedAt", "started_at", "text"),
-    field("endedAt", "ended_at", "text"),
-    field("millis", "millis", "int"),
-    field("ok", "ok", "bool"),
-    field("result", "result", "text"),
-  ];
-  return repository({ table: "thread_steps", idField: "id", idColumn: "id", fields: fs });
+  return threadStepRepository();
 }
 
 export function stepPlan(db: Db): Migration[] {
