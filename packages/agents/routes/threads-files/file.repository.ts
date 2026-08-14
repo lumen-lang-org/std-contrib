@@ -1,10 +1,11 @@
 import { Db } from "../../../plume/driver.ts";
-import { findById } from "../../../plume/plume.ts";
+import { DbOrder, deleteById, findById, listOrdered, placeholderAt } from "../../../plume/plume.ts";
 import { credentialFor } from "../../credentials.ts";
 import { Upload, embeddingModel } from "../../knowledge.ts";
 import { documentRepository } from "../documents/entities/document.entity.ts";
 import { ownedThread } from "../../threads.ts";
-import { FileWrite, WorkspaceFileRow, deleteFile, getFile, listFiles, promoteFile, putFile } from "../../workspace.ts";
+import { workspaceFileRepository } from "./entities/workspace-file.entity.ts";
+import { FileWrite, WorkspaceFileRow, getFile, promoteFile, putFile } from "../../workspace.ts";
 
 export class FileRepository {
   database: Db;
@@ -20,7 +21,17 @@ export class FileRepository {
   }
 
   listing(threadId: string): WorkspaceFileRow[] {
-    return listFiles(this.database, threadId);
+    let none: WorkspaceFileRow[] = [];
+    let keys: DbOrder[] = [{ column: "file_name" }];
+    let listed = listOrdered(this.database, workspaceFileRepository(), {
+      where: "thread_id = " + placeholderAt(this.database, 1),
+      args: [threadId],
+      order: keys,
+    });
+    if (listed == "" || listed == "[]") {
+      return none;
+    }
+    return JSON.parse<WorkspaceFileRow[]>(listed);
   }
 
   one(threadId: string, fileName: string): WorkspaceFileRow {
@@ -53,6 +64,10 @@ export class FileRepository {
   }
 
   forget(threadId: string, fileName: string): string {
-    return deleteFile(this.database, threadId, fileName);
+    let gone = deleteById(this.database, workspaceFileRepository(), threadId + ":" + fileName);
+    if (!gone.ok) {
+      return gone.error;
+    }
+    return "";
   }
 }

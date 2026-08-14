@@ -1,10 +1,11 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbOrder, DbRepository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { binaryKind, getArtifact, getVersion, kindOf, listArtifacts, utf8Length } from "./artifacts.ts";
 import { uploadBytesMax } from "./caps.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
+import { workspaceFileRepository } from "./routes/threads-files/entities/workspace-file.entity.ts";
 
 export const UPLOAD_MAX: int = uploadBytesMax();
 
@@ -20,17 +21,7 @@ export type WorkspaceFileRow = {
 };
 
 export function workspaceFilesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("fileName", "file_name", "text"),
-    field("mime", "mime", "text"),
-    field("origin", "origin", "text"),
-    field("body", "body", "text"),
-    field("documentId", "document_id", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "workspace_files", idField: "id", idColumn: "id", fields: fs });
+  return workspaceFileRepository();
 }
 
 export function workspacePlan(db: Db): Migration[] {
