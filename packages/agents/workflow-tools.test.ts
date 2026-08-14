@@ -7,7 +7,8 @@ import { WorkflowRow, parseGraph, workflowRunsMapping, workflowsMapping, workflo
 import { callWorkflowTool, workflowTools } from "./workflow-tools.ts";
 import { jsonComplete } from "./scan.ts";
 import { credentialsMapping } from "./schema.ts";
-import { createSecret, secretsMapping, secretsPlan } from "./secrets.ts";
+import { secretsMapping, secretsPlan } from "./secrets.ts";
+import { SecretService } from "./routes/secrets/secret.service.ts";
 
 let database: Db = sqlite();
 
@@ -464,7 +465,7 @@ test("a secret is attached by name, never created, and never leaves its address"
   expect(none.ok);
   expect(none.text.indexOf("No secrets stored") >= 0);
 
-  let made = createSecret(database, { owner: "o1", name: "api key", value: "Bearer sk-t-1",
+  let made = new SecretService(database, "0123456789abcdef0123456789abcdef").mint({ owner: "o1", name: "api key", value: "Bearer sk-t-1",
     destination: "https://api.example.com", header: "", category: "", master: "0123456789abcdef0123456789abcdef", now: "t" });
   expect(made.fault == "");
   let drafted = call("o1", "draft_workflow",

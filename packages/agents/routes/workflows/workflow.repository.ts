@@ -1,9 +1,9 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../plume/plume.ts";
 import { WfGraph } from "../../../workflow/workflow.ts";
-import { graphSecretFault } from "../../secrets.ts";
 import { enabledWorkflowCount } from "../../workflow-store.ts";
 import { agentRepository } from "../agents/entities/agent.entity.ts";
+import { SecretRepository } from "../secrets/secret.repository.ts";
 import { workflowRunRepository } from "./entities/workflow-run.entity.ts";
 import { workflowRepository } from "./entities/workflow.entity.ts";
 
@@ -11,11 +11,13 @@ export class WorkflowRepository {
   database: Db;
   workflows: DbRepository;
   runsOfWorkflows: DbRepository;
+  secrets: SecretRepository;
 
   constructor(database: Db) {
     this.database = database;
     this.workflows = workflowRepository();
     this.runsOfWorkflows = workflowRunRepository();
+    this.secrets = new SecretRepository(database);
   }
 
   listing(owner: string): string {
@@ -40,7 +42,7 @@ export class WorkflowRepository {
   }
 
   secretFault(graph: WfGraph, owner: string): string {
-    return graphSecretFault(this.database, graph, owner);
+    return this.secrets.graphFault(graph, owner);
   }
 
   save(document: string): DbResult {

@@ -7,7 +7,8 @@ import { maySchedule } from "./task-tools.ts";
 import { civil, knownZone } from "./../cron/cron.ts";
 import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGraph, secretIds, startOf } from "../workflow/workflow.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
-import { SecretRow, graphSecretFault, secretByName, secretsOf } from "./secrets.ts";
+import { SecretRepository } from "./routes/secrets/secret.repository.ts";
+import { SecretRow } from "./routes/secrets/secret.utils.ts";
 import { stampMs } from "./tasks.ts";
 
 const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\\\" (one model call, no tools), "
@@ -605,7 +606,7 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     let bad: Stored = { ok: false, row: row, error: wrong };
     return bad;
   }
-  let secretWrong = graphSecretFault(db, graph, row.owner);
+  let secretWrong = new SecretRepository(db).graphFault(graph, row.owner);
   if (secretWrong != "") {
     let bad: Stored = { ok: false, row: row, error: secretWrong };
     return bad;
@@ -676,7 +677,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   }
 
   if (call.name == "list_secrets") {
-    let rows = JSON.parse<SecretRow[]>(secretsOf(db, call.owner));
+    let rows = JSON.parse<SecretRow[]>(new SecretRepository(db).listing(call.owner));
     if (rows.length == 0) {
       return yes("No secrets stored. They are added on the Workflows page (in an http step's settings) or in Settings — never here: a value said in chat is a value in the transcript.");
     }
@@ -1082,7 +1083,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
         ids = "";
         let w: int = 0;
         while (w < wanted.length) {
-          let held = secretByName(db, wanted[w], call.owner);
+          let held = new SecretRepository(db).byName(wanted[w], call.owner);
           if (held.id == "") {
             return no("there is no secret called \"" + wanted[w] + "\" — list_secrets says which exist; new ones are added in the step's settings or in Settings, never in chat.");
           }

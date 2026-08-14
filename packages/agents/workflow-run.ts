@@ -4,7 +4,7 @@ import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, casesOf, emptyNode,
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
-import { secretById, secretValue, touchSecret } from "./secrets.ts";
+import { SecretService } from "./routes/secrets/secret.service.ts";
 import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";
@@ -215,10 +215,11 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
     }
     h = h + 1;
   }
+  let secrets = new SecretService(db, master);
   let held = secretIds(node);
   let s: int = 0;
   while (s < held.length) {
-    let secret = secretById(db, held[s], owner);
+    let secret = secrets.repository.byId(held[s], owner);
     if (secret.id == "") {
       return stepFailed("this step names a secret that is not here any more — pick another in the step's settings");
     }
@@ -227,12 +228,12 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
         + ", and \"" + secret.name + "\" was stored for " + secret.destination
         + " — a secret is only sent to the address it was stored for");
     }
-    let value = secretValue(db, secret, master);
+    let value = secrets.value(secret);
     if (value == "") {
       return stepFailed("\"" + secret.name + "\" could not be opened — delete it and add it again");
     }
     headers.set(secret.header, value);
-    touchSecret(db, secret.id, `${Date.now() as number}`);
+    secrets.touch(secret.id, `${Date.now() as number}`);
     s = s + 1;
   }
   let body = node.method == "GET" ? "" : fill(node.body, ctx);
