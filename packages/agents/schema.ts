@@ -20,6 +20,7 @@ import { mcpToolOffRepository } from "./routes/connect/entities/mcp-tool-off.ent
 import { mcpOauthRepository } from "./routes/connect/entities/mcp-oauth.entity.ts";
 import { mcpPendingRepository } from "./routes/connect/entities/mcp-pending.entity.ts";
 import { mcpGrantRepository } from "./routes/connect/entities/mcp-grant.entity.ts";
+import { credentialRepository } from "./routes/credentials/entities/credential.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -366,13 +367,7 @@ export function mcpGrantsMapping(): DbRepository {
 }
 
 export function credentialsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("provider", "provider", "text"),
-    field("envelope", "envelope", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "provider_credentials", idField: "id", idColumn: "id", fields: fs });
+  return credentialRepository();
 }
 
 export function scriptImagesMappingV1(): DbRepository {
