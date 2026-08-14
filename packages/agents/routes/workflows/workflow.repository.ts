@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../plume/plume.ts";
 import { WfGraph } from "../../../workflow/workflow.ts";
-import { enabledWorkflowCount } from "../../workflow-store.ts";
 import { agentRepository } from "../agents/entities/agent.entity.ts";
 import { SecretRepository } from "../secrets/secret.repository.ts";
 import { workflowRunRepository } from "./entities/workflow-run.entity.ts";
@@ -34,7 +33,14 @@ export class WorkflowRepository {
   }
 
   enabledCount(owner: string): int {
-    return enabledWorkflowCount(this.database, owner);
+    let sql = "SELECT COUNT(*) FROM workflows WHERE owner = " + this.database.placeholder + " AND enabled = true";
+    if (!this.database.query(sql, [owner])) {
+      return 0;
+    }
+    if (this.database.rows() == 0) {
+      return 0;
+    }
+    return parseInt(this.database.value(0, 0)) ?? 0;
   }
 
   hasAgent(id: string): bool {
