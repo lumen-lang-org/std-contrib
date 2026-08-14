@@ -115,16 +115,30 @@ function renew(db: Db, server: McpServerRow, key: string, master: string): strin
     markUnrefreshable(db, key);
     return "";
   }
-  storeCredential(db, { provider: key, apiKey: got.accessToken, masterKey: master, now: stamp() });
+  let storedAccess = storeCredential(db, {
+    provider: key,
+    apiKey: got.accessToken,
+    masterKey: master,
+    now: stamp(),
+  });
+  if (storedAccess != "") {
+    return "";
+  }
   if (got.refreshToken != "") {
-    storeCredential(db, {
+    let storedRefresh = storeCredential(db, {
       provider: refreshKey(key),
       apiKey: got.refreshToken,
       masterKey: master,
       now: stamp(),
     });
+    if (storedRefresh != "") {
+      return "";
+    }
   }
-  writeGrant(db, key, server.id, ownerOfKey(server.id, key), got, true);
+  let wroteGrant = writeGrant(db, key, server.id, ownerOfKey(server.id, key), got, true);
+  if (wroteGrant != "") {
+    return "";
+  }
   return got.accessToken;
 }
 
@@ -195,7 +209,7 @@ function markUnrefreshable(db: Db, key: string): void {
   persist(db, mcpGrantsMapping(), JSON.stringify(dead));
 }
 
-function writeGrant(db: Db, key: string, serverId: string, owner: string, got: Grant, keepConnectedAt: bool): void {
+function writeGrant(db: Db, key: string, serverId: string, owner: string, got: Grant, keepConnectedAt: bool): string {
   let connectedAt = stamp();
   if (keepConnectedAt) {
     let had = findById(db, mcpGrantsMapping(), key);
@@ -216,7 +230,11 @@ function writeGrant(db: Db, key: string, serverId: string, owner: string, got: G
     expiresAt: expiresAt, refreshable: refreshable, connectedAt: connectedAt,
   };
   deleteById(db, mcpGrantsMapping(), key);
-  persist(db, mcpGrantsMapping(), JSON.stringify(row));
+  let written = persist(db, mcpGrantsMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return written.error;
+  }
+  return "";
 }
 
 type ClientLookup = {
@@ -405,7 +423,10 @@ export function completeConnect(db: Db, master: string, state: string, code: str
   } else {
     forgetCredential(db, refreshKey(key));
   }
-  writeGrant(db, key, server.id, pending.owner, got, false);
+  let wroteGrant = writeGrant(db, key, server.id, pending.owner, got, false);
+  if (wroteGrant != "") {
+    return { serverId: server.id, serverName: server.serverName, fault: wroteGrant };
+  }
 
   enable(db, server.id);
   attachToDefault(db, server.id);
