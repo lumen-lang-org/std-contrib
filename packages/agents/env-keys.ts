@@ -214,9 +214,9 @@ export function forgetEnvKey(db: Db, id: string, owner: string): bool {
   if (row.id == "") {
     return false;
   }
-  forgetCredential(db, refOf(row.id));
-  deleteById(db, envKeysMapping(), row.id);
-  return true;
+  let droppedValue = forgetCredential(db, refOf(row.id));
+  let droppedRow = deleteById(db, envKeysMapping(), row.id).ok;
+  return droppedValue && droppedRow;
 }
 
 export function envKeyFileBody(db: Db, owner: string, imageId: string, master: string): string {
