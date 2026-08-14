@@ -66,7 +66,7 @@ export class DocumentRepository {
     return deleteWhere(this.database, documentRepository(), "source = " + placeholderAt(this.database, 1), [source]);
   }
 
-  forgetFiles(source: string): void {
-    deleteWhere(this.database, documentFileRepository(), "source = " + placeholderAt(this.database, 1), [source]);
+  forgetFiles(source: string): DbResult {
+    return deleteWhere(this.database, documentFileRepository(), "source = " + placeholderAt(this.database, 1), [source]);
   }
 }

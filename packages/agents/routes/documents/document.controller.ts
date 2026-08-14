@@ -57,7 +57,10 @@ export class DocumentApi {
   @Delete("/:source")
   @Guard(needsPg)
   remove(@PathVariable("source") source: string): Reply {
-    this.documents.remove(source);
+    let gone = this.documents.remove(source);
+    if (gone.fault != "") {
+      return BadRequest(gone.fault);
+    }
     return NoContent();
   }
 }

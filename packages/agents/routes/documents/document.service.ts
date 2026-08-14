@@ -124,8 +124,15 @@ export class DocumentService {
     return this.repository.fileFor(scope, source);
   }
 
-  remove(source: string): void {
-    this.repository.deleteBySource(source);
-    this.repository.forgetFiles(source);
+  remove(source: string): Outcome {
+    let gone = this.repository.deleteBySource(source);
+    if (!gone.ok) {
+      return refusing("\"" + source + "\" is still in the corpus — the delete failed, so agents keep retrieving it.");
+    }
+    let filed = this.repository.forgetFiles(source);
+    if (!filed.ok) {
+      return refusing("\"" + source + "\" left the corpus, but its kept file could not be deleted.");
+    }
+    return produced("");
   }
 }
