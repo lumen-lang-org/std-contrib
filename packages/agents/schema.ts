@@ -16,6 +16,10 @@ import { scriptImageRepository } from "./routes/script-images/entities/script-im
 import { modelRepository } from "./routes/models/entities/model.entity.ts";
 import { modelChoiceRepository } from "./routes/models/entities/model-choice.entity.ts";
 import { modelRouterRepository } from "./routes/models/entities/model-router.entity.ts";
+import { mcpToolOffRepository } from "./routes/connect/entities/mcp-tool-off.entity.ts";
+import { mcpOauthRepository } from "./routes/connect/entities/mcp-oauth.entity.ts";
+import { mcpPendingRepository } from "./routes/connect/entities/mcp-pending.entity.ts";
+import { mcpGrantRepository } from "./routes/connect/entities/mcp-grant.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -318,12 +322,7 @@ export type McpToolOffRow = {
 };
 
 export function mcpToolsOffMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("serverId", "server_id", "text"),
-    field("toolName", "tool_name", "text"),
-  ];
-  return repository({ table: "mcp_tools_off", idField: "id", idColumn: "id", fields: fs });
+  return mcpToolOffRepository();
 }
 
 export type McpOauthRow = {
@@ -338,17 +337,7 @@ export type McpOauthRow = {
 };
 
 export function mcpOauthMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("issuer", "issuer", "text"),
-    field("authorizeUrl", "authorize_url", "text"),
-    field("tokenUrl", "token_url", "text"),
-    field("clientId", "client_id", "text"),
-    field("scope", "scope", "text"),
-    field("redirectUri", "redirect_uri", "text"),
-    field("registeredAt", "registered_at", "text"),
-  ];
-  return repository({ table: "mcp_oauth", idField: "id", idColumn: "id", fields: fs });
+  return mcpOauthRepository();
 }
 
 export type McpPendingRow = {
@@ -360,14 +349,7 @@ export type McpPendingRow = {
 };
 
 export function mcpPendingMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("serverId", "server_id", "text"),
-    field("owner", "owner", "text"),
-    field("verifier", "verifier", "text"),
-    field("startedAt", "started_at", "text"),
-  ];
-  return repository({ table: "mcp_oauth_pending", idField: "id", idColumn: "id", fields: fs });
+  return mcpPendingRepository();
 }
 
 export type McpGrantRow = {
@@ -380,15 +362,7 @@ export type McpGrantRow = {
 };
 
 export function mcpGrantsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("serverId", "server_id", "text"),
-    field("owner", "owner", "text"),
-    field("expiresAt", "expires_at", "text"),
-    field("refreshable", "refreshable", "bool"),
-    field("connectedAt", "connected_at", "text"),
-  ];
-  return repository({ table: "mcp_oauth_grants", idField: "id", idColumn: "id", fields: fs });
+  return mcpGrantRepository();
 }
 
 export function credentialsMapping(): DbRepository {
