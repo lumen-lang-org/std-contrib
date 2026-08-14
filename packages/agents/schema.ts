@@ -5,6 +5,8 @@ import { agentRepository } from "./routes/agents/entities/agent.entity.ts";
 import { promptRepository } from "./routes/prompts/entities/prompt.entity.ts";
 import { templateRepository } from "./routes/templates/entities/template.entity.ts";
 import { templateFileRepository } from "./routes/templates/entities/template-file.entity.ts";
+import { pluginRepository } from "./routes/plugins/entities/plugin.entity.ts";
+import { pluginItemRepository } from "./routes/plugins/entities/plugin-item.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -498,15 +500,7 @@ export type PluginRow = {
 };
 
 export function pluginsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("pluginName", "plugin_name", "text"),
-    field("description", "description", "text"),
-    field("sourceUrl", "source_url", "text"),
-    field("version", "version", "text"),
-    field("installedAt", "installed_at", "text"),
-  ];
-  return repository({ table: "plugins", idField: "id", idColumn: "id", fields: fs });
+  return withoutRelations(pluginRepository());
 }
 
 export type PluginItemRow = {
@@ -517,13 +511,7 @@ export type PluginItemRow = {
 };
 
 export function pluginItemsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("pluginId", "plugin_id", "text"),
-    field("kind", "kind", "text"),
-    field("itemId", "item_id", "text"),
-  ];
-  return repository({ table: "plugin_items", idField: "id", idColumn: "id", fields: fs });
+  return withoutRelations(pluginItemRepository());
 }
 
 export type ThreadSummaryRow = {
