@@ -1,18 +1,21 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, setOn } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../plume/plume.ts";
 import { WfGraph } from "../../../workflow/workflow.ts";
 import { graphSecretFault } from "../../secrets.ts";
-import { enabledWorkflowCount, workflowRunsMapping, workflowRunsOf } from "../../workflow-store.ts";
+import { enabledWorkflowCount } from "../../workflow-store.ts";
 import { agentRepository } from "../agents/entities/agent.entity.ts";
+import { workflowRunRepository } from "./entities/workflow-run.entity.ts";
 import { workflowRepository } from "./entities/workflow.entity.ts";
 
 export class WorkflowRepository {
   database: Db;
   workflows: DbRepository;
+  runsOfWorkflows: DbRepository;
 
   constructor(database: Db) {
     this.database = database;
     this.workflows = workflowRepository();
+    this.runsOfWorkflows = workflowRunRepository();
   }
 
   listing(owner: string): string {
@@ -68,12 +71,17 @@ export class WorkflowRepository {
   }
 
   runs(workflowId: string, owner: string): string {
-    return workflowRunsOf(this.database, workflowId, owner);
+    let keys: DbOrder[] = [{ column: "started_at", direction: "desc" }];
+    return listOrdered(this.database, this.runsOfWorkflows, {
+      where: "workflow_id = " + this.database.placeholder + " AND owner = " + placeholderAt(this.database, 2),
+      args: [workflowId, owner],
+      order: keys,
+    });
   }
 
   forget(id: string): string {
     let steps: DbResult[] = [
-      deleteWhere(this.database, workflowRunsMapping(), "workflow_id = " + this.database.placeholder, [id]),
+      deleteWhere(this.database, this.runsOfWorkflows, "workflow_id = " + this.database.placeholder, [id]),
       deleteById(this.database, this.workflows, id),
     ];
     let i: int = 0;

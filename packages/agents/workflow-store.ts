@@ -5,6 +5,7 @@ import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
 import { knownZone } from "../cron/cron.ts";
 import { workflowRepository } from "./routes/workflows/entities/workflow.entity.ts";
+import { workflowRunRepository } from "./routes/workflows/entities/workflow-run.entity.ts";
 
 export const MAX_WORKFLOWS_PER_OWNER: int = 10;
 export const MAX_GRAPH_CHARS: int = 65536;
@@ -82,7 +83,7 @@ export function workflowsMapping(): DbRepository {
   return workflowRepository();
 }
 
-export function workflowRunsMapping(): DbRepository {
+function workflowRunsMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("workflowId", "workflow_id", "text"),
@@ -99,12 +100,16 @@ export function workflowRunsMapping(): DbRepository {
   return repository({ table: "workflow_runs", idField: "id", idColumn: "id", fields: fs });
 }
 
+export function workflowRunsMapping(): DbRepository {
+  return workflowRunRepository();
+}
+
 export function workflowsPlan(db: Db): Migration[] {
   return [
     migration("101", "workflows: steps somebody drew",
       createTableSql(db, workflowsMappingV1())),
     migration("101.1", "and what happened when they ran",
-      createTableSql(db, workflowRunsMapping())),
+      createTableSql(db, workflowRunsMappingV1())),
     migration("107", "what production runs: the graph as last published",
       "ALTER TABLE workflows ADD COLUMN published_graph " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.1", "and when it was published",
