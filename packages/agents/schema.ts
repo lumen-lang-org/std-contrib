@@ -3,6 +3,8 @@ import { DbField, DbOrder, DbRelation, DbRepository, ManyThrough, withoutRelatio
 import { Migration, migration } from "../plume/migrate.ts";
 import { agentRepository } from "./routes/agents/entities/agent.entity.ts";
 import { promptRepository } from "./routes/prompts/entities/prompt.entity.ts";
+import { templateRepository } from "./routes/templates/entities/template.entity.ts";
+import { templateFileRepository } from "./routes/templates/entities/template-file.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -596,20 +598,7 @@ export type TemplateRow = {
 };
 
 export function templatesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("label", "label", "text"),
-    field("description", "description", "text"),
-    field("kind", "kind", "text"),
-    field("skillName", "skill_name", "text"),
-    field("visibility", "visibility", "text"),
-    field("featuredRank", "featured_rank", "int"),
-    field("image", "image", "text"),
-    field("bootstrap", "bootstrap", "text"),
-    field("serve", "serve", "text"),
-    field("request", "request", "text"),
-  ];
-  return repository({ table: "templates", idField: "id", idColumn: "id", fields: fs });
+  return templateRepository();
 }
 
 // The shape migration 79 created, frozen. Built from the live mapping instead,
@@ -637,14 +626,7 @@ export type TemplateFileRow = {
 };
 
 export function templateFilesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("templateId", "template_id", "text"),
-    field("path", "path", "text"),
-    field("title", "title", "text"),
-    field("body", "body", "text"),
-  ];
-  return repository({ table: "template_files", idField: "id", idColumn: "id", fields: fs });
+  return templateFileRepository();
 }
 
 export type OfficeRenderRow = {

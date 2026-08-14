@@ -3,6 +3,8 @@ import { DbAssignment, DbRepository, DbResult, findById, listWhere, placeholderA
 import { ArtifactRow, ArtifactVersionRow, ArtifactWrite, ArtifactWritten, TurnArtifact, artifactsByTurn, artifactsForTurn, deleteArtifact, noArtifactVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
 import { artifactRepository } from "./entities/artifact.entity.ts";
 import { artifactVersionRepository } from "./entities/artifact-version.entity.ts";
+import { templateRepository } from "../templates/entities/template.entity.ts";
+import { templateFileRepository } from "../templates/entities/template-file.entity.ts";
 import { OfficeRenderAsk, OfficeRendered, officeRender } from "../../office-render.ts";
 import { jsonList } from "../../scan.ts";
 import { ownedThread, readableThread } from "../../threads.ts";
@@ -38,12 +40,12 @@ export class ArtifactRepository {
   }
 
   template(templateId: string): string {
-    return findById(this.database, templatesMapping(), templateId);
+    return findById(this.database, templateRepository(), templateId);
   }
 
   templateFiles(templateId: string): string {
     let where = "template_id = " + placeholderAt(this.database, 1);
-    return listWhere(this.database, templateFilesMapping(), where, [templateId]);
+    return listWhere(this.database, templateFileRepository(), where, [templateId]);
   }
 
   everyTurn(threadId: string): TurnArtifact[] {
