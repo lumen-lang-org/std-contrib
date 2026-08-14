@@ -15,6 +15,7 @@ import { authProviderRepository } from "./routes/auth-providers/entities/auth-pr
 import { scriptImageRepository } from "./routes/script-images/entities/script-image.entity.ts";
 import { modelRepository } from "./routes/models/entities/model.entity.ts";
 import { modelChoiceRepository } from "./routes/models/entities/model-choice.entity.ts";
+import { modelRouterRepository } from "./routes/models/entities/model-router.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -219,17 +220,7 @@ export function modelChoicesMapping(): DbRepository {
 }
 
 export function modelRoutersMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("label", "label", "text"),
-    field("routerConfigId", "router_config_id", "text"),
-    field("candidatesJson", "candidates_json", "text"),
-    field("fallbackConfigId", "fallback_config_id", "text"),
-    field("routeEvery", "route_every", "text"),
-    field("escalateOnly", "escalate_only", "bool"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({ table: "model_routers", idField: "id", idColumn: "id", fields: fs });
+  return modelRouterRepository();
 }
 
 export function enabledChoices(db: Db): ModelChoiceRow[] {
