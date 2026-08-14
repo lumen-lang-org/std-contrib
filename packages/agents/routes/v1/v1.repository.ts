@@ -1,18 +1,21 @@
 import { Db } from "../../../plume/driver.ts";
-import { ApiKeyAuth, touchApiKey, verifyApiKey } from "../../api-keys.ts";
+import { ApiKeyAuth } from "../api-keys/api-key.utils.ts";
+import { ApiKeyService } from "../api-keys/api-key.service.ts";
 
 export class V1Repository {
   database: Db;
+  apiKeys: ApiKeyService;
 
   constructor(database: Db) {
     this.database = database;
+    this.apiKeys = new ApiKeyService(database);
   }
 
   authorize(secret: string): ApiKeyAuth {
-    return verifyApiKey(this.database, secret);
+    return this.apiKeys.verify(secret);
   }
 
   touch(keyId: string, now: string): void {
-    touchApiKey(this.database, keyId, now);
+    this.apiKeys.touch(keyId, now);
   }
 }

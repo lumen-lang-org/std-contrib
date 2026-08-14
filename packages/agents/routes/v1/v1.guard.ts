@@ -1,5 +1,5 @@
 import { Guarded, Request, Refused, header, reject, resolve } from "../../../rest/server.ts";
-import { hasScope } from "../../api-keys.ts";
+import { hasScope } from "../api-keys/api-key.utils.ts";
 import { presentedKey } from "../../search-gateway.ts";
 import { V1Service } from "./v1.service.ts";
 

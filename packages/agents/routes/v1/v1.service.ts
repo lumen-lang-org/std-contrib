@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { Reply, BadRequest, Refused, Respond } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { ApiKeyAuth } from "../../api-keys.ts";
+import { ApiKeyAuth } from "../api-keys/api-key.utils.ts";
 import { urlEncode } from "../../mcp-oauth.ts";
 import { upstreamBase } from "../../search-gateway.ts";
 import { V1Repository } from "./v1.repository.ts";
