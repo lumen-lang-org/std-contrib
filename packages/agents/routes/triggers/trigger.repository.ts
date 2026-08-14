@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, setOn } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../plume/plume.ts";
 import { CredentialWrite, forgetCredential, storeCredential } from "../../credentials.ts";
-import { queuedFor } from "../../triggers.ts";
 import { workflowRepository } from "../workflows/entities/workflow.entity.ts";
 import { triggerBotRepository } from "./entities/trigger-bot.entity.ts";
 import { triggerInboxRepository } from "./entities/trigger-inbox.entity.ts";
@@ -61,7 +60,12 @@ export class TriggerRepository {
   }
 
   queue(id: string): string {
-    return queuedFor(this.database, id);
+    let keys: DbOrder[] = [{ column: "created_at" }];
+    return listOrdered(this.database, triggerInboxRepository(), {
+      where: "bot_id = " + this.database.placeholder + " AND status = " + placeholderAt(this.database, 2),
+      args: [id, "queued"],
+      order: keys,
+    });
   }
 
   forget(id: string): string {

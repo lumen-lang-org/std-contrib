@@ -347,15 +347,6 @@ export function recentRuns(db: Db, botId: string, nowMs: number): int {
   return rows.length;
 }
 
-export function queuedFor(db: Db, botId: string): string {
-  let keys: DbOrder[] = [{ column: "created_at" }];
-  return listOrdered(db, triggerInboxMapping(), {
-    where: "bot_id = " + db.placeholder + " AND status = " + placeholderAt(db, 2),
-    args: [botId, "queued"],
-    order: keys,
-  });
-}
-
 export function unsentFor(db: Db, botId: string): string {
   let keys: DbOrder[] = [{ column: "updated_at" }];
   return listOrdered(db, triggerInboxMapping(), {
