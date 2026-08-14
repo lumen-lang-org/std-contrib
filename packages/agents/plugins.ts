@@ -223,6 +223,18 @@ function receipt(db: Db, pluginId: string, kind: string, itemId: string): void {
   persist(db, pluginItemsMapping(), JSON.stringify(row));
 }
 
+function emptyPlugin(): PluginRow {
+  let none: PluginRow = {
+    id: "",
+    pluginName: "",
+    description: "",
+    sourceUrl: "",
+    version: "",
+    installedAt: "",
+  };
+  return none;
+}
+
 export function install(db: Db, m: Manifest, sourceUrl: string, now: string): PluginRow {
   let plugin: PluginRow = {
     id: crypto.randomUUID(),
@@ -232,7 +244,10 @@ export function install(db: Db, m: Manifest, sourceUrl: string, now: string): Pl
     version: m.version,
     installedAt: now,
   };
-  persist(db, pluginsMapping(), JSON.stringify(plugin));
+  let written = persist(db, pluginsMapping(), JSON.stringify(plugin));
+  if (!written.ok) {
+    return emptyPlugin();
+  }
 
   let i: int = 0;
   while (i < m.skills.length) {

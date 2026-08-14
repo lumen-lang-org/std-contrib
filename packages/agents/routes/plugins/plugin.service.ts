@@ -77,6 +77,9 @@ export class PluginService {
       return refusing(clash);
     }
     let made = this.repository.installFrom(manifest, manifestUrl(sourceUrl), stamp());
+    if (made == "") {
+      return refusing("the plugin could not be installed");
+    }
     return produced(this.repository.one(made));
   }
 
