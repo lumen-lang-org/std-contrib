@@ -5,7 +5,8 @@ import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
 import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelRow, writeSetting } from "./schema.ts";
 import { listSources, normalScope } from "./knowledge.ts";
-import { enqueue, JOB_QUEUED } from "./indexing.ts";
+import { enqueue } from "./indexing.ts";
+import { JOB_QUEUED } from "./routes/jobs/entities/index-job.entity.ts";
 import { forgetDocumentFiles } from "./document-files.ts";
 import { maySchedule } from "./task-tools.ts";
 

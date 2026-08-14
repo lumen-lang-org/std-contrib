@@ -1,4 +1,4 @@
-import { IndexJobRow } from "../../indexing.ts";
+import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
 
 export function scopeNamesOf(rows: IndexJobRow[]): string[] {
   let out: string[] = [];

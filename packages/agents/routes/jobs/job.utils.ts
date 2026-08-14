@@ -1,4 +1,4 @@
-import { IndexJobRow } from "../../indexing.ts";
+import { IndexJobRow } from "./entities/index-job.entity.ts";
 import { JobView } from "./dtos/job-view.dto.ts";
 
 export function jobViewOf(row: IndexJobRow): JobView {

@@ -1,6 +1,24 @@
 import { EntityDescription, entity } from "../../../../plume/entity.ts";
 import { DbRepository } from "../../../../plume/plume.ts";
 
+export const JOB_QUEUED: string = "queued";
+export const JOB_INDEXING: string = "indexing";
+export const JOB_INDEXED: string = "indexed";
+export const JOB_FAILED: string = "failed";
+
+export type IndexJobRow = {
+  id: string,
+  source: string,
+  scope: string,
+  modelId: string,
+  body: string,
+  status: string,
+  chunks: int,
+  error: string,
+  createdAt: string,
+  updatedAt: string,
+};
+
 @entity("index_jobs")
 export class IndexJob {
   @Id

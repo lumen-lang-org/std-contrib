@@ -1,25 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbRepository, persist, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { indexJobRepository } from "./routes/jobs/entities/index-job.entity.ts";
-
-export const JOB_QUEUED: string = "queued";
-export const JOB_INDEXING: string = "indexing";
-export const JOB_INDEXED: string = "indexed";
-export const JOB_FAILED: string = "failed";
-
-export type IndexJobRow = {
-  id: string,
-  source: string,
-  scope: string,
-  modelId: string,
-  body: string,
-  status: string,
-  chunks: int,
-  error: string,
-  createdAt: string,
-  updatedAt: string,
-};
+import { IndexJobRow, JOB_FAILED, JOB_INDEXED, JOB_INDEXING, JOB_QUEUED, indexJobRepository } from "./routes/jobs/entities/index-job.entity.ts";
 
 export function indexJobsMapping(): DbRepository {
   return indexJobRepository();
@@ -85,33 +67,6 @@ export function markFailed(db: Db, id: string, why: string, now: string): void {
     + ", updated_at = " + placeholderAt(db, 3)
     + " WHERE id = " + placeholderAt(db, 4),
     [JOB_FAILED, why, now, id]);
-}
-
-export function pendingJobs(db: Db, scope: string): IndexJobRow[] {
-  let out: IndexJobRow[] = [];
-  let sql = "SELECT id, source, scope, status, chunks, error, created_at FROM index_jobs"
-    + " WHERE status <> " + db.placeholder + " AND status <> " + placeholderAt(db, 2);
-  let args: string[] = [JOB_INDEXED, ""];
-  if (scope != "") {
-    sql = sql + " AND scope = " + placeholderAt(db, 3);
-    args = [JOB_INDEXED, "", scope];
-  }
-  sql = sql + " ORDER BY created_at";
-  if (!db.query(sql, args)) {
-    return out;
-  }
-  let i: int = 0;
-  while (i < db.rows()) {
-    let row: IndexJobRow = {
-      id: db.value(i, 0), source: db.value(i, 1), scope: db.value(i, 2),
-      modelId: "", body: "", status: db.value(i, 3),
-      chunks: parseInt(db.value(i, 4)) ?? 0, error: db.value(i, 5),
-      createdAt: db.value(i, 6), updatedAt: "",
-    };
-    out.push(row);
-    i = i + 1;
-  }
-  return out;
 }
 
 export function requeueStalled(db: Db, before: string): void {

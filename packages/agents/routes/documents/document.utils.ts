@@ -1,6 +1,6 @@
 import { safeIdentifier } from "../../../plume/plume.ts";
 import { DocumentFileRow } from "../../document-files.ts";
-import { IndexJobRow } from "../../indexing.ts";
+import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
 import { SourceListing } from "../../knowledge.ts";
 import { DocumentFileView } from "./dtos/document-file-view.dto.ts";
 import { DocumentSummary } from "./dtos/document-summary.dto.ts";

@@ -2,10 +2,12 @@ import { Db } from "../../../plume/driver.ts";
 import { DbResult, deleteWhere, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { credentialFor } from "../../credentials.ts";
 import { DocumentFileRow, documentFileId, emptyDocumentFile, sourcesWithFiles } from "../../document-files.ts";
-import { IndexJobRow, enqueue, pendingJobs } from "../../indexing.ts";
+import { enqueue } from "../../indexing.ts";
 import { SourceListing, createDocuments, embeddingModel, listSources } from "../../knowledge.ts";
 import { documentRepository } from "./entities/document.entity.ts";
 import { documentFileRepository } from "./entities/document-file.entity.ts";
+import { JobRepository } from "../jobs/job.repository.ts";
+import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
 
 export class DocumentRepository {
   database: Db;
@@ -21,7 +23,7 @@ export class DocumentRepository {
   }
 
   waitingJobs(scope: string): IndexJobRow[] {
-    return pendingJobs(this.database, scope);
+    return new JobRepository(this.database).pending(scope);
   }
 
   indexedSources(scope: string): SourceListing[] {

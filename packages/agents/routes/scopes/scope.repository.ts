@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
-import { IndexJobRow, pendingJobs } from "../../indexing.ts";
 import { ScopeNode, scopeCounts } from "../../knowledge.ts";
+import { JobRepository } from "../jobs/job.repository.ts";
+import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
 
 export class ScopeRepository {
   database: Db;
@@ -10,7 +11,7 @@ export class ScopeRepository {
   }
 
   pending(): IndexJobRow[] {
-    return pendingJobs(this.database, "");
+    return new JobRepository(this.database).pending("");
   }
 
   counts(prefix: string, scopes: string[]): ScopeNode[] {
