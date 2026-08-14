@@ -4,6 +4,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { triggerBotRepository } from "./routes/triggers/entities/trigger-bot.entity.ts";
 import { triggerInboxRepository } from "./routes/triggers/entities/trigger-inbox.entity.ts";
 import { triggerOutboxRepository } from "./routes/triggers/entities/trigger-outbox.entity.ts";
+import { triggerPendingRepository } from "./routes/triggers/entities/trigger-pending.entity.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { stampMs } from "./tasks.ts";
 
@@ -148,7 +149,7 @@ export type TriggerPendingRow = {
   createdAt: string,
 };
 
-export function triggerPendingMapping(): DbRepository {
+function triggerPendingMappingV1(): DbRepository {
   let fs: DbField[] = [
     field("id", "id", "text"),
     field("botId", "bot_id", "text"),
@@ -166,6 +167,10 @@ export function triggerPendingMapping(): DbRepository {
   return repository({ table: "trigger_pending", idField: "id", idColumn: "id", fields: fs });
 }
 
+export function triggerPendingMapping(): DbRepository {
+  return triggerPendingRepository();
+}
+
 export const TRIGGER_ASK_TTL_MS: int = 1800000;
 
 export function triggersPlan(db: Db): Migration[] {
@@ -181,7 +186,7 @@ export function triggersPlan(db: Db): Migration[] {
     migration("107.3", "a bounded window where a bot tests the draft",
       "ALTER TABLE trigger_bots ADD COLUMN draft_until " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.4", "a question waiting for its chat to answer",
-      createTableSql(db, triggerPendingMapping())),
+      createTableSql(db, triggerPendingMappingV1())),
     migration("107.5", "a question can offer its answers as buttons",
       "ALTER TABLE trigger_outbox ADD COLUMN options " + db.textType + " NOT NULL DEFAULT ''"),
     migration("107.6", "a message can carry a document, parked for the walk",
