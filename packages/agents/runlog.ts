@@ -4,6 +4,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { AgentRun } from "./run.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
 import { runRepository } from "./routes/runs/entities/run.entity.ts";
+import { runStepRepository } from "./routes/runs/entities/run-step.entity.ts";
 
 export type RunRow = {
   id: string,
@@ -65,17 +66,7 @@ export function runsMapping(): DbRepository {
 }
 
 export function runStepsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("runId", "run_id", "text"),
-    field("stepIndex", "step_index", "int"),
-    field("tool", "tool", "text"),
-    field("server", "server", "text"),
-    field("args", "args", "text"),
-    field("result", "result", "text"),
-    field("ok", "ok", "bool"),
-  ];
-  return repository({ table: "run_steps", idField: "id", idColumn: "id", fields: fs });
+  return runStepRepository();
 }
 
 export function runsFull(db: Db): DbRepository {
