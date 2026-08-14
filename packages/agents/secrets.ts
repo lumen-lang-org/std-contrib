@@ -194,9 +194,9 @@ export function forgetSecret(db: Db, id: string, owner: string): bool {
   if (row.id == "") {
     return false;
   }
-  deleteById(db, secretsMapping(), id);
-  forgetCredential(db, refOf(id));
-  return true;
+  let droppedRow = deleteById(db, secretsMapping(), id).ok;
+  let droppedValue = forgetCredential(db, refOf(id));
+  return droppedRow && droppedValue;
 }
 
 export function secretValue(db: Db, row: SecretRow, master: string): string {
