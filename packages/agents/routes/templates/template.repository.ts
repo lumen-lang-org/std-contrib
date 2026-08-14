@@ -4,7 +4,8 @@ import { templateFileRepository } from "./entities/template-file.entity.ts";
 import { templateRepository } from "./entities/template.entity.ts";
 import { EnvEnsure, EnvEnsured, envEnsure } from "../../environments.ts";
 import { envHostFor } from "../../env-grants.ts";
-import { ThreadRow, appendTurns, threadsMapping } from "../../threads.ts";
+import { ThreadRow, appendTurns } from "../../threads.ts";
+import { threadRepository } from "../threads/entities/thread.entity.ts";
 import { Turn, ToolCall, assistantTurn, userTurn } from "../../provider.ts";
 
 export class TemplateRepository {
@@ -105,7 +106,10 @@ export class TemplateRepository {
       routeKey: "", title: title, replayable: false, projectId: "",
       createdAt: now,
     };
-    persist(this.database, threadsMapping(), JSON.stringify(row));
+    let written = persist(this.database, threadRepository(), JSON.stringify(row));
+    if (!written.ok) {
+      return "";
+    }
     return id;
   }
 
