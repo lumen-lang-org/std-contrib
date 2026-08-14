@@ -1,7 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbRepository, DbResult, deleteById, existsById, findById, persist, setOn } from "../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, listOrdered, listWhere, persist, setOn } from "../../../plume/plume.ts";
 import { agentRepository } from "../agents/entities/agent.entity.ts";
-import { enabledCount, tasksMapping, tasksOf } from "../../tasks.ts";
+import { ScheduledTaskRow, scheduledTaskRepository } from "./entities/scheduled-task.entity.ts";
 
 export class TaskRepository {
   database: Db;
@@ -9,11 +9,16 @@ export class TaskRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.tasks = tasksMapping();
+    this.tasks = scheduledTaskRepository();
   }
 
   listing(owner: string): string {
-    return tasksOf(this.database, owner);
+    let keys: DbOrder[] = [{ column: "next_at" }];
+    return listOrdered(this.database, this.tasks, {
+      where: "owner = " + this.database.placeholder,
+      args: [owner],
+      order: keys,
+    });
   }
 
   one(id: string): string {
@@ -25,7 +30,17 @@ export class TaskRepository {
   }
 
   enabledForOwner(owner: string): int {
-    return enabledCount(this.database, owner);
+    let rows: ScheduledTaskRow[] = JSON.parse<ScheduledTaskRow[]>(listWhere(this.database, this.tasks,
+      "owner = " + this.database.placeholder, [owner]));
+    let n: int = 0;
+    let i: int = 0;
+    while (i < rows.length) {
+      if (rows[i].enabled) {
+        n = n + 1;
+      }
+      i = i + 1;
+    }
+    return n;
   }
 
   save(document: string): DbResult {

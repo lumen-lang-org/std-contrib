@@ -1,7 +1,8 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
+import { DbOrder, DbRepository, createTableSql, listOrdered, listWhere, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { next as nextFiring, fault as cronFault, civil, knownZone } from "../cron/cron.ts";
+import { scheduledTaskRepository } from "./routes/tasks/entities/scheduled-task.entity.ts";
 
 export type TaskRow = {
   id: string,
@@ -35,30 +36,7 @@ export function stampMs(said: string): number {
 }
 
 export function tasksMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("agentId", "agent_id", "text"),
-    field("modelChoiceId", "model_choice_id", "text"),
-    field("title", "title", "text"),
-    field("instruction", "instruction", "text"),
-    field("kind", "kind", "text"),
-    field("cronExpr", "cron_expr", "text"),
-    field("tz", "tz", "text"),
-    field("nextAt", "next_at", "text"),
-    field("runningSince", "running_since", "text"),
-    field("enabled", "enabled", "bool"),
-    field("failures", "failures", "int"),
-    field("pausedReason", "paused_reason", "text"),
-    field("lastRunAt", "last_run_at", "text"),
-    field("lastRunId", "last_run_id", "text"),
-    field("lastStatus", "last_status", "text"),
-    field("lastError", "last_error", "text"),
-    field("runCount", "run_count", "int"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "scheduled_tasks", idField: "id", idColumn: "id", fields: fs });
+  return scheduledTaskRepository();
 }
 
 export function tasksPlan(db: Db): Migration[] {
