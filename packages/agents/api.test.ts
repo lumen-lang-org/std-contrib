@@ -18,10 +18,11 @@ import { RecordedSpan } from "../tracing/tracing.ts";
 import { putFile, getFile, listFiles } from "./workspace.ts";
 import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
-import { DocumentFileRow, documentFileId, documentFilesMapping, findDocumentFile, forgetDocumentFiles, holdsSource, sourcesWithFiles } from "./document-files.ts";
+import { documentFilesMapping } from "./document-files.ts";
+import { DocumentRepository } from "./routes/documents/document.repository.ts";
 import { migrationFault, wholePlan, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
 import { forgetAgent } from "./routes/agents/agent.service.ts";
-import { decodedSize } from "./routes/documents/document.utils.ts";
+import { DocumentFileRow, decodedSize, documentFileId, holdsSource } from "./routes/documents/document.utils.ts";
 import { HealthService } from "./routes/healthz/health.service.ts";
 import { StoredModel } from "./routes/models/dtos/stored-model.dto.ts";
 import { ModelService, modelDestinationFault } from "./routes/models/model.service.ts";
@@ -668,38 +669,42 @@ function keptFile(source: string, scope: string, bytes: string): DocumentFileRow
 
 test("a kept original is found by the pair that names it, however the scope was spelled", () => {
   expect(fresh() == "");
+  let files = new DocumentRepository(database, "");
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "aGVsbG8gcGRm")));
-  expect(findDocumentFile(database, "/e2e", "notes").bytes == "aGVsbG8gcGRm");
-  expect(findDocumentFile(database, "/e2e/", "notes").bytes == "aGVsbG8gcGRm");
-  expect(findDocumentFile(database, "e2e", "notes").filename == "notes.pdf");
-  expect(findDocumentFile(database, "/other", "notes").id == "");
-  expect(findDocumentFile(database, "/e2e", "absent").id == "");
+  expect(files.fileFor("/e2e", "notes").bytes == "aGVsbG8gcGRm");
+  expect(files.fileFor("/e2e/", "notes").bytes == "aGVsbG8gcGRm");
+  expect(files.fileFor("e2e", "notes").filename == "notes.pdf");
+  expect(files.fileFor("/other", "notes").id == "");
+  expect(files.fileFor("/e2e", "absent").id == "");
 });
 
 test("re-uploading a document replaces its kept copy rather than adding one", () => {
   expect(fresh() == "");
+  let files = new DocumentRepository(database, "");
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "dHdv")));
   expect(countWhere(database, documentFilesMapping(), "source = ?", ["notes"]) == 1);
-  expect(findDocumentFile(database, "/e2e", "notes").bytes == "dHdv");
+  expect(files.fileFor("/e2e", "notes").bytes == "dHdv");
 });
 
 test("deleting a document takes its original with it, in every folder", () => {
   expect(fresh() == "");
+  let files = new DocumentRepository(database, "");
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/spec", "dHdv")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("other", "/e2e", "dGhyZWU=")));
-  forgetDocumentFiles(database, "notes");
-  expect(findDocumentFile(database, "/e2e", "notes").id == "");
-  expect(findDocumentFile(database, "/spec", "notes").id == "");
-  expect(findDocumentFile(database, "/e2e", "other").bytes == "dGhyZWU=");
+  files.forgetFiles("notes");
+  expect(files.fileFor("/e2e", "notes").id == "");
+  expect(files.fileFor("/spec", "notes").id == "");
+  expect(files.fileFor("/e2e", "other").bytes == "dGhyZWU=");
 });
 
 test("the folder listing learns which sources have an original in one query", () => {
   expect(fresh() == "");
+  let files = new DocumentRepository(database, "");
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("elsewhere", "/spec", "dHdv")));
-  let mine = sourcesWithFiles(database, "/e2e");
+  let mine = files.filedSources("/e2e");
   expect(mine.length == 1);
   expect(holdsSource(mine, "notes"));
   expect(!holdsSource(mine, "unindexed"));

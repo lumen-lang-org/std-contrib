@@ -1,8 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbResult, deleteWhere, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { credentialFor } from "../../credentials.ts";
-import { DocumentFileRow, documentFileId, emptyDocumentFile, sourcesWithFiles } from "../../document-files.ts";
-import { SourceListing, createDocuments, embeddingModel, listSources } from "../../knowledge.ts";
+import { DocumentFileRow, documentFileId, emptyDocumentFile } from "./document.utils.ts";
+import { SourceListing, createDocuments, embeddingModel, listSources, normalScope } from "../../knowledge.ts";
 import { documentRepository } from "./entities/document.entity.ts";
 import { documentFileRepository } from "./entities/document-file.entity.ts";
 import { JobRepository } from "../jobs/job.repository.ts";
@@ -18,7 +18,17 @@ export class DocumentRepository {
   }
 
   filedSources(scope: string): string[] {
-    return sourcesWithFiles(this.database, scope);
+    let out: string[] = [];
+    let sql = "SELECT source FROM document_files WHERE scope = " + placeholderAt(this.database, 1);
+    if (!this.database.query(sql, [normalScope(scope)])) {
+      return out;
+    }
+    let i: int = 0;
+    while (i < this.database.rows()) {
+      out.push(this.database.value(i, 0));
+      i = i + 1;
+    }
+    return out;
   }
 
   waitingJobs(scope: string): IndexJobRow[] {

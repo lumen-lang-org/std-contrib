@@ -7,7 +7,7 @@ import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelR
 import { listSources, normalScope } from "./knowledge.ts";
 import { JobRepository } from "./routes/jobs/job.repository.ts";
 import { JOB_QUEUED } from "./routes/jobs/entities/index-job.entity.ts";
-import { forgetDocumentFiles } from "./document-files.ts";
+import { DocumentRepository } from "./routes/documents/document.repository.ts";
 import { maySchedule } from "./task-tools.ts";
 
 function not(): FileToolResult {
@@ -223,7 +223,7 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (!gone.ok) {
       return no("\"" + source + "\" is still in the corpus — the delete failed, so agents keep retrieving it.");
     }
-    forgetDocumentFiles(db, source);
+    new DocumentRepository(db, "").forgetFiles(source);
     return yes("Forgotten: \"" + source + "\" — out of every agent's retrieval now.");
   }
 

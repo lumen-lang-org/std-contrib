@@ -1,9 +1,50 @@
 import { safeIdentifier } from "../../../plume/plume.ts";
-import { DocumentFileRow } from "../../document-files.ts";
+import { SourceListing, normalScope } from "../../knowledge.ts";
 import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
-import { SourceListing } from "../../knowledge.ts";
 import { DocumentFileView } from "./dtos/document-file-view.dto.ts";
 import { DocumentSummary } from "./dtos/document-summary.dto.ts";
+
+export const FILE_BASE64_MAX: int = 24 * 1024 * 1024;
+
+export type DocumentFileRow = {
+  id: string,
+  source: string,
+  scope: string,
+  filename: string,
+  mime: string,
+  bytes: string,
+  size: int,
+  createdAt: string,
+};
+
+export function documentFileId(scope: string, source: string): string {
+  return normalScope(scope) + "/" + source;
+}
+
+export function emptyDocumentFile(): DocumentFileRow {
+  let none: DocumentFileRow = {
+    id: "",
+    source: "",
+    scope: "",
+    filename: "",
+    mime: "",
+    bytes: "",
+    size: 0,
+    createdAt: "",
+  };
+  return none;
+}
+
+export function holdsSource(names: string[], source: string): bool {
+  let i: int = 0;
+  while (i < names.length) {
+    if (names[i] == source) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
 
 export function sourceFault(source: string, body: string): string {
   if (source.trim() == "") {

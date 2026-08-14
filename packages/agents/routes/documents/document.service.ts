@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { Outcome, produced, refusing } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { DocumentFileRow, FILE_BASE64_MAX, documentFileId, holdsSource } from "../../document-files.ts";
 import { JOB_QUEUED } from "../jobs/entities/index-job.entity.ts";
 import { normalScope } from "../../knowledge.ts";
 import { DocumentFileUpload } from "./dtos/document-file-upload.dto.ts";
@@ -10,7 +9,7 @@ import { DocumentStored } from "./dtos/document-stored.dto.ts";
 import { DocumentSummary } from "./dtos/document-summary.dto.ts";
 import { DocumentUpload } from "./dtos/document-upload.dto.ts";
 import { DocumentRepository } from "./document.repository.ts";
-import { decodedSize, firstText, indexedSummary, queuedSummary, sourceFault } from "./document.utils.ts";
+import { DocumentFileRow, FILE_BASE64_MAX, decodedSize, documentFileId, firstText, holdsSource, indexedSummary, queuedSummary, sourceFault } from "./document.utils.ts";
 
 export class DocumentService {
   repository: DocumentRepository;
