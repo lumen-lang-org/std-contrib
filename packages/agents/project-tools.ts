@@ -131,7 +131,10 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
       instructions: jsonText(call.args, "instructions").trim(),
       filesThreadId: "", createdAt: `${call.nowMs}`,
     };
-    persist(db, projectsMapping(), JSON.stringify(row));
+    let written = persist(db, projectsMapping(), JSON.stringify(row));
+    if (!written.ok) {
+      return no(written.error);
+    }
     return yes("Created \"" + name + "\"."
       + (row.instructions == "" ? "" : " Its conversations will be told: " + firstLine(row.instructions))
       + " move_to_project puts this conversation in it.");

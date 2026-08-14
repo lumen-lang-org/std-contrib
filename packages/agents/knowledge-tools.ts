@@ -191,7 +191,10 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
 
   if (call.name == "set_banner") {
     let said = jsonText(call.args, "text");
-    writeSetting(db, "banner", said.trim());
+    let saved = writeSetting(db, "banner", said.trim());
+    if (saved != "") {
+      return no("the banner setting was not written — every page still shows what it showed.");
+    }
     return yes(said.trim() == "" ? "Banner down." : "Up, above every page: " + said.trim());
   }
 
@@ -215,7 +218,10 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (source == "") {
       return no("say which source: {\"source\":\"...\"} — list_documents shows them.");
     }
-    executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder, [source]);
+    let gone = executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder, [source]);
+    if (!gone.ok) {
+      return no("\"" + source + "\" is still in the corpus — the delete failed, so agents keep retrieving it.");
+    }
     forgetDocumentFiles(db, source);
     return yes("Forgotten: \"" + source + "\" — out of every agent's retrieval now.");
   }
@@ -253,16 +259,21 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
       body: instructions,
       source: "local", sourceUrl: "", visibility: "private", featuredRank: 0, updatedAt: `${call.nowMs}`,
     };
-    persist(db, skillsMapping(), JSON.stringify(row));
+    let stored = persist(db, skillsMapping(), JSON.stringify(row));
+    if (!stored.ok) {
+      return no("\"" + name + "\" was not written — nothing to load with use_skill.");
+    }
     let keys2: DbOrder[] = [{ column: "agent_name" }];
     let agents = JSON.parse<AgentRow[]>(listOrdered(db, agentsMapping(), { order: keys2 }));
     let a: int = 0;
     let carrier = "";
     while (a < agents.length) {
       if (agents[a].isDefault) {
-        executeWith(db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
+        let attached = executeWith(db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
           + db.placeholder + ", " + placeholderAt(db, 2) + ")", [agents[a].id, row.id]);
-        carrier = agents[a].agentName;
+        if (attached.ok) {
+          carrier = agents[a].agentName;
+        }
       }
       a = a + 1;
     }
@@ -293,6 +304,9 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     source: skill.source, sourceUrl: skill.sourceUrl,
     visibility: skill.visibility, featuredRank: skill.featuredRank, updatedAt: `${call.nowMs}`,
   };
-  persist(db, skillsMapping(), JSON.stringify(edited));
+  let written = persist(db, skillsMapping(), JSON.stringify(edited));
+  if (!written.ok) {
+    return no("\"" + skill.skillName + "\" is unchanged — the write failed, so use_skill still loads the old text.");
+  }
   return yes("Changed \"" + skill.skillName + "\".");
 }

@@ -196,7 +196,10 @@ function writePromptVersion(db: Db, promptName: string, body: string, nowMs: num
     id: crypto.randomUUID(), promptName: promptName, version: at + 1,
     body: body, createdAt: `${nowMs}`,
   };
-  persist(db, promptsMapping(), JSON.stringify(row));
+  let written = persist(db, promptsMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return "";
+  }
   return row.id;
 }
 
@@ -295,6 +298,9 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
       return no("this deployment has no model config to run an agent on yet.");
     }
     let promptId = writePromptVersion(db, name, prompt, call.nowMs);
+    if (promptId == "") {
+      return no("the prompt could not be saved, so \"" + name + "\" was not created.");
+    }
     let row: AgentRow = {
       id: "a-" + crypto.randomUUID().slice(0, 8), agentName: name,
       description: jsonText(call.args, "description").trim(),
@@ -302,7 +308,10 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
       enabled: true, isDefault: false, scriptImageId: "",
       updatedAt: `${call.nowMs}`,
     };
-    persist(db, agentsMapping(), JSON.stringify(row));
+    let written = persist(db, agentsMapping(), JSON.stringify(row));
+    if (!written.ok) {
+      return no(written.error);
+    }
     return yes("Created.\n\n" + describeAgent(db, row, true)
       + "\n\nA workflow step or a bot can name it now.");
   }
@@ -325,7 +334,10 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
       return no("\"" + agent.agentName + "\" is the default agent — make another the default first (change_agent with default: true).");
     }
     executeWith(db, "DELETE FROM agent_skills WHERE agent_id = " + db.placeholder, [agent.id]);
-    executeWith(db, "DELETE FROM agents WHERE id = " + db.placeholder, [agent.id]);
+    let gone = executeWith(db, "DELETE FROM agents WHERE id = " + db.placeholder, [agent.id]);
+    if (!gone.ok) {
+      return no(gone.error);
+    }
     return yes("Deleted \"" + agent.agentName + "\". Any workflow step or bot that still names it will fail with its name — worth checking if one might.");
   }
 
@@ -357,13 +369,19 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     }
     executeWith(db, "DELETE FROM agent_skills WHERE agent_id = " + db.placeholder
       + " AND skill_id = " + placeholderAt(db, 2), [agent.id, sk]);
-    executeWith(db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
+    let linked = executeWith(db, "INSERT INTO agent_skills (agent_id, skill_id) VALUES ("
       + db.placeholder + ", " + placeholderAt(db, 2) + ")", [agent.id, sk]);
+    if (!linked.ok) {
+      return no(linked.error);
+    }
     note = note + " Skill \"" + addSkill + "\" attached.";
   }
   if (wantDefault && !agent.isDefault) {
-    executeWith(db, "UPDATE agents SET is_default = " + boolLit(db, false)
+    let stepped = executeWith(db, "UPDATE agents SET is_default = " + boolLit(db, false)
       + " WHERE is_default = " + boolLit(db, true), []);
+    if (!stepped.ok) {
+      return no(stepped.error);
+    }
     note = note + " It is the default now.";
   }
   let promptId = agent.promptId;
@@ -381,6 +399,9 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     let old = promptOf(db, agent.promptId);
     promptId = writePromptVersion(db, old.promptName == "" ? agent.agentName : old.promptName,
       promptText.trim(), call.nowMs);
+    if (promptId == "") {
+      return no("the new prompt could not be saved — \"" + agent.agentName + "\" still runs on the prompt it had.");
+    }
     note = note + " Prompt is now v" + `${promptOf(db, promptId).version}`
       + " — v" + `${old.version}` + " stays, for rolling back.";
   }
@@ -392,6 +413,9 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     isDefault: wantDefault ? true : agent.isDefault, scriptImageId: agent.scriptImageId,
     updatedAt: `${call.nowMs}`,
   };
-  persist(db, agentsMapping(), JSON.stringify(edited));
+  let saved = persist(db, agentsMapping(), JSON.stringify(edited));
+  if (!saved.ok) {
+    return no(saved.error);
+  }
   return yes("Changed." + note + "\n\n" + describeAgent(db, edited, false));
 }

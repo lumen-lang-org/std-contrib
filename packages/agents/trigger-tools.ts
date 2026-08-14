@@ -200,7 +200,10 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
       draftUntil: bot.draftUntil ?? "",
       createdAt: bot.createdAt, updatedAt: `${call.nowMs}`,
     };
-    persist(db, triggerBotsMapping(), JSON.stringify(edited));
+    let written = persist(db, triggerBotsMapping(), JSON.stringify(edited));
+    if (!written.ok) {
+      return no("the change did not save — " + bot.name + " is still as it was.");
+    }
     let word = enabled == bot.enabled ? "Changed." : enabled ? "On." : "Paused.";
     return yes(word + note + "\n\n" + describeBot(db, edited, call.nowMs));
   }
@@ -216,7 +219,9 @@ export function callTriggerTool(db: Db, call: TriggerToolCall): FileToolResult {
   let sql = "UPDATE trigger_bots SET draft_until = " + db.placeholder
     + ", updated_at = " + placeholderAt(db, 2)
     + " WHERE id = " + placeholderAt(db, 3);
-  db.query(sql, [until, `${call.nowMs}`, bot.id]);
+  if (!db.query(sql, [until, `${call.nowMs}`, bot.id])) {
+    return no("the draft window did not change — " + bot.name + " serves what it served before.");
+  }
   if (minutes == 0) {
     return yes("Window closed — " + bot.name + " serves the published version again.");
   }

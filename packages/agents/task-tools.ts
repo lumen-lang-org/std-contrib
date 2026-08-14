@@ -318,11 +318,14 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
 
   if (call.name == "run_task_now") {
     let now = `${call.nowMs}`;
-    executeWith(db,
+    let written = executeWith(db,
       "UPDATE scheduled_tasks SET next_at = " + db.placeholder
       + ", running_since = '', enabled = true, updated_at = " + placeholderAt(db, 2)
       + " WHERE id = " + placeholderAt(db, 3),
       [now, now, row.id]);
+    if (!written.ok) {
+      return no(written.error);
+    }
     return yes("\"" + (row.title == "" ? row.instruction : row.title)
       + "\" will run within about a minute, in a conversation of its own — it does not answer here. "
       + "Its own schedule is unchanged.");

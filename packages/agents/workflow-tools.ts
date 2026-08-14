@@ -802,24 +802,32 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       + ", updated_at = " + placeholderAt(db, 2)
       + " WHERE id = " + placeholderAt(db, 3);
     let now = `${call.nowMs}`;
-    db.query(sql, [now, now, row.id]);
+    if (!db.query(sql, [now, now, row.id])) {
+      return no("nothing was published — \"" + row.name + "\" still runs the version it ran before.");
+    }
     let fresh: WorkflowRow = JSON.parse<WorkflowRow>(findById(db, workflowsMapping(), row.id));
     return yes("Published — messages and the clock now run what you see. " + describe(fresh, false));
   }
 
   if (call.name == "run_workflow") {
     let now = `${call.nowMs}`;
-    executeWith(db,
+    let written = executeWith(db,
       "UPDATE workflows SET next_at = " + db.placeholder
       + ", running_since = '', enabled = true, updated_at = " + placeholderAt(db, 2)
       + " WHERE id = " + placeholderAt(db, 3),
       [now, now, row.id]);
+    if (!written.ok) {
+      return no(written.error);
+    }
     return yes("\"" + row.name + "\" will run within about a minute, in a conversation of its own — it does not answer here. "
       + "Its own schedule is unchanged.");
   }
 
   if (call.name == "delete_workflow") {
-    executeWith(db, "DELETE FROM workflow_runs WHERE workflow_id = " + db.placeholder, [row.id]);
+    let cleared = executeWith(db, "DELETE FROM workflow_runs WHERE workflow_id = " + db.placeholder, [row.id]);
+    if (!cleared.ok) {
+      return no(cleared.error);
+    }
     let gone = deleteById(db, workflowsMapping(), row.id);
     if (!gone.ok) {
       return no(gone.error);
