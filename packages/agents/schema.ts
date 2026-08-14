@@ -7,6 +7,14 @@ import { templateRepository } from "./routes/templates/entities/template.entity.
 import { templateFileRepository } from "./routes/templates/entities/template-file.entity.ts";
 import { pluginRepository } from "./routes/plugins/entities/plugin.entity.ts";
 import { pluginItemRepository } from "./routes/plugins/entities/plugin-item.entity.ts";
+import { mcpServerRepository } from "./routes/servers/entities/mcp-server.entity.ts";
+import { settingRepository } from "./routes/captcha/entities/setting.entity.ts";
+import { skillRepository } from "./routes/skills/entities/skill.entity.ts";
+import { skillFileRepository } from "./routes/skills/entities/skill-file.entity.ts";
+import { authProviderRepository } from "./routes/auth-providers/entities/auth-provider.entity.ts";
+import { scriptImageRepository } from "./routes/script-images/entities/script-image.entity.ts";
+import { modelRepository } from "./routes/models/entities/model.entity.ts";
+import { modelChoiceRepository } from "./routes/models/entities/model-choice.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -160,18 +168,7 @@ function agentsMappingV1(): DbRepository {
 }
 
 export function modelsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("label", "label", "text"),
-    field("apiName", "api_name", "text"),
-    field("provider", "provider", "text"),
-    field("kind", "kind", "text"),
-    field("dimensions", "dimensions", "int"),
-    field("baseUrl", "base_url", "text"),
-    field("contextTokens", "context_tokens", "int"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({ table: "models", idField: "id", idColumn: "id", fields: fs });
+  return modelRepository();
 }
 
 function modelConfigsMappingV1(): DbRepository {
@@ -218,18 +215,7 @@ export function modelConfigsMapping(db: Db): DbRepository {
 }
 
 export function modelChoicesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("label", "label", "text"),
-    field("description", "description", "text"),
-    field("kind", "kind", "text"),
-    field("configId", "config_id", "text"),
-    field("routerId", "router_id", "text"),
-    field("tier", "tier", "text"),
-    field("enabled", "enabled", "bool"),
-    field("rank", "menu_rank", "int"),
-  ];
-  return repository({ table: "model_choices", idField: "id", idColumn: "id", fields: fs });
+  return modelChoiceRepository();
 }
 
 export function modelRoutersMapping(): DbRepository {
@@ -331,16 +317,7 @@ export function promptsMapping(): DbRepository {
 }
 
 export function mcpServersMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("serverName", "server_name", "text"),
-    field("transport", "transport", "text"),
-    field("endpoint", "endpoint", "text"),
-    field("authKind", "auth_kind", "text"),
-    field("authHeader", "auth_header", "text"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({ table: "mcp_servers", idField: "id", idColumn: "id", fields: fs });
+  return mcpServerRepository();
 }
 
 export type McpToolOffRow = {
@@ -444,14 +421,7 @@ export function scriptImagesMappingV1(): DbRepository {
 }
 
 export function scriptImagesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("label", "label", "text"),
-    field("image", "image", "text"),
-    field("enabled", "enabled", "bool"),
-    field("summary", "summary", "text"),
-  ];
-  return repository({ table: "script_images", idField: "id", idColumn: "id", fields: fs });
+  return scriptImageRepository();
 }
 
 export function skillsMappingV1(): DbRepository {
@@ -466,28 +436,11 @@ export function skillsMappingV1(): DbRepository {
 }
 
 export function skillsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("skillName", "skill_name", "text"),
-    field("description", "description", "text"),
-    field("body", "body", "text"),
-    field("updatedAt", "updated_at", "text"),
-    field("visibility", "visibility", "text"),
-    field("featuredRank", "featured_rank", "int"),
-    field("source", "source", "text"),
-    field("sourceUrl", "source_url", "text"),
-  ];
-  return repository({ table: "skills", idField: "id", idColumn: "id", fields: fs });
+  return skillRepository();
 }
 
 export function skillFilesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("skillId", "skill_id", "text"),
-    field("path", "path", "text"),
-    field("body", "body", "text"),
-  ];
-  return repository({ table: "skill_files", idField: "id", idColumn: "id", fields: fs });
+  return skillFileRepository();
 }
 
 export type PluginRow = {
@@ -556,16 +509,7 @@ export function authProvidersMappingV1(): DbRepository {
 }
 
 export function authProvidersMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("label", "label", "text"),
-    field("kind", "kind", "text"),
-    field("issuer", "issuer", "text"),
-    field("clientId", "client_id", "text"),
-    field("scopes", "scopes", "text"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({ table: "auth_providers", idField: "id", idColumn: "id", fields: fs });
+  return authProviderRepository();
 }
 
 export type TemplateRow = {
@@ -1079,11 +1023,7 @@ export type SettingRow = {
 };
 
 export function settingsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("value", "value", "text"),
-  ];
-  return repository({ table: "settings", idField: "id", idColumn: "id", fields: fs });
+  return settingRepository();
 }
 
 export function readSetting(db: Db, key: string): string {
