@@ -132,18 +132,6 @@ export function normalScope(scope: string): string {
   return out;
 }
 
-export function scopeCovers(granted: string, path: string): bool {
-  let g = normalScope(granted);
-  let p = normalScope(path);
-  if (g == "/") {
-    return true;
-  }
-  if (p == g) {
-    return true;
-  }
-  return p.startsWith(g + "/");
-}
-
 const SCOPE_ESCAPE = "!";
 
 export function likeLiteral(text: string): string {
@@ -432,12 +420,6 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
   return out;
 }
 
-export type ScopeNode = {
-  path: string,
-  documents: int,
-  total: int,
-};
-
 export type SourceListing = {
   source: string,
   scope: string,
@@ -467,73 +449,6 @@ export function listSources(db: Db, scope: string): SourceListing[] {
   return out;
 }
 
-function pendingIn(pending: string[], scope: string): int {
-  let n: int = 0;
-  let i: int = 0;
-  while (i < pending.length) {
-    if (pending[i] == scope) {
-      n = n + 1;
-    }
-    i = i + 1;
-  }
-  return n;
-}
-
-export function scopeCounts(db: Db, prefix: string, pending: string[]): ScopeNode[] {
-  let out: ScopeNode[] = [];
-  let sql = "SELECT scope, COUNT(*) FROM documents GROUP BY scope ORDER BY scope";
-  if (!db.query(sql, [])) {
-    return out;
-  }
-
-  let paths: string[] = [];
-  let counts: int[] = [];
-  let i: int = 0;
-  while (i < db.rows()) {
-    paths.push(db.value(i, 0));
-    counts.push(parseInt(db.value(i, 1)) ?? 0);
-    i = i + 1;
-  }
-
-  let n: int = 0;
-  while (n < pending.length) {
-    let seen = false;
-    let s: int = 0;
-    while (s < paths.length) {
-      if (paths[s] == pending[n]) {
-        seen = true;
-      }
-      s = s + 1;
-    }
-    if (!seen) {
-      paths.push(pending[n]);
-      counts.push(0);
-    }
-    n = n + 1;
-  }
-
-  let p: int = 0;
-  while (p < paths.length) {
-    if (prefix == "" || scopeCovers(prefix, paths[p])) {
-      let total: int = 0;
-      let q: int = 0;
-      while (q < paths.length) {
-        if (scopeCovers(paths[p], paths[q])) {
-          total = total + counts[q] + pendingIn(pending, paths[q]);
-        }
-        q = q + 1;
-      }
-      let node: ScopeNode = {
-        path: paths[p],
-        documents: counts[p] + pendingIn(pending, paths[p]),
-        total: total,
-      };
-      out.push(node);
-    }
-    p = p + 1;
-  }
-  return out;
-}
 
 export type AgentRetrievalRow = {
   agentId: string,

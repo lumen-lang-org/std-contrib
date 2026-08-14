@@ -3,7 +3,8 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Retrieved, embeddingModel, createDocuments, indexDocument, retrieve, asContext, normalScope, scopeCovers, scopeClause, scopeArgs, splitIntoChunks } from "./knowledge.ts";
+import { Retrieved, embeddingModel, createDocuments, indexDocument, retrieve, asContext, normalScope, scopeClause, scopeArgs, splitIntoChunks } from "./knowledge.ts";
+import { scopeCovers } from "./routes/scopes/scope.utils.ts";
 
 let database: Db = sqlite();
 
