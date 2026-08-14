@@ -229,8 +229,7 @@ export function forgetApiKey(db: Db, id: string, owner: string): bool {
   if (row.id == "") {
     return false;
   }
-  deleteById(db, apiKeysMapping(), id);
-  return true;
+  return deleteById(db, apiKeysMapping(), id).ok;
 }
 
 export type ApiKeyAuth = {
