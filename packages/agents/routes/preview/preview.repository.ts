@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
-import { placeholderAt } from "../../../plume/plume.ts";
-import { ArtifactRow, ArtifactVersionRow, findByToken, getArtifact, getVersion, nextVersion } from "../../artifacts.ts";
+import { findById, placeholderAt } from "../../../plume/plume.ts";
+import { ArtifactRow, ArtifactVersionRow, findByToken, getArtifact, noArtifactVersion, nextVersion } from "../../artifacts.ts";
+import { artifactVersionRepository } from "../threads-artifacts/entities/artifact-version.entity.ts";
 
 export class PreviewRepository {
   database: Db;
@@ -18,7 +19,11 @@ export class PreviewRepository {
   }
 
   version(artifactId: string, at: int): ArtifactVersionRow {
-    return getVersion(this.database, artifactId, at);
+    let document = findById(this.database, artifactVersionRepository(), artifactId + ":" + `${at}`);
+    if (document == "") {
+      return noArtifactVersion(artifactId);
+    }
+    return JSON.parse<ArtifactVersionRow>(document);
   }
 
   newestVersion(artifactId: string): int {

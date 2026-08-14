@@ -1,10 +1,11 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
+import { DbOrder, DbRepository, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { artifactBytesMax, threadBytesMax } from "./caps.ts";
 import { normalScope } from "./knowledge.ts";
 import { ownerClause } from "./owner.ts";
 import { artifactRepository } from "./routes/threads-artifacts/entities/artifact.entity.ts";
+import { artifactVersionRepository } from "./routes/threads-artifacts/entities/artifact-version.entity.ts";
 
 export const ARTIFACT_MAX: int = artifactBytesMax();
 
@@ -50,18 +51,7 @@ export function artifactsMapping(): DbRepository {
 }
 
 export function artifactVersionsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("artifactId", "artifact_id", "text"),
-    field("version", "version", "int"),
-    field("body", "body", "text"),
-    field("bytes", "bytes", "int"),
-    field("origin", "origin", "text"),
-    field("turnSeq", "turn_seq", "int"),
-    field("note", "note", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "artifact_versions", idField: "id", idColumn: "id", fields: fs });
+  return artifactVersionRepository();
 }
 
 export function artifactPlan(db: Db): Migration[] {
@@ -720,14 +710,18 @@ export function findByToken(db: Db, token: string): ArtifactRow {
   return rows[0];
 }
 
-export function getVersion(db: Db, artifactId: string, version: int): ArtifactVersionRow {
+export function noArtifactVersion(artifactId: string): ArtifactVersionRow {
   let absent: ArtifactVersionRow = {
     id: "", artifactId: artifactId, version: 0, body: "", bytes: 0,
     origin: "", turnSeq: TURN_SEQ_NONE, note: "", createdAt: "",
   };
+  return absent;
+}
+
+export function getVersion(db: Db, artifactId: string, version: int): ArtifactVersionRow {
   let document = findById(db, artifactVersionsMapping(), artifactId + ":" + `${version}`);
   if (document == "") {
-    return absent;
+    return noArtifactVersion(artifactId);
   }
   return JSON.parse<ArtifactVersionRow>(document);
 }

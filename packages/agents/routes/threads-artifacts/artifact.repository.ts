@@ -1,7 +1,8 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbAssignment, DbRepository, DbResult, findById, listWhere, placeholderAt, setOn } from "../../../plume/plume.ts";
-import { ArtifactRow, ArtifactVersionRow, ArtifactWrite, ArtifactWritten, TurnArtifact, artifactsByTurn, artifactsForTurn, deleteArtifact, getVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
+import { ArtifactRow, ArtifactVersionRow, ArtifactWrite, ArtifactWritten, TurnArtifact, artifactsByTurn, artifactsForTurn, deleteArtifact, noArtifactVersion, listArtifacts, putArtifact } from "../../artifacts.ts";
 import { artifactRepository } from "./entities/artifact.entity.ts";
+import { artifactVersionRepository } from "./entities/artifact-version.entity.ts";
 import { OfficeRenderAsk, OfficeRendered, officeRender } from "../../office-render.ts";
 import { jsonList } from "../../scan.ts";
 import { ownedThread, readableThread } from "../../threads.ts";
@@ -54,7 +55,11 @@ export class ArtifactRepository {
   }
 
   version(artifactId: string, wanted: int): ArtifactVersionRow {
-    return getVersion(this.database, artifactId, wanted);
+    let document = findById(this.database, artifactVersionRepository(), artifactId + ":" + `${wanted}`);
+    if (document == "") {
+      return noArtifactVersion(artifactId);
+    }
+    return JSON.parse<ArtifactVersionRow>(document);
   }
 
   render(ask: OfficeRenderAsk): OfficeRendered {
