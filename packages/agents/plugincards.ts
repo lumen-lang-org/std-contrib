@@ -1,6 +1,8 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { cardPluginRepository } from "./routes/card-plugins/entities/card-plugin.entity.ts";
+import { cardCaseRepository } from "./routes/card-plugins/entities/card-case.entity.ts";
 
 export type CardPluginRow = {
   id: string,
@@ -22,28 +24,11 @@ export type CardCaseRow = {
 };
 
 export function cardPluginsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("pluginName", "plugin_name", "text"),
-    field("description", "description", "text"),
-    field("sourceUrl", "source_url", "text"),
-    field("version", "version", "text"),
-    field("rendererUrl", "renderer_url", "text"),
-    field("rendererSource", "renderer_source", "text"),
-    field("enabled", "enabled", "bool"),
-    field("installedAt", "installed_at", "text"),
-  ];
-  return repository({ table: "card_plugins", idField: "id", idColumn: "id", fields: fs });
+  return cardPluginRepository();
 }
 
 export function cardCasesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("pluginId", "plugin_id", "text"),
-    field("when", "when_asked", "text"),
-    field("then", "then_do", "text"),
-  ];
-  return repository({ table: "card_cases", idField: "id", idColumn: "id", fields: fs });
+  return cardCaseRepository();
 }
 
 function cardPluginsMappingAsCreated(): DbRepository {

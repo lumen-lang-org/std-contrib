@@ -1,6 +1,7 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, listWhere, persist } from "../../../plume/plume.ts";
-import { cardCasesMapping, cardPluginsMapping } from "../../plugincards.ts";
+import { cardPluginRepository } from "./entities/card-plugin.entity.ts";
+import { cardCaseRepository } from "./entities/card-case.entity.ts";
 import { toolCardRepository } from "../tool-cards/entities/tool-card.entity.ts";
 
 export class CardPluginRepository {
@@ -11,9 +12,9 @@ export class CardPluginRepository {
 
   constructor(database: Db) {
     this.database = database;
-    this.plugins = cardPluginsMapping();
+    this.plugins = cardPluginRepository();
     this.cards = toolCardRepository();
-    this.cases = cardCasesMapping();
+    this.cases = cardCaseRepository();
   }
 
   listing(): string {
