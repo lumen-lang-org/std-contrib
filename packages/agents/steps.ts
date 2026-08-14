@@ -1,10 +1,11 @@
 import { Db } from "../plume/driver.ts";
 import { cardClaims } from "./toolcards.ts";
 import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
-import { DbField, DbRepository, DbOrder, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
+import { DbRepository, DbOrder, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { threadStepRepository } from "./routes/threads/entities/thread-step.entity.ts";
 import { threadThoughtRepository } from "./routes/threads/entities/thread-thought.entity.ts";
+import { threadPartialRepository } from "./routes/threads/entities/thread-partial.entity.ts";
 
 export type LiveStep = {
   id: string,
@@ -409,13 +410,7 @@ type PartialRow = {
 };
 
 function partialsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "thread_id", "text"),
-    field("seq", "seq", "int"),
-    field("text", "text", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "thread_partials", idField: "id", idColumn: "thread_id", fields: fs });
+  return threadPartialRepository();
 }
 
 export function clearPartial(db: Db, threadId: string, now: string): void {
