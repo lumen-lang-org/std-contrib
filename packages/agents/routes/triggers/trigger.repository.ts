@@ -2,7 +2,7 @@ import { Db } from "../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, setOn } from "../../../plume/plume.ts";
 import { CredentialWrite, forgetCredential, storeCredential } from "../../credentials.ts";
 import { queuedFor } from "../../triggers.ts";
-import { workflowsMapping } from "../../workflow-store.ts";
+import { workflowRepository } from "../workflows/entities/workflow.entity.ts";
 import { triggerBotRepository } from "./entities/trigger-bot.entity.ts";
 import { triggerInboxRepository } from "./entities/trigger-inbox.entity.ts";
 
@@ -29,7 +29,7 @@ export class TriggerRepository {
   }
 
   hasWorkflow(id: string): bool {
-    return existsById(this.database, workflowsMapping(), id);
+    return existsById(this.database, workflowRepository(), id);
   }
 
   save(document: string): DbResult {
