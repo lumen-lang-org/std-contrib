@@ -7,7 +7,8 @@ import { mcpServerRepository } from "../servers/entities/mcp-server.entity.ts";
 import { modelConfigRepository } from "../model-configs/entities/model-config.entity.ts";
 import { modelRepository } from "../models/entities/model.entity.ts";
 import { skillRepository } from "../skills/entities/skill.entity.ts";
-import { AgentWebRagRow, agentWebRagMapping, webRagFor } from "../../webrag.ts";
+import { agentWebRagRepository } from "./entities/agent-web-rag.entity.ts";
+import { AgentWebRagRow, webRagFor } from "../../webrag.ts";
 import { runsOf } from "../../runlog.ts";
 
 export class AgentRepository {
@@ -116,11 +117,11 @@ export class AgentRepository {
   }
 
   saveWebRag(row: AgentWebRagRow): DbResult {
-    return persist(this.database, agentWebRagMapping(), JSON.stringify(row));
+    return persist(this.database, agentWebRagRepository(), JSON.stringify(row));
   }
 
   storedWebRag(id: string): string {
-    return findById(this.database, agentWebRagMapping(), id);
+    return findById(this.database, agentWebRagRepository(), id);
   }
 
   model(id: string): string {
