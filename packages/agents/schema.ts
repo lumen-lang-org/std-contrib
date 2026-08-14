@@ -405,25 +405,9 @@ export function skillFilesMapping(): DbRepository {
   return skillFileRepository();
 }
 
-export type PluginRow = {
-  id: string,
-  pluginName: string,
-  description: string,
-  sourceUrl: string,
-  version: string,
-  installedAt: string,
-};
-
 export function pluginsMapping(): DbRepository {
   return withoutRelations(pluginRepository());
 }
-
-export type PluginItemRow = {
-  id: string,
-  pluginId: string,
-  kind: string,
-  itemId: string,
-};
 
 export function pluginItemsMapping(): DbRepository {
   return withoutRelations(pluginItemRepository());

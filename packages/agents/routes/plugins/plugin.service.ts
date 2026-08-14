@@ -1,12 +1,11 @@
 import { Db } from "../../../plume/driver.ts";
 import { Outcome, produced, refusing } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
-import { fetchManifest, manifestFrom, manifestUrl } from "../../plugins.ts";
-import { McpServer } from "../servers/entities/mcp-server.entity.ts";
-import { Skill } from "../skills/entities/skill.entity.ts";
+import { ServerBody } from "../servers/dtos/server-body.dto.ts";
+import { SkillBody } from "../skills/dtos/skill-body.dto.ts";
 import { PluginItemView } from "./dtos/plugin-item-view.dto.ts";
 import { PluginRepository } from "./plugin.repository.ts";
-import { manifestView } from "./plugin.utils.ts";
+import { fetchManifest, manifestFrom, manifestUrl, manifestView } from "./plugin.utils.ts";
 
 export class PluginService {
   repository: PluginRepository;
@@ -32,12 +31,12 @@ export class PluginService {
       if (rows[i].kind == "skill") {
         let held = this.repository.skill(rows[i].itemId);
         if (held != "") {
-          name = JSON.parse<Skill>(held).skillName;
+          name = JSON.parse<SkillBody>(held).skillName;
         }
       } else {
         let held = this.repository.server(rows[i].itemId);
         if (held != "") {
-          name = JSON.parse<McpServer>(held).serverName;
+          name = JSON.parse<ServerBody>(held).serverName;
         }
       }
       let one: PluginItemView = {
