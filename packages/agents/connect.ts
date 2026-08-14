@@ -428,7 +428,10 @@ export function completeConnect(db: Db, master: string, state: string, code: str
     return { serverId: server.id, serverName: server.serverName, fault: wroteGrant };
   }
 
-  enable(db, server.id);
+  let enabled = enable(db, server.id);
+  if (enabled != "") {
+    return { serverId: server.id, serverName: server.serverName, fault: enabled };
+  }
   attachToDefault(db, server.id);
   return { serverId: server.id, serverName: server.serverName, fault: "" };
 }
@@ -462,14 +465,14 @@ function agentServerLink(): DbRepository {
   });
 }
 
-function enable(db: Db, serverId: string): void {
+function enable(db: Db, serverId: string): string {
   let document = findById(db, mcpServersMapping(), serverId);
   if (document == "") {
-    return;
+    return "";
   }
   let server: McpServerRow = JSON.parse<McpServerRow>(document);
   if (server.enabled) {
-    return;
+    return "";
   }
   let on: McpServerRow = {
     id: server.id, serverName: server.serverName, transport: server.transport,
@@ -477,7 +480,11 @@ function enable(db: Db, serverId: string): void {
     authHeader: server.authHeader, enabled: true,
   };
   deleteById(db, mcpServersMapping(), serverId);
-  persist(db, mcpServersMapping(), JSON.stringify(on));
+  let written = persist(db, mcpServersMapping(), JSON.stringify(on));
+  if (!written.ok) {
+    return written.error;
+  }
+  return "";
 }
 
 export function disconnect(db: Db, serverId: string, owner: string): bool {
