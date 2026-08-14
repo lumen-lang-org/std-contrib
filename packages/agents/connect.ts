@@ -489,11 +489,14 @@ function enable(db: Db, serverId: string): string {
 
 export function disconnect(db: Db, serverId: string, owner: string): bool {
   let key = owner == "" ? sharedTokenKey(serverId) : userTokenKey(serverId, owner);
-  let had = hasCredential(db, key);
-  forgetCredential(db, key);
-  forgetCredential(db, refreshKey(key));
-  deleteById(db, mcpGrantsMapping(), key);
-  return had;
+  if (!hasCredential(db, key)) {
+    return false;
+  }
+  let droppedValue = forgetCredential(db, key);
+  let hadRefresh = hasCredential(db, refreshKey(key));
+  let droppedRefresh = !hadRefresh || forgetCredential(db, refreshKey(key));
+  let droppedGrant = deleteById(db, mcpGrantsMapping(), key).ok;
+  return droppedValue && droppedRefresh && droppedGrant;
 }
 
 export function forgetConnector(db: Db, serverId: string, master: string): void {

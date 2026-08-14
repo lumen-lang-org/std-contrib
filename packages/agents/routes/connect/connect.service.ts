@@ -50,7 +50,7 @@ export class ConnectService {
     forgetSuppliedClient(this.repository.database, id);
   }
 
-  dropConnection(id: string, owner: string): void {
-    disconnectConnector(this.repository.database, id, owner);
+  dropConnection(id: string, owner: string): bool {
+    return disconnectConnector(this.repository.database, id, owner);
   }
 }
