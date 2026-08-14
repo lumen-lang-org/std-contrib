@@ -3,6 +3,7 @@ import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOr
 import { Migration, migration } from "../plume/migrate.ts";
 import { triggerBotRepository } from "./routes/triggers/entities/trigger-bot.entity.ts";
 import { triggerInboxRepository } from "./routes/triggers/entities/trigger-inbox.entity.ts";
+import { triggerOutboxRepository } from "./routes/triggers/entities/trigger-outbox.entity.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { stampMs } from "./tasks.ts";
 
@@ -129,20 +130,7 @@ function triggerOutboxMappingV1(): DbRepository {
 }
 
 export function triggerOutboxMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("botId", "bot_id", "text"),
-    field("chatId", "chat_id", "text"),
-    field("runId", "run_id", "text"),
-    field("text", "text", "text"),
-    field("status", "status", "text"),
-    field("options", "options", "text"),
-    field("fileThread", "file_thread", "text"),
-    field("filePath", "file_path", "text"),
-    field("createdAt", "created_at", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "trigger_outbox", idField: "id", idColumn: "id", fields: fs });
+  return triggerOutboxRepository();
 }
 
 export type TriggerPendingRow = {
