@@ -4,6 +4,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { Tracer, makeTracerFor, tracerWithEnvironment, noTracer } from "../tracing/tracing.ts";
 import { BackendCredentials, backendNamed } from "../tracing/backend.ts";
 import { credentialFor } from "./credentials.ts";
+import { traceConfigRepository } from "./routes/tracing/entities/trace-config.entity.ts";
 
 export type TraceConfigRow = {
   id: string,
@@ -16,16 +17,7 @@ export type TraceConfigRow = {
 };
 
 export function traceConfigMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("backend", "backend", "text"),
-    field("endpoint", "endpoint", "text"),
-    field("publicKey", "public_key", "text"),
-    field("serviceName", "service_name", "text"),
-    field("environment", "environment", "text"),
-    field("enabled", "enabled", "bool"),
-  ];
-  return repository({ table: "trace_config", idField: "id", idColumn: "id", fields: fs });
+  return traceConfigRepository();
 }
 
 function traceConfigMappingV1(): DbRepository {
