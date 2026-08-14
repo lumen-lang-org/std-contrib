@@ -13,6 +13,7 @@ import { RouteAsk, candidatesFrom, indexOfKey, routeTurn, withoutAddresses } fro
 import { credentialFor } from "./credentials.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
 import { threadRepository } from "./routes/threads/entities/thread.entity.ts";
+import { threadTurnRepository } from "./routes/threads/entities/thread-turn.entity.ts";
 
 export type ThreadRow = {
   id: string,
@@ -51,17 +52,7 @@ export function threadsMapping(): DbRepository {
 }
 
 export function threadTurnsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("seq", "seq", "int"),
-    field("role", "role", "text"),
-    field("text", "text", "text"),
-    field("calls", "calls", "text"),
-    field("callId", "call_id", "text"),
-    field("toolName", "tool_name", "text"),
-  ];
-  return repository({ table: "thread_turns", idField: "id", idColumn: "id", fields: fs });
+  return threadTurnRepository();
 }
 
 export function threadPlan(db: Db): Migration[] {
