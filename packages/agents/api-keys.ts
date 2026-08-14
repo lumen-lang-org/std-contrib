@@ -1,6 +1,7 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, deleteById, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, listWhere, persist, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { apiKeyRepository } from "./routes/api-keys/entities/api-key.entity.ts";
 
 export const MAX_KEYS_PER_OWNER: int = 20;
 export const MAX_KEY_NAME: int = 60;
@@ -19,17 +20,7 @@ export type ApiKeyRow = {
 };
 
 export function apiKeysMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("owner", "owner", "text"),
-    field("name", "name", "text"),
-    field("keyPrefix", "key_prefix", "text"),
-    field("keyHash", "key_hash", "text"),
-    field("scopes", "scopes", "text"),
-    field("createdAt", "created_at", "text"),
-    field("lastUsedAt", "last_used_at", "text"),
-  ];
-  return repository({ table: "api_keys", idField: "id", idColumn: "id", fields: fs });
+  return apiKeyRepository();
 }
 
 export function apiKeysPlan(db: Db): Migration[] {
