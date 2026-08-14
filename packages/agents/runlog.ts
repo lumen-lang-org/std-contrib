@@ -1,8 +1,9 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRelation, DbRepository, field, repository, hasMany, boolColumn, dialectType, persist, findById, pageOrdered, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, pageOrdered, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { AgentRun } from "./run.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
+import { runRepository } from "./routes/runs/entities/run.entity.ts";
 
 export type RunRow = {
   id: string,
@@ -55,27 +56,12 @@ function runsMappingV1(): DbRepository {
 }
 
 export function runsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("agentId", "agent_id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("owner", "owner", "text"),
-    field("inputTokens", "input_tokens", "int"),
-    field("outputTokens", "output_tokens", "int"),
-    field("modelChoiceId", "model_choice_id", "text"),
-    field("routeNote", "route_note", "text"),
-    field("agentName", "agent_name", "text"),
-    field("promptVersion", "prompt_version", "int"),
-    field("modelApiName", "model_api_name", "text"),
-    field("question", "question", "text"),
-    field("answer", "answer", "text"),
-    field("ok", "ok", "bool"),
-    field("stopReason", "stop_reason", "text"),
-    field("rounds", "rounds", "int"),
-    field("error", "error", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "runs", idField: "id", idColumn: "id", fields: fs });
+  return repository({
+    table: "runs",
+    idField: "id",
+    idColumn: "id",
+    fields: runRepository().fields,
+  });
 }
 
 export function runStepsMapping(): DbRepository {
@@ -93,17 +79,7 @@ export function runStepsMapping(): DbRepository {
 }
 
 export function runsFull(db: Db): DbRepository {
-  let rs: DbRelation[] = [
-    hasMany({ field: "steps", table: "run_steps", localColumn: "id", foreignColumn: "run_id", columns: "step_index AS \"stepIndex\", tool, server, args, result, "
-            + boolColumn(db, "ok") + " AS \"ok\"" }),
-  ];
-  return repository({
-    table: "runs",
-    idField: "id",
-    idColumn: "id",
-    fields: runsMapping().fields,
-    relations: rs,
-  });
+  return runRepository();
 }
 
 export function runLogPlan(db: Db): Migration[] {
