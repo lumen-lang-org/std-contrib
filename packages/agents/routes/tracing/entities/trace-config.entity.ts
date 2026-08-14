@@ -1,6 +1,16 @@
 import { EntityDescription, entity } from "../../../../plume/entity.ts";
 import { DbRepository } from "../../../../plume/plume.ts";
 
+export type TraceConfigRow = {
+  id: string,
+  backend: string,
+  endpoint: string,
+  publicKey: string,
+  serviceName: string,
+  environment: string,
+  enabled: bool,
+};
+
 @entity("trace_config")
 export class TraceConfig {
   @Id

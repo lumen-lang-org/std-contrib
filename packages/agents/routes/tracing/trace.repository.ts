@@ -1,7 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { DbResult, findById, persist } from "../../../plume/plume.ts";
-import { TraceConfigRow } from "../../trace.ts";
-import { traceConfigRepository } from "./entities/trace-config.entity.ts";
+import { TraceConfigRow, traceConfigRepository } from "./entities/trace-config.entity.ts";
 
 export class TraceRepository {
   database: Db;

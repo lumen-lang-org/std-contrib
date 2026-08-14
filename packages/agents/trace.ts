@@ -4,17 +4,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { Tracer, makeTracerFor, tracerWithEnvironment, noTracer } from "../tracing/tracing.ts";
 import { BackendCredentials, backendNamed } from "../tracing/backend.ts";
 import { credentialFor } from "./credentials.ts";
-import { traceConfigRepository } from "./routes/tracing/entities/trace-config.entity.ts";
-
-export type TraceConfigRow = {
-  id: string,
-  backend: string,
-  endpoint: string,
-  publicKey: string,
-  serviceName: string,
-  environment: string,
-  enabled: bool,
-};
+import { TraceConfigRow, traceConfigRepository } from "./routes/tracing/entities/trace-config.entity.ts";
 
 export function traceConfigMapping(): DbRepository {
   return traceConfigRepository();
