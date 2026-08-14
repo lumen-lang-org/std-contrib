@@ -4,6 +4,7 @@ import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
 import { DbField, DbRepository, DbOrder, field, repository, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { threadStepRepository } from "./routes/threads/entities/thread-step.entity.ts";
+import { threadThoughtRepository } from "./routes/threads/entities/thread-thought.entity.ts";
 
 export type LiveStep = {
   id: string,
@@ -91,16 +92,7 @@ export type Thought = {
 };
 
 export function thoughtsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("seq", "seq", "int"),
-    field("depth", "depth", "int"),
-    field("rotation", "rotation", "int"),
-    field("text", "text", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "thread_thoughts", idField: "id", idColumn: "id", fields: fs });
+  return threadThoughtRepository();
 }
 
 export function recordThought(db: Db, threadId: string, seq: int, depth: int, rotation: int, text: string, now: string): void {
