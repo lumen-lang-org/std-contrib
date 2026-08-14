@@ -63,19 +63,6 @@ export function emptyProject(): ProjectRow {
   return none;
 }
 
-export const PROJECT_FILES_KEY: string = "project-files";
-
-export function rememberFilesThread(db: Db, projectId: string, threadId: string): string {
-  let wrote = executeWith(db,
-    "UPDATE projects SET files_thread_id = " + placeholderAt(db, 1)
-    + " WHERE id = " + placeholderAt(db, 2),
-    [threadId, projectId]);
-  if (wrote.ok) {
-    return "";
-  }
-  return wrote.error;
-}
-
 export function assignProject(db: Db, threadId: string, projectId: string): string {
   let wrote = executeWith(db,
     "UPDATE threads SET project_id = " + placeholderAt(db, 1)
@@ -85,12 +72,6 @@ export function assignProject(db: Db, threadId: string, projectId: string): stri
     return "";
   }
   return wrote.error;
-}
-
-export function releaseThreads(db: Db, projectId: string): void {
-  executeWith(db,
-    "UPDATE threads SET project_id = '' WHERE project_id = " + placeholderAt(db, 1),
-    [projectId]);
 }
 
 export function projectBriefing(db: Db, threadId: string): string {

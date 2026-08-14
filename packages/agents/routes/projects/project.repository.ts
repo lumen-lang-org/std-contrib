@@ -1,9 +1,10 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, listOrdered, persist } from "../../../plume/plume.ts";
-import { PROJECT_FILES_KEY, releaseThreads, rememberFilesThread } from "../../projects.ts";
+import { DbOrder, DbRepository, DbResult, DbSweep, deleteById, existsById, findById, listOrdered, persist, setOn, setWhere } from "../../../plume/plume.ts";
 import { openThread, rememberRouteKey } from "../../threads.ts";
 import { threadRepository } from "../threads/entities/thread.entity.ts";
 import { projectRepository } from "./entities/project.entity.ts";
+
+export const PROJECT_FILES_KEY: string = "project-files";
 
 export class ProjectRepository {
   database: Db;
@@ -32,7 +33,11 @@ export class ProjectRepository {
   }
 
   remove(id: string): DbResult {
-    releaseThreads(this.database, id);
+    let sweep: DbSweep = {
+      values: [{ column: "project_id", value: "" }],
+      match: [{ column: "project_id", operator: "=", value: id }],
+    };
+    setWhere(this.database, threadRepository(), sweep);
     return deleteById(this.database, this.projects, id);
   }
 
@@ -49,6 +54,13 @@ export class ProjectRepository {
   }
 
   noteFilesThread(id: string, threadId: string): string {
-    return rememberFilesThread(this.database, id, threadId);
+    let wrote = setOn(this.database, this.projects, {
+      id: id,
+      values: [{ column: "files_thread_id", value: threadId }],
+    });
+    if (wrote.ok) {
+      return "";
+    }
+    return wrote.error;
   }
 }
