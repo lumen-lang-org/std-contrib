@@ -595,6 +595,9 @@ export type TemplateRow = {
   image: string,
   bootstrap: string,
   serve: string,
+  /** What the prepared conversation opens with, in the words of whoever
+   *  prepared it. */
+  request: string,
 };
 
 export function templatesMapping(): DbRepository {
