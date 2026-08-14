@@ -21,6 +21,7 @@ import { mcpOauthRepository } from "./routes/connect/entities/mcp-oauth.entity.t
 import { mcpPendingRepository } from "./routes/connect/entities/mcp-pending.entity.ts";
 import { mcpGrantRepository } from "./routes/connect/entities/mcp-grant.entity.ts";
 import { credentialRepository } from "./routes/credentials/entities/credential.entity.ts";
+import { threadSummaryRepository } from "./routes/threads/entities/thread-summary.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -436,14 +437,7 @@ export type ThreadSummaryRow = {
 };
 
 export function threadSummariesMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("throughSeq", "through_seq", "int"),
-    field("text", "text", "text"),
-    field("updatedAt", "updated_at", "text"),
-  ];
-  return repository({ table: "thread_summaries", idField: "id", idColumn: "id", fields: fs });
+  return threadSummaryRepository();
 }
 
 export type AuthProviderRow = {
