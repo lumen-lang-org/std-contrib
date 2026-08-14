@@ -422,7 +422,10 @@ export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, now
     runId: "", answer: "", error: "",
     createdAt: now, updatedAt: now,
   };
-  persist(db, triggerInboxMapping(), JSON.stringify(row));
+  let written = persist(db, triggerInboxMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return "";
+  }
   return row.id;
 }
 
@@ -439,7 +442,10 @@ export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, w
     runId: "", answer: why, error: why,
     createdAt: now, updatedAt: now,
   };
-  persist(db, triggerInboxMapping(), JSON.stringify(row));
+  let written = persist(db, triggerInboxMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return "";
+  }
   return row.id;
 }
 
@@ -508,7 +514,10 @@ export function queueOutboundWith(db: Db, botId: string, chatId: string, runId: 
     fileThread: "", filePath: "",
     createdAt: now, updatedAt: now,
   };
-  persist(db, triggerOutboxMapping(), JSON.stringify(row));
+  let written = persist(db, triggerOutboxMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return "";
+  }
   return row.id;
 }
 
@@ -520,7 +529,10 @@ export function queueOutboundFile(db: Db, botId: string, chatId: string, runId: 
     fileThread: fileThread, filePath: filePath,
     createdAt: now, updatedAt: now,
   };
-  persist(db, triggerOutboxMapping(), JSON.stringify(row));
+  let written = persist(db, triggerOutboxMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return "";
+  }
   return row.id;
 }
 
