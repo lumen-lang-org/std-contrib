@@ -81,14 +81,14 @@ export class PluginRepository {
     return "";
   }
 
-  private receipt(pluginId: string, kind: string, itemId: string): void {
+  private receipt(pluginId: string, kind: string, itemId: string): bool {
     let row: PluginItemBody = {
       id: crypto.randomUUID(),
       pluginId: pluginId,
       kind: kind,
       itemId: itemId,
     };
-    persist(this.database, this.pluginItems, JSON.stringify(row));
+    return persist(this.database, this.pluginItems, JSON.stringify(row)).ok;
   }
 
   installFrom(manifest: Manifest, sourceUrl: string, now: string): string {
@@ -119,8 +119,10 @@ export class PluginRepository {
         source: "repo",
         sourceUrl: sourceUrl,
       };
-      persist(this.database, skillRepository(), JSON.stringify(skill));
-      this.receipt(plugin.id, "skill", skill.id);
+      let skillWritten = persist(this.database, skillRepository(), JSON.stringify(skill));
+      if (!skillWritten.ok || !this.receipt(plugin.id, "skill", skill.id)) {
+        return emptyPlugin().id;
+      }
       let f: int = 0;
       while (f < seed.files.length) {
         let file: SkillFileBody = {
@@ -129,7 +131,10 @@ export class PluginRepository {
           path: seed.files[f].path,
           body: seed.files[f].body,
         };
-        persist(this.database, skillFileRepository(), JSON.stringify(file));
+        let fileWritten = persist(this.database, skillFileRepository(), JSON.stringify(file));
+        if (!fileWritten.ok) {
+          return emptyPlugin().id;
+        }
         f = f + 1;
       }
       i = i + 1;
@@ -147,17 +152,20 @@ export class PluginRepository {
         authHeader: seed.authHeader,
         enabled: false,
       };
-      persist(this.database, mcpServerRepository(), JSON.stringify(server));
-      this.receipt(plugin.id, "connector", server.id);
+      let serverWritten = persist(this.database, mcpServerRepository(), JSON.stringify(server));
+      if (!serverWritten.ok || !this.receipt(plugin.id, "connector", server.id)) {
+        return emptyPlugin().id;
+      }
       c = c + 1;
     }
     return plugin.id;
   }
 
-  forget(id: string): void {
+  forget(id: string): bool {
     let held = listWhere(this.database, this.pluginItems,
       "plugin_id = " + this.database.placeholder, [id]);
     let items: PluginItemBody[] = held == "" || held == "[]" ? [] : JSON.parse<PluginItemBody[]>(held);
+    let allOk = true;
     let i: int = 0;
     while (i < items.length) {
       if (items[i].kind == "skill") {
@@ -167,18 +175,19 @@ export class PluginRepository {
           let rows: SkillFileBody[] = JSON.parse<SkillFileBody[]>(files);
           let f: int = 0;
           while (f < rows.length) {
-            deleteById(this.database, skillFileRepository(), rows[f].id);
+            allOk = deleteById(this.database, skillFileRepository(), rows[f].id).ok && allOk;
             f = f + 1;
           }
         }
-        deleteById(this.database, skillRepository(), items[i].itemId);
+        allOk = deleteById(this.database, skillRepository(), items[i].itemId).ok && allOk;
       }
       if (items[i].kind == "connector") {
-        deleteById(this.database, mcpServerRepository(), items[i].itemId);
+        allOk = deleteById(this.database, mcpServerRepository(), items[i].itemId).ok && allOk;
       }
-      deleteById(this.database, this.pluginItems, items[i].id);
+      allOk = deleteById(this.database, this.pluginItems, items[i].id).ok && allOk;
       i = i + 1;
     }
-    deleteById(this.database, this.plugins, id);
+    allOk = deleteById(this.database, this.plugins, id).ok && allOk;
+    return allOk;
   }
 }

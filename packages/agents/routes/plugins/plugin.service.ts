@@ -82,7 +82,7 @@ export class PluginService {
     return produced(this.repository.one(made));
   }
 
-  forget(id: string): void {
-    this.repository.forget(id);
+  forget(id: string): bool {
+    return this.repository.forget(id);
   }
 }

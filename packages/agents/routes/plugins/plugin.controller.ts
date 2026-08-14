@@ -1,6 +1,6 @@
 import { Db } from "../../../plume/driver.ts";
 import { bindings, controller } from "../../../rest/controller.ts";
-import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, Ok, OkJson } from "../../../rest/server.ts";
+import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, NotFound, Ok, OkJson } from "../../../rest/server.ts";
 import { PluginAsk } from "./dtos/plugin-ask.dto.ts";
 import { pluginExists } from "./plugin.guard.ts";
 import { PluginService } from "./plugin.service.ts";
@@ -46,7 +46,9 @@ export class PluginApi {
   @Delete("/:id")
   @Guard(thePlugin)
   remove(@PathVariable("id") id: string): Reply {
-    this.plugins.forget(id);
+    if (!this.plugins.forget(id)) {
+      return NotFound("plugin " + id);
+    }
     return NoContent();
   }
 }
