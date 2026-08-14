@@ -1,10 +1,11 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbResult, deleteWhere, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbResult, deleteWhere, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { credentialFor } from "../../credentials.ts";
-import { DocumentFileRow, documentFilesMapping, findDocumentFile, forgetDocumentFiles, sourcesWithFiles } from "../../document-files.ts";
+import { DocumentFileRow, documentFileId, emptyDocumentFile, sourcesWithFiles } from "../../document-files.ts";
 import { IndexJobRow, enqueue, pendingJobs } from "../../indexing.ts";
 import { SourceListing, createDocuments, embeddingModel, listSources } from "../../knowledge.ts";
 import { documentRepository } from "./entities/document.entity.ts";
+import { documentFileRepository } from "./entities/document-file.entity.ts";
 
 export class DocumentRepository {
   database: Db;
@@ -49,11 +50,16 @@ export class DocumentRepository {
   }
 
   saveFile(row: DocumentFileRow): DbResult {
-    return persist(this.database, documentFilesMapping(), JSON.stringify(row));
+    return persist(this.database, documentFileRepository(), JSON.stringify(row));
   }
 
   fileFor(scope: string, source: string): DocumentFileRow {
-    return findDocumentFile(this.database, scope, source);
+    let document = findById(this.database, documentFileRepository(), documentFileId(scope, source));
+    if (document == "") {
+      return emptyDocumentFile();
+    }
+    let row: DocumentFileRow = JSON.parse<DocumentFileRow>(document);
+    return row;
   }
 
   deleteBySource(source: string): DbResult {
@@ -61,6 +67,6 @@ export class DocumentRepository {
   }
 
   forgetFiles(source: string): void {
-    forgetDocumentFiles(this.database, source);
+    deleteWhere(this.database, documentFileRepository(), "source = " + placeholderAt(this.database, 1), [source]);
   }
 }
