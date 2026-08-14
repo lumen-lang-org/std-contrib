@@ -33,11 +33,23 @@ function sources(dir) {
 const FILES = sources(ROOT);
 const ALL = FILES.map(f => [f, readFileSync(f, "utf8")]);
 
+// A JSDoc comment on a field routinely contains prose like "answers to on the
+// wire: 16 hex characters" — which the field regex below, run against the raw
+// body, would read as a field named "wire". Confirmed live: it was reading
+// phantom fields "wire" and "s" out of environments.ts's EnvRow before this
+// strip existed, which silently changes what a mismatch check downstream can
+// even see. Every type body is stripped of comments before it is scanned, in
+// both this tool and its narrow-read.mjs sibling — checked identically, kept
+// in sync by hand since sharing a module was not worth the coupling.
+function stripComments(body) {
+  return body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
 // Field names of every `export type X = { a: T, b: U }`.
 const types = new Map();
 for (const [, text] of ALL) {
   for (const m of text.matchAll(/(?:export\s+)?type\s+(\w+)\s*=\s*\{([^}]*)\}/g)) {
-    const fields = [...m[2].matchAll(/(\w+)\??\s*:/g)].map(f => f[1]);
+    const fields = [...stripComments(m[2]).matchAll(/(\w+)\??\s*:/g)].map(f => f[1]);
     if (fields.length) types.set(m[1], fields);
   }
 }
