@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { embeddingModel, uploadDocument } from "./knowledge.ts";
-import { claimNext, markIndexed, markFailed, requeueStalled } from "./indexing.ts";
+import { JobRepository } from "./routes/jobs/job.repository.ts";
 import { JOB_QUEUED } from "./routes/jobs/entities/index-job.entity.ts";
 import { masterKey, credentialFor } from "./credentials.ts";
 
@@ -24,7 +24,7 @@ function main(): void {
   };
   connectDatabase(db, server);
 
-  requeueStalled(db, "");
+  new JobRepository(db).requeueStalled("");
   console.log("indexer: draining the queue");
 
   while (true) {
@@ -39,30 +39,31 @@ function main(): void {
 }
 
 function drainOne(db: Db, master: string): void {
-  let job = claimNext(db, now());
+  let jobs = new JobRepository(db);
+  let job = jobs.claimNext(now());
   if (job.id == "") {
     return;
   }
 
   let embedder = embeddingModel(db, job.modelId);
   if (embedder.id == "") {
-    markFailed(db, job.id, "no usable embedding model " + job.modelId, now());
+    jobs.markFailed(job.id, "no usable embedding model " + job.modelId, now());
     return;
   }
   let key = credentialFor(db, embedder.provider, master);
   if (key == "") {
-    markFailed(db, job.id, "no credential for " + embedder.provider, now());
+    jobs.markFailed(job.id, "no credential for " + embedder.provider, now());
     return;
   }
 
   console.log("indexing " + job.source + " into " + job.scope);
   let stored = uploadDocument(db, embedder, job.source, job.scope, job.body, key);
   if (!stored.ok) {
-    markFailed(db, job.id, stored.error, now());
+    jobs.markFailed(job.id, stored.error, now());
     console.log("  failed: " + stored.error);
     return;
   }
-  markIndexed(db, job.id, stored.chunks, now());
+  jobs.markIndexed(job.id, stored.chunks, now());
   console.log("  " + `${stored.chunks}` + " chunks");
 }
 

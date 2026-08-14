@@ -2,7 +2,6 @@ import { Db } from "../../../plume/driver.ts";
 import { DbResult, deleteWhere, findById, persist, placeholderAt } from "../../../plume/plume.ts";
 import { credentialFor } from "../../credentials.ts";
 import { DocumentFileRow, documentFileId, emptyDocumentFile, sourcesWithFiles } from "../../document-files.ts";
-import { enqueue } from "../../indexing.ts";
 import { SourceListing, createDocuments, embeddingModel, listSources } from "../../knowledge.ts";
 import { documentRepository } from "./entities/document.entity.ts";
 import { documentFileRepository } from "./entities/document-file.entity.ts";
@@ -48,7 +47,7 @@ export class DocumentRepository {
   }
 
   queueUpload(source: string, scope: string, modelId: string, body: string, now: string): string {
-    return enqueue(this.database, source, scope, modelId, body, now);
+    return new JobRepository(this.database).enqueue(source, scope, modelId, body, now);
   }
 
   saveFile(row: DocumentFileRow): DbResult {

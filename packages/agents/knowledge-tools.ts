@@ -5,7 +5,7 @@ import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
 import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelRow, writeSetting } from "./schema.ts";
 import { listSources, normalScope } from "./knowledge.ts";
-import { enqueue } from "./indexing.ts";
+import { JobRepository } from "./routes/jobs/job.repository.ts";
 import { JOB_QUEUED } from "./routes/jobs/entities/index-job.entity.ts";
 import { forgetDocumentFiles } from "./document-files.ts";
 import { maySchedule } from "./task-tools.ts";
@@ -182,7 +182,7 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (embedder.id == "") {
       return no("this deployment has no enabled embedding model, so nothing can be indexed.");
     }
-    let id = enqueue(db, source, scope, embedder.id, body, `${call.nowMs}`);
+    let id = new JobRepository(db).enqueue(source, scope, embedder.id, body, `${call.nowMs}`);
     if (id == "") {
       return no("the indexing queue refused the job.");
     }
