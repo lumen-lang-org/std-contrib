@@ -2,6 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, createTableSql, deleteById, field, findById, persist, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { McpTool } from "./mcp.ts";
+import { mcpToolRosterRepository } from "./routes/servers/entities/mcp-tool-roster.entity.ts";
 
 export const MAX_REMEMBERED_TOOLS: int = 200;
 
@@ -12,12 +13,7 @@ export type McpRosterRow = {
 };
 
 export function mcpRosterMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("tools", "tools", "text"),
-    field("listedAt", "listed_at", "text"),
-  ];
-  return repository({ table: "mcp_tool_roster", idField: "id", idColumn: "id", fields: fs });
+  return mcpToolRosterRepository();
 }
 
 export function mcpRosterPlan(db: Db): Migration[] {
