@@ -22,6 +22,7 @@ import { mcpPendingRepository } from "./routes/connect/entities/mcp-pending.enti
 import { mcpGrantRepository } from "./routes/connect/entities/mcp-grant.entity.ts";
 import { credentialRepository } from "./routes/credentials/entities/credential.entity.ts";
 import { threadSummaryRepository } from "./routes/threads/entities/thread-summary.entity.ts";
+import { officeRenderRepository } from "./routes/threads-artifacts/entities/office-render.entity.ts";
 
 export type ModelRow = {
   id: string,
@@ -527,14 +528,7 @@ export type OfficeRenderRow = {
 };
 
 export function officeRendersMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("artifactId", "artifact_id", "text"),
-    field("version", "version", "int"),
-    field("body", "body", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "office_renders", idField: "id", idColumn: "id", fields: fs });
+  return officeRenderRepository();
 }
 
 export function agentsMapping(): DbRepository {
