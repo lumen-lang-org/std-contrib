@@ -270,12 +270,15 @@ test("a pruned container is recreated from the row's image, reported as created"
   expect(!back.warmed);
 
   let asked = argvLines();
-  expect(asked.length == 5);
+  expect(asked.length == 6);
   expect(asked[0] == "inspect -f {{.State.Running}} agents-env-t1-main");
   expect(asked[1] == "start agents-env-t1-main");
-  expect(asked[2] == "rm -f agents-env-t1-main");
-  expect(asked[3] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --read-only --tmpfs /tmp:rw,nosuid,size=64m -v agents-run-t1:/artifacts -v agents-skills-t1:/skills -v agents-home-t1:/home/sandbox --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
-  expect(asked[4].indexOf("exec agents-env-t1-main sh -c") == 0);
+  // Asked a second time before tearing anything down: a start that fails
+  // because another ensure is mid-rebuild is not a container that is gone.
+  expect(asked[2] == "inspect -f {{.State.Running}} agents-env-t1-main");
+  expect(asked[3] == "rm -f agents-env-t1-main");
+  expect(asked[4] == "run -d --name agents-env-t1-main -v agents-ws-t1:/workspace --memory 1024m --cpus 2 --pids-limit 256 --shm-size 512m --security-opt no-new-privileges --cap-drop ALL --read-only --tmpfs /tmp:rw,nosuid,size=64m -v agents-run-t1:/artifacts -v agents-skills-t1:/skills -v agents-home-t1:/home/sandbox --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID --network none --entrypoint sleep python:3.12-slim infinity");
+  expect(asked[5].indexOf("exec agents-env-t1-main sh -c") == 0);
 
   expect(envList(database, "t1")[0].status == "running");
 });
@@ -825,6 +828,39 @@ test("the list a person sees says which of their environments can be opened", ()
     }
     i = i + 1;
   }
+  envBindOverride("");
+});
+
+test("a name another ensure just took is used, not fought over", () => {
+  fresh();
+  withThreads();
+  envBindOverride(GATEWAY_SIDE);
+  // docker refuses the create because the name is held, and the container
+  // under that name is up: the console polls serve every few seconds while a
+  // rebuild runs, so the second call arrives mid-flight. It wanted a running
+  // container and there is one.
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"run\" ] && [ \"$2\" = \"-d\" ]; then\n"
+    + "  echo 'docker: Error response from daemon: Conflict. The container name is already in use' >&2\n"
+    + "  exit 125\n"
+    + "fi\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
+    + "if [ \"$1\" = \"port\" ]; then echo '3000/tcp -> 127.0.0.1:49154'; fi\n"
+    + "exit 0\n");
+  let up = serve("t1", "1700000000000");
+
+  expect(up.ok);
+  expect(up.fault == "");
+  // And it did not tear down the container the other call had just made.
+  let asked = argvLines();
+  let removed = false;
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i].indexOf("rm -f agents-env-t1-web") == 0) { removed = true; }
+    i = i + 1;
+  }
+  expect(!removed);
   envBindOverride("");
 });
 

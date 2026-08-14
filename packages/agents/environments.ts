@@ -371,7 +371,11 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   if (e.serve && row.servePort == 0) {
     envDocker(["rm", "-f", container]);
     let rebuilt = envMake(make);
-    if (rebuilt.status != 0) {
+    // A rebuild that failed is only a failure if the container is not there
+    // afterwards. Several ensures for one environment overlap constantly —
+    // the console polls serve every few seconds while one is coming up — and
+    // the loser of that race would otherwise report a conflict it caused.
+    if (rebuilt.status != 0 && !envRunning(container)) {
       return envRefused(envDockerFault("rebuild the environment so it can serve", rebuilt));
     }
     created = true;
@@ -379,10 +383,14 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     let started = envDocker(["start", container]);
     if (started.status == 0) {
       warmed = true;
+    } else if (envRunning(container)) {
+      // It came up between the question and the answer, which is another
+      // ensure finishing rather than anything being wrong.
+      warmed = true;
     } else {
       envDocker(["rm", "-f", container]);
       let remade = envMake(make);
-      if (remade.status != 0) {
+      if (remade.status != 0 && !envRunning(container)) {
         return envRefused(envDockerFault("start the environment", remade));
       }
       created = true;
@@ -848,6 +856,11 @@ export function envOwnVolumes(threadId: string, image: string): void {
     "-R", `${ENV_UID}` + ":" + `${ENV_UID}`, "/workspace", ENV_HOME]);
 }
 
+/** Docker's word for a name somebody else is already holding. */
+function envNameTaken(reply: EnvDockerReply): bool {
+  return (reply.stderr + reply.stdout).indexOf("already in use") >= 0;
+}
+
 function envMake(r: EnvRun): EnvDockerReply {
   if (r.network || r.serve) {
     envNetworkUp(r.threadId, r.name);
@@ -856,6 +869,22 @@ function envMake(r: EnvRun): EnvDockerReply {
     envOwnVolumes(r.threadId, r.image);
   }
   let made = envDocker(envRunArgs(r));
+  // Two ensures for one environment can overlap. The console polls serve
+  // every few seconds while a container comes up, and a rebuild is not
+  // instant, so the second call can find the container gone, fail to start
+  // it, and try to create one into the name the first call has just taken.
+  //
+  // Whoever loses that race asks what is there rather than failing a click:
+  // a container already running under this name is the thing that was wanted,
+  // and a dead one is cleared out of the way for one more attempt.
+  if (made.status != 0 && envNameTaken(made)) {
+    if (envRunning(r.container)) {
+      let theirs: EnvDockerReply = { status: 0, stdout: r.container, stderr: "" };
+      return theirs;
+    }
+    envDocker(["rm", "-f", r.container]);
+    made = envDocker(envRunArgs(r));
+  }
   if (made.status == 0 && !r.serve) {
     envDocker(["exec", r.container, "sh", "-c", "mkdir -p /workspace && chown 65534:65534 /workspace"]);
   }
