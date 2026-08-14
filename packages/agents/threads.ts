@@ -671,6 +671,7 @@ function refusedRemix(why: string): Remixed {
 function remixTurns(db: Db, sourceId: string, threadId: string): int {
   let held = threadTurnRows(db, sourceId);
   let seq: int = 0;
+  let written: int = 0;
   while (seq < held.length) {
     let was = held[seq];
     let row: ThreadTurnRow = {
@@ -683,10 +684,12 @@ function remixTurns(db: Db, sourceId: string, threadId: string): int {
       callId: was.callId,
       toolName: was.toolName,
     };
-    persist(db, threadTurnsMapping(), JSON.stringify(row));
+    if (persist(db, threadTurnsMapping(), JSON.stringify(row)).ok) {
+      written = written + 1;
+    }
     seq = seq + 1;
   }
-  return seq;
+  return written;
 }
 
 export function remixThread(db: Db, ask: RemixAsk): Remixed {
