@@ -94,8 +94,24 @@ for (const file of FILES) {
 // of these straight through is a live guard, not a dead one.
 const EMPTY_ON_MISS = new Set(["findById", "jsonText", "jsonRaw", "credentialFor", "env"]);
 
+// A comment inside a function body is not code, and this codebase writes
+// prose comments freely — "this one does not return "" on failure" is
+// exactly the sentence that would fool a line-scan for `return ... ""`, and
+// it says the opposite of what it would be read as. Confirmed live: a
+// planted comment saying a function does NOT return "" made canAnswerEmpty
+// report that it could, hiding the caller's guard as live when the function
+// underneath, code only, never returns "". Same class of bug fixed in
+// narrow-write.mjs and narrow-read.mjs the cycle before this one, just
+// pointed the other way — there a phantom comment field created a false
+// finding, here a phantom comment sentence erases a real one, which is
+// worse: it is a false negative in a tool whose whole job is not missing
+// its own worked example.
+function stripComments(body) {
+  return body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
 function canAnswerEmpty(entry, depth = 0) {
-  const body = entry.body;
+  const body = stripComments(entry.body);
   for (const line of body.split("\n")) {
     if (/return[^;]*""/.test(line)) return true;
   }
