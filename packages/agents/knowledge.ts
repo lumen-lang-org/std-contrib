@@ -387,7 +387,15 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
     return odd;
   }
 
-  executeWith(db, "DELETE FROM documents WHERE source = " + placeholderAt(db, 1), [source]);
+  let cleared = executeWith(db, "DELETE FROM documents WHERE source = " + placeholderAt(db, 1), [source]);
+  if (!cleared.ok) {
+    let blocked: Upload = {
+      ok: false,
+      chunks: 0,
+      error: "\"" + source + "\"'s old chunks could not be cleared, so re-indexing was refused rather than risk duplicating them: " + cleared.error,
+    };
+    return blocked;
+  }
 
   let stem = source;
   if (stem.length > 48) {
