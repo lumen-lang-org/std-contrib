@@ -1,6 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
+import { environmentRepository } from "./routes/sandbox/environments/entities/environment.entity.ts";
 
 export const ENV_IDLE_MS: int = 900000;
 
@@ -77,22 +78,7 @@ export type EnvRow = {
 };
 
 export function envMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("threadId", "thread_id", "text"),
-    field("name", "name", "text"),
-    field("image", "image", "text"),
-    field("network", "network", "int"),
-    field("status", "status", "text"),
-    field("slug", "slug", "text"),
-    field("hostPort", "host_port", "int"),
-    field("servePort", "serve_port", "int"),
-    field("serveCmd", "serve_cmd", "text"),
-    field("syncAt", "sync_at", "text"),
-    field("createdAt", "created_at", "text"),
-    field("lastUsedAt", "last_used_at", "text"),
-  ];
-  return repository({ table: "environments", idField: "id", idColumn: "id", fields: fs });
+  return environmentRepository();
 }
 
 // The shape migration 64 created, frozen. Building that statement from the
