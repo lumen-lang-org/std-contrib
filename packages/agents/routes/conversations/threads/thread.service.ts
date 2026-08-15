@@ -269,7 +269,13 @@ export class ThreadService {
 
   say(id: string, body: string, tags: string[]): Reply {
     let agentId = ownedThread(this.database, id, tags);
-    clearCancel(this.database, id);
+    // Before anything else: with the previous stop still on the row, the run
+    // below would come straight back as "cancelled" and burn the turn.
+    let cleared = clearCancel(this.database, id);
+    if (cleared != "") {
+      return BadRequest("the last stop on this conversation could not be lifted, so a new "
+        + "message would come back cancelled — " + cleared);
+    }
     if (body == "") {
       return BadRequest("a body is required: {\"text\":\"...\"}");
     }

@@ -905,10 +905,20 @@ export function askCancel(db: Db, threadId: string): string {
   return wrote.error;
 }
 
-export function clearCancel(db: Db, threadId: string): void {
-  executeWith(db,
+/** The stop somebody asked for last time, taken back before the next turn.
+ *
+ *  Reported rather than assumed: run.ts reads cancel_asked at four points and
+ *  returns the cancelled report the moment it is set, so a clear that does not
+ *  land does not merely risk a wrong answer — it guarantees the next message
+ *  is answered "cancelled" before the model is ever called. */
+export function clearCancel(db: Db, threadId: string): string {
+  let wrote = executeWith(db,
     "UPDATE threads SET cancel_asked = '' WHERE id = " + placeholderAt(db, 1),
     [threadId]);
+  if (wrote.ok) {
+    return "";
+  }
+  return wrote.error;
 }
 
 export function cancelAsked(db: Db, threadId: string): bool {
