@@ -129,7 +129,7 @@ function queuedMessages(db: Db): int {
   return parseInt(db.value(0, 0), 10) ?? 0;
 }
 
-function rememberOpenQuestion(db: Db, msg: TriggerInboxRow, flow: WorkflowRow, done: WorkflowDone): void {
+function rememberOpenQuestion(db: Db, msg: TriggerInboxRow, flow: WorkflowRow, done: WorkflowDone): bool {
   let now = Date.now() as number;
   let row: TriggerPendingRow = {
     id: crypto.randomUUID(), botId: msg.botId, chatId: msg.chatId,
@@ -139,7 +139,7 @@ function rememberOpenQuestion(db: Db, msg: TriggerInboxRow, flow: WorkflowRow, d
     expiresAt: `${now + (TRIGGER_ASK_TTL_MS as number)}`,
     createdAt: `${now}`,
   };
-  rememberAsk(db, row);
+  return rememberAsk(db, row);
 }
 
 function drainTriggers(db: Db, master: string): void {
@@ -254,7 +254,12 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     noteThread(db, msg.id, done.threadId);
   }
   if ((done.waitingAt ?? "") != "") {
-    rememberOpenQuestion(db, msg, flow, done);
+    if (!rememberOpenQuestion(db, msg, flow, done)) {
+      finishMessage(db, msg, "failed", done.runId, "",
+        "the workflow is waiting on a reply, but that could not be saved — a reply here will not resume it",
+        Date.now() as number);
+      return;
+    }
     finishMessage(db, msg, "done", done.runId, "", "", Date.now() as number);
     return;
   }

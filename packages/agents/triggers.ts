@@ -592,10 +592,10 @@ export function pendingFor(db: Db, botId: string, chatId: string, nowMs: number)
   return held;
 }
 
-export function rememberAsk(db: Db, row: TriggerPendingRow): void {
+export function rememberAsk(db: Db, row: TriggerPendingRow): bool {
   db.query("DELETE FROM trigger_pending WHERE bot_id = " + db.placeholder
     + " AND chat_id = " + placeholderAt(db, 2), [row.botId, row.chatId]);
-  persist(db, triggerPendingMapping(), JSON.stringify(row));
+  return persist(db, triggerPendingMapping(), JSON.stringify(row)).ok;
 }
 
 export function forgetAsk(db: Db, id: string): void {
