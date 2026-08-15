@@ -328,7 +328,9 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
   return got;
 }
 
-export function markWorkflowRan(db: Db, row: WorkflowRow, runId: string, nowMs: number): void {
+/** As markRan is for a task, and returning a fault for the same reason: an
+ *  unrecorded run stays claimed and stays due. */
+export function markWorkflowRan(db: Db, row: WorkflowRow, runId: string, nowMs: number): string {
   let ahead = nextWorkflowFire(row, nowMs);
   let stillOn = row.kind == "manual" || (row.kind == "every" && ahead.ok);
   let again = row.kind == "every" && ahead.ok ? ahead.at : "";
@@ -342,10 +344,13 @@ export function markWorkflowRan(db: Db, row: WorkflowRow, runId: string, nowMs: 
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
   let now = `${nowMs}`;
-  db.query(sql, [now, runId, stillOn ? "true" : "false", again, now, row.id]);
+  if (!db.query(sql, [now, runId, stillOn ? "true" : "false", again, now, row.id])) {
+    return "the run of \"" + row.id + "\" was not recorded, so it is still claimed and still due";
+  }
+  return "";
 }
 
-export function markWorkflowFailed(db: Db, row: WorkflowRow, why: string, nowMs: number): void {
+export function markWorkflowFailed(db: Db, row: WorkflowRow, why: string, nowMs: number): string {
   let failures = row.failures + 1;
   let done = failures >= PAUSE_AFTER;
   let ahead = nextWorkflowFire(row, nowMs);
@@ -361,6 +366,9 @@ export function markWorkflowFailed(db: Db, row: WorkflowRow, why: string, nowMs:
     + " WHERE id = " + placeholderAt(db, 8);
   let now = `${nowMs}`;
   let reason = done ? "paused after " + `${failures}` + " failures: " + why : "";
-  db.query(sql, [`${failures}`, now, why, stillOn ? "true" : "false", reason,
-    stillOn && scheduled ? ahead.at : "", now, row.id]);
+  if (!db.query(sql, [`${failures}`, now, why, stillOn ? "true" : "false", reason,
+    stillOn && scheduled ? ahead.at : "", now, row.id])) {
+    return "the failure of \"" + row.id + "\" was not recorded, so it is still claimed and still due";
+  }
+  return "";
 }

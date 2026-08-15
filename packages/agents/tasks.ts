@@ -357,7 +357,12 @@ export function claimDue(db: Db, nowMs: number): TaskRow {
   return got;
 }
 
-export function markRan(db: Db, row: TaskRow, runId: string, nowMs: number): void {
+/** Records that a task ran: clears the claim and moves next_at on.
+ *
+ *  Returns why it could not be recorded, if it could not. Silence here is not
+ *  harmless: the claim stays set and next_at stays in the past, so once the
+ *  claim goes stale the same task is due again and runs a second time. */
+export function markRan(db: Db, row: TaskRow, runId: string, nowMs: number): string {
   let ahead = nextFire(row, nowMs);
   let stillOn = row.kind == "every" && ahead.ok;
   let sql = "UPDATE scheduled_tasks SET running_since = '', failures = 0, paused_reason = '',"
@@ -370,10 +375,15 @@ export function markRan(db: Db, row: TaskRow, runId: string, nowMs: number): voi
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
   let now = `${nowMs}`;
-  db.query(sql, [now, runId, stillOn ? "true" : "false", stillOn ? ahead.at : "", now, row.id]);
+  if (!db.query(sql, [now, runId, stillOn ? "true" : "false", stillOn ? ahead.at : "", now, row.id])) {
+    return "the run of \"" + row.id + "\" was not recorded, so it is still claimed and still due";
+  }
+  return "";
 }
 
-export function markFailed(db: Db, row: TaskRow, why: string, nowMs: number): void {
+/** The same for a task that failed, and the same reason for saying so: an
+ *  unrecorded failure is a failure that never counts towards PAUSE_AFTER. */
+export function markFailed(db: Db, row: TaskRow, why: string, nowMs: number): string {
   let failures = row.failures + 1;
   let done = failures >= PAUSE_AFTER;
   let ahead = nextFire(row, nowMs);
@@ -388,8 +398,11 @@ export function markFailed(db: Db, row: TaskRow, why: string, nowMs: number): vo
     + " WHERE id = " + placeholderAt(db, 8);
   let now = `${nowMs}`;
   let reason = done ? "paused after " + `${failures}` + " failures: " + why : "";
-  db.query(sql, [`${failures}`, now, why, stillOn ? "true" : "false", reason,
-    stillOn ? ahead.at : "", now, row.id]);
+  if (!db.query(sql, [`${failures}`, now, why, stillOn ? "true" : "false", reason,
+    stillOn ? ahead.at : "", now, row.id])) {
+    return "the failure of \"" + row.id + "\" was not recorded, so it is still claimed and still due";
+  }
+  return "";
 }
 
 export function withNextAt(row: TaskRow, at: string): TaskRow {

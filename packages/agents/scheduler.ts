@@ -13,6 +13,17 @@ import { TURN_SEQ_NONE, binaryKind, kindOf, putArtifact } from "./artifacts.ts";
 import { TRIGGER_ASK_TTL_MS, TriggerInboxRow, TriggerPendingRow, botById, claimMessage, finishMessage, forgetAsk, noteThread, pendingFor, plainly, queueOutbound, rememberAsk, testingDraft, threadForChat } from "./triggers.ts";
 
 const PER_PASS: int = 5;
+
+/** The bookkeeping that ends a run — the claim cleared, next_at moved on — is
+ *  the one write the scheduler cannot retry, because the row it would retry
+ *  from is the row it failed to change. Said out loud so an operator sees the
+ *  cause: a task still claimed and still due runs again once the claim goes
+ *  stale, and does that every RUN_TIMEOUT_MS until the write lands. */
+function noteFault(fault: string): void {
+  if (fault != "") {
+    console.error("scheduler: " + fault);
+  }
+}
 const TRIGGER_RUNNERS: int = 3;
 const WORKFLOWS_PER_PASS: int = 2;
 
@@ -71,7 +82,7 @@ function main(): void {
     }
     catch (e) {
       console.error("scheduler: " + task.id + " threw: " + e.message);
-      markFailed(db, task, e.message, Date.now() as number);
+      noteFault(markFailed(db, task, e.message, Date.now() as number));
     }
     fired = fired + 1;
   }
@@ -90,7 +101,7 @@ function main(): void {
     }
     catch (e) {
       console.error("scheduler: workflow " + flow.id + " threw: " + e.message);
-      markWorkflowFailed(db, flow, e.message, Date.now() as number);
+      noteFault(markWorkflowFailed(db, flow, e.message, Date.now() as number));
     }
     walked = walked + 1;
   }
@@ -318,17 +329,17 @@ function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {
     : (flow.publishedGraph ?? "") == "" ? flow.graph : (flow.publishedGraph ?? "");
   let done = runWorkflow(db, withGraph(flow, bytes), ask);
   if (!done.ok) {
-    markWorkflowFailed(db, flow, done.error, Date.now() as number);
+    noteFault(markWorkflowFailed(db, flow, done.error, Date.now() as number));
     return;
   }
-  markWorkflowRan(db, flow, done.runId, Date.now() as number);
+  noteFault(markWorkflowRan(db, flow, done.runId, Date.now() as number));
 }
 
 function fire(db: Db, task: TaskRow, master: string): void {
   let now = Date.now() as number;
   let threadId = openThread(db, { agentId: task.agentId, owner: task.owner, now: `${now}` });
   if (threadId == "") {
-    markFailed(db, task, "the conversation could not be opened", now);
+    noteFault(markFailed(db, task, "the conversation could not be opened", now));
     return;
   }
 
@@ -350,10 +361,10 @@ function fire(db: Db, task: TaskRow, master: string): void {
   });
 
   if (!answered.run.ok) {
-    markFailed(db, task, answered.run.error, Date.now() as number);
+    noteFault(markFailed(db, task, answered.run.error, Date.now() as number));
     return;
   }
-  markRan(db, task, runId, Date.now() as number);
+  noteFault(markRan(db, task, runId, Date.now() as number));
 }
 
 main();
