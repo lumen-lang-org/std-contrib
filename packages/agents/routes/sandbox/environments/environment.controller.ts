@@ -42,7 +42,10 @@ export class EnvironmentApi {
   @Delete("/:id")
   @Guard(theEnvironment)
   remove(@PathVariable("id") id: string, @From(owningCaller) owner: string): Reply {
-    this.environments.remove(id, owner);
+    let stayed = this.environments.remove(id, owner);
+    if (stayed != "") {
+      return BadRequest(stayed);
+    }
     return NoContent();
   }
 

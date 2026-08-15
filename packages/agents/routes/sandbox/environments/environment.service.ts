@@ -74,14 +74,32 @@ export class EnvironmentService {
     return this.repository.ownedRow(id, owner).id != "";
   }
 
-  remove(id: string, owner: string): void {
-    this.repository.forget(id, owner);
+  /** Returns what is still there, if anything is. The keys are taken after the
+   *  environment they belong to, and a key that stays is a stored secret with
+   *  nothing left pointing at it — so neither half is answered for silently. */
+  remove(id: string, owner: string): string {
+    let forgotten = this.repository.forget(id, owner);
     let keys = this.repository.keysOf(owner, id);
+    let stayed: int = 0;
     let k: int = 0;
     while (k < keys.length) {
-      this.repository.forgetKey(keys[k].id, owner);
+      if (!this.repository.forgetKey(keys[k].id, owner)) {
+        stayed = stayed + 1;
+      }
       k = k + 1;
     }
+    if (!forgotten && stayed > 0) {
+      return "the environment is still stored, and so are " + `${stayed}`
+        + " of its keys — nothing was removed";
+    }
+    if (!forgotten) {
+      return "the environment is still stored";
+    }
+    if (stayed > 0) {
+      return "the environment was removed, but " + `${stayed}`
+        + " of its keys are still stored";
+    }
+    return "";
   }
 
   mine(owner: string): EnvOwnedRow[] {

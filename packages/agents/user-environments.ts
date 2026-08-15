@@ -259,6 +259,14 @@ export function forgetUserEnv(db: Db, id: string, owner: string): bool {
   if (row.source == "dockerfile") {
     uenvDocker(["image", "rm", "-f", row.image]);
   }
-  deleteById(db, userEnvsMapping(), row.id);
+  let gone = deleteById(db, userEnvsMapping(), row.id);
+  if (!gone.ok) {
+    // The image may be gone, the row is not, and the row is what the person
+    // sees. Reported as not forgotten rather than answered with a removal the
+    // next listing contradicts.
+    console.error("user-environments: " + row.id + " (" + row.name + ") was not removed: "
+      + gone.error);
+    return false;
+  }
   return true;
 }
