@@ -160,7 +160,10 @@ class ConfigApi {
     if (used != "") {
       return BadRequest(used);
     }
-    deleteById(this.db, modelConfigsMapping(this.db), id);
+    let gone = deleteById(this.db, modelConfigsMapping(this.db), id);
+    if (!gone.ok) {
+      return BadRequest(gone.error);
+    }
     return NoContent();
   }
 }
@@ -341,7 +344,10 @@ class ChoiceApi {
     if (used != "") {
       return BadRequest(used);
     }
-    deleteById(this.db, modelChoicesMapping(), id);
+    let gone = deleteById(this.db, modelChoicesMapping(), id);
+    if (!gone.ok) {
+      return BadRequest(gone.error);
+    }
     return NoContent();
   }
 }
@@ -607,7 +613,10 @@ class RouterApi {
     if (used != "") {
       return BadRequest(used);
     }
-    deleteById(this.db, modelRoutersMapping(), id);
+    let gone = deleteById(this.db, modelRoutersMapping(), id);
+    if (!gone.ok) {
+      return BadRequest(gone.error);
+    }
     return NoContent();
   }
 }
