@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { triggerBotRepository } from "./routes/automation/triggers/entities/trigger-bot.entity.ts";
 import { triggerInboxRepository } from "./routes/automation/triggers/entities/trigger-inbox.entity.ts";
@@ -287,6 +287,13 @@ export function mayRun(bot: TriggerBotRow, recentMinute: int, nowMs: number): Tr
       reason: "that is " + `${TRIGGER_RUNS_PER_DAY}` + " runs today — the day's ceiling for one bot" };
     return spent;
   }
+  if (recentMinute < 0) {
+    // Closed rather than open: a ceiling that cannot be measured is not a
+    // ceiling with room under it.
+    let unknown: TriggerVerdict = { ok: false,
+      reason: "how many messages have come in this minute could not be counted, so this one waits" };
+    return unknown;
+  }
   if (recentMinute >= TRIGGER_RUNS_PER_MINUTE) {
     let fast: TriggerVerdict = { ok: false,
       reason: "more than " + `${TRIGGER_RUNS_PER_MINUTE}` + " messages in a minute — slow down and they will all be answered" };
@@ -339,12 +346,17 @@ export function alreadyHave(db: Db, botId: string, updateId: string): bool {
   return rows.length > 0;
 }
 
+/** How many messages this bot has taken in the last minute, or -1 when that
+ *  cannot be counted.
+ *
+ *  Counted rather than listed: listWhere answers "[]" both for a quiet minute
+ *  and for a query that did not run, and this number is what the per-minute
+ *  ceiling is measured against. */
 export function recentRuns(db: Db, botId: string, nowMs: number): int {
   let since = `${(nowMs as i64) - 60000}`;
-  let rows = JSON.parse<TriggerInboxRow[]>(listWhere(db, triggerInboxMapping(),
+  return countWhere(db, triggerInboxMapping(),
     "bot_id = " + db.placeholder + " AND created_at > " + placeholderAt(db, 2),
-    [botId, since]));
-  return rows.length;
+    [botId, since]);
 }
 
 export function unsentFor(db: Db, botId: string): string {
