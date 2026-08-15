@@ -1,21 +1,18 @@
 import { Db } from "../plume/driver.ts";
 import { DbRepository, findById, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { agentWebRagRepository } from "./routes/authoring/agents/entities/agent-web-rag.entity.ts";
+import { AgentWebRagRow, agentWebRagRepository } from "./routes/authoring/agents/entities/agent-web-rag.entity.ts";
 import { ModelRow, ModelConfigRow, modelsMapping } from "./schema.ts";
 import { ToolSpec, complete, replyText, toolSpec } from "./provider.ts";
 import { credentialFor } from "./credentials.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { urlEncode } from "./mcp-oauth.ts";
 
-export type AgentWebRagRow = {
-  agentId: string,
-  enabled: bool,
-  topK: int,
-  maxChars: int,
-  queryMode: string,
-  queryModelId: string,
-};
+// The row this table reads as. Declared beside the entity that owns the
+// columns, not here — kept importable from this file too, since every other
+// function below already takes/returns it and existing callers should not
+// all need to learn a second import path for the same shape.
+export { AgentWebRagRow };
 
 export function agentWebRagMapping(): DbRepository {
   return agentWebRagRepository();

@@ -7,8 +7,7 @@ import { mcpServerRepository } from "../../connectivity/servers/entities/mcp-ser
 import { modelConfigRepository } from "../../inference/model-configs/entities/model-config.entity.ts";
 import { modelRepository } from "../../inference/models/entities/model.entity.ts";
 import { skillRepository } from "../skills/entities/skill.entity.ts";
-import { agentWebRagRepository } from "./entities/agent-web-rag.entity.ts";
-import { AgentWebRagRow, webRagFor } from "../../../webrag.ts";
+import { AgentWebRagRow, agentWebRagRepository } from "./entities/agent-web-rag.entity.ts";
 import { runsOf } from "../../../runlog.ts";
 
 export class AgentRepository {
@@ -113,7 +112,15 @@ export class AgentRepository {
   }
 
   webRag(id: string): AgentWebRagRow {
-    return webRagFor(this.database, id);
+    let held = findById(this.database, agentWebRagRepository(), id);
+    if (held == "") {
+      let none: AgentWebRagRow = {
+        agentId: id, enabled: false, topK: 5, maxChars: 6000,
+        queryMode: "verbatim", queryModelId: "",
+      };
+      return none;
+    }
+    return JSON.parse<AgentWebRagRow>(held);
   }
 
   saveWebRag(row: AgentWebRagRow): DbResult {

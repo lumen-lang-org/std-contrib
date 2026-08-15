@@ -35,3 +35,16 @@ export class AgentWebRag {
 export function agentWebRagRepository(): DbRepository {
   return entityAgentWebRag;
 }
+
+// The document this table reads as. Co-located with the entity that defines
+// its columns, rather than with webrag.ts's retrieval logic that merely uses
+// it — webrag.ts imports this back, the same direction agent.repository.ts
+// does.
+export type AgentWebRagRow = {
+  agentId: string,
+  enabled: bool,
+  topK: int,
+  maxChars: int,
+  queryMode: string,
+  queryModelId: string,
+};
