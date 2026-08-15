@@ -164,8 +164,25 @@ const rules = [
       // A call that IS the statement discards its result. One ending in a
       // comma is an element of a list being collected, which is the fix, not
       // the fault — a rule that cries wolf is a rule nobody runs.
+      //
+      // plume exports 23 functions returning DbResult and this names 12 of
+      // them. The other 11 are left out on purpose, having been checked one by
+      // one: rollbackTransaction (34 sites) is called from inside an error path
+      // that is already returning a fault, dropTable (31) and createTable are
+      // schema setup in tests and examples/, execute (54) is the raw escape
+      // hatch and matches far more DDL than writing, and connectDatabase,
+      // beginTransaction, commitTransaction, createHistory, repairChecksums and
+      // forgetMigrations are start-up and migration plumbing. Adding them would
+      // add ~119 hits nobody would act on and drown the ones that matter.
+      //
+      // setOn, setWhere, deleteWhere and persistMany are here because they are
+      // ordinary writes whose failure loses data exactly like persist's does.
+      // They were missing until two real defects came through the gap: an
+      // engine that crashed inside the migrator on a database that never
+      // opened, and a project whose deletion orphaned its conversations
+      // (a01d441), which a setWhere discard had hidden.
       return lines(path).flatMap((l, i) =>
-        /^\s+(persist|link|unlink|unlinkAllOwnedBy|unlinkAllPointingAt|setEvery|executeWith|deleteById)\(.*\);\s*$/.test(l)
+        /^\s+(persistMany|persist|link|unlink|unlinkAllOwnedBy|unlinkAllPointingAt|setEvery|setOn|setWhere|executeWith|deleteById|deleteWhere)\(.*\);\s*$/.test(l)
           ? [{ line: i + 1, detail: l.trim().slice(0, 60) }]
           : [],
       );
