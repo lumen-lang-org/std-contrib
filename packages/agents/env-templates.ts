@@ -186,6 +186,5 @@ export function forgetEnvTemplate(db: Db, id: string): bool {
   if (findById(db, envTemplatesMapping(), id) == "") {
     return false;
   }
-  deleteById(db, envTemplatesMapping(), id);
-  return true;
+  return deleteById(db, envTemplatesMapping(), id).ok;
 }
