@@ -778,13 +778,13 @@ test("a binary image round-trips as base64: decoded for the script, re-encoded f
 test("an agent's curated image is what its containers are built from, with a working fallback", () => {
   fresh();
   dockerEmulated();
-  execute(database, "CREATE TABLE IF NOT EXISTS script_images (id text PRIMARY KEY, label text NOT NULL, image text NOT NULL, enabled integer NOT NULL)");
+  execute(database, "CREATE TABLE IF NOT EXISTS script_images (id text PRIMARY KEY, label text NOT NULL, image text NOT NULL, enabled integer NOT NULL, summary text NOT NULL DEFAULT '')");
   execute(database, "CREATE TABLE IF NOT EXISTS agents (id text PRIMARY KEY, agent_name text NOT NULL, description text NOT NULL, model_config_id text NOT NULL, prompt_id text NOT NULL, enabled integer NOT NULL, is_default integer NOT NULL, script_image_id text NOT NULL DEFAULT '', updated_at text NOT NULL)");
-  execute(database, "CREATE TABLE IF NOT EXISTS skills (id text PRIMARY KEY, skill_name text NOT NULL, description text NOT NULL, body text NOT NULL, updated_at text NOT NULL)");
+  execute(database, "CREATE TABLE IF NOT EXISTS skills (id text PRIMARY KEY, skill_name text NOT NULL, description text NOT NULL, body text NOT NULL, updated_at text NOT NULL, visibility text NOT NULL DEFAULT 'private', featured_rank integer NOT NULL DEFAULT 0, source text NOT NULL DEFAULT '', source_url text NOT NULL DEFAULT '')");
   execute(database, "CREATE TABLE IF NOT EXISTS skill_files (id text PRIMARY KEY, skill_id text NOT NULL, path text NOT NULL, body text NOT NULL)");
   execute(database, "CREATE TABLE IF NOT EXISTS agent_skills (agent_id text NOT NULL, skill_id text NOT NULL)");
-  execute(database, "INSERT INTO script_images VALUES ('img-node', 'Node toolchain', 'node:22-bookworm', 1)");
-  execute(database, "INSERT INTO script_images VALUES ('img-off', 'Retired', 'old:1', 0)");
+  execute(database, "INSERT INTO script_images VALUES ('img-node', 'Node toolchain', 'node:22-bookworm', 1, '')");
+  execute(database, "INSERT INTO script_images VALUES ('img-off', 'Retired', 'old:1', 0, '')");
   execute(database, "INSERT INTO agents VALUES ('a-node', 'node agent', '', 'c1', 'p1', 1, 0, 'img-node', 'now')");
   execute(database, "INSERT INTO agents VALUES ('a-gone', 'stale agent', '', 'c1', 'p1', 1, 0, 'img-vanished', 'now')");
   execute(database, "INSERT INTO agents VALUES ('a-off', 'retired image', '', 'c1', 'p1', 1, 0, 'img-off', 'now')");
@@ -802,7 +802,9 @@ test("an agent's curated image is what its containers are built from, with a wor
     mayCreate: false, environment: "", agentId: "a-node", turnSeq: 3, now: "1785200000000",
   });
   expect(ran.ok);
-  expect(findLine(argvLines(), "--entrypoint sleep node:22-bookworm infinity") != "");
+  let runline = findLine(argvLines(), "run -d --name agents-env-t1-main ");
+  expect(runline != "");
+  expect(runline.indexOf("--entrypoint sleep node:22-bookworm infinity") > 0);
 });
 
 test("a skill's files are staged at /skills, and an edit is what the next run executes", () => {
@@ -813,11 +815,11 @@ test("a skill's files are staged at /skills, and an edit is what the next run ex
   execute(database, "DROP TABLE IF EXISTS skills");
   execute(database, "DROP TABLE IF EXISTS agents");
   execute(database, "CREATE TABLE agents (id text PRIMARY KEY, agent_name text NOT NULL, description text NOT NULL, model_config_id text NOT NULL, prompt_id text NOT NULL, enabled integer NOT NULL, is_default integer NOT NULL, script_image_id text NOT NULL DEFAULT '', updated_at text NOT NULL)");
-  execute(database, "CREATE TABLE skills (id text PRIMARY KEY, skill_name text NOT NULL, description text NOT NULL, body text NOT NULL, updated_at text NOT NULL, visibility text NOT NULL DEFAULT 'private', featured_rank integer NOT NULL DEFAULT 0)");
+  execute(database, "CREATE TABLE skills (id text PRIMARY KEY, skill_name text NOT NULL, description text NOT NULL, body text NOT NULL, updated_at text NOT NULL, visibility text NOT NULL DEFAULT 'private', featured_rank integer NOT NULL DEFAULT 0, source text NOT NULL DEFAULT '', source_url text NOT NULL DEFAULT '')");
   execute(database, "CREATE TABLE skill_files (id text PRIMARY KEY, skill_id text NOT NULL, path text NOT NULL, body text NOT NULL)");
   execute(database, "CREATE TABLE agent_skills (agent_id text NOT NULL, skill_id text NOT NULL)");
   execute(database, "INSERT INTO agents VALUES ('a1', 'skilled', '', 'c1', 'p1', 1, 0, '', 'now')");
-  execute(database, "INSERT INTO skills VALUES ('k1', 'read-proto-enums', 'compute enum values', 'Run the script.', 'now', 'private', 0)");
+  execute(database, "INSERT INTO skills VALUES ('k1', 'read-proto-enums', 'compute enum values', 'Run the script.', 'now', 'private', 0, 'local', '')");
   execute(database, "INSERT INTO skill_files VALUES ('f1', 'k1', 'enums.py', 'print(1)')");
   execute(database, "INSERT INTO agent_skills VALUES ('a1', 'k1')");
 
