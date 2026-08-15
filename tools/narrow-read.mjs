@@ -55,6 +55,11 @@ for (const [, text] of ALL) {
 }
 
 const mappings = new Map();
+// A mapping's joined fields, kept apart from its columns: withoutRelations()
+// hands back the same repository with the joins taken off, so whether a
+// document carries them depends on which accessor was called, not on the
+// entity alone.
+const joinsOf = new Map();
 for (const [, text] of ALL) {
   for (const m of text.matchAll(/function\s+(\w+)\s*\([^)]*\)\s*:\s*DbRepository\s*\{([\s\S]*?)\n\}/g)) {
     // Plain columns plus hasOne/hasMany/hasManyThrough relations — a joined
@@ -66,17 +71,31 @@ for (const [, text] of ALL) {
     const fields = [...m[2].matchAll(/field\(\s*"(\w+)"/g)].map(f => f[1]);
     const relations = [...m[2].matchAll(/hasOne(?:Through)?\(\s*\{\s*field:\s*"(\w+)"/g),
                         ...m[2].matchAll(/hasMany(?:Through)?\(\s*\{\s*field:\s*"(\w+)"/g)].map(f => f[1]);
-    const all = [...fields, ...relations];
-    if (all.length) mappings.set(m[1], all);
+    if (fields.length || relations.length) {
+      mappings.set(m[1], fields);
+      joinsOf.set(m[1], relations);
+    }
   }
   for (const m of text.matchAll(/@entity\("(\w+)"\)\s*export\s+class\s+(\w+)\s*\{([\s\S]*?)\n\}/g)) {
     const body = m[3];
     const fields = [];
     for (const c of body.matchAll(/@Column\([^)]*\)\s*\n\s*(\w+)\s*:/g)) fields.push(c[1]);
-    if (fields.length) mappings.set(m[2], fields);
+    // An @entity's joins carry a field into the document exactly as the older
+    // hasOne({field: ...}) mappings above do, and are counted for the same
+    // reason: a read type that declares the join's name is right, not narrow.
+    // Only the function-mapping form was handled here, so every mapping that
+    // moved to an entity brought its own false positive back — model_configs
+    // did, and run.ts's ConfigWithModel.model was reported again.
+    const joins = [];
+    for (const c of body.matchAll(/@HasOne(?:Through)?\([^)]*\)\s*\n\s*(\w+)\s*:/g)) joins.push(c[1]);
+    for (const c of body.matchAll(/@HasMany(?:Through)?\([^)]*\)\s*\n\s*(\w+)\s*:/g)) joins.push(c[1]);
+    if (fields.length) { mappings.set(m[2], fields); joinsOf.set(m[2], joins); }
   }
 }
 const forwards = new Map();
+// Mappings that go through withoutRelations(): their documents carry columns
+// only, so a read type that leaves the joins out is right, not narrow.
+const naked = new Set();
 for (const [, text] of ALL) {
   for (const m of text.matchAll(/function\s+(\w+)\s*\(\s*\)\s*:\s*DbRepository\s*\{\s*return\s+entity(\w+);/g)) {
     forwards.set(m[1], m[2]);
@@ -84,14 +103,26 @@ for (const [, text] of ALL) {
   for (const m of text.matchAll(/function\s+(\w+)\s*\([^)]*\)\s*:\s*DbRepository\s*\{\s*return\s+(\w+)\(\s*[\w.]*\s*\);/g)) {
     forwards.set(m[1], m[2]);
   }
-  for (const m of text.matchAll(/function\s+(\w+)\s*\([^)]*\)\s*:\s*DbRepository\s*\{\s*return\s+\w+\(\s*(\w+)\(\s*\)\s*\)\s*;/g)) {
-    forwards.set(m[1], m[2]);
+  for (const m of text.matchAll(/function\s+(\w+)\s*\([^)]*\)\s*:\s*DbRepository\s*\{\s*return\s+(\w+)\(\s*(\w+)\(\s*\)\s*\)\s*;/g)) {
+    forwards.set(m[1], m[3]);
+    if (m[2] === "withoutRelations") { naked.add(m[1]); }
   }
 }
 for (const name of forwards.keys()) {
   let at = name, hops = 0;
   while (!mappings.has(at) && forwards.has(at) && hops < 6) { at = forwards.get(at); hops++; }
-  if (mappings.has(at)) mappings.set(name, mappings.get(at));
+  if (mappings.has(at)) {
+    mappings.set(name, mappings.get(at));
+    joinsOf.set(name, joinsOf.get(at) ?? []);
+  }
+}
+
+// What a document from this mapping actually carries.
+function documentFields(name) {
+  const cols = mappings.get(name);
+  if (!cols) { return null; }
+  if (naked.has(name)) { return cols; }
+  return [...cols, ...(joinsOf.get(name) ?? [])];
 }
 
 // A parse-target's own field set: JSON.parse<T> where T is a known type, OR a
@@ -140,7 +171,7 @@ for (const [file, text] of ALL) {
     }
     if (!call) { continue; } // not a mapping read this tool can trace — out of scope
     const mapping = call[1];
-    const columns = mappings.get(mapping);
+    const columns = documentFields(mapping);
     if (!columns) {
       skipped.push(`${file.replace(ROOT + "/", "")}:${ln} (mapping ${mapping} not resolved)`);
       continue;
