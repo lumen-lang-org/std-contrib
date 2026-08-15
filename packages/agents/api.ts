@@ -32,6 +32,7 @@ import { PluginApi } from "./routes/extensions/plugins/plugin.controller.ts";
 import { PromptApi } from "./routes/authoring/prompts/prompt.controller.ts";
 import { ModelApi } from "./routes/inference/models/model.controller.ts";
 import { ConfigApi } from "./routes/inference/model-configs/model-config.controller.ts";
+import { ChoiceApi } from "./routes/inference/model-choices/model-choice.controller.ts";
 import { chatConfigFault } from "./routes/inference/model-configs/model-config.utils.ts";
 import { SkillApi } from "./routes/authoring/skills/skill.controller.ts";
 import { ScriptImageApi } from "./routes/authoring/script-images/script-image.controller.ts";
@@ -98,141 +99,6 @@ type PromptChange = { promptId: string };
 
 
 
-export function blankChoice(id: string): ModelChoiceRow {
-  let out: ModelChoiceRow = {
-    id: id, label: "", description: "", kind: "", configId: "", routerId: "",
-    tier: "", enabled: true, rank: 0,
-  };
-  return out;
-}
-
-export function mergedChoice(stored: ModelChoiceRow, body: string): ModelChoiceRow {
-  let out: ModelChoiceRow = {
-    id: stored.id,
-    label: bodyText(body, "label", stored.label),
-    description: bodyText(body, "description", stored.description),
-    kind: bodyText(body, "kind", stored.kind),
-    configId: bodyText(body, "configId", stored.configId),
-    routerId: bodyText(body, "routerId", stored.routerId),
-    tier: bodyText(body, "tier", stored.tier),
-    enabled: bodyBool(body, "enabled", stored.enabled),
-    rank: bodyRank(body, stored.rank),
-  };
-  return out;
-}
-
-export function choiceRowFault(db: Db, row: ModelChoiceRow): string {
-  if (row.label == "") {
-    return "a choice needs a label; it is the word in the menu";
-  }
-  if (row.tier != "" && row.tier != "premium") {
-    return "tier is \"\" or \"premium\", not \"" + row.tier + "\"";
-  }
-  if (row.rank < 0) {
-    return "menuRank cannot be negative";
-  }
-  if (row.kind == "config") {
-    if (row.routerId != "") {
-      return "a \"config\" choice carries no routerId; clear it, or set kind to \"router\"";
-    }
-    return chatConfigFault(db, row.configId, "configId");
-  }
-  if (row.kind == "router") {
-    if (row.configId != "") {
-      return "a \"router\" choice carries no configId; clear it, or set kind to \"config\"";
-    }
-    if (row.routerId == "") {
-      return "routerId is required";
-    }
-    if (!existsById(db, modelRoutersMapping(), row.routerId)) {
-      return "no model router " + row.routerId + "; create it first";
-    }
-    return "";
-  }
-  return "kind is \"config\" or \"router\", not \"" + row.kind + "\"";
-}
-
-export function choiceInUse(db: Db, choiceId: string): string {
-  if (countWhere(db, threadsMapping(), "model_choice_id = " + db.placeholder, [choiceId]) > 0) {
-    return "model choice " + choiceId + " is what conversations are still set to; "
-      + "take it off the menu instead — PUT /model-choices/" + choiceId
-      + " with {\"enabled\":false} leaves those conversations running";
-  }
-  return "";
-}
-
-@controller("/model-choices")
-@bindings
-class ChoiceApi {
-  db: Db;
-  constructor(db: Db) {
-    this.db = db;
-  }
-
-  @Get("/")
-  list(): Reply {
-    let keys: DbOrder[] = [{ column: "menu_rank" }, { column: "label" }];
-    return Ok(listOrdered(this.db, modelChoicesMapping(), { order: keys }));
-  }
-
-  @Post("/")
-  create(req: Request): Reply {
-    let fault = createFault(this.db, modelChoicesMapping(), req.body);
-    if (fault != "") {
-      return BadRequest(fault);
-    }
-    let row = mergedChoice(blankChoice(jsonId(req.body)), req.body);
-    let wrong = choiceRowFault(this.db, row);
-    if (wrong != "") {
-      return BadRequest(wrong);
-    }
-    let written = persist(this.db, modelChoicesMapping(), JSON.stringify(row));
-    if (!written.ok) {
-      return BadRequest(written.error);
-    }
-    return Created(findById(this.db, modelChoicesMapping(), row.id));
-  }
-
-  @Put("/:id")
-  update(req: Request, @PathVariable("id") id: string): Reply {
-    let stored = findById(this.db, modelChoicesMapping(), id);
-    if (stored == "") {
-      return NotFound("model choice " + id);
-    }
-    if (req.body == "") {
-      return BadRequest("a body is required");
-    }
-    if (bodyText(req.body, "id", id) != id) {
-      return BadRequest("the id in the body must match the path");
-    }
-    let row = mergedChoice(JSON.parse<ModelChoiceRow>(stored), req.body);
-    let wrong = choiceRowFault(this.db, row);
-    if (wrong != "") {
-      return BadRequest(wrong);
-    }
-    let written = persist(this.db, modelChoicesMapping(), JSON.stringify(row));
-    if (!written.ok) {
-      return BadRequest(written.error);
-    }
-    return Ok(findById(this.db, modelChoicesMapping(), id));
-  }
-
-  @Delete("/:id")
-  remove(@PathVariable("id") id: string): Reply {
-    if (!existsById(this.db, modelChoicesMapping(), id)) {
-      return NotFound("model choice " + id);
-    }
-    let used = choiceInUse(this.db, id);
-    if (used != "") {
-      return BadRequest(used);
-    }
-    let gone = deleteById(this.db, modelChoicesMapping(), id);
-    if (!gone.ok) {
-      return BadRequest(gone.error);
-    }
-    return NoContent();
-  }
-}
 
 export function blankRouter(id: string): ModelRouterRow {
   let out: ModelRouterRow = {

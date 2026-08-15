@@ -20,7 +20,9 @@ import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { documentFilesMapping } from "./document-files.ts";
 import { DocumentRepository } from "./routes/knowledge/documents/document.repository.ts";
-import { migrationFault, wholePlan, bearerRefused, askedPick, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { migrationFault, wholePlan, bearerRefused, askedPick, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { blankChoice, choiceRowFault, mergedChoice } from "./routes/inference/model-choices/model-choice.utils.ts";
+import { ModelChoiceService } from "./routes/inference/model-choices/model-choice.service.ts";
 import { chatConfigFault, configFault, mergedConfig } from "./routes/inference/model-configs/model-config.utils.ts";
 import { ModelConfigService } from "./routes/inference/model-configs/model-config.service.ts";
 import { forgetAgent } from "./routes/authoring/agents/agent.service.ts";
@@ -1139,14 +1141,15 @@ test("neither a choice nor a router can be deleted out from under what points at
   persist(database, modelChoicesMapping(), JSON.stringify(fast));
   let hers = openThread(database, { agentId: "a1", owner: "u-alice", now: "1700000000000" });
   expect(rememberChoice(database, hers, "ch-fast") == "");
-  let held = choiceInUse(database, "ch-fast");
+  let choices = new ModelChoiceService(database);
+  let held = choices.inUse("ch-fast");
   expect(held.indexOf("ch-fast") >= 0);
   expect(held.indexOf("enabled") >= 0);
-  expect(choiceInUse(database, "ch-auto") == "");
+  expect(choices.inUse("ch-auto") == "");
 
   recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "hi",
     run: emptyRun("hi"), modelChoiceId: "ch-auto", routeNote: "" });
-  expect(choiceInUse(database, "ch-auto") == "");
+  expect(choices.inUse("ch-auto") == "");
 });
 
 test("a country code is two ISO letters or nothing at all", () => {
