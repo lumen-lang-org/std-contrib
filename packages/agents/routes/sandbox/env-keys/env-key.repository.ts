@@ -1,8 +1,8 @@
 import { Db } from "../../../../plume/driver.ts";
-import { existsById, findById } from "../../../../plume/plume.ts";
+import { countWhere, existsById, findById, placeholderAt } from "../../../../plume/plume.ts";
 import { EnvKeyMade, EnvKeyWrite, createEnvKey, envKeysOwnedBy, forgetEnvKey } from "../../../env-keys.ts";
-import { userEnvById } from "../../../user-environments.ts";
 import { scriptImageRepository } from "../../authoring/script-images/entities/script-image.entity.ts";
+import { userEnvironmentRepository } from "../environments/entities/user-environment.entity.ts";
 import { envKeyRepository } from "./entities/env-key.entity.ts";
 
 export class EnvKeyRepository {
@@ -27,7 +27,10 @@ export class EnvKeyRepository {
     if (existsById(this.database, scriptImageRepository(), imageId)) {
       return true;
     }
-    return userEnvById(this.database, imageId, owner).id != "";
+    let owned = countWhere(this.database, userEnvironmentRepository(),
+      "id = " + this.database.placeholder + " AND owner = " + placeholderAt(this.database, 2),
+      [imageId, owner]);
+    return owned > 0;
   }
 
   create(write: EnvKeyWrite): EnvKeyMade {
