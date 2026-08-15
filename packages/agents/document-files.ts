@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, createTableSql, field, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { documentFileRepository } from "./routes/documents/entities/document-file.entity.ts";
+import { documentFileRepository } from "./routes/knowledge/documents/entities/document-file.entity.ts";
 
 export function documentFilesMapping(): DbRepository {
   return documentFileRepository();

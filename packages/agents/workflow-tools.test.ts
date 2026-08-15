@@ -8,7 +8,7 @@ import { callWorkflowTool, workflowTools } from "./workflow-tools.ts";
 import { jsonComplete } from "./scan.ts";
 import { credentialsMapping } from "./schema.ts";
 import { secretsMapping, secretsPlan } from "./secrets.ts";
-import { SecretService } from "./routes/secrets/secret.service.ts";
+import { SecretService } from "./routes/identity/secrets/secret.service.ts";
 
 let database: Db = sqlite();
 

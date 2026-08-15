@@ -3,8 +3,8 @@ import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist
 import { Migration, migration } from "../plume/migrate.ts";
 import { AgentRun } from "./run.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
-import { runRepository } from "./routes/runs/entities/run.entity.ts";
-import { runStepRepository } from "./routes/runs/entities/run-step.entity.ts";
+import { runRepository } from "./routes/conversations/runs/entities/run.entity.ts";
+import { runStepRepository } from "./routes/conversations/runs/entities/run-step.entity.ts";
 
 export type RunRow = {
   id: string,

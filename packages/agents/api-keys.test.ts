@@ -3,8 +3,8 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { apiKeysPlan } from "./api-keys.ts";
-import { ApiKeyService } from "./routes/api-keys/api-key.service.ts";
-import { ApiKeyView, cleanScopes, hasScope, scopeList } from "./routes/api-keys/api-key.utils.ts";
+import { ApiKeyService } from "./routes/identity/api-keys/api-key.service.ts";
+import { ApiKeyView, cleanScopes, hasScope, scopeList } from "./routes/identity/api-keys/api-key.utils.ts";
 
 let database: Db = sqlite();
 

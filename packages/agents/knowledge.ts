@@ -3,8 +3,8 @@ import { DbRepository, execute, executeWith, findById, placeholderAt, safeIdenti
 import { Migration, migration } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping } from "./schema.ts";
 import { Embedding, embedText } from "./provider.ts";
-import { documentRepository } from "./routes/documents/entities/document.entity.ts";
-import { agentRetrievalRepository } from "./routes/agents/entities/agent-retrieval.entity.ts";
+import { documentRepository } from "./routes/knowledge/documents/entities/document.entity.ts";
+import { agentRetrievalRepository } from "./routes/authoring/agents/entities/agent-retrieval.entity.ts";
 
 export type DocumentRow = {
   id: string,

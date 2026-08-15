@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbRepository, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { indexJobRepository } from "./routes/jobs/entities/index-job.entity.ts";
+import { indexJobRepository } from "./routes/knowledge/jobs/entities/index-job.entity.ts";
 
 export function indexJobsMapping(): DbRepository {
   return indexJobRepository();

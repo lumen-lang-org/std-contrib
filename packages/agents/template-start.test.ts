@@ -1,4 +1,4 @@
-import { templateStartCmd } from "./routes/templates/template.utils.ts";
+import { templateStartCmd } from "./routes/extensions/templates/template.utils.ts";
 
 test("a starting point runs one command, and generates itself only once", () => {
   let both = templateStartCmd("npm create vite@latest . -- --template react-ts", "npm run dev");

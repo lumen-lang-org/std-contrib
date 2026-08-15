@@ -3,7 +3,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable, createTableSql } from "../plume/plume.ts";
 import { forgetMigrations } from "../plume/migrate.ts";
 import { AgentRow, agentsMapping } from "./schema.ts";
-import { ScopeNode } from "./routes/scopes/scope.utils.ts";
+import { ScopeNode } from "./routes/authoring/scopes/scope.utils.ts";
 import { jsonId, createFault, backendOr, knownBackend, scopesJson } from "./payload.ts";
 
 let database: Db = sqlite();

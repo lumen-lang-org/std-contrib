@@ -12,8 +12,8 @@ import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, AgentRow, age
 import { RouteAsk, candidatesFrom, indexOfKey, routeTurn, withoutAddresses } from "./router.ts";
 import { credentialFor } from "./credentials.ts";
 import { ownerClause, documentIsOwned } from "./owner.ts";
-import { threadRepository } from "./routes/threads/entities/thread.entity.ts";
-import { threadTurnRepository } from "./routes/threads/entities/thread-turn.entity.ts";
+import { threadRepository } from "./routes/conversations/threads/entities/thread.entity.ts";
+import { threadTurnRepository } from "./routes/conversations/threads/entities/thread-turn.entity.ts";
 
 export type ThreadRow = {
   id: string,

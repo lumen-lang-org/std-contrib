@@ -205,7 +205,21 @@ const rules = [
   },
 ];
 
-const files = walk(only ? join(ROUTES, only) : ENGINE).filter((f) => !f.endsWith(".test.ts"));
+// --route takes a bare route name ("templates") or a domain-qualified one
+// ("extensions/templates"); routes live one domain folder deep now.
+function routeDir(name) {
+  const direct = join(ROUTES, name);
+  if (existsSync(direct)) return direct;
+  for (const domain of readdirSync(ROUTES, { withFileTypes: true })) {
+    if (!domain.isDirectory()) continue;
+    const nested = join(ROUTES, domain.name, name);
+    if (existsSync(nested)) return nested;
+  }
+  console.error(`no route "${name}" under ${ROUTES}`);
+  process.exit(2);
+}
+
+const files = walk(only ? routeDir(only) : ENGINE).filter((f) => !f.endsWith(".test.ts"));
 
 const byRule = new Map();
 const byRoute = new Map();
@@ -215,7 +229,11 @@ for (const path of files) {
   for (const rule of rules) {
     for (const hit of rule.scan(path)) {
       byRule.get(rule.id).push({ path, ...hit });
-      const route = path.includes("/routes/") ? path.split("/routes/")[1].split("/")[0] : "(engine)";
+      // routes/ groups routes under a domain folder (routes/<domain>/<route>/…),
+      // so the route is the second segment. Reported without its domain, to stay
+      // directly comparable with the scorecards taken before the regrouping.
+      const under = path.includes("/routes/") ? path.split("/routes/")[1].split("/") : null;
+      const route = under ? (under[1] ?? under[0]) : "(engine)";
       if (!byRoute.has(route)) byRoute.set(route, 0);
       byRoute.set(route, byRoute.get(route) + 1);
     }

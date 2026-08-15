@@ -5,8 +5,8 @@ import { FileToolResult } from "./workspace.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
 import { AgentRow, ModelConfigRow, PromptRow, agentsMapping, modelConfigRows, promptsMapping } from "./schema.ts";
 import { maySchedule } from "./task-tools.ts";
-import { agentRepository } from "./routes/agents/entities/agent.entity.ts";
-import { agentRetrievalRepository } from "./routes/agents/entities/agent-retrieval.entity.ts";
+import { agentRepository } from "./routes/authoring/agents/entities/agent.entity.ts";
+import { agentRetrievalRepository } from "./routes/authoring/agents/entities/agent-retrieval.entity.ts";
 
 function not(): FileToolResult {
   let none: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };

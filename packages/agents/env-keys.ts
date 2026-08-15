@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
-import { envKeyRepository } from "./routes/env-keys/entities/env-key.entity.ts";
+import { envKeyRepository } from "./routes/sandbox/env-keys/entities/env-key.entity.ts";
 
 export const MAX_ENV_KEYS_PER_ENV: int = 20;
 let envKeyPerEnvChosen: int = 0;

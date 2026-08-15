@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbOrder, DbRepository, createTableSql, listOrdered, listWhere, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { next as nextFiring, fault as cronFault, civil, knownZone } from "../cron/cron.ts";
-import { scheduledTaskRepository } from "./routes/tasks/entities/scheduled-task.entity.ts";
+import { scheduledTaskRepository } from "./routes/automation/tasks/entities/scheduled-task.entity.ts";
 
 export type TaskRow = {
   id: string,

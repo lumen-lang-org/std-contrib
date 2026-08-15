@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbRepository, findById, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { agentWebRagRepository } from "./routes/agents/entities/agent-web-rag.entity.ts";
+import { agentWebRagRepository } from "./routes/authoring/agents/entities/agent-web-rag.entity.ts";
 import { ModelRow, ModelConfigRow, modelsMapping } from "./schema.ts";
 import { ToolSpec, complete, replyText, toolSpec } from "./provider.ts";
 import { credentialFor } from "./credentials.ts";

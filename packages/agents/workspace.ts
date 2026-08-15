@@ -5,7 +5,7 @@ import { binaryKind, getArtifact, getVersion, kindOf, listArtifacts, utf8Length 
 import { uploadBytesMax } from "./caps.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
-import { workspaceFileRepository } from "./routes/threads-files/entities/workspace-file.entity.ts";
+import { workspaceFileRepository } from "./routes/conversations/threads-files/entities/workspace-file.entity.ts";
 
 export const UPLOAD_MAX: int = uploadBytesMax();
 

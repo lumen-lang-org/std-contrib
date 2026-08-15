@@ -1,8 +1,8 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, createTableSql, field, listOrdered, listWhere, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { cardPluginRepository } from "./routes/card-plugins/entities/card-plugin.entity.ts";
-import { cardCaseRepository } from "./routes/card-plugins/entities/card-case.entity.ts";
+import { cardPluginRepository } from "./routes/extensions/card-plugins/entities/card-plugin.entity.ts";
+import { cardCaseRepository } from "./routes/extensions/card-plugins/entities/card-case.entity.ts";
 
 export type CardPluginRow = {
   id: string,

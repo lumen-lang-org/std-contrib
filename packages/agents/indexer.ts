@@ -2,8 +2,8 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
 import { connectDatabase } from "../plume/plume.ts";
 import { embeddingModel, uploadDocument } from "./knowledge.ts";
-import { JobRepository } from "./routes/jobs/job.repository.ts";
-import { JOB_QUEUED } from "./routes/jobs/entities/index-job.entity.ts";
+import { JobRepository } from "./routes/knowledge/jobs/job.repository.ts";
+import { JOB_QUEUED } from "./routes/knowledge/jobs/entities/index-job.entity.ts";
 import { masterKey, credentialFor } from "./credentials.ts";
 
 const IDLE_MS: int = 1000;

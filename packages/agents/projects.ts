@@ -3,7 +3,7 @@ import { DbField, DbOrder, DbRepository, createTableSql, executeWith, field, fin
 import { Migration, migration } from "../plume/migrate.ts";
 import { jsonText } from "./scan.ts";
 import { ArtifactRow, getVersion, listArtifacts } from "./artifacts.ts";
-import { projectRepository } from "./routes/projects/entities/project.entity.ts";
+import { projectRepository } from "./routes/conversations/projects/entities/project.entity.ts";
 
 export type ProjectRow = {
   id: string,

@@ -4,8 +4,8 @@ import { connectDatabase, execute } from "../plume/plume.ts";
 import { Migration, migrate, forgetMigrations } from "../plume/migrate.ts";
 import { EnvEnsure, EnvEnsured, envPlan, envEnsure, envDockerOverride, envBindOverride } from "./environments.ts";
 import { envGrantsPlan, envZoneOverride } from "./env-grants.ts";
-import { EnvGrantView } from "./routes/environments/dtos/env-grant-view.dto.ts";
-import { EnvironmentService } from "./routes/environments/environment.service.ts";
+import { EnvGrantView } from "./routes/sandbox/environments/dtos/env-grant-view.dto.ts";
+import { EnvironmentService } from "./routes/sandbox/environments/environment.service.ts";
 
 // The three calls the ingress is made of, driven through the service the
 // controller mounts: the console asks for a way in, the gateway spends it once,

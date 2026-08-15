@@ -4,7 +4,7 @@ import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, casesOf, emptyNode,
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
-import { SecretService } from "./routes/secrets/secret.service.ts";
+import { SecretService } from "./routes/identity/secrets/secret.service.ts";
 import { accessTokenFor } from "./connect.ts";
 import { Turn, complete, replyText } from "./provider.ts";
 import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, threadsMapping } from "./threads.ts";

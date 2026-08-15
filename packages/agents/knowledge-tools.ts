@@ -5,9 +5,9 @@ import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
 import { AgentRow, SkillRow, agentsMapping, skillsMapping, modelsMapping, ModelRow, writeSetting } from "./schema.ts";
 import { listSources, normalScope } from "./knowledge.ts";
-import { JobRepository } from "./routes/jobs/job.repository.ts";
-import { JOB_QUEUED } from "./routes/jobs/entities/index-job.entity.ts";
-import { DocumentRepository } from "./routes/documents/document.repository.ts";
+import { JobRepository } from "./routes/knowledge/jobs/job.repository.ts";
+import { JOB_QUEUED } from "./routes/knowledge/jobs/entities/index-job.entity.ts";
+import { DocumentRepository } from "./routes/knowledge/documents/document.repository.ts";
 import { maySchedule } from "./task-tools.ts";
 
 function not(): FileToolResult {

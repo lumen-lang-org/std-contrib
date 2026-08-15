@@ -1,6 +1,6 @@
 import { Db } from "../plume/driver.ts";
 import { DbRepository, existsById } from "../plume/plume.ts";
-import { ScopeNode } from "./routes/scopes/scope.utils.ts";
+import { ScopeNode } from "./routes/authoring/scopes/scope.utils.ts";
 
 export function jsonId(document: string): string {
   let at = document.indexOf("\"id\"");

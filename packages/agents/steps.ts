@@ -3,9 +3,9 @@ import { cardClaims } from "./toolcards.ts";
 import { jsonFind, jsonRaw, jsonText } from "./scan.ts";
 import { DbRepository, DbOrder, persist, findById, listOrdered, deleteWhere, dialectType, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { threadStepRepository } from "./routes/threads/entities/thread-step.entity.ts";
-import { threadThoughtRepository } from "./routes/threads/entities/thread-thought.entity.ts";
-import { threadPartialRepository } from "./routes/threads/entities/thread-partial.entity.ts";
+import { threadStepRepository } from "./routes/conversations/threads/entities/thread-step.entity.ts";
+import { threadThoughtRepository } from "./routes/conversations/threads/entities/thread-thought.entity.ts";
+import { threadPartialRepository } from "./routes/conversations/threads/entities/thread-partial.entity.ts";
 
 export type LiveStep = {
   id: string,

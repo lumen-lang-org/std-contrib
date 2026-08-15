@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { envTemplateRepository } from "./routes/env-templates/entities/env-template.entity.ts";
+import { envTemplateRepository } from "./routes/sandbox/env-templates/entities/env-template.entity.ts";
 
 export const MAX_TEMPLATE_NAME: int = 60;
 export const MAX_TEMPLATE_SUMMARY: int = 400;

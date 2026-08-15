@@ -4,8 +4,8 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { artifactBytesMax, threadBytesMax } from "./caps.ts";
 import { normalScope } from "./knowledge.ts";
 import { ownerClause } from "./owner.ts";
-import { artifactRepository } from "./routes/threads-artifacts/entities/artifact.entity.ts";
-import { artifactVersionRepository } from "./routes/threads-artifacts/entities/artifact-version.entity.ts";
+import { artifactRepository } from "./routes/conversations/threads-artifacts/entities/artifact.entity.ts";
+import { artifactVersionRepository } from "./routes/conversations/threads-artifacts/entities/artifact-version.entity.ts";
 
 export const ARTIFACT_MAX: int = artifactBytesMax();
 

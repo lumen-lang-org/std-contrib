@@ -4,11 +4,11 @@ import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonFlag, jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { maySchedule } from "./task-tools.ts";
-import { civil, knownZone } from "./../cron/cron.ts";
+import { civil, knownZone } from "../cron/cron.ts";
 import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGraph, secretIds, startOf } from "../workflow/workflow.ts";
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
-import { SecretRepository } from "./routes/secrets/secret.repository.ts";
-import { SecretRow } from "./routes/secrets/secret.utils.ts";
+import { SecretRepository } from "./routes/identity/secrets/secret.repository.ts";
+import { SecretRow } from "./routes/identity/secrets/secret.utils.ts";
 import { stampMs } from "./tasks.ts";
 
 const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\\\" (one model call, no tools), "

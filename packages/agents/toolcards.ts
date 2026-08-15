@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbRepository, createTableSql, listOrdered, listWhere } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { pluginOn } from "./plugincards.ts";
-import { toolCardRepository } from "./routes/tool-cards/entities/tool-card.entity.ts";
+import { toolCardRepository } from "./routes/authoring/tool-cards/entities/tool-card.entity.ts";
 
 export type ToolCardRow = {
   id: string,

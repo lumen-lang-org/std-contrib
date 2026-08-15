@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbRepository, createTableSql, field, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { secretRepository } from "./routes/secrets/entities/secret.entity.ts";
+import { secretRepository } from "./routes/identity/secrets/entities/secret.entity.ts";
 
 export function secretsMapping(): DbRepository {
   return secretRepository();

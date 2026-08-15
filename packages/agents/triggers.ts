@@ -1,10 +1,10 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { triggerBotRepository } from "./routes/triggers/entities/trigger-bot.entity.ts";
-import { triggerInboxRepository } from "./routes/triggers/entities/trigger-inbox.entity.ts";
-import { triggerOutboxRepository } from "./routes/triggers/entities/trigger-outbox.entity.ts";
-import { triggerPendingRepository } from "./routes/triggers/entities/trigger-pending.entity.ts";
+import { triggerBotRepository } from "./routes/automation/triggers/entities/trigger-bot.entity.ts";
+import { triggerInboxRepository } from "./routes/automation/triggers/entities/trigger-inbox.entity.ts";
+import { triggerOutboxRepository } from "./routes/automation/triggers/entities/trigger-outbox.entity.ts";
+import { triggerPendingRepository } from "./routes/automation/triggers/entities/trigger-pending.entity.ts";
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
 import { stampMs } from "./tasks.ts";
 

@@ -5,7 +5,7 @@ import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { credentialsMapping } from "./schema.ts";
 import { storeCredential } from "./credentials.ts";
 import { traceConfigMapping, tracePlan, tracerFor } from "./trace.ts";
-import { TraceConfigRow } from "./routes/tracing/entities/trace-config.entity.ts";
+import { TraceConfigRow } from "./routes/ops/tracing/entities/trace-config.entity.ts";
 
 const MASTER: string = "0123456789abcdef0123456789abcdef";
 

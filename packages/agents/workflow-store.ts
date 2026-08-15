@@ -4,8 +4,8 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
 import { knownZone } from "../cron/cron.ts";
-import { workflowRepository } from "./routes/workflows/entities/workflow.entity.ts";
-import { workflowRunRepository } from "./routes/workflows/entities/workflow-run.entity.ts";
+import { workflowRepository } from "./routes/automation/workflows/entities/workflow.entity.ts";
+import { workflowRunRepository } from "./routes/automation/workflows/entities/workflow-run.entity.ts";
 
 export const MAX_WORKFLOWS_PER_OWNER: int = 10;
 export const MAX_GRAPH_CHARS: int = 65536;

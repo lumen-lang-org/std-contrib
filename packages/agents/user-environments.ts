@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { envDockerBin } from "./environments.ts";
-import { userEnvironmentRepository } from "./routes/environments/entities/user-environment.entity.ts";
+import { userEnvironmentRepository } from "./routes/sandbox/environments/entities/user-environment.entity.ts";
 
 function foldName(n: string): string {
   return n.toLowerCase().replaceAll("-", "").replaceAll("_", "").replaceAll(" ", "").replaceAll("+", "");

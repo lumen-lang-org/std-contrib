@@ -5,8 +5,8 @@ import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { agentsMapping, credentialsMapping, mcpServersMapping, modelConfigsMapping, modelsMapping, promptsMapping, schemaPlan } from "./schema.ts";
 import { hasCredential } from "./credentials.ts";
 import { secretsMapping, secretsPlan } from "./secrets.ts";
-import { SecretService } from "./routes/secrets/secret.service.ts";
-import { MAX_SECRETS_PER_OWNER } from "./routes/secrets/secret.utils.ts";
+import { SecretService } from "./routes/identity/secrets/secret.service.ts";
+import { MAX_SECRETS_PER_OWNER } from "./routes/identity/secrets/secret.utils.ts";
 import { WfEdge, WfGraph, WfNode, emptyGraph, emptyNode, secretIds } from "../workflow/workflow.ts";
 
 let database: Db = sqlite();
