@@ -46,8 +46,8 @@ export class ConnectService {
     return produced(JSON.stringify(view));
   }
 
-  dropClient(id: string): void {
-    forgetSuppliedClient(this.repository.database, id);
+  dropClient(id: string): string {
+    return forgetSuppliedClient(this.repository.database, id);
   }
 
   dropConnection(id: string, owner: string): bool {

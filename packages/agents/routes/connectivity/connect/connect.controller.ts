@@ -1,6 +1,6 @@
 import { Db } from "../../../../plume/driver.ts";
 import { bindings, controller } from "../../../../rest/controller.ts";
-import { Guarded, Reply, Request, answered, NoContent, NotFound, Respond } from "../../../../rest/server.ts";
+import { Guarded, Reply, Request, answered, BadRequest, NoContent, NotFound, Respond } from "../../../../rest/server.ts";
 import { owningCaller } from "../../../api-core.ts";
 import { connectorExists } from "./connect.guard.ts";
 import { ConnectService } from "./connect.service.ts";
@@ -52,7 +52,10 @@ export class ConnectApi {
   @Delete("/:id/client")
   @Guard(theConnector)
   dropClient(@PathVariable("id") id: string): Reply {
-    this.connections.dropClient(id);
+    let dropped = this.connections.dropClient(id);
+    if (dropped != "") {
+      return BadRequest(dropped);
+    }
     return NoContent();
   }
 

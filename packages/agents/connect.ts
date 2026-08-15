@@ -189,10 +189,29 @@ export function setSuppliedClient(db: Db, serverId: string, clientId: string, cl
   return "";
 }
 
-export function forgetSuppliedClient(db: Db, serverId: string): void {
-  forgetCredential(db, clientIdKey(serverId));
-  forgetCredential(db, clientSecretKey(serverId));
-  deleteById(db, mcpOauthMapping(), serverId);
+/** A credential that was never there is nothing to forget; one that is there
+ *  and will not go is what this has to say out loud, because the caller is
+ *  about to tell somebody their secret is gone. */
+function stillStored(db: Db, key: string): bool {
+  return hasCredential(db, key) && !forgetCredential(db, key);
+}
+
+export function forgetSuppliedClient(db: Db, serverId: string): string {
+  let kept: string[] = [];
+  if (stillStored(db, clientIdKey(serverId))) {
+    kept.push("the client id");
+  }
+  if (stillStored(db, clientSecretKey(serverId))) {
+    kept.push("the client secret");
+  }
+  let dropped = deleteById(db, mcpOauthMapping(), serverId);
+  if (!dropped.ok) {
+    return "the registration for " + serverId + " could not be removed: " + dropped.error;
+  }
+  if (kept.length > 0) {
+    return kept.join(" and ") + " for " + serverId + " could not be removed and is still stored";
+  }
+  return "";
 }
 
 function markUnrefreshable(db: Db, key: string): void {
@@ -512,22 +531,51 @@ export function disconnect(db: Db, serverId: string, owner: string): bool {
   return droppedValue && droppedRefresh && droppedGrant;
 }
 
-export function forgetConnector(db: Db, serverId: string, master: string): void {
-  forgetCredential(db, sharedTokenKey(serverId));
-  forgetCredential(db, refreshKey(sharedTokenKey(serverId)));
-  forgetCredential(db, clientSecretKey(serverId));
-  forgetCredential(db, clientIdKey(serverId));
-  deleteById(db, mcpOauthMapping(), serverId);
+/** Everything this deployment holds for a connector, forgotten — and a
+ *  sentence when any of it survived. Both callers announce the secret is gone:
+ *  one is a person switching a server's auth off, the other is deleting the
+ *  server outright, after which nothing in the console can ever reach an
+ *  orphaned token again. */
+export function forgetConnector(db: Db, serverId: string, master: string): string {
+  let kept: int = 0;
+  if (stillStored(db, sharedTokenKey(serverId))) {
+    kept = kept + 1;
+  }
+  if (stillStored(db, refreshKey(sharedTokenKey(serverId)))) {
+    kept = kept + 1;
+  }
+  if (stillStored(db, clientSecretKey(serverId))) {
+    kept = kept + 1;
+  }
+  if (stillStored(db, clientIdKey(serverId))) {
+    kept = kept + 1;
+  }
+  let dropped = deleteById(db, mcpOauthMapping(), serverId);
+  if (!dropped.ok) {
+    return "the registration for " + serverId + " could not be removed: " + dropped.error;
+  }
 
   let rows = JSON.parse<McpGrantRow[]>(listWhere(db, mcpGrantsMapping(),
     "server_id = " + placeholderAt(db, 1), [serverId]));
   let i: int = 0;
   while (i < rows.length) {
-    forgetCredential(db, rows[i].id);
-    forgetCredential(db, refreshKey(rows[i].id));
-    deleteById(db, mcpGrantsMapping(), rows[i].id);
+    if (stillStored(db, rows[i].id)) {
+      kept = kept + 1;
+    }
+    if (stillStored(db, refreshKey(rows[i].id))) {
+      kept = kept + 1;
+    }
+    let gone = deleteById(db, mcpGrantsMapping(), rows[i].id);
+    if (!gone.ok) {
+      return "a grant for " + serverId + " could not be removed: " + gone.error;
+    }
     i = i + 1;
   }
+  if (kept > 0) {
+    return `${kept}` + " stored credential(s) for " + serverId
+      + " could not be removed and are still held";
+  }
+  return "";
 }
 
 export function toolsOff(db: Db, serverId: string): string[] {

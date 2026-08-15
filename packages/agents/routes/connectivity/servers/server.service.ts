@@ -155,7 +155,10 @@ export class ServerService {
       return refusing(written.error);
     }
     if (body.authKind == "none") {
-      forgetConnector(this.repository.database, id, this.master);
+      let cleared = forgetConnector(this.repository.database, id, this.master);
+      if (cleared != "") {
+        return refusing(cleared);
+      }
       return produced(this.repository.one(id));
     }
     if (body.authKind == "oauth") {
@@ -231,9 +234,14 @@ export class ServerService {
 
   forget(id: string): string {
     let fault = this.forgetStoredServer(id);
-    forgetConnector(this.repository.database, id, this.master);
+    let cleared = forgetConnector(this.repository.database, id, this.master);
     forgetRoster(this.repository.database, id);
-    return fault;
+    if (fault != "") {
+      return fault;
+    }
+    // Said even though the row is gone: an orphaned token is not reachable
+    // from anywhere in the console once its server has been deleted.
+    return cleared;
   }
 
   connections(owner: string): ConnectionView[] {
