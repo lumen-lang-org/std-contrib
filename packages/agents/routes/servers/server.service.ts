@@ -177,7 +177,10 @@ export class ServerService {
     if (tool.trim() == "") {
       return refusing("a tool needs a name");
     }
-    setToolOn(this.repository.database, id, tool, body.on);
+    let switched = setToolOn(this.repository.database, id, tool, body.on);
+    if (switched != "") {
+      return refusing(switched);
+    }
     return produced("");
   }
 

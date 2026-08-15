@@ -529,15 +529,22 @@ export function toolsOff(db: Db, serverId: string): string[] {
   return out;
 }
 
-export function setToolOn(db: Db, serverId: string, toolName: string, on: bool): void {
+export function setToolOn(db: Db, serverId: string, toolName: string, on: bool): string {
   let id = serverId + ":" + toolName;
   if (on) {
-    deleteById(db, mcpToolsOffMapping(), id);
-    return;
+    let removed = deleteById(db, mcpToolsOffMapping(), id);
+    if (!removed.ok) {
+      return removed.error;
+    }
+    return "";
   }
   if (findById(db, mcpToolsOffMapping(), id) != "") {
-    return;
+    return "";
   }
   let row: McpToolOffRow = { id: id, serverId: serverId, toolName: toolName };
-  persist(db, mcpToolsOffMapping(), JSON.stringify(row));
+  let written = persist(db, mcpToolsOffMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return written.error;
+  }
+  return "";
 }
