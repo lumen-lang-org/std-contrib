@@ -129,10 +129,13 @@ export class TriggerService {
 
   forget(id: string, tags: string[]): Outcome {
     let mine = this.owned(id, tags);
-    this.repository.forgetToken(mine.credentialRef);
+    let droppedToken = this.repository.forgetToken(mine.credentialRef);
     let fault = this.repository.forget(mine.id);
     if (fault != "") {
       return refusing(fault);
+    }
+    if (!droppedToken && mine.credentialRef != "") {
+      return refusing("the bot is gone, but its stored token could not be deleted");
     }
     return produced("");
   }
