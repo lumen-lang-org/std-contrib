@@ -12,7 +12,10 @@ export class QuotaService {
   }
 
   forGuest(guest: string, now: number): QuotaView {
-    let used = this.repository.runCountSince(guest, utcDayStartText(now));
+    let counted = this.repository.runCountSince(guest, utcDayStartText(now));
+    // Display only. An unreadable count shows as none remaining rather than as
+    // a full allowance, so the page never overstates what is left.
+    let used = counted < 0 ? GUEST_DAILY_RUNS : counted;
     let left = GUEST_DAILY_RUNS - used;
     if (left < 0) {
       left = 0;

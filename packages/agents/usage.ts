@@ -39,10 +39,21 @@ function artifactBytes(db: Db, owner: string): string {
   return digitsOrZero(db.value(0, 0));
 }
 
+/** How many runs an owner has had since an instant, or -1 when that cannot be
+ *  counted.
+ *
+ *  The two apart, because this number is what the guest allowance is measured
+ *  against. A query that fails and a day with no runs are both "no rows", and
+ *  answering 0 for the first hands out an unlimited allowance to whoever asks
+ *  while the database is unwell. Callers that gate on it refuse on -1; callers
+ *  that only display it can show it as nothing used. */
 export function runsSince(db: Db, owner: string, since: string): int {
   let sql = "SELECT COUNT(*) FROM runs WHERE owner = " + placeholderAt(db, 1)
     + " AND created_at >= " + placeholderAt(db, 2);
-  if (!db.query(sql, [owner, since]) || db.rows() == 0) {
+  if (!db.query(sql, [owner, since])) {
+    return -1;
+  }
+  if (db.rows() == 0) {
     return 0;
   }
   return parseInt(digitsOrZero(db.value(0, 0)), 10) ?? 0;

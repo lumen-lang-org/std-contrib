@@ -310,6 +310,10 @@ export class ThreadService {
     if (guest != "") {
       let atGate = Date.now();
       let used = runsSince(this.database, guest, utcDayStartText(atGate));
+      if (used < 0) {
+        return Respond(503, "{\"error\":\"the guest allowance could not be read\"}",
+          "application/json");
+      }
       if (used >= GUEST_DAILY_RUNS) {
         let refusal = Respond(429, guestQuotaJson(used, nextUtcMidnightIso(atGate)), "application/json");
         refusal.headers.set("retry-after", `${secondsToUtcMidnight(atGate)}`);
@@ -358,7 +362,10 @@ export class ThreadService {
     if (guest == "") {
       return OkJson(said);
     }
-    let left = GUEST_DAILY_RUNS - runsSince(this.database, guest, utcDayStartText(Date.now()));
+    let spent = runsSince(this.database, guest, utcDayStartText(Date.now()));
+    // Reported, not gated: the run has already happened by here, and a count
+    // that cannot be read should not turn a good answer into an error.
+    let left = GUEST_DAILY_RUNS - (spent < 0 ? GUEST_DAILY_RUNS : spent);
     if (left < 0) {
       left = 0;
     }

@@ -18,6 +18,12 @@ export function guestRunsLeft(agents: AgentService, request: Request): Guarded {
   }
   let atGate = Date.now();
   let used = agents.runsToday(guest, atGate);
+  if (used < 0) {
+    // Closed rather than open: an allowance that cannot be read is not an
+    // allowance of none used.
+    return reject(Respond(503, "{\"error\":\"the guest allowance could not be read\"}",
+      "application/json"));
+  }
   if (used < GUEST_DAILY_RUNS) {
     return resolve();
   }
