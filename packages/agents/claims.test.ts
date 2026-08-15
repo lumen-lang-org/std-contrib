@@ -12,12 +12,19 @@ import { JobRepository } from "./routes/knowledge/jobs/job.repository.ts";
 // workflow, a message a bot has taken, a document waiting to be indexed. Each
 // is an UPDATE ... WHERE id = (SELECT ... LIMIT 1 <lock>) RETURNING ..., and
 // each answers an empty row when its statement does not run — which is exactly
-// what an empty queue looks like. That is how "FOR UPDATE SKIP LOCKED",
-// written into the SQL and unparseable on sqlite, left every scheduler here
-// idle for ever without a word in the log.
+// what an empty queue looks like, so a claim that cannot parse is a scheduler
+// that finds nothing to do and says nothing about it.
 //
-// So these tests claim on the driver the suite runs on. A plan per database
-// file, because migrate orders versions as text and "106" sorts below "99".
+// What that cost, precisely, since the commit that fixed it (9bda48d) said
+// more than it should have: every caller of these four — scheduler.ts and
+// indexer.ts — opens postgres() itself and gives up if it cannot, so no
+// deployment was running them on sqlite and no production queue stalled. What
+// the literal " FOR UPDATE SKIP LOCKED" did cost is this file: the claims
+// could not be exercised on the driver the suite runs on, which is why they
+// had no test at all and why the shape survived unnoticed.
+//
+// A plan per database file, because migrate orders versions as text and "106"
+// sorts below "99".
 
 const NOW: number = 1786093200000.0;
 
