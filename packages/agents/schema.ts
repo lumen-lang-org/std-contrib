@@ -14,6 +14,7 @@ import { skillFileRepository } from "./routes/skills/entities/skill-file.entity.
 import { authProviderRepository } from "./routes/auth-providers/entities/auth-provider.entity.ts";
 import { scriptImageRepository } from "./routes/script-images/entities/script-image.entity.ts";
 import { modelRepository } from "./routes/models/entities/model.entity.ts";
+import { modelConfigRepository } from "./routes/model-configs/entities/model-config.entity.ts";
 import { modelChoiceRepository } from "./routes/models/entities/model-choice.entity.ts";
 import { modelRouterRepository } from "./routes/models/entities/model-router.entity.ts";
 import { mcpToolOffRepository } from "./routes/connect/entities/mcp-tool-off.entity.ts";
@@ -192,34 +193,7 @@ function modelConfigsMappingV1(): DbRepository {
 }
 
 export function modelConfigsMapping(db: Db): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("modelId", "model_id", "text"),
-    field("temperature", "temperature", "float8"),
-    field("maxTokens", "max_tokens", "int"),
-    field("topP", "top_p", "float8"),
-    field("extra", "extra", "text"),
-    field("thinking", "thinking", "text"),
-    field("label", "label", "text"),
-    field("selectable", "selectable", "bool"),
-    field("rank", "menu_rank", "int"),
-  ];
-  let rs: DbRelation[] = [
-    hasOne({
-      field: "model",
-      table: "models",
-      localColumn: "model_id",
-      foreignColumn: "id",
-      columns: "id, label, api_name AS \"apiName\", provider, " + boolColumn(db, "enabled") + " AS \"enabled\"",
-    }),
-  ];
-  return repository({
-    table: "model_configs",
-    idField: "id",
-    idColumn: "id",
-    fields: fs,
-    relations: rs,
-  });
+  return modelConfigRepository();
 }
 
 export function modelChoicesMapping(): DbRepository {
