@@ -1,5 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbMatch, DbRepository, DbSweep, deleteWhere, persist, placeholderAt, setOn, setWhere } from "../../../../plume/plume.ts";
+import { DbMatch, DbRepository, DbResult, DbSweep, deleteWhere, persist, placeholderAt, setOn, setWhere } from "../../../../plume/plume.ts";
 import { IndexJobRow, JOB_FAILED, JOB_INDEXED, JOB_INDEXING, JOB_QUEUED, indexJobRepository } from "./entities/index-job.entity.ts";
 
 export class JobRepository {
@@ -48,8 +48,8 @@ export class JobRepository {
     return claimed;
   }
 
-  markIndexed(id: string, chunks: int, now: string): void {
-    setOn(this.database, this.jobs, {
+  markIndexed(id: string, chunks: int, now: string): DbResult {
+    return setOn(this.database, this.jobs, {
       id: id,
       values: [
         { column: "status", value: JOB_INDEXED },
@@ -59,8 +59,8 @@ export class JobRepository {
     });
   }
 
-  markFailed(id: string, why: string, now: string): void {
-    setOn(this.database, this.jobs, {
+  markFailed(id: string, why: string, now: string): DbResult {
+    return setOn(this.database, this.jobs, {
       id: id,
       values: [
         { column: "status", value: JOB_FAILED },

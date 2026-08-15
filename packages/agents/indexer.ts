@@ -1,6 +1,6 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { postgres } from "../plume/postgres.ts";
-import { connectDatabase } from "../plume/plume.ts";
+import { DbResult, connectDatabase } from "../plume/plume.ts";
 import { embeddingModel, uploadDocument } from "./knowledge.ts";
 import { JobRepository } from "./routes/knowledge/jobs/job.repository.ts";
 import { JOB_QUEUED } from "./routes/knowledge/jobs/entities/index-job.entity.ts";
@@ -53,6 +53,17 @@ function main(): void {
   }
 }
 
+/** A job whose terminal status does not land stays on "indexing" for good:
+ *  claimNext only ever takes queued rows, so nothing picks it up again until
+ *  a restart requeues it. Said out loud, naming the job, because the row
+ *  itself can no longer say it. */
+function noteStatus(id: string, what: string, wrote: DbResult): void {
+  if (!wrote.ok) {
+    console.error("indexer: job " + id + " could not be marked " + what
+      + " and is left running — " + wrote.error);
+  }
+}
+
 function drainOne(db: Db, master: string): void {
   let jobs = new JobRepository(db);
   let job = jobs.claimNext(now());
@@ -62,23 +73,23 @@ function drainOne(db: Db, master: string): void {
 
   let embedder = embeddingModel(db, job.modelId);
   if (embedder.id == "") {
-    jobs.markFailed(job.id, "no usable embedding model " + job.modelId, now());
+    noteStatus(job.id, "failed", jobs.markFailed(job.id, "no usable embedding model " + job.modelId, now()));
     return;
   }
   let key = credentialFor(db, embedder.provider, master);
   if (key == "") {
-    jobs.markFailed(job.id, "no credential for " + embedder.provider, now());
+    noteStatus(job.id, "failed", jobs.markFailed(job.id, "no credential for " + embedder.provider, now()));
     return;
   }
 
   console.log("indexing " + job.source + " into " + job.scope);
   let stored = uploadDocument(db, embedder, job.source, job.scope, job.body, key);
   if (!stored.ok) {
-    jobs.markFailed(job.id, stored.error, now());
+    noteStatus(job.id, "failed", jobs.markFailed(job.id, stored.error, now()));
     console.log("  failed: " + stored.error);
     return;
   }
-  jobs.markIndexed(job.id, stored.chunks, now());
+  noteStatus(job.id, "indexed", jobs.markIndexed(job.id, stored.chunks, now()));
   console.log("  " + `${stored.chunks}` + " chunks");
 }
 
