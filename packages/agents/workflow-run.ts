@@ -385,7 +385,10 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       if (bot == "" || chat == "") {
         return withInput(stepFailed("nobody can answer - this run was not started by a chat"), asking);
       }
-      queueOutboundWith(db, bot, chat, runId, asking, node.cases ?? "", Date.now() as number);
+      let queued = queueOutboundWith(db, bot, chat, runId, asking, node.cases ?? "", Date.now() as number);
+      if (queued == "") {
+        return withInput(stepFailed("the question could not be sent"), asking);
+      }
       let paused: StepResult = {
         ok: true,
         output: asking,
@@ -407,10 +410,11 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       if (sendPath == "") {
         sendPath = fileBlock(saying);
       }
-      if (sendPath != "") {
-        queueOutboundFile(db, bot, chat, runId, saying, threadId, sendPath, Date.now() as number);
-      } else {
-        queueOutbound(db, bot, chat, runId, saying, Date.now() as number);
+      let queued = sendPath != ""
+        ? queueOutboundFile(db, bot, chat, runId, saying, threadId, sendPath, Date.now() as number)
+        : queueOutbound(db, bot, chat, runId, saying, Date.now() as number);
+      if (queued == "") {
+        return withInput(stepFailed("the reply could not be sent"), saying);
       }
       return withInput(stepOk(ctx.prev), saying);
     }
