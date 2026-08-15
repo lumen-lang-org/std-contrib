@@ -13,7 +13,14 @@ function testKey(): string {
 }
 
 function fresh(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_connect_test.db" };
+  let file = "/tmp/agents_connect_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");

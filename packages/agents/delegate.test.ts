@@ -56,7 +56,14 @@ function seeded(): void {
   // on every seeded() call after the first. A distinct file per call sidesteps
   // it; the underlying plume/sqlite.ts behavior is a separate, deeper issue.
   seededRound = seededRound + 1;
-  let cfg: DbConfig = { filename: "/tmp/agents_delegate_test_" + `${seededRound}` + ".db" };
+  let file = "/tmp/agents_delegate_test_" + `${seededRound}` + ".db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");

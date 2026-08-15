@@ -84,7 +84,14 @@ test("the budget is a number this package states", () => {
 });
 
 function freshThreads(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_threads_test.db" };
+  let file = "/tmp/agents_threads_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP INDEX IF EXISTS chunks_by_thread");
@@ -100,7 +107,19 @@ function freshThreads(): void {
     plan.push(grouped[g]);
     g = g + 1;
   }
-  migrate(database, plan);
+  // Remix copies a conversation's artifacts, so this fixture has to own the
+  // artifact tables rather than borrow whichever ones an earlier test left in
+  // the file.
+  let held = artifactPlan(database);
+  let a: int = 0;
+  while (a < held.length) {
+    plan.push(held[a]);
+    a = a + 1;
+  }
+  let ran = migrate(database, plan);
+  if (!ran.ok) {
+    console.error("[fixture] the plan did not run: " + ran.error);
+  }
 }
 
 function turnCount(threadId: string): int {
@@ -144,7 +163,14 @@ test("a round nobody tried to store is not a stored round", () => {
 });
 
 function freshSweep(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_threads_test.db" };
+  let file = "/tmp/agents_threads_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS thread_chunks");
@@ -254,7 +280,14 @@ test("no age configured is no sweep at all", () => {
 });
 
 function seededMenu(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_threads_test.db" };
+  let file = "/tmp/agents_threads_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS provider_credentials");
