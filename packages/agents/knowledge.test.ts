@@ -88,7 +88,7 @@ test("a corpus cannot be created without a width", () => {
 
 test("indexing with a chat model is refused before a request is made", () => {
   fresh();
-  let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true}");
+  let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true,\"contextTokens\":0}");
   expect(indexDocument(database, chat, {
     id: "d1",
     source: "s",
@@ -99,7 +99,7 @@ test("indexing with a chat model is refused before a request is made", () => {
 
 test("searching with a chat model is refused too", () => {
   fresh();
-  let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true}");
+  let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true,\"contextTokens\":0}");
   let anywhere: string[] = ["/"];
   let r = retrieve(database, chat, anywhere, "question", 3, "sk-fake");
   expect(!r.ok);
