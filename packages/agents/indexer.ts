@@ -16,15 +16,30 @@ function main(): void {
   }
 
   let db = postgres();
+  let host = process.env("AGENTS_PG_HOST") ?? "127.0.0.1";
+  let named = process.env("AGENTS_PG_DATABASE") ?? "agents";
+  let asUser = process.env("AGENTS_PG_USER") ?? "agents";
   let server: DbConfig = {
-    host: process.env("AGENTS_PG_HOST") ?? "127.0.0.1",
-    database: process.env("AGENTS_PG_DATABASE") ?? "agents",
-    user: process.env("AGENTS_PG_USER") ?? "agents",
+    host: host,
+    database: named,
+    user: asUser,
     password: process.env("AGENTS_PG_PASSWORD") ?? "",
   };
-  connectDatabase(db, server);
+  let reached = connectDatabase(db, server);
+  if (!reached.ok) {
+    console.error("indexer: the database did not open: postgres " + named + " at "
+      + host + " as " + asUser + " — " + reached.error);
+    return;
+  }
 
-  new JobRepository(db).requeueStalled("");
+  // Jobs left mid-flight by a previous run. Failing here is not fatal — new
+  // work still drains — but those rows stay stuck on "indexing" and nothing
+  // else ever picks them up, so it has to be said.
+  let requeued = new JobRepository(db).requeueStalled("");
+  if (!requeued.ok) {
+    console.error("indexer: jobs left running by an earlier pass were not requeued — "
+      + requeued.error);
+  }
   console.log("indexer: draining the queue");
 
   while (true) {

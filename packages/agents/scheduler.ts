@@ -24,25 +24,41 @@ function main(): void {
   }
   if ((process.env("SCHEDULER_CHILD") ?? "") == "triggers") {
     let db2 = postgres();
+    let childHost = process.env("AGENTS_PG_HOST") ?? "127.0.0.1";
+    let childNamed = process.env("AGENTS_PG_DATABASE") ?? "agents";
+    let childUser = process.env("AGENTS_PG_USER") ?? "agents";
     let server2: DbConfig = {
-      host: process.env("AGENTS_PG_HOST") ?? "127.0.0.1",
-      database: process.env("AGENTS_PG_DATABASE") ?? "agents",
-      user: process.env("AGENTS_PG_USER") ?? "agents",
+      host: childHost,
+      database: childNamed,
+      user: childUser,
       password: process.env("AGENTS_PG_PASSWORD") ?? "",
     };
-    connectDatabase(db2, server2);
+    let reachedChild = connectDatabase(db2, server2);
+    if (!reachedChild.ok) {
+      console.error("scheduler: the database did not open: postgres " + childNamed + " at "
+        + childHost + " as " + childUser + " — " + reachedChild.error);
+      return;
+    }
     drainTriggers(db2, master);
     return;
   }
 
   let db = postgres();
+  let host = process.env("AGENTS_PG_HOST") ?? "127.0.0.1";
+  let named = process.env("AGENTS_PG_DATABASE") ?? "agents";
+  let asUser = process.env("AGENTS_PG_USER") ?? "agents";
   let server: DbConfig = {
-    host: process.env("AGENTS_PG_HOST") ?? "127.0.0.1",
-    database: process.env("AGENTS_PG_DATABASE") ?? "agents",
-    user: process.env("AGENTS_PG_USER") ?? "agents",
+    host: host,
+    database: named,
+    user: asUser,
     password: process.env("AGENTS_PG_PASSWORD") ?? "",
   };
-  connectDatabase(db, server);
+  let reached = connectDatabase(db, server);
+  if (!reached.ok) {
+    console.error("scheduler: the database did not open: postgres " + named + " at "
+      + host + " as " + asUser + " — " + reached.error);
+    return;
+  }
 
   let fired: int = 0;
   while (fired < PER_PASS) {

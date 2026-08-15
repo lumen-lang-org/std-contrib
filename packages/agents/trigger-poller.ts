@@ -25,13 +25,21 @@ function main(): void {
   }
 
   let db = postgres();
+  let host = process.env("AGENTS_PG_HOST") ?? "127.0.0.1";
+  let named = process.env("AGENTS_PG_DATABASE") ?? "agents";
+  let asUser = process.env("AGENTS_PG_USER") ?? "agents";
   let server: DbConfig = {
-    host: process.env("AGENTS_PG_HOST") ?? "127.0.0.1",
-    database: process.env("AGENTS_PG_DATABASE") ?? "agents",
-    user: process.env("AGENTS_PG_USER") ?? "agents",
+    host: host,
+    database: named,
+    user: asUser,
     password: process.env("AGENTS_PG_PASSWORD") ?? "",
   };
-  connectDatabase(db, server);
+  let reached = connectDatabase(db, server);
+  if (!reached.ok) {
+    console.error("trigger-poller: the database did not open: postgres " + named + " at "
+      + host + " as " + asUser + " — " + reached.error);
+    return;
+  }
 
   let who = (process.env("HOSTNAME") ?? "poller") + ":" + botId;
   console.log("trigger-poller: " + botId + " starting");

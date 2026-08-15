@@ -70,7 +70,7 @@ export class JobRepository {
     });
   }
 
-  requeueStalled(before: string): void {
+  requeueStalled(before: string): DbResult {
     let match: DbMatch[] = [{ column: "status", operator: "=", value: JOB_INDEXING }];
     if (before != "") {
       match.push({ column: "updated_at", operator: "<", value: before });
@@ -79,7 +79,7 @@ export class JobRepository {
       values: [{ column: "status", value: JOB_QUEUED }],
       match: match,
     };
-    setWhere(this.database, this.jobs, sweep);
+    return setWhere(this.database, this.jobs, sweep);
   }
 
   forgetFinished(before: string): void {
