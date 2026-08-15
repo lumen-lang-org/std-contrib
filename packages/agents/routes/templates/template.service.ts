@@ -177,7 +177,10 @@ export class TemplateService {
     // The reply names no address. A fork carries this transcript, and its
     // server answers on a hostname of its own, so a URL written here would be
     // wrong for everyone who takes it.
-    this.repository.greet(made, templateRequest(row), templateReply(row));
+    let greeted = this.repository.greet(made, templateRequest(row), templateReply(row));
+    if (greeted != "") {
+      return refusing(greeted);
+    }
     let view: TemplateStartedView = {
       threadId: made,
       host: this.repository.hostFor(up.slug),

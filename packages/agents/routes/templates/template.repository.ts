@@ -132,9 +132,9 @@ export class TemplateRepository {
    *  built to answer, written by whoever prepared it. What would be dishonest
    *  is putting it in somebody's *fork*, and a fork copies rather than invents,
    *  so the words stay attached to the person who wrote them. */
-  greet(threadId: string, asked: string, said: string): void {
+  greet(threadId: string, asked: string, said: string): string {
     let none: ToolCall[] = [];
     let turns: Turn[] = [userTurn(asked), assistantTurn(said, none)];
-    appendTurns(this.database, threadId, turns, 0);
+    return appendTurns(this.database, threadId, turns, 0);
   }
 }
