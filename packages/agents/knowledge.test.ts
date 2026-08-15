@@ -8,21 +8,28 @@ import { scopeCovers } from "./routes/authoring/scopes/scope.utils.ts";
 
 let database: Db = sqlite();
 
+// Every test starts from an empty file rather than from a list of drops.
+//
+// The list was incomplete and could not easily be made complete: the plan
+// ALTERs tables this suite never names — migration 77 adds a column to
+// `skills` — so on the second fresh() that migration failed with "duplicate
+// column name: visibility", the plan stopped there, and `models` never got
+// its later `context_tokens` column. Every model persisted after the first
+// test then failed, embeddingModel returned the absent row, and two tests
+// were asserting against the wrong refusal. Removing the file cannot go
+// stale as the plan grows.
 function fresh(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_knowledge_test.db" };
+  let file = "/tmp/agents_knowledge_test.db";
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
-  execute(database, "DROP TABLE IF EXISTS documents");
-  execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
-  execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
-  execute(database, "DROP INDEX IF EXISTS prompts_by_name");
-  dropTable(database, credentialsMapping());
-  dropTable(database, agentsMapping());
-  dropTable(database, mcpServersMapping());
-  dropTable(database, promptsMapping());
-  dropTable(database, modelConfigsMapping(database));
-  dropTable(database, modelsMapping());
-  migrate(database, schemaPlan(database));
+  let ran = migrate(database, schemaPlan(database));
+  if (!ran.ok) {
+    console.error("[fixture] the plan did not run: " + ran.error);
+  }
 
   let chat: ModelRow = {
     id: "m1",
