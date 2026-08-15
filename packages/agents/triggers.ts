@@ -522,20 +522,35 @@ export function emptyMessage(): TriggerInboxRow {
   return none;
 }
 
-export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runId: string, answer: string, fault: string, nowMs: number): void {
+/** Records what became of a message the runner took: its status, the run that
+ *  answered it and the answer itself.
+ *
+ *  Returns why it could not be recorded, if it could not. Silence here costs
+ *  the same as it does for a task: claimMessage takes a row that is queued or
+ *  has been running longer than the lease, so a message whose finish was never
+ *  written is claimed again and answered a second time. */
+export function finishMessage(db: Db, row: TriggerInboxRow, status: string, runId: string, answer: string, fault: string, nowMs: number): string {
   let sql = "UPDATE trigger_inbox SET status = " + db.placeholder
     + ", run_id = " + placeholderAt(db, 2)
     + ", answer = " + placeholderAt(db, 3)
     + ", error = " + placeholderAt(db, 4)
     + ", updated_at = " + placeholderAt(db, 5)
     + " WHERE id = " + placeholderAt(db, 6);
-  db.query(sql, [status, runId, answer, fault, `${nowMs}`, row.id]);
+  if (!db.query(sql, [status, runId, answer, fault, `${nowMs}`, row.id])) {
+    return "message " + row.id + " was answered but not marked " + status
+      + ", so it is still claimed and will be answered again";
+  }
+  return "";
 }
 
-export function parkFile(db: Db, rowId: string, fileName: string, fileBody: string): void {
-  db.query("UPDATE trigger_inbox SET file_name = " + db.placeholder
+export function parkFile(db: Db, rowId: string, fileName: string, fileBody: string): string {
+  if (!db.query("UPDATE trigger_inbox SET file_name = " + db.placeholder
     + ", file_body = " + placeholderAt(db, 2)
-    + " WHERE id = " + placeholderAt(db, 3), [fileName, fileBody, rowId]);
+    + " WHERE id = " + placeholderAt(db, 3), [fileName, fileBody, rowId])) {
+    return "the document " + fileName + " was fetched but not parked, so the run "
+      + "will answer without it";
+  }
+  return "";
 }
 
 export function queueOutbound(db: Db, botId: string, chatId: string, runId: string, text: string, nowMs: number): string {
@@ -624,9 +639,16 @@ export function testingDraft(bot: TriggerBotRow, nowMs: number): bool {
   return until > nowMs;
 }
 
-export function markOutboundSent(db: Db, id: string, nowMs: number): void {
-  db.query("UPDATE trigger_outbox SET status = 'sent', updated_at = " + db.placeholder
-    + " WHERE id = " + placeholderAt(db, 2), [`${nowMs}`, id]);
+/** The reply has gone to the chat. Returns why that could not be written down,
+ *  if it could not: unsent rows are what the next pass sends, so a reply the
+ *  chat has already seen is sent to it again. */
+export function markOutboundSent(db: Db, id: string, nowMs: number): string {
+  if (!db.query("UPDATE trigger_outbox SET status = 'sent', updated_at = " + db.placeholder
+    + " WHERE id = " + placeholderAt(db, 2), [`${nowMs}`, id])) {
+    return "reply " + id + " was sent to the chat but not marked sent, so it "
+      + "will be sent again";
+  }
+  return "";
 }
 
 export function pendingFor(db: Db, botId: string, chatId: string, nowMs: number): TriggerPendingRow {
@@ -677,9 +699,13 @@ export function threadForChat(db: Db, botId: string, chatId: string): string {
   return db.value(0, 0);
 }
 
-export function noteThread(db: Db, rowId: string, threadId: string): void {
-  db.query("UPDATE trigger_inbox SET thread_id = " + db.placeholder
-    + " WHERE id = " + placeholderAt(db, 2), [threadId, rowId]);
+export function noteThread(db: Db, rowId: string, threadId: string): string {
+  if (!db.query("UPDATE trigger_inbox SET thread_id = " + db.placeholder
+    + " WHERE id = " + placeholderAt(db, 2), [threadId, rowId])) {
+    return "message " + rowId + " was answered in conversation " + threadId
+      + " but not tied to it, so the next message from that chat starts a new one";
+  }
+  return "";
 }
 
 export function plainly(answer: string): string {

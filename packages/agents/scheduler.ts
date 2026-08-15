@@ -181,7 +181,7 @@ function drainTriggers(db: Db, master: string): void {
     }
     catch (e) {
       console.error("scheduler: trigger message " + msg.id + " threw: " + e.message);
-      finishMessage(db, msg, "failed", "", "", e.message, Date.now() as number);
+      noteFault(finishMessage(db, msg, "failed", "", "", e.message, Date.now() as number));
     }
     answered = answered + 1;
   }
@@ -193,7 +193,7 @@ function drainTriggers(db: Db, master: string): void {
 function answer(db: Db, msg: TriggerInboxRow, master: string): void {
   let doc = findById(db, workflowsMapping(), msg.workflowId);
   if (doc == "") {
-    finishMessage(db, msg, "failed", "", "", "no workflow " + msg.workflowId, Date.now() as number);
+    noteFault(finishMessage(db, msg, "failed", "", "", "no workflow " + msg.workflowId, Date.now() as number));
     return;
   }
   let flow: WorkflowRow = JSON.parse<WorkflowRow>(doc);
@@ -216,18 +216,18 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     };
     let resumed = resumeWorkflow(db, flow, held);
     if (resumed.threadId != "") {
-      noteThread(db, msg.id, resumed.threadId);
+      noteFault(noteThread(db, msg.id, resumed.threadId));
     }
     if ((resumed.waitingAt ?? "") != "") {
       rememberOpenQuestion(db, msg, withGraph(flow, open.graph), resumed);
-      finishMessage(db, msg, "done", resumed.runId, "", "", Date.now() as number);
+      noteFault(finishMessage(db, msg, "done", resumed.runId, "", "", Date.now() as number));
       return;
     }
     if (!resumed.ok) {
-      finishMessage(db, msg, "failed", resumed.runId, "", resumed.error, Date.now() as number);
+      noteFault(finishMessage(db, msg, "failed", resumed.runId, "", resumed.error, Date.now() as number));
       return;
     }
-    finishMessage(db, msg, "done", resumed.runId, plainly(resumed.answer), "", Date.now() as number);
+    noteFault(finishMessage(db, msg, "done", resumed.runId, plainly(resumed.answer), "", Date.now() as number));
     return;
   }
 
@@ -267,7 +267,7 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
         turnSeq: TURN_SEQ_NONE, now: `${Date.now() as number}`,
       });
       if (!filed.ok) {
-        finishMessage(db, msg, "failed", "", "", filed.fault, Date.now() as number);
+        noteFault(finishMessage(db, msg, "failed", "", "", filed.fault, Date.now() as number));
         queueOutbound(db, msg.botId, msg.chatId, "", "I could not keep that file: " + filed.fault, Date.now() as number);
         return;
       }
@@ -278,23 +278,23 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
   }
   let done = runWorkflow(db, flow, ask);
   if (done.threadId != "") {
-    noteThread(db, msg.id, done.threadId);
+    noteFault(noteThread(db, msg.id, done.threadId));
   }
   if ((done.waitingAt ?? "") != "") {
     if (!rememberOpenQuestion(db, msg, flow, done)) {
-      finishMessage(db, msg, "failed", done.runId, "",
+      noteFault(finishMessage(db, msg, "failed", done.runId, "",
         "the workflow is waiting on a reply, but that could not be saved — a reply here will not resume it",
-        Date.now() as number);
+        Date.now() as number));
       return;
     }
-    finishMessage(db, msg, "done", done.runId, "", "", Date.now() as number);
+    noteFault(finishMessage(db, msg, "done", done.runId, "", "", Date.now() as number));
     return;
   }
   if (!done.ok) {
-    finishMessage(db, msg, "failed", done.runId, "", done.error, Date.now() as number);
+    noteFault(finishMessage(db, msg, "failed", done.runId, "", done.error, Date.now() as number));
     return;
   }
-  finishMessage(db, msg, "done", done.runId, plainly(done.answer), "", Date.now() as number);
+  noteFault(finishMessage(db, msg, "done", done.runId, plainly(done.answer), "", Date.now() as number));
 }
 
 const REFLOW_PER_PASS: int = 3;

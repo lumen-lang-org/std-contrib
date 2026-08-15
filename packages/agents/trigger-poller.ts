@@ -118,7 +118,10 @@ function pass(db: Db, botId: string, who: string, master: string): void {
             try {
               let got = fetchDocument(token, said[i].fileId);
               if (got != "") {
-                parkFile(db, rowId, said[i].fileName, got);
+                let parked = parkFile(db, rowId, said[i].fileName, got);
+                if (parked != "") {
+                  console.error("trigger-poller: " + parked);
+                }
               }
             } catch (e) {
               console.error("trigger-poller: download " + said[i].fileName + ": " + e.message);
@@ -159,7 +162,10 @@ function sendAnswers(db: Db, bot: TriggerBotRow, token: string): void {
       } else if (out.text.trim() != "") {
         sendMessage(token, out.chatId, out.text, replyKeyboard(out.options ?? ""));
       }
-      markOutboundSent(db, out.id, Date.now() as number);
+      let sent = markOutboundSent(db, out.id, Date.now() as number);
+      if (sent != "") {
+        console.error("trigger-poller: " + sent);
+      }
     } catch (e) {
       console.error("trigger-poller: outbox " + out.id + ": " + e.message);
     }
