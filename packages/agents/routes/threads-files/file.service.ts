@@ -114,7 +114,7 @@ export class FileService {
     return produced(JSON.stringify(view));
   }
 
-  forget(threadId: string, fileName: string): void {
-    this.repository.forget(threadId, fileName);
+  forget(threadId: string, fileName: string): string {
+    return this.repository.forget(threadId, fileName);
   }
 }

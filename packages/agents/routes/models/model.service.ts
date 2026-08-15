@@ -145,7 +145,10 @@ export class ModelService {
     if (this.repository.configsUsing(id) > 0) {
       return refusing("model " + id + " is used by a model config; delete or repoint those first");
     }
-    this.repository.forget(id);
+    let gone = this.repository.forget(id);
+    if (!gone.ok) {
+      return refusing(gone.error);
+    }
     return produced("");
   }
 }

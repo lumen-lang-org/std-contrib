@@ -53,7 +53,10 @@ export class WorkspaceApi {
   @Guard(theThread)
   @Guard(theFile)
   remove(@PathVariable("id") id: string, @PathVariable("name") name: string): Reply {
-    this.files.forget(id, name);
+    let fault = this.files.forget(id, name);
+    if (fault != "") {
+      return BadRequest(fault);
+    }
     return NoContent();
   }
 

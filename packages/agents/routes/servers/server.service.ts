@@ -220,15 +220,17 @@ export class ServerService {
     return produced("");
   }
 
-  forgetStoredServer(id: string): void {
-    this.repository.forget(id);
+  forgetStoredServer(id: string): string {
+    let fault = this.repository.forget(id);
     forgetCredential(this.repository.database, "mcp:" + id);
+    return fault;
   }
 
-  forget(id: string): void {
-    this.forgetStoredServer(id);
+  forget(id: string): string {
+    let fault = this.forgetStoredServer(id);
     forgetConnector(this.repository.database, id, this.master);
     forgetRoster(this.repository.database, id);
+    return fault;
   }
 
   connections(owner: string): ConnectionView[] {

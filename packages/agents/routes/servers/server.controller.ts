@@ -91,7 +91,10 @@ export class ServerApi {
   @Delete("/:id")
   @Guard(theServer)
   remove(@PathVariable("id") id: string): Reply {
-    this.servers.forget(id);
+    let fault = this.servers.forget(id);
+    if (fault != "") {
+      return BadRequest(fault);
+    }
     return NoContent();
   }
 
