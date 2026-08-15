@@ -811,6 +811,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
   }
 
   if (call.name == "run_workflow") {
+    if (!row.enabled && enabledWorkflowCount(db, call.owner) >= MAX_WORKFLOWS_PER_OWNER) {
+      return no("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — one has to be paused or deleted before this one can run. list_workflows shows them.");
+    }
     let now = `${call.nowMs}`;
     let written = executeWith(db,
       "UPDATE workflows SET next_at = " + db.placeholder
@@ -840,6 +843,9 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     let name = jsonText(call.args, "name").trim();
     let description = jsonText(call.args, "description").trim();
     let on = jsonFlag(call.args, "enabled", row.enabled);
+    if (on && !row.enabled && enabledWorkflowCount(db, call.owner) >= MAX_WORKFLOWS_PER_OWNER) {
+      return no("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — one has to be paused or deleted before another can run. list_workflows shows them.");
+    }
     let edited: WorkflowRow = {
       id: row.id, owner: row.owner, agentId: row.agentId,
       modelChoiceId: row.modelChoiceId,

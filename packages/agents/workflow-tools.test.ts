@@ -298,6 +298,62 @@ test("the eleventh workflow is refused before it is a row", () => {
   expect(flowsFor("o1").length == 10);
 });
 
+test("resuming a paused workflow through run_workflow is bound by the same cap as drafting one", () => {
+  seeded();
+  let i: int = 0;
+  while (i < 10) {
+    let one = "{\"name\":\"Flow " + `${i}` + "\",\"steps\":[{\"kind\":\"model\",\"text\":\"say hi\"}]}";
+    expect(call("o1", "draft_workflow", one).ok);
+    i = i + 1;
+  }
+  expect(call("o1", "change_workflow", "{\"workflow\":\"Flow 0\",\"enabled\":false}").ok);
+  expect(call("o1", "draft_workflow",
+    "{\"name\":\"Flow last\",\"steps\":[{\"kind\":\"model\",\"text\":\"say hi\"}]}").ok);
+
+  let ran = call("o1", "run_workflow", "{\"workflow\":\"Flow 0\"}");
+  expect(!ran.ok);
+  expect(ran.text.indexOf("10") >= 0);
+  let rows = flowsFor("o1");
+  let j: int = 0;
+  let found = false;
+  while (j < rows.length) {
+    if (rows[j].name == "Flow 0") {
+      expect(!rows[j].enabled);
+      found = true;
+    }
+    j = j + 1;
+  }
+  expect(found);
+});
+
+test("resuming a paused workflow through change_workflow is bound by the same cap as drafting one", () => {
+  seeded();
+  let i: int = 0;
+  while (i < 10) {
+    let one = "{\"name\":\"Flow " + `${i}` + "\",\"steps\":[{\"kind\":\"model\",\"text\":\"say hi\"}]}";
+    expect(call("o1", "draft_workflow", one).ok);
+    i = i + 1;
+  }
+  expect(call("o1", "change_workflow", "{\"workflow\":\"Flow 0\",\"enabled\":false}").ok);
+  expect(call("o1", "draft_workflow",
+    "{\"name\":\"Flow last\",\"steps\":[{\"kind\":\"model\",\"text\":\"say hi\"}]}").ok);
+
+  let resumed = call("o1", "change_workflow", "{\"workflow\":\"Flow 0\",\"enabled\":true}");
+  expect(!resumed.ok);
+  expect(resumed.text.indexOf("10") >= 0);
+  let rows = flowsFor("o1");
+  let j: int = 0;
+  let found = false;
+  while (j < rows.length) {
+    if (rows[j].name == "Flow 0") {
+      expect(!rows[j].enabled);
+      found = true;
+    }
+    j = j + 1;
+  }
+  expect(found);
+});
+
 test("a chat can draft the telegram shapes, and publish what it drafted", () => {
   let made = call("o9", "draft_workflow",
     "{\"name\":\"Triage over chat\",\"steps\":["
