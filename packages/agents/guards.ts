@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { Request, Guarded, BadRequest, Ok, resolve, reject } from "../rest/server.ts";
 import { callerTags, guestTag } from "./api-core.ts";
-import { owningTag } from "./owner.ts";
+import { owningTag, UNKNOWN_TAG } from "./owner.ts";
 
 export function pgOnly(db: Db, said: string): Guarded {
   if (db.name != "postgres") {
@@ -16,7 +16,7 @@ export function pgOnly(db: Db, said: string): Guarded {
 export function roleAtLeast(req: Request, role: string, said: string): Guarded {
   let tags = callerTags(req);
   if (role == "signed-in") {
-    if (guestTag(tags) != "" || (owningTag(tags) == "" && tags.length > 0)) {
+    if (guestTag(tags) != "" || owningTag(tags) == "" || owningTag(tags) == UNKNOWN_TAG) {
       return reject(BadRequest(said));
     }
     return resolve();
@@ -38,7 +38,7 @@ export function roleAtLeast(req: Request, role: string, said: string): Guarded {
 // the same as being told no.
 export function ownedOrEmpty(req: Request): Guarded {
   let tags = callerTags(req);
-  if (owningTag(tags) == "" && tags.length > 0) {
+  if (owningTag(tags) == "" || owningTag(tags) == UNKNOWN_TAG) {
     return reject(Ok("[]"));
   }
   return resolve();
