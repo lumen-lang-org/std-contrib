@@ -20,7 +20,9 @@ import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { documentFilesMapping } from "./document-files.ts";
 import { DocumentRepository } from "./routes/knowledge/documents/document.repository.ts";
-import { migrationFault, wholePlan, bearerRefused, askedPick, configInUse, mergedConfig, configFault, chatConfigFault, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { migrationFault, wholePlan, bearerRefused, askedPick, blankChoice, mergedChoice, choiceRowFault, choiceInUse, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { chatConfigFault, configFault, mergedConfig } from "./routes/inference/model-configs/model-config.utils.ts";
+import { ModelConfigService } from "./routes/inference/model-configs/model-config.service.ts";
 import { forgetAgent } from "./routes/authoring/agents/agent.service.ts";
 import { DocumentFileRow, decodedSize, documentFileId, holdsSource } from "./routes/knowledge/documents/document.utils.ts";
 import { HealthService } from "./routes/ops/healthz/health.service.ts";
@@ -819,11 +821,12 @@ test("a config the menu or a router points at cannot be deleted out from under i
   };
   persist(database, modelRoutersMapping(), JSON.stringify(auto));
 
-  expect(configInUse(database, "cfg-quick").indexOf("model menu") >= 0);
-  expect(configInUse(database, "c-router").indexOf("router") >= 0);
-  expect(configInUse(database, "c-standard").indexOf("router") >= 0);
-  expect(configInUse(database, "cfg-quick").indexOf("take the choice off the menu") >= 0);
-  expect(configInUse(database, "c-router").indexOf("repoint the router") >= 0);
+  let configs = new ModelConfigService(database);
+  expect(configs.inUse("cfg-quick").indexOf("model menu") >= 0);
+  expect(configs.inUse("c-router").indexOf("router") >= 0);
+  expect(configs.inUse("c-standard").indexOf("router") >= 0);
+  expect(configs.inUse("cfg-quick").indexOf("take the choice off the menu") >= 0);
+  expect(configs.inUse("c-router").indexOf("repoint the router") >= 0);
 
   let a9: AgentRow = {
     id: "a9",
@@ -837,9 +840,9 @@ test("a config the menu or a router points at cannot be deleted out from under i
     updatedAt: "t",
   };
   persist(database, agentsMapping(), JSON.stringify(a9));
-  expect(configInUse(database, "c-agents").indexOf("used by an agent") >= 0);
+  expect(configs.inUse("c-agents").indexOf("used by an agent") >= 0);
 
-  expect(configInUse(database, "c-nobody") == "");
+  expect(configs.inUse("c-nobody") == "");
 });
 
 test("a conversation can be opened already pointing at a choice", () => {
@@ -1125,7 +1128,8 @@ test("neither a choice nor a router can be deleted out from under what points at
 
   expect(routerInUse(database, "rt-1").indexOf("menu choice") >= 0);
   expect(routerInUse(database, "rt-1").indexOf("repoint") >= 0);
-  expect(configInUse(database, "c-fast").indexOf("router") >= 0);
+  let configs = new ModelConfigService(database);
+  expect(configs.inUse("c-fast").indexOf("router") >= 0);
   deleteById(database, modelChoicesMapping(), "ch-auto");
   expect(routerInUse(database, "rt-1") == "");
   expect(routerInUse(database, "rt-never-existed") == "");

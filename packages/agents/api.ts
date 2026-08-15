@@ -31,6 +31,8 @@ import { AuthProviderApi } from "./routes/identity/auth-providers/auth-provider.
 import { PluginApi } from "./routes/extensions/plugins/plugin.controller.ts";
 import { PromptApi } from "./routes/authoring/prompts/prompt.controller.ts";
 import { ModelApi } from "./routes/inference/models/model.controller.ts";
+import { ConfigApi } from "./routes/inference/model-configs/model-config.controller.ts";
+import { chatConfigFault } from "./routes/inference/model-configs/model-config.utils.ts";
 import { SkillApi } from "./routes/authoring/skills/skill.controller.ts";
 import { ScriptImageApi } from "./routes/authoring/script-images/script-image.controller.ts";
 import { TraceApi } from "./routes/ops/tracing/trace.controller.ts";
@@ -95,126 +97,6 @@ type PromptChange = { promptId: string };
 
 
 
-@controller("/model-configs")
-@bindings
-class ConfigApi {
-  db: Db;
-  constructor(db: Db) {
-    this.db = db;
-  }
-
-  @Get("/")
-  list(): Reply {
-    let keys: DbOrder[] = [{ column: "id" }];
-    return Ok(listOrdered(this.db, modelConfigsMapping(this.db), { order: keys }));
-  }
-
-  @Post("/")
-  create(req: Request): Reply {
-    let fault = createFault(this.db, modelConfigsMapping(this.db), req.body);
-    if (fault != "") {
-      return BadRequest(fault);
-    }
-    let body: ModelConfigRow = JSON.parse<ModelConfigRow>(req.body);
-    let wrong = configFault(this.db, body);
-    if (wrong != "") {
-      return BadRequest(wrong);
-    }
-    let written = persist(this.db, modelConfigsMapping(this.db), req.body);
-    if (!written.ok) {
-      return BadRequest(written.error);
-    }
-    return Created(findById(this.db, modelConfigsMapping(this.db), jsonId(req.body)));
-  }
-
-  @Put("/:id")
-  update(req: Request, @PathVariable("id") id: string): Reply {
-    let stored = findById(this.db, modelConfigRows(this.db), id);
-    if (stored == "") {
-      return NotFound("model config " + id);
-    }
-    if (req.body == "") {
-      return BadRequest("a body is required");
-    }
-    if (bodyText(req.body, "id", id) != id) {
-      return BadRequest("the id in the body must match the path");
-    }
-    let row = mergedConfig(JSON.parse<ModelConfigRow>(stored), req.body);
-    let wrong = configFault(this.db, row);
-    if (wrong != "") {
-      return BadRequest(wrong);
-    }
-    let written = persist(this.db, modelConfigsMapping(this.db), JSON.stringify(row));
-    if (!written.ok) {
-      return BadRequest(written.error);
-    }
-    return Ok(findById(this.db, modelConfigsMapping(this.db), id));
-  }
-
-  @Delete("/:id")
-  remove(@PathVariable("id") id: string): Reply {
-    if (!existsById(this.db, modelConfigsMapping(this.db), id)) {
-      return NotFound("model config " + id);
-    }
-    let used = configInUse(this.db, id);
-    if (used != "") {
-      return BadRequest(used);
-    }
-    let gone = deleteById(this.db, modelConfigsMapping(this.db), id);
-    if (!gone.ok) {
-      return BadRequest(gone.error);
-    }
-    return NoContent();
-  }
-}
-
-
-export function mergedConfig(stored: ModelConfigRow, body: string): ModelConfigRow {
-  let out: ModelConfigRow = {
-    id: stored.id,
-    modelId: bodyText(body, "modelId", stored.modelId),
-    temperature: bodyNumber(body, "temperature", stored.temperature),
-    maxTokens: bodyInt(body, "maxTokens", stored.maxTokens),
-    topP: bodyNumber(body, "topP", stored.topP),
-    extra: bodyJson(body, "extra", stored.extra),
-    thinking: bodyText(body, "thinking", stored.thinking),
-    label: bodyText(body, "label", stored.label),
-    selectable: bodyBool(body, "selectable", stored.selectable),
-    rank: bodyRank(body, stored.rank),
-  };
-  return out;
-}
-
-export function configFault(db: Db, row: ModelConfigRow): string {
-  if (row.modelId == "") {
-    return "a modelId is required";
-  }
-  if (!existsById(db, modelsMapping(), row.modelId)) {
-    return "no model " + row.modelId + "; create it first";
-  }
-  if (row.maxTokens < 1) {
-    return "maxTokens must be at least 1; a config that asks for no tokens cannot answer";
-  }
-  if (row.rank < 0) {
-    return "menuRank cannot be negative";
-  }
-  return "";
-}
-
-export function chatConfigFault(db: Db, configId: string, role: string): string {
-  if (configId == "") {
-    return role + " is required";
-  }
-  let pair = configAndModel(db, configId);
-  if (pair.fault != "") {
-    return role + ": " + pair.fault;
-  }
-  if (pair.model.kind != "chat") {
-    return role + ": model config " + configId + " runs on a \"" + pair.model.kind
-      + "\" model, and only a chat model can answer a turn";
-  }
-  return "";
-}
 
 export function blankChoice(id: string): ModelChoiceRow {
   let out: ModelChoiceRow = {
@@ -620,25 +502,6 @@ class RouterApi {
     return NoContent();
   }
 }
-
-export function configInUse(db: Db, configId: string): string {
-  if (countWhere(db, agentsMapping(), "model_config_id = " + db.placeholder, [configId]) > 0) {
-    return "config " + configId + " is used by an agent; repoint it first";
-  }
-  if (countWhere(db, modelChoicesMapping(), "config_id = " + db.placeholder, [configId]) > 0) {
-    return "config " + configId + " is a row of the model menu; take the choice off the menu first";
-  }
-  if (countWhere(db, modelRoutersMapping(),
-                 "router_config_id = " + placeholderAt(db, 1)
-                 + " OR fallback_config_id = " + placeholderAt(db, 2),
-                 [configId, configId]) > 0) {
-    return "config " + configId + " is a router's own config or its fallback; repoint the router first";
-  }
-  return "";
-}
-
-
-
 
 
 export function choiceWasSent(body: string): bool {
