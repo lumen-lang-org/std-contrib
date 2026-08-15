@@ -20,7 +20,8 @@ import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { documentFilesMapping } from "./document-files.ts";
 import { DocumentRepository } from "./routes/knowledge/documents/document.repository.ts";
-import { migrationFault, wholePlan, bearerRefused, askedPick, publishMenu } from "./api.ts";
+import { migrationFault, wholePlan, bearerRefused, publishMenu } from "./api.ts";
+import { askedPick } from "./routes/conversations/threads/thread.utils.ts";
 import { blankRouter, candidatesFault, mergedRouter, preEncodedCandidates, routerJson, routerRowFault, withCanonicalCandidates } from "./routes/inference/model-routers/model-router.utils.ts";
 import { ModelRouterService } from "./routes/inference/model-routers/model-router.service.ts";
 import { blankChoice, choiceRowFault, mergedChoice } from "./routes/inference/model-choices/model-choice.utils.ts";
@@ -781,17 +782,6 @@ test("the door reads its members and never parses the body into a narrow record"
   expect(jsonText("{\"agentId\":\"a1\"}", "agentId") == "a1");
 });
 
-test("\"Agent default\" is a choice a person makes, not the absence of one", () => {
-  let cleared = askedPick("{\"text\":\"hello\",\"modelChoiceId\":\"\"}");
-  expect(cleared.choiceId == "" && cleared.sent);
-  let picked = askedPick("{\"text\":\"hello\",\"modelChoiceId\":\"mc-fast\"}");
-  expect(picked.choiceId == "mc-fast" && picked.sent);
-  let silent = askedPick("{\"text\":\"hello\"}");
-  expect(silent.choiceId == "" && !silent.sent);
-  expect(!askedPick("").sent);
-  expect(!askedPick("{\"text\":\"{\\\"modelChoiceId\\\":\\\"mc-fast\\\"}\"}").sent);
-});
-
 test("a choice that names nothing is refused at the door, by name", () => {
   expect(fresh() == "");
   seedMenu();
@@ -847,6 +837,17 @@ test("a config the menu or a router points at cannot be deleted out from under i
   expect(configs.inUse("c-agents").indexOf("used by an agent") >= 0);
 
   expect(configs.inUse("c-nobody") == "");
+});
+
+test("\"Agent default\" is a choice a person makes, not the absence of one", () => {
+  let cleared = askedPick("{\"text\":\"hello\",\"modelChoiceId\":\"\"}");
+  expect(cleared.choiceId == "" && cleared.sent);
+  let picked = askedPick("{\"text\":\"hello\",\"modelChoiceId\":\"mc-fast\"}");
+  expect(picked.choiceId == "mc-fast" && picked.sent);
+  let silent = askedPick("{\"text\":\"hello\"}");
+  expect(silent.choiceId == "" && !silent.sent);
+  expect(!askedPick("").sent);
+  expect(!askedPick("{\"text\":\"{\\\"modelChoiceId\\\":\\\"mc-fast\\\"}\"}").sent);
 });
 
 test("a conversation can be opened already pointing at a choice", () => {
