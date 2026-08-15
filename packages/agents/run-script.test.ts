@@ -734,7 +734,12 @@ test("an environment name is refused before anything exists: bytes counted as by
   expect(argvLines().length == 0);
 });
 
-test("a source that is the run_script(...) call itself is refused before the shell sees it", () => {
+// The name deliberately says "the run_script call" and not "run_script(...)":
+// the runner prints a test's name followed by "..." and then its result, and a
+// name that already contains "..." is counted as a failure while the line it
+// prints ends in OK. This test passed every assertion in that state, which is
+// what made it look like a defect in the guard rather than in its own name.
+test("a source that is the run_script call itself is refused before the shell sees it", () => {
   fresh();
   dockerEmulated();
   let ran = running("sh",
