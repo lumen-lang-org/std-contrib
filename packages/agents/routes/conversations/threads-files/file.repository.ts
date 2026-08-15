@@ -2,8 +2,10 @@ import { Db } from "../../../../plume/driver.ts";
 import { DbOrder, deleteById, findById, listOrdered, placeholderAt } from "../../../../plume/plume.ts";
 import { credentialFor } from "../../../credentials.ts";
 import { Upload, embeddingModel } from "../../../knowledge.ts";
+import { documentIsOwned } from "../../../owner.ts";
+import { jsonText } from "../../../scan.ts";
 import { documentRepository } from "../../knowledge/documents/entities/document.entity.ts";
-import { ownedThread } from "../../../threads.ts";
+import { threadRepository } from "../threads/entities/thread.entity.ts";
 import { workspaceFileRepository } from "./entities/workspace-file.entity.ts";
 import { FileWrite, WorkspaceFileRow, getFile, promoteFile, putFile } from "../../../workspace.ts";
 
@@ -17,7 +19,14 @@ export class FileRepository {
   }
 
   threadOwner(threadId: string, tags: string[]): string {
-    return ownedThread(this.database, threadId, tags);
+    let document = findById(this.database, threadRepository(), threadId);
+    if (document == "") {
+      return "";
+    }
+    if (!documentIsOwned(document, tags)) {
+      return "";
+    }
+    return jsonText(document, "agentId");
   }
 
   listing(threadId: string): WorkspaceFileRow[] {
