@@ -390,7 +390,10 @@ export function noteBotPass(db: Db, botId: string, offset: string, fault: string
 }
 
 export function saveBot(db: Db, bot: TriggerBotRow): void {
-  persist(db, triggerBotsMapping(), JSON.stringify(bot));
+  let written = persist(db, triggerBotsMapping(), JSON.stringify(bot));
+  if (!written.ok) {
+    console.error("saveBot: " + bot.id + " was not saved: " + written.error);
+  }
 }
 
 export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, nowMs: number): string {
