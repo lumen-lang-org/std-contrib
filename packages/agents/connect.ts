@@ -112,7 +112,11 @@ function renew(db: Db, server: McpServerRow, key: string, master: string): strin
   let got = refreshGrant(client.tokenUrl, refresh,
     client.clientId, credentialFor(db, clientSecretKey(server.id), master), server.endpoint);
   if (got.fault != "") {
-    markUnrefreshable(db, key);
+    let marked = markUnrefreshable(db, key);
+    if (marked != "") {
+      console.error("connect: " + key + " keeps a refresh token the provider has "
+        + "rejected, because the grant could not be marked unrefreshable: " + marked);
+    }
     return "";
   }
   let storedAccess = storeCredential(db, {
@@ -214,18 +218,30 @@ export function forgetSuppliedClient(db: Db, serverId: string): string {
   return "";
 }
 
-function markUnrefreshable(db: Db, key: string): void {
+/** The provider has refused this refresh token, so the grant is written back
+ *  dead and the console asks for a reconnection. Returns why it could not be,
+ *  if it could not: unmarked, the grant still looks refreshable and every later
+ *  call presents the same rejected token to the same endpoint again. */
+function markUnrefreshable(db: Db, key: string): string {
   let document = findById(db, mcpGrantsMapping(), key);
   if (document == "") {
-    return;
+    return "";
   }
   let grant: McpGrantRow = JSON.parse<McpGrantRow>(document);
   let dead: McpGrantRow = {
     id: grant.id, serverId: grant.serverId, owner: grant.owner,
     expiresAt: "1", refreshable: false, connectedAt: grant.connectedAt,
   };
-  deleteById(db, mcpGrantsMapping(), key);
-  persist(db, mcpGrantsMapping(), JSON.stringify(dead));
+  // No delete first. persist is an upsert, so the delete adds nothing an
+  // overwrite does not do — and when the write after it fails, the delete has
+  // already taken the grant away, which loses the connection rather than
+  // marking it. Overwriting in place leaves the old row standing if the write
+  // does not land.
+  let written = persist(db, mcpGrantsMapping(), JSON.stringify(dead));
+  if (!written.ok) {
+    return written.error;
+  }
+  return "";
 }
 
 function writeGrant(db: Db, key: string, serverId: string, owner: string, got: Grant, keepConnectedAt: bool): string {
