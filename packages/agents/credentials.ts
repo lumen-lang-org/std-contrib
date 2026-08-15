@@ -40,9 +40,12 @@ export function storeCredential(db: Db, write: CredentialWrite): string {
     return "an empty key is not a credential";
   }
 
-  if (existsById(db, credentialsMapping(), credentialId(provider))) {
-    deleteById(db, credentialsMapping(), credentialId(provider));
-  }
+  // Written over rather than removed and rewritten. persist is an upsert, so
+  // the delete could only ever lose the credential: it lands, the write after
+  // it does not, and the key that was working is gone rather than replaced —
+  // on a token refresh, that is a live connection destroyed by a failed write.
+  // The existsById in front of it went too; it was a read whose only use was
+  // deciding whether to do the delete.
   let row: CredentialRow = {
     id: credentialId(provider),
     provider: provider,
