@@ -1,10 +1,12 @@
 import { Db } from "../plume/driver.ts";
-import { DbOrder, executeWith, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../plume/plume.ts";
+import { DbOrder, DbResult, deleteById, executeWith, existsById, findById, linkOf, listOrdered, pageOrdered, persist, placeholderAt, unlinkAllOwnedBy, unlinkAllPointingAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
 import { AgentRow, ModelConfigRow, PromptRow, agentsMapping, modelConfigRows, promptsMapping } from "./schema.ts";
 import { maySchedule } from "./task-tools.ts";
+import { agentRepository } from "./routes/agents/entities/agent.entity.ts";
+import { agentRetrievalRepository } from "./routes/agents/entities/agent-retrieval.entity.ts";
 
 function not(): FileToolResult {
   let none: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
@@ -19,6 +21,31 @@ function no(why: string): FileToolResult {
 function yes(text: string): FileToolResult {
   let good: FileToolResult = { handled: true, ok: true, text: text, line: 0, changed: "" };
   return good;
+}
+
+// Mirrors routes/agents/agent.repository.ts's forget() — same steps, same
+// order, same all-checked discipline — kept as a duplicate rather than a
+// shared call because agent.repository.ts pulls in runlog.ts, which imports
+// run.ts, which imports this file: an import cycle.
+function forgetAgentAndLinks(db: Db, id: string): string {
+  let agents = agentRepository();
+  let steps: DbResult[] = [
+    unlinkAllOwnedBy(db, linkOf(agents, "subAgents"), id),
+    unlinkAllPointingAt(db, linkOf(agents, "subAgents"), id),
+    unlinkAllOwnedBy(db, linkOf(agents, "servers"), id),
+    unlinkAllOwnedBy(db, linkOf(agents, "skills"), id),
+    unlinkAllOwnedBy(db, linkOf(agents, "scopes"), id),
+    deleteById(db, agentRetrievalRepository(), id),
+    deleteById(db, agents, id),
+  ];
+  let i: int = 0;
+  while (i < steps.length) {
+    if (!steps[i].ok) {
+      return steps[i].error;
+    }
+    i = i + 1;
+  }
+  return "";
 }
 
 export function agentTools(): ToolSpec[] {
@@ -333,10 +360,9 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     if (agent.isDefault) {
       return no("\"" + agent.agentName + "\" is the default agent — make another the default first (change_agent with default: true).");
     }
-    executeWith(db, "DELETE FROM agent_skills WHERE agent_id = " + db.placeholder, [agent.id]);
-    let gone = executeWith(db, "DELETE FROM agents WHERE id = " + db.placeholder, [agent.id]);
-    if (!gone.ok) {
-      return no(gone.error);
+    let gone = forgetAgentAndLinks(db, agent.id);
+    if (gone != "") {
+      return no(gone);
     }
     return yes("Deleted \"" + agent.agentName + "\". Any workflow step or bot that still names it will fail with its name — worth checking if one might.");
   }

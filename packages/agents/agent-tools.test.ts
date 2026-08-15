@@ -1,7 +1,9 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { connectDatabase, createTable, dropTable, persist } from "../plume/plume.ts";
-import { AgentRow, ModelConfigRow, ModelRow, PromptRow, agentsMapping, modelConfigsMapping, modelsMapping, promptsMapping } from "./schema.ts";
+import { connectDatabase, dropTable, execute, persist } from "../plume/plume.ts";
+import { migrate, forgetMigrations } from "../plume/migrate.ts";
+import { AgentRow, ModelConfigRow, ModelRow, PromptRow, agentsMapping, modelConfigsMapping, modelsMapping, promptsMapping, schemaPlan, skillsMapping, skillFilesMapping } from "./schema.ts";
+import { agentRetrievalMapping, knowledgePlan } from "./knowledge.ts";
 import { AgentToolCall, agentTools, callAgentTool } from "./agent-tools.ts";
 
 let database: Db = sqlite();
@@ -12,14 +14,27 @@ function db(): Db {
   if (!ready) {
     let cfg: DbConfig = { filename: "/tmp/agents_agent_tools_test.db" };
     connectDatabase(database, cfg);
+    forgetMigrations(database);
+    execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
+    execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
+    execute(database, "DROP TABLE IF EXISTS agent_skills");
+    execute(database, "DROP TABLE IF EXISTS agent_scopes");
+    execute(database, "DROP INDEX IF EXISTS prompts_by_name");
+    dropTable(database, skillFilesMapping());
+    dropTable(database, skillsMapping());
+    dropTable(database, agentRetrievalMapping());
     dropTable(database, agentsMapping());
     dropTable(database, promptsMapping());
     dropTable(database, modelConfigsMapping(database));
     dropTable(database, modelsMapping());
-    createTable(database, agentsMapping());
-    createTable(database, promptsMapping());
-    createTable(database, modelConfigsMapping(database));
-    createTable(database, modelsMapping());
+    let plan = schemaPlan(database);
+    let extra = knowledgePlan(database);
+    let e: int = 0;
+    while (e < extra.length) {
+      plan.push(extra[e]);
+      e = e + 1;
+    }
+    migrate(database, plan);
     seed();
     ready = true;
   }
@@ -109,7 +124,18 @@ test("rollback repoints, delete refuses the default and takes the rest", () => {
   let refused = call("o1", "delete_agent", "{\"agent\":\"helper\"}");
   expect(!refused.ok);
   expect(refused.text.includes("default"));
+
+  database.query("SELECT id FROM agents WHERE agent_name = 'french-tutor'", []);
+  let tutorId = database.value(0, 0);
+  execute(database, "INSERT INTO agent_scopes (agent_id, scope) VALUES ('" + tutorId + "', '/french')");
+  execute(database, "INSERT INTO agent_sub_agents (parent_id, child_id) VALUES ('a1', '" + tutorId + "')");
+
   let bye = call("o1", "delete_agent", "{\"agent\":\"french-tutor\"}");
   expect(bye.ok);
   expect(call("o1", "show_agent", "{\"agent\":\"french-tutor\"}").ok == false);
+
+  database.query("SELECT COUNT(*) FROM agent_scopes WHERE agent_id = '" + tutorId + "'", []);
+  expect(database.value(0, 0) == "0");
+  database.query("SELECT COUNT(*) FROM agent_sub_agents WHERE child_id = '" + tutorId + "'", []);
+  expect(database.value(0, 0) == "0");
 });
