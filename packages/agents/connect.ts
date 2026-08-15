@@ -432,24 +432,37 @@ export function completeConnect(db: Db, master: string, state: string, code: str
   if (enabled != "") {
     return { serverId: server.id, serverName: server.serverName, fault: enabled };
   }
-  attachToDefault(db, server.id);
+  // Said rather than returned. By here the token is stored, the grant is
+  // written and the server is switched on — the connection really did happen,
+  // so a fault would render the "could not connect" page over a connection
+  // that worked. What is lost is the convenience link, and the person can add
+  // the server to an agent by hand; the operator gets the reason.
+  let attached = attachToDefault(db, server.id);
+  if (attached != "") {
+    console.error("connect: " + server.serverName + " is connected but was not attached to the "
+      + "default agent — " + attached);
+  }
   return { serverId: server.id, serverName: server.serverName, fault: "" };
 }
 
-function attachToDefault(db: Db, serverId: string): void {
+function attachToDefault(db: Db, serverId: string): string {
   let agents = JSON.parse<AgentRow[]>(listWhere(db, agentsMapping(),
     "is_default = " + placeholderAt(db, 1), ["1"]));
   if (agents.length == 0) {
-    return;
+    return "";
   }
   let agentId = agents[0].id;
   if (countWhere(db, agentServerLink(),
         "agent_id = " + placeholderAt(db, 1) + " AND server_id = " + placeholderAt(db, 2),
         [agentId, serverId]) > 0) {
-    return;
+    return "";
   }
-  executeWith(db, "INSERT INTO agent_mcp_servers (agent_id, server_id) VALUES ("
+  let linked = executeWith(db, "INSERT INTO agent_mcp_servers (agent_id, server_id) VALUES ("
     + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ")", [agentId, serverId]);
+  if (!linked.ok) {
+    return linked.error;
+  }
+  return "";
 }
 
 function agentServerLink(): DbRepository {
