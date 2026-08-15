@@ -1,6 +1,8 @@
 import { Rule, validated, MaxLength, Required } from "../../../../../validation/validation.ts";
+import { OpenApiField, schema } from "../../../../../openapi/openapi.ts";
 
 @validated
+@schema
 export class AgentBody {
   @Required("an \"id\" is required")
   id: string;

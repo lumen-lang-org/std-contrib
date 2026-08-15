@@ -1,5 +1,6 @@
 import { apiKeysPlan } from "./api-keys.ts";
-import { Request, Reply, Mount, mountedRoutes, mountFault, dispatchedMounted, Respond, Ok, Created, OkJson, CreatedJson, NoContent, NotFound, BadRequest, Refused } from "../rest/server.ts";
+import { Request, Reply, Mount, mount, mountedRoutes, mountFault, dispatchedMounted, Respond, Ok, Created, OkJson, CreatedJson, NoContent, NotFound, BadRequest, Refused } from "../rest/server.ts";
+import { openApiDocument, openApiHandlerInfoOf, openApiOperations, openApiSchemaOf } from "../openapi/openapi.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
@@ -39,6 +40,11 @@ import { SkillApi } from "./routes/authoring/skills/skill.controller.ts";
 import { ScriptImageApi } from "./routes/authoring/script-images/script-image.controller.ts";
 import { TraceApi } from "./routes/ops/tracing/trace.controller.ts";
 import { AgentApi } from "./routes/authoring/agents/agent.controller.ts";
+import { AgentBody } from "./routes/authoring/agents/dtos/agent-body.dto.ts";
+import { RetrievalSetup } from "./routes/authoring/agents/dtos/retrieval-setup.dto.ts";
+import { ScopeGrant } from "./routes/authoring/agents/dtos/scope-grant.dto.ts";
+import { WebRagSetup } from "./routes/authoring/agents/dtos/web-rag-setup.dto.ts";
+import { OpenApiDocApi } from "./routes/ops/openapi-doc/openapi-doc.controller.ts";
 import { ProviderApi } from "./routes/inference/providers/provider.controller.ts";
 import { WorkflowApi } from "./routes/automation/workflows/workflow.controller.ts";
 import { DiscoverApi } from "./routes/knowledge/discover/discover.controller.ts";
@@ -766,8 +772,24 @@ function main(): void {
     }
   }
 
+  // Built from the same @openapi/@schema decorators AgentApi's own routes
+  // and DTOs already carry — a second AgentApi instance, alongside the one
+  // in the mounts list below, since Mount erases which controller it was
+  // once built and openApiOperations needs AgentApi's own Route[] by name.
+  let agentDoc = mount(new AgentApi(db, master));
+  let agentInfo = openApiHandlerInfoOf(new AgentApi(db, master));
+  let agentOps = openApiOperations(agentDoc.routes, agentDoc.controller, agentInfo);
+  let agentSchemas = [
+    openApiSchemaOf(new AgentBody("", "", "", "", "", false, false, "", "")),
+    openApiSchemaOf(new RetrievalSetup("", 0, 0.0, false)),
+    openApiSchemaOf(new ScopeGrant("")),
+    openApiSchemaOf(new WebRagSetup(false, 5, 6000, "verbatim", "")),
+  ];
+  let openApiDoc = openApiDocument("Joule agents — agents route", "0.1.0", agentOps, agentSchemas);
+
   let mounts: Mount[] = [
     new AgentApi(db, master),
+    new OpenApiDocApi(openApiDoc),
     new ProviderApi(db, master),
     new ThreadApi(db, master),
     new RunApi(db),

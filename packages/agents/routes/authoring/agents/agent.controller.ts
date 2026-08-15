@@ -1,6 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
 import { bindings, controller } from "../../../../rest/controller.ts";
 import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, Ok, OkJson } from "../../../../rest/server.ts";
+import { OpenApiOperation, openapi } from "../../../../openapi/openapi.ts";
 import { callerTags, owningCaller } from "../../../api-core.ts";
 import { AgentBody } from "./dtos/agent-body.dto.ts";
 import { ChildLink } from "./dtos/child-link.dto.ts";
@@ -16,6 +17,7 @@ import { scopeFromPath } from "./agent.utils.ts";
 
 @controller("/agents")
 @bindings
+@openapi
 export class AgentApi {
   agents: AgentService;
 

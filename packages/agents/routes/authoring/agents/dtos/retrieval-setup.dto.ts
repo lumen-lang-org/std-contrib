@@ -1,6 +1,8 @@
 import { Rule, validated, Max, Min } from "../../../../../validation/validation.ts";
+import { OpenApiField, schema } from "../../../../../openapi/openapi.ts";
 
 @validated
+@schema
 export class RetrievalSetup {
   embeddingModelId: string;
 
