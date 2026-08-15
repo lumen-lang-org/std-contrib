@@ -28,9 +28,19 @@ function agentsFindOperation(): OpenApiOperation {
   return op;
 }
 
+function plainField(name: string, fieldType: string, required: bool): OpenApiField {
+  let f: OpenApiField = {
+    name: name, fieldType: fieldType, required: required,
+    hasMaxLength: false, maxLength: 0, hasMinLength: false, minLength: 0,
+    hasMinimum: false, minimum: 0.0, hasMaximum: false, maximum: 0.0,
+    allowedValues: "",
+  };
+  return f;
+}
+
 function agentBodySchema(): OpenApiSchema {
-  let name: OpenApiField = { name: "agentName", fieldType: "string", required: true };
-  let enabled: OpenApiField = { name: "enabled", fieldType: "bool", required: false };
+  let name = plainField("agentName", "string", true);
+  let enabled = plainField("enabled", "bool", false);
   let s: OpenApiSchema = { schemaName: "AgentBody", fields: [name, enabled] };
   return s;
 }
@@ -83,6 +93,34 @@ test("two operations answering the same method and path is refused, naming both"
   // Not a false alarm on a route that legitimately reappears under its own
   // operationId — a document rebuilt from the same mounts twice, say.
   expect(openApiFault([agentsListOperation(), agentsListOperation()]) == "");
+});
+
+test("@MaxLength, @Min/@Max and @OneOf become the OpenAPI keyword each means", () => {
+  let name: OpenApiField = {
+    name: "agentName", fieldType: "string", required: true,
+    hasMaxLength: true, maxLength: 48, hasMinLength: false, minLength: 0,
+    hasMinimum: false, minimum: 0.0, hasMaximum: false, maximum: 0.0,
+    allowedValues: "",
+  };
+  let topK: OpenApiField = {
+    name: "topK", fieldType: "int", required: false,
+    hasMaxLength: false, maxLength: 0, hasMinLength: false, minLength: 0,
+    hasMinimum: true, minimum: 1.0, hasMaximum: true, maximum: 20.0,
+    allowedValues: "",
+  };
+  let mode: OpenApiField = {
+    name: "queryMode", fieldType: "string", required: false,
+    hasMaxLength: false, maxLength: 0, hasMinLength: false, minLength: 0,
+    hasMinimum: false, minimum: 0.0, hasMaximum: false, maximum: 0.0,
+    allowedValues: "verbatim,generated",
+  };
+  let s: OpenApiSchema = { schemaName: "WebRagSetup", fields: [name, topK, mode] };
+  let noOps: OpenApiOperation[] = [];
+  let doc = openApiDocument("agents pilot", "0.1.0", noOps, [s]);
+
+  expect(doc.indexOf("\"agentName\":{\"type\":\"string\",\"maxLength\":48}") >= 0);
+  expect(doc.indexOf("\"topK\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}") >= 0);
+  expect(doc.indexOf("\"queryMode\":{\"type\":\"string\",\"enum\":[\"verbatim\",\"generated\"]}") >= 0);
 });
 
 test("the whole document names a real route and a real schema together", () => {

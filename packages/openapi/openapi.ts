@@ -56,9 +56,19 @@
 
 import { Route } from "../rest/router.ts";
 
+// argsText only, deliberately: args carries each argument typed as the
+// decorator's own parameter declares it — @MaxLength(48, "...")'s first
+// argument arrives as a real JSON number, not a string, and a value of
+// mixed-typed args cannot be declared as string[] without JSON.parse
+// throwing the moment a decorator with a non-string argument is described.
+// validation.ts's own FieldRule has the identical shape for the identical
+// reason. Caught with strace against a real @MaxLength/@Min compile, not
+// assumed: the first version of this file declared args: string[] too, and
+// it worked only as long as every decorator this package had been tried
+// against happened to take string arguments — @Get, @PathVariable,
+// @Required. @MaxLength(48, ...) is the first with a leading int.
 export type OpenApiDecoratorUse = {
   name: string,
-  args: string[],
   argsText: string[],
 };
 
@@ -98,7 +108,7 @@ function decoratorNamed(decorators: OpenApiDecoratorUse[], name: string): OpenAp
     }
     i = i + 1;
   }
-  let none: OpenApiDecoratorUse = { name: "", args: [], argsText: [] };
+  let none: OpenApiDecoratorUse = { name: "", argsText: [] };
   return none;
 }
 
@@ -156,15 +166,15 @@ function operationParams(m: OpenApiMethod): OpenApiParam[] {
     let query = decoratorNamed(p.decorators, "RequestParam");
     let header = decoratorNamed(p.decorators, "RequestHeader");
     if (path.name != "") {
-      let name = path.args.length > 0 && path.args[0] != "" ? path.args[0] : p.name;
+      let name = path.argsText.length > 0 && path.argsText[0] != "" ? path.argsText[0] : p.name;
       let param: OpenApiParam = { name: name, location: "path", paramType: p.type, required: true };
       out.push(param);
     } else if (query.name != "") {
-      let name = query.args.length > 0 && query.args[0] != "" ? query.args[0] : p.name;
+      let name = query.argsText.length > 0 && query.argsText[0] != "" ? query.argsText[0] : p.name;
       let param: OpenApiParam = { name: name, location: "query", paramType: p.type, required: false };
       out.push(param);
     } else if (header.name != "") {
-      let name = header.args.length > 0 && header.args[0] != "" ? header.args[0] : p.name;
+      let name = header.argsText.length > 0 && header.argsText[0] != "" ? header.argsText[0] : p.name;
       let param: OpenApiParam = { name: name, location: "header", paramType: p.type, required: false };
       out.push(param);
     }
@@ -224,7 +234,7 @@ export function openapi(d: OpenApiDescription): OpenApiHandlerInfo[] {
         handlerName: m.name,
         params: operationParams(m),
         bodyType: bodyTypeOf(m),
-        responseType: returns.args.length > 0 ? returns.args[0] : "",
+        responseType: returns.argsText.length > 0 ? returns.argsText[0] : "",
       };
       out.push(info);
     }
@@ -233,21 +243,61 @@ export function openapi(d: OpenApiDescription): OpenApiHandlerInfo[] {
   return out;
 }
 
+// One constraint validation.ts's own decorators carry, translated to the
+// OpenAPI schema keyword it means. hasX guards whether x is meaningful at
+// all — a plain 0 default would be indistinguishable from "field must be
+// exactly 0", which packages/validation.ts's own Rule sidesteps the same
+// question differently (a Rule is one constraint; a field here is many).
 export type OpenApiField = {
   name: string,
   fieldType: string,
   required: bool,
+  hasMaxLength: bool,
+  maxLength: int,
+  hasMinLength: bool,
+  minLength: int,
+  hasMinimum: bool,
+  minimum: number,
+  hasMaximum: bool,
+  maximum: number,
+  allowedValues: string,
 };
+
+function decoratorInt(decorators: OpenApiDecoratorUse[], name: string): int {
+  let dec = decoratorNamed(decorators, name);
+  if (dec.name == "" || dec.argsText.length == 0) {
+    return 0;
+  }
+  return parseInt(dec.argsText[0], 10) ?? 0;
+}
+
+function decoratorNumber(decorators: OpenApiDecoratorUse[], name: string): number {
+  let dec = decoratorNamed(decorators, name);
+  if (dec.name == "" || dec.argsText.length == 0) {
+    return 0.0;
+  }
+  return parseFloat(dec.argsText[0]) ?? 0.0;
+}
 
 export function schema(d: OpenApiDescription): OpenApiField[] {
   let out: OpenApiField[] = [];
   let i: int = 0;
   while (i < d.fields.length) {
     let f = d.fields[i];
+    let allowed = decoratorNamed(f.decorators, "OneOf");
     let field: OpenApiField = {
       name: f.name,
       fieldType: f.type,
       required: hasDecorator(f.decorators, "Required"),
+      hasMaxLength: hasDecorator(f.decorators, "MaxLength"),
+      maxLength: decoratorInt(f.decorators, "MaxLength"),
+      hasMinLength: hasDecorator(f.decorators, "MinLength"),
+      minLength: decoratorInt(f.decorators, "MinLength"),
+      hasMinimum: hasDecorator(f.decorators, "Min"),
+      minimum: decoratorNumber(f.decorators, "Min"),
+      hasMaximum: hasDecorator(f.decorators, "Max"),
+      maximum: decoratorNumber(f.decorators, "Max"),
+      allowedValues: allowed.name != "" && allowed.argsText.length > 0 ? allowed.argsText[0] : "",
     };
     out.push(field);
     i = i + 1;
@@ -363,6 +413,45 @@ function propertySchema(fieldType: string): string {
   return "{\"$ref\":\"#/components/schemas/" + fieldType + "\"}";
 }
 
+// propertySchema for one DTO field, with whatever constraints its
+// @MaxLength/@MinLength/@Min/@Max/@OneOf carry folded in as the OpenAPI
+// keyword each means. Only meaningful beside a known primitive type — a
+// constraint decorator has never been written on a field whose type is
+// itself another DTO, so this does not attempt to compose one with a $ref.
+function fieldPropertySchema(f: OpenApiField): string {
+  let known = openApiType(f.fieldType);
+  if (known == "") {
+    return propertySchema(f.fieldType);
+  }
+  let extra = "";
+  if (f.hasMaxLength) {
+    extra = extra + ",\"maxLength\":" + `${f.maxLength}`;
+  }
+  if (f.hasMinLength) {
+    extra = extra + ",\"minLength\":" + `${f.minLength}`;
+  }
+  if (f.hasMinimum) {
+    extra = extra + ",\"minimum\":" + `${f.minimum}`;
+  }
+  if (f.hasMaximum) {
+    extra = extra + ",\"maximum\":" + `${f.maximum}`;
+  }
+  if (f.allowedValues != "") {
+    let values = f.allowedValues.split(",");
+    let enumOut = "";
+    let i: int = 0;
+    while (i < values.length) {
+      if (enumOut != "") {
+        enumOut = enumOut + ",";
+      }
+      enumOut = enumOut + JSON.stringify(values[i].trim());
+      i = i + 1;
+    }
+    extra = extra + ",\"enum\":[" + enumOut + "]";
+  }
+  return "{\"type\":" + JSON.stringify(known) + extra + "}";
+}
+
 function schemaObject(fields: OpenApiField[]): string {
   let properties = "";
   let required = "";
@@ -372,7 +461,7 @@ function schemaObject(fields: OpenApiField[]): string {
     if (properties != "") {
       properties = properties + ",";
     }
-    properties = properties + JSON.stringify(f.name) + ":" + propertySchema(f.fieldType);
+    properties = properties + JSON.stringify(f.name) + ":" + fieldPropertySchema(f);
     if (f.required) {
       if (required != "") {
         required = required + ",";
