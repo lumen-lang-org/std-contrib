@@ -186,4 +186,8 @@ test("a reasoning model served without its parser has its thought taken out of t
 
   let open = "{\"choices\":[{\"message\":{\"content\":\"<think>never closed\"}}]}";
   expect(replyText("vllm", open) == "<think>never closed");
+
+  let emptyThought = "{\"choices\":[{\"message\":{\"content\":\"<think></think>\\n\\nFour.\"}}]}";
+  expect(assistantThinking("vllm", emptyThought) == "");
+  expect(replyText("vllm", emptyThought) == "Four.");
 });

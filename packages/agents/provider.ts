@@ -777,10 +777,14 @@ export function inlineThinking(text: string): string {
 }
 
 export function withoutInlineThinking(text: string): string {
-  if (inlineThinking(text) == "") {
+  let open = text.indexOf("<think>");
+  if (open < 0 || text.slice(0, open).trim() != "") {
     return text;
   }
-  let close = text.indexOf("</think>");
+  let close = text.indexOf("</think>", open);
+  if (close < 0) {
+    return text;
+  }
   return text.slice(close + 8).trim();
 }
 
