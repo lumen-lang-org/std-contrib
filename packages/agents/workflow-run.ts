@@ -564,7 +564,15 @@ function closeWalk(db: Db, row: WorkflowRow, owner: string, runId: string, threa
     threadId: threadId, steps: JSON.stringify(all),
     startedAt: startedAt, endedAt: waiting != "" ? "" : `${Date.now() as number}`,
   };
-  persist(db, workflowRunsMapping(), JSON.stringify(closed));
+  let written = persist(db, workflowRunsMapping(), JSON.stringify(closed));
+  if (!written.ok) {
+    let lost: WorkflowDone = {
+      ok: false, runId: runId, threadId: threadId,
+      answer: walked.answer, error: "the run finished but could not be saved: " + written.error,
+      waitingAt: "", outputsSoFar: "[]",
+    };
+    return lost;
+  }
   let outsSoFar = "[]";
   if (waiting != "") {
     let outs: WfOut[] = [];
