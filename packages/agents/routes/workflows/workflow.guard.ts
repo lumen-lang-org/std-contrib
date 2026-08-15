@@ -1,6 +1,6 @@
-import { Guarded, Request, BadRequest, NotFound, param, reject, resolve } from "../../../rest/server.ts";
-import { callerTags, guestTag } from "../../api-core.ts";
-import { owningTag } from "../../owner.ts";
+import { Guarded, Request, NotFound, param, reject, resolve } from "../../../rest/server.ts";
+import { callerTags } from "../../api-core.ts";
+import { roleAtLeast } from "../../guards.ts";
 import { WorkflowService } from "./workflow.service.ts";
 
 export function workflowOwned(workflows: WorkflowService, request: Request): Guarded {
@@ -12,9 +12,5 @@ export function workflowOwned(workflows: WorkflowService, request: Request): Gua
 }
 
 export function namedAuthor(request: Request): Guarded {
-  let tags = callerTags(request);
-  if (owningTag(tags) == "" || guestTag(tags) != "") {
-    return reject(BadRequest("signing in is what makes a script yours to compile"));
-  }
-  return resolve();
+  return roleAtLeast(request, "signed-in", "signing in is what makes a script yours to compile");
 }
