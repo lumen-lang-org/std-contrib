@@ -65,13 +65,23 @@ export class ModelConfigService {
   /** Why a config cannot be deleted yet, named so the reader knows what to
    *  repoint first. */
   inUse(id: string): string {
-    if (this.repository.agentsOn(id) > 0) {
+    let onAgents = this.repository.agentsOn(id);
+    let onMenu = this.repository.menuRowsOn(id);
+    let onRouters = this.repository.routersOn(id);
+    // A count that could not be taken is not a count of none. Refusing here
+    // keeps a config that something still points at from being deleted while
+    // the database cannot say so — the same rule putArtifact already applies
+    // to its own cap.
+    if (onAgents < 0 || onMenu < 0 || onRouters < 0) {
+      return "could not check whether config " + id + " is still in use";
+    }
+    if (onAgents > 0) {
       return "config " + id + " is used by an agent; repoint it first";
     }
-    if (this.repository.menuRowsOn(id) > 0) {
+    if (onMenu > 0) {
       return "config " + id + " is a row of the model menu; take the choice off the menu first";
     }
-    if (this.repository.routersOn(id) > 0) {
+    if (onRouters > 0) {
       return "config " + id + " is a router's own config or its fallback; repoint the router first";
     }
     return "";

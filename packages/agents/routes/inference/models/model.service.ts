@@ -148,7 +148,11 @@ export class ModelService {
   }
 
   forget(id: string): Outcome {
-    if (this.repository.configsUsing(id) > 0) {
+    let using = this.repository.configsUsing(id);
+    if (using < 0) {
+      return refusing("could not check whether model " + id + " is still in use");
+    }
+    if (using > 0) {
       return refusing("model " + id + " is used by a model config; delete or repoint those first");
     }
     let gone = this.repository.forget(id);

@@ -73,7 +73,11 @@ export class ModelRouterService {
   /** A router a menu choice points at cannot go: the menu would name something
    *  that is not there. */
   inUse(id: string): string {
-    if (this.repository.choicesOn(id) > 0) {
+    let onChoices = this.repository.choicesOn(id);
+    if (onChoices < 0) {
+      return "could not check whether router " + id + " is still in use";
+    }
+    if (onChoices > 0) {
       return "router " + id + " is what a menu choice points at; delete or "
         + "repoint that choice first";
     }

@@ -65,7 +65,11 @@ export class ModelChoiceService {
   /** Taking a choice off the menu is not the same as deleting it: the
    *  conversations already set to it would lose what they were answering on. */
   inUse(id: string): string {
-    if (this.repository.threadsOn(id) > 0) {
+    let onThreads = this.repository.threadsOn(id);
+    if (onThreads < 0) {
+      return "could not check whether model choice " + id + " is still in use";
+    }
+    if (onThreads > 0) {
       return "model choice " + id + " is what conversations are still set to; "
         + "take it off the menu instead — PUT /model-choices/" + id
         + " with {\"enabled\":false} leaves those conversations running";
