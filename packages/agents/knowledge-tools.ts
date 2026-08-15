@@ -223,7 +223,10 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (!gone.ok) {
       return no("\"" + source + "\" is still in the corpus — the delete failed, so agents keep retrieving it.");
     }
-    new DocumentRepository(db, "").forgetFiles(source);
+    let filed = new DocumentRepository(db, "").forgetFiles(source);
+    if (!filed.ok) {
+      return no("\"" + source + "\" left the corpus, but its kept file could not be deleted.");
+    }
     return yes("Forgotten: \"" + source + "\" — out of every agent's retrieval now.");
   }
 
