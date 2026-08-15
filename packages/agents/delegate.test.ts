@@ -192,6 +192,7 @@ test("a cycle is named, not descended into", () => {
     baseSeq: TURN_SEQ_NONE,
     owner: "",
     think: false,
+    scope: "",
   });
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
@@ -241,6 +242,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
     baseSeq: TURN_SEQ_NONE,
     owner: "",
     think: false,
+    scope: "",
   });
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
