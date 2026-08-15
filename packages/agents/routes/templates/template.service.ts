@@ -62,6 +62,9 @@ export class TemplateService {
   }
 
   update(id: string, document: string): Outcome {
+    if (jsonId(document) != id) {
+      return refusing("the id in the body must match the path");
+    }
     let written = this.repository.save(document);
     if (!written.ok) {
       return refusing(written.error);
@@ -86,6 +89,9 @@ export class TemplateService {
   }
 
   updateFile(fileId: string, document: string): Outcome {
+    if (jsonId(document) != fileId) {
+      return refusing("the id in the body must match the path");
+    }
     let written = this.repository.saveFile(document);
     if (!written.ok) {
       return refusing(written.error);
