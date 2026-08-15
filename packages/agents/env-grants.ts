@@ -172,7 +172,11 @@ export function envGrantMint(db: Db, m: EnvGrantMint): EnvGranted {
     usedAt: "",
     createdAt: m.now,
   };
-  persist(db, envGrantsMapping(), JSON.stringify(grant));
+  let written = persist(db, envGrantsMapping(), JSON.stringify(grant));
+  if (!written.ok) {
+    return envGrantRefused("the grant could not be stored, so the link would not "
+      + "open anything: " + written.error);
+  }
   let made: EnvGranted = {
     ok: true,
     token: token,
@@ -201,7 +205,12 @@ export function envTouch(db: Db, slug: string, now: string): bool {
     hostPort: row.hostPort, servePort: row.servePort, serveCmd: row.serveCmd,
     syncAt: row.syncAt, createdAt: row.createdAt, lastUsedAt: now,
   };
-  persist(db, envMapping(), JSON.stringify(seen));
+  let noted = persist(db, envMapping(), JSON.stringify(seen));
+  if (!noted.ok) {
+    console.error("envTouch: " + slug + " was not marked as watched, so the idle "
+      + "sweep may stop it under its reader: " + noted.error);
+    return false;
+  }
   return true;
 }
 
@@ -298,7 +307,13 @@ export function envGrantRedeem(db: Db, r: EnvRedeem): EnvRedeemed {
     id: grant.id, slug: grant.slug, owner: grant.owner,
     expiresAt: grant.expiresAt, usedAt: r.now, createdAt: grant.createdAt,
   };
-  persist(db, envGrantsMapping(), JSON.stringify(spent));
+  let marked = persist(db, envGrantsMapping(), JSON.stringify(spent));
+  if (!marked.ok) {
+    // Refused rather than let through: a grant that is not written as spent is
+    // a grant that redeems again, and this is the whole of the credential.
+    return envRedeemRefused("this grant could not be marked as used, so it is not "
+      + "being honoured; ask for another");
+  }
   let done: EnvRedeemed = {
     ok: true,
     slug: grant.slug,
@@ -328,8 +343,12 @@ export function envGrantSweep(db: Db, now: string): int {
   let i: int = 0;
   while (i < rows.length) {
     if (envStampLess(rows[i].expiresAt, now)) {
-      deleteWhere(db, envGrantsMapping(), "id = " + placeholderAt(db, 1), [rows[i].id]);
-      gone = gone + 1;
+      let cleared = deleteWhere(db, envGrantsMapping(), "id = " + placeholderAt(db, 1), [rows[i].id]);
+      if (cleared.ok) {
+        gone = gone + 1;
+      } else {
+        console.error("envGrantSweep: " + rows[i].id + " stayed: " + cleared.error);
+      }
     }
     i = i + 1;
   }
