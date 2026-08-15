@@ -1,6 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, persist, setEvery, unlink, unlinkAllPointingAt, unlinkAllOwnedBy } from "../../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, pageOrdered, persist, placeholderAt, repository, setEvery, unlink, unlinkAllPointingAt, unlinkAllOwnedBy } from "../../../../plume/plume.ts";
 import { AgentRetrievalRow, agentScopes, embeddingModel, grantScope, revokeScope } from "../../../knowledge.ts";
+import { ownerClause } from "../../../owner.ts";
 import { agentRepository } from "./entities/agent.entity.ts";
 import { agentRetrievalRepository } from "./entities/agent-retrieval.entity.ts";
 import { mcpServerRepository } from "../../connectivity/servers/entities/mcp-server.entity.ts";
@@ -8,7 +9,19 @@ import { modelConfigRepository } from "../../inference/model-configs/entities/mo
 import { modelRepository } from "../../inference/models/entities/model.entity.ts";
 import { skillRepository } from "../skills/entities/skill.entity.ts";
 import { AgentWebRagRow, agentWebRagRepository } from "./entities/agent-web-rag.entity.ts";
-import { runsOf } from "../../../runlog.ts";
+import { runRepository } from "../../conversations/runs/entities/run.entity.ts";
+
+// The runs table's own mapping, minus relations — the same shape
+// runlog.ts's runsMapping() builds from the same entity, kept in step here
+// rather than imported: runlog.ts also runs CRUD verbs of its own, and any
+// import from it flags this whole file under repository-delegates-to-
+// legacy-module.
+function runsMapping(): DbRepository {
+  return repository({
+    table: "runs", idField: "id", idColumn: "id",
+    fields: runRepository().fields,
+  });
+}
 
 export class AgentRepository {
   database: Db;
@@ -136,7 +149,25 @@ export class AgentRepository {
   }
 
   runs(id: string, tags: string[], limit: int): string {
-    return runsOf(this.database, id, tags, limit);
+    let keys: DbOrder[] = [{ column: "created_at", direction: "desc" }];
+    let where = "agent_id = " + placeholderAt(this.database, 1);
+    let args: string[] = [id];
+    let mine = ownerClause(this.database, tags, 2);
+    if (mine != "") {
+      where = where + " AND " + mine;
+      let i: int = 0;
+      while (i < tags.length) {
+        args.push(tags[i]);
+        i = i + 1;
+      }
+    }
+    return pageOrdered(this.database, runsMapping(), {
+      where: where,
+      args: args,
+      order: keys,
+      limit: limit,
+      offset: 0,
+    });
   }
 
   forget(id: string): string {
