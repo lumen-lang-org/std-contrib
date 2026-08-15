@@ -317,6 +317,9 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
   }
 
   if (call.name == "run_task_now") {
+    if (!row.enabled && enabledCount(db, call.owner) >= MAX_PER_OWNER) {
+      return no("that is " + `${MAX_PER_OWNER}` + " tasks already — one has to be paused or deleted before this one can run. list_tasks shows them.");
+    }
     let now = `${call.nowMs}`;
     let written = executeWith(db,
       "UPDATE scheduled_tasks SET next_at = " + db.placeholder
@@ -360,6 +363,9 @@ export function callTaskTool(db: Db, call: TaskToolCall): FileToolResult {
   let title = jsonText(call.args, "title").trim();
   let instruction = jsonText(call.args, "instruction").trim();
   let on = jsonFlag(call.args, "enabled", row.enabled);
+  if (on && !row.enabled && enabledCount(db, call.owner) >= MAX_PER_OWNER) {
+    return no("that is " + `${MAX_PER_OWNER}` + " tasks already — one has to be paused or deleted before another can run. list_tasks shows them.");
+  }
 
   let edited: TaskRow = {
     id: row.id, owner: row.owner, agentId: row.agentId,

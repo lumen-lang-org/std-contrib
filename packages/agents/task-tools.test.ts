@@ -74,12 +74,16 @@ function tasksFor(owner: string): TaskRow[] {
 }
 
 function planted(id: string, owner: string, title: string): void {
+  plantedWith(id, owner, title, true);
+}
+
+function plantedWith(id: string, owner: string, title: string, enabled: bool): void {
   let row: TaskRow = {
     id: id, owner: owner, agentId: "a1", modelChoiceId: "",
     title: title, instruction: "say something",
     kind: "every", cronExpr: "0 0 8 * * 1-5", tz: "Europe/Paris",
     nextAt: `${NOW + 3600000.0}`, runningSince: "",
-    enabled: true, failures: 0, pausedReason: "",
+    enabled: enabled, failures: 0, pausedReason: "",
     lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
     runCount: 0, createdAt: "", updatedAt: "",
   };
@@ -181,6 +185,56 @@ test("the limits are the route's own, not a second opinion", () => {
     "{\"instruction\":\"one more\",\"schedule\":\"every day at 08:00\"}");
   expect(!full.ok);
   expect(full.text.indexOf(`${MAX_PER_OWNER}`) >= 0);
+});
+
+test("resuming a paused task through run_task_now is bound by the same cap as creating one", () => {
+  seeded();
+  let n: int = 0;
+  while (n < MAX_PER_OWNER) {
+    planted("g" + `${n}`, "o3", "filler " + `${n}`);
+    n = n + 1;
+  }
+  plantedWith("paused", "o3", "Paused one", false);
+
+  let ran = call("o3", "run_task_now", "{\"id\":\"paused\"}");
+  expect(!ran.ok);
+  expect(ran.text.indexOf(`${MAX_PER_OWNER}`) >= 0);
+  let stillPaused = tasksFor("o3");
+  let i: int = 0;
+  let found = false;
+  while (i < stillPaused.length) {
+    if (stillPaused[i].id == "paused") {
+      expect(!stillPaused[i].enabled);
+      found = true;
+    }
+    i = i + 1;
+  }
+  expect(found);
+});
+
+test("resuming a paused task through change_task is bound by the same cap as creating one", () => {
+  seeded();
+  let n: int = 0;
+  while (n < MAX_PER_OWNER) {
+    planted("h" + `${n}`, "o4", "filler " + `${n}`);
+    n = n + 1;
+  }
+  plantedWith("paused2", "o4", "Paused two", false);
+
+  let resumed = call("o4", "change_task", "{\"id\":\"paused2\",\"enabled\":true}");
+  expect(!resumed.ok);
+  expect(resumed.text.indexOf(`${MAX_PER_OWNER}`) >= 0);
+  let stillPaused = tasksFor("o4");
+  let i: int = 0;
+  let found = false;
+  while (i < stillPaused.length) {
+    if (stillPaused[i].id == "paused2") {
+      expect(!stillPaused[i].enabled);
+      found = true;
+    }
+    i = i + 1;
+  }
+  expect(found);
 });
 
 test("nobody unnamed schedules anything", () => {
