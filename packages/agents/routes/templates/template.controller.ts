@@ -68,8 +68,8 @@ export class TemplateApi {
 
   @Post("/:id/files")
   @Guard(theTemplate)
-  addFile(@RequestBody document: string): Reply {
-    let made = this.templates.addFile(document);
+  addFile(@PathVariable("id") id: string, @RequestBody document: string): Reply {
+    let made = this.templates.addFile(id, document);
     if (made.fault != "") {
       return BadRequest(made.fault);
     }

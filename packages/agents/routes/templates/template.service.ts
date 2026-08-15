@@ -3,6 +3,7 @@ import { Outcome, produced, refusing } from "../../../rest/server.ts";
 import { stamp } from "../../api-core.ts";
 import { OfficeRenderAsk, officeRender } from "../../office-render.ts";
 import { createFault, jsonId } from "../../payload.ts";
+import { jsonText } from "../../scan.ts";
 import { TemplateBody } from "./dtos/template-body.dto.ts";
 import { TemplateFileBody } from "./dtos/template-file-body.dto.ts";
 import { TemplatePdfView } from "./dtos/template-pdf-view.dto.ts";
@@ -80,7 +81,10 @@ export class TemplateService {
     return produced("");
   }
 
-  addFile(document: string): Outcome {
+  addFile(id: string, document: string): Outcome {
+    if (jsonText(document, "templateId") != id) {
+      return refusing("the templateId in the body must match the path");
+    }
     let written = this.repository.saveFile(document);
     if (!written.ok) {
       return refusing(written.error);
