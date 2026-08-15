@@ -149,7 +149,10 @@ export function recordRun(db: Db, wrote: RunRecord): string {
       result: run.steps[i].result,
       ok: run.steps[i].ok,
     };
-    persist(db, runStepsMapping(), JSON.stringify(step));
+    let wroteStep = persist(db, runStepsMapping(), JSON.stringify(step));
+    if (!wroteStep.ok) {
+      console.error("recordRun: step " + `${run.steps[i].index}` + " of run " + id + " was not saved: " + wroteStep.error);
+    }
     i = i + 1;
   }
   return id;
