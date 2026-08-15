@@ -1,5 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbMatch, DbRepository, DbResult, DbSweep, deleteWhere, persist, placeholderAt, setOn, setWhere } from "../../../../plume/plume.ts";
+import { DbMatch, DbRepository, DbResult, DbSweep, deleteWhere, persist, placeholderAt, setOn, setWhere, skipLocked } from "../../../../plume/plume.ts";
 import { IndexJobRow, JOB_FAILED, JOB_INDEXED, JOB_INDEXING, JOB_QUEUED, indexJobRepository } from "./entities/index-job.entity.ts";
 
 export class JobRepository {
@@ -32,7 +32,7 @@ export class JobRepository {
     let sql = "UPDATE index_jobs SET status = " + this.database.placeholder
       + ", updated_at = " + placeholderAt(this.database, 2)
       + " WHERE id = (SELECT id FROM index_jobs WHERE status = " + placeholderAt(this.database, 3)
-      + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
+      + " ORDER BY created_at LIMIT 1" + skipLocked(this.database) + ")"
       + " RETURNING id, source, scope, model_id, body";
     if (!this.database.query(sql, [JOB_INDEXING, now, JOB_QUEUED])) {
       return none;

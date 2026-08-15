@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbOrder, DbRepository, countWhere, createTableSql, listOrdered, listWhere, placeholderAt } from "../plume/plume.ts";
+import { DbOrder, DbRepository, countWhere, createTableSql, listOrdered, listWhere, placeholderAt, skipLocked } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { next as nextFiring, fault as cronFault, civil, knownZone } from "../cron/cron.ts";
 import { scheduledTaskRepository } from "./routes/automation/tasks/entities/scheduled-task.entity.ts";
@@ -325,7 +325,7 @@ export function claimDue(db: Db, nowMs: number): TaskRow {
     + " WHERE id = (SELECT id FROM scheduled_tasks"
     + " WHERE enabled = true AND next_at <> '' AND next_at <= " + placeholderAt(db, 2)
     + " AND (running_since = '' OR running_since < " + placeholderAt(db, 3) + ")"
-    + " ORDER BY next_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
+    + " ORDER BY next_at LIMIT 1" + skipLocked(db) + ")"
     + " RETURNING id, owner, agent_id, model_choice_id, title, instruction,"
     + " kind, cron_expr, tz, next_at, failures, run_count";
   if (!db.query(sql, [now, now, stale])) {

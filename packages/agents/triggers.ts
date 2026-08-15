@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, findById, listOrdered, listWhere, persist, placeholderAt, repository, skipLocked } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { triggerBotRepository } from "./routes/automation/triggers/entities/trigger-bot.entity.ts";
 import { triggerInboxRepository } from "./routes/automation/triggers/entities/trigger-inbox.entity.ts";
@@ -492,7 +492,7 @@ export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
     + " WHERE id = (SELECT id FROM trigger_inbox"
     + " WHERE status = 'queued'"
     + " OR (status = 'running' AND updated_at < " + placeholderAt(db, 2) + ")"
-    + " ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
+    + " ORDER BY created_at LIMIT 1" + skipLocked(db) + ")"
     + " RETURNING id, owner, bot_id, workflow_id, update_id, chat_id, input, run_id, created_at, file_name, file_body, thread_id, speaker";
   if (!db.query(sql, [now, stale])) {
     return emptyMessage();

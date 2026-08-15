@@ -286,6 +286,22 @@ export function placeholderAt(db: Db, n: int): string {
   return "$" + `${n}`;
 }
 
+// The clause that makes a claim safe when more than one process is claiming:
+// the row picked by the subquery is locked, and a claimer that would block on
+// it takes the next row instead. PostgreSQL and MySQL have it; SQLite does not
+// and does not need it, since it serialises writers — but it does not ignore
+// the words either. `FOR UPDATE SKIP LOCKED` is a syntax error there, which
+// fails the whole statement: every claim answers "nothing", and a scheduler
+// reading that as "no work" spins for ever without saying anything.
+//
+// So the clause is spelled by the driver rather than written into the SQL.
+export function skipLocked(db: Db): string {
+  if (db.name == "sqlite") {
+    return "";
+  }
+  return " FOR UPDATE SKIP LOCKED";
+}
+
 export function safeSqlType(name: string): bool {
   if (name.length == 0 || name.length > 63) {
     return false;

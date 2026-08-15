@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, listOrdered, listWhere, placeholderAt, repository, skipLocked } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
@@ -295,7 +295,7 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
     + " WHERE id = (SELECT id FROM workflows"
     + " WHERE enabled = true AND next_at <> '' AND next_at <= " + placeholderAt(db, 2)
     + " AND (running_since = '' OR running_since < " + placeholderAt(db, 3) + ")"
-    + " ORDER BY next_at LIMIT 1 FOR UPDATE SKIP LOCKED)"
+    + " ORDER BY next_at LIMIT 1" + skipLocked(db) + ")"
     + " RETURNING id, owner, agent_id, model_choice_id, name, description,"
     + " graph, kind, cron_expr, tz, next_at, failures, run_count, published_graph";
   if (!db.query(sql, [now, now, stale])) {
