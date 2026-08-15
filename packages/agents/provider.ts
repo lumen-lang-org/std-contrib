@@ -236,20 +236,21 @@ function vertexVectorFrom(body: string): Embedding {
   }
   let pretty = rest.substring(open, close + 1);
   let literal = "";
-  let dims: int = 0;
+  let commas: int = 0;
   let i: int = 0;
   while (i < pretty.length) {
     let c = pretty.charAt(i);
     if (c == ",") {
-      dims = dims + 1;
+      commas = commas + 1;
     }
     if (c != " " && c != "\n" && c != "\r" && c != "\t") {
       literal = literal + c;
     }
     i = i + 1;
   }
-  if (dims > 0) {
-    dims = dims + 1;
+  let dims = commas + 1;
+  if (literal == "[]") {
+    dims = 0;
   }
   let out: Embedding = { ok: dims > 0, vector: literal, dimensions: dims, error: "" };
   if (dims == 0) {
