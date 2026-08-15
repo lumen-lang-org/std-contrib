@@ -1,10 +1,6 @@
-import { Guarded, Refused, Request, reject, resolve } from "../../../rest/server.ts";
-import { callerTags } from "../../api-core.ts";
-import { owningTag } from "../../owner.ts";
+import { Guarded, Request } from "../../../rest/server.ts";
+import { roleAtLeast } from "../../guards.ts";
 
 export function signedIn(request: Request): Guarded {
-  if (owningTag(callerTags(request)) == "") {
-    return reject(Refused(401, "sign in to use the playground"));
-  }
-  return resolve();
+  return roleAtLeast(request, "signed-in", "sign in to use the playground");
 }
