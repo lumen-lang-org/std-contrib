@@ -19,6 +19,7 @@ type ConfigRowView = {
 type ServerView = { id: string, serverName: string, transport: string, endpoint: string, enabled: bool };
 type SubAgentView = { id: string, agentName: string, enabled: bool };
 type SkillView = { id: string, skillName: string, description: string };
+type ScopeView = { scope: string };
 type AgentView = {
   id: string,
   agentName: string,
@@ -34,6 +35,7 @@ type AgentView = {
   servers: ServerView[],
   subAgents: SubAgentView[],
   skills: SkillView[],
+  scopes: ScopeView[],
 };
 
 function connect(): void {
@@ -49,6 +51,7 @@ function wipe(): void {
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
   execute(database, "DROP TABLE IF EXISTS agent_mcp_servers");
   execute(database, "DROP TABLE IF EXISTS agent_skills");
+  execute(database, "DROP TABLE IF EXISTS agent_scopes");
   execute(database, "DROP TABLE IF EXISTS skill_files");
   execute(database, "DROP TABLE IF EXISTS skills");
   execute(database, "DROP INDEX IF EXISTS prompts_by_name");
@@ -70,6 +73,9 @@ function wipe(): void {
 function seeded(): void {
   wipe();
   migrate(database, schemaPlan(database));
+  execute(database, "CREATE TABLE IF NOT EXISTS agent_scopes ("
+    + "agent_id " + database.textType + " NOT NULL, "
+    + "scope " + database.textType + " NOT NULL)");
 
   let opus: ModelRow = {
     id: "m1",
@@ -272,14 +278,14 @@ test("the plan creates every table, from the mappings", () => {
   wipe();
   let r = migrate(database, schemaPlan(database));
   expect(r.ok);
-  expect(r.applied == 65);
+  expect(r.applied == 66);
   expect(countWhere(database, modelsMapping(), "", []) == 0);
   expect(countWhere(database, agentsMapping(), "", []) == 0);
 });
 
 test("running the plan twice applies nothing the second time", () => {
   wipe();
-  expect(migrate(database, schemaPlan(database)).applied == 65);
+  expect(migrate(database, schemaPlan(database)).applied == 66);
   expect(migrate(database, schemaPlan(database)).applied == 0);
 });
 
