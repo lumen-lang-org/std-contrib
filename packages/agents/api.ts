@@ -3,7 +3,7 @@ import { Request, Reply, Mount, mountedRoutes, mountFault, dispatchedMounted, Re
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
-import { DbOrder, placeholderAt, connectDatabase, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
+import { DbOrder, placeholderAt, connectDatabase, databaseConnected, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel } from "./schema.ts";
 import { masterKey, masterKeyFault } from "./credentials.ts";
@@ -300,22 +300,40 @@ function sweepIdleEnvironments(db: Db): void {
   }
 }
 
+/** The database this deployment runs on, opened.
+ *
+ *  A connection that does not open is said so here, naming the address it was
+ *  tried at. Left unsaid it surfaces as whatever the first query happens to
+ *  fail with — for main() that is "the schema is not up to date", which sends
+ *  the reader looking at migrations over a wrong password. The two worker
+ *  loops that call this have no such reader at all, so the line in the log is
+ *  the only sign they are turning without a database. */
 function openDatabase(): Db {
   let pgHost = process.env("AGENTS_PG_HOST") ?? "";
   if (pgHost != "") {
     let pg = postgres();
+    let named = process.env("AGENTS_PG_DATABASE") ?? "agents";
+    let asUser = process.env("AGENTS_PG_USER") ?? "agents";
     let server: DbConfig = {
       host: pgHost,
-      database: process.env("AGENTS_PG_DATABASE") ?? "agents",
-      user: process.env("AGENTS_PG_USER") ?? "agents",
+      database: named,
+      user: asUser,
       password: process.env("AGENTS_PG_PASSWORD") ?? "",
     };
-    connectDatabase(pg, server);
+    let reached = connectDatabase(pg, server);
+    if (!reached.ok) {
+      console.error("the database did not open: postgres " + named + " at "
+        + pgHost + " as " + asUser + " — " + reached.error);
+    }
     return pg;
   }
   let db = sqlite();
-  let cfg: DbConfig = { filename: process.env("AGENTS_DB_FILE") ?? "/tmp/agents_api.db" };
-  connectDatabase(db, cfg);
+  let file = process.env("AGENTS_DB_FILE") ?? "/tmp/agents_api.db";
+  let cfg: DbConfig = { filename: file };
+  let opened = connectDatabase(db, cfg);
+  if (!opened.ok) {
+    console.error("the database did not open: sqlite at " + file + " — " + opened.error);
+  }
   return db;
 }
 
@@ -706,6 +724,12 @@ export function publishMenu(db: Db): string {
 
 function main(): void {
   let db = openDatabase();
+  // Before the migrations, so a connection that never opened is not reported
+  // as a schema that is behind. openDatabase has already named the address.
+  if (!databaseConnected(db)) {
+    console.error("the engine cannot start without its database");
+    return;
+  }
   let schema = migrationFault(db);
   if (schema != "") {
     console.error(schema);
