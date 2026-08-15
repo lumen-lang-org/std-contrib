@@ -94,7 +94,16 @@ function pass(db: Db, botId: string, who: string, master: string): void {
     let now = Date.now() as number;
     let verdict = mayRun(counted, recentRuns(db, counted.id, now), now);
     if (verdict.ok) {
-      let rowId = takeMessage(db, counted, said[i], now);
+      let taken = takeMessage(db, counted, said[i], now);
+      if (taken.fault != "") {
+        /** Neither filed nor known to be already held. Advancing the cursor
+         *  past it here is the one move that loses it for good, so the pass
+         *  ends where it is and Telegram sends this update again. */
+        console.error("trigger-poller: " + counted.id + ": " + taken.fault);
+        saveBot(db, counted);
+        return;
+      }
+      let rowId = taken.id;
       if (rowId != "") {
         counted = withRunCounted(counted, now);
         if (said[i].fileId != "") {
@@ -118,7 +127,13 @@ function pass(db: Db, botId: string, who: string, master: string): void {
         }
       }
     } else {
-      if (refuseMessage(db, counted, said[i], verdict.reason, now) != "") {
+      let refused = refuseMessage(db, counted, said[i], verdict.reason, now);
+      if (refused.fault != "") {
+        console.error("trigger-poller: " + counted.id + ": " + refused.fault);
+        saveBot(db, counted);
+        return;
+      }
+      if (refused.id != "") {
         try {
           sendMessage(token, said[i].chatId, verdict.reason, "");
         }

@@ -339,11 +339,16 @@ export function botsOf(db: Db, owner: string): string {
   });
 }
 
-export function alreadyHave(db: Db, botId: string, updateId: string): bool {
-  let rows = JSON.parse<TriggerInboxRow[]>(listWhere(db, triggerInboxMapping(),
+/** How many times this bot has already taken this update — 0 for a message
+ *  never seen, and -1 when that cannot be told.
+ *
+ *  Counted rather than listed, for the reason recentRuns is: listWhere answers
+ *  "[]" both for an update never seen and for a query that did not run, and
+ *  the difference decides whether a message is filed twice. */
+export function alreadyHave(db: Db, botId: string, updateId: string): int {
+  return countWhere(db, triggerInboxMapping(),
     "bot_id = " + db.placeholder + " AND update_id = " + placeholderAt(db, 2),
-    [botId, updateId]));
-  return rows.length > 0;
+    [botId, updateId]);
 }
 
 /** How many messages this bot has taken in the last minute, or -1 when that
@@ -408,9 +413,35 @@ export function saveBot(db: Db, bot: TriggerBotRow): void {
   }
 }
 
-export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, nowMs: number): string {
-  if (alreadyHave(db, bot.id, said.updateId)) {
-    return "";
+/** What became of an update the poller offered the inbox.
+ *
+ *  An id means it was filed. No id and no fault means the bot already had it,
+ *  which is the ordinary answer to Telegram resending an update. A fault means
+ *  neither could be established, so the caller must not treat the update as
+ *  dealt with — the cursor stays where it is and the update comes round again. */
+export type Taken = {
+  id: string,
+  fault: string,
+};
+
+function took(id: string): Taken {
+  let out: Taken = { id: id, fault: "" };
+  return out;
+}
+
+function couldNot(fault: string): Taken {
+  let out: Taken = { id: "", fault: fault };
+  return out;
+}
+
+export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, nowMs: number): Taken {
+  let held = alreadyHave(db, bot.id, said.updateId);
+  if (held < 0) {
+    return couldNot("could not tell whether update " + said.updateId
+      + " had already been taken");
+  }
+  if (held > 0) {
+    return took("");
   }
   let now = `${nowMs}`;
   let row: TriggerInboxRow = {
@@ -423,14 +454,19 @@ export function takeMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, now
   };
   let written = persist(db, triggerInboxMapping(), JSON.stringify(row));
   if (!written.ok) {
-    return "";
+    return couldNot("update " + said.updateId + " was not filed: " + written.error);
   }
-  return row.id;
+  return took(row.id);
 }
 
-export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, why: string, nowMs: number): string {
-  if (alreadyHave(db, bot.id, said.updateId)) {
-    return "";
+export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, why: string, nowMs: number): Taken {
+  let held = alreadyHave(db, bot.id, said.updateId);
+  if (held < 0) {
+    return couldNot("could not tell whether update " + said.updateId
+      + " had already been taken");
+  }
+  if (held > 0) {
+    return took("");
   }
   let now = `${nowMs}`;
   let row: TriggerInboxRow = {
@@ -443,9 +479,10 @@ export function refuseMessage(db: Db, bot: TriggerBotRow, said: TriggerUpdate, w
   };
   let written = persist(db, triggerInboxMapping(), JSON.stringify(row));
   if (!written.ok) {
-    return "";
+    return couldNot("the refusal of update " + said.updateId
+      + " was not filed: " + written.error);
   }
-  return row.id;
+  return took(row.id);
 }
 
 export function claimMessage(db: Db, nowMs: number): TriggerInboxRow {
