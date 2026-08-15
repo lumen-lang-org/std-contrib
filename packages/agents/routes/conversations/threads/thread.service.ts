@@ -1,5 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
-import { existsById, findById } from "../../../../plume/plume.ts";
+import { DbAssignment, existsById, findById, setOn } from "../../../../plume/plume.ts";
 import { Reply, Respond, BadRequest, CreatedJson, NotFound, OkJson } from "../../../../rest/server.ts";
 import { flush, traceId, tracing, tracerWithMoreSpans, tracerWithSession } from "../../../../tracing/tracing.ts";
 import { GUEST_DAILY_RUNS, askedChoice, choiceFault, guestQuotaJson, guestTag, stamp } from "../../../api-core.ts";
@@ -12,7 +12,7 @@ import { holdsOwner, owningTag } from "../../../owner.ts";
 import { assignProject, projectsMapping } from "../../../projects.ts";
 import { userTurn } from "../../../provider.ts";
 import { recordRun } from "../../../runlog.ts";
-import { askCancel, clearCancel } from "../../../schema.ts";
+import { threadRepository } from "./entities/thread.entity.ts";
 import { modelChoiceRepository } from "../../inference/models/entities/model-choice.entity.ts";
 import { ModelChoiceBody } from "../../inference/model-choices/dtos/model-choice-body.dto.ts";
 import { jsonRaw, jsonText } from "../../../scan.ts";
@@ -265,9 +265,10 @@ export class ThreadService {
   }
 
   cancel(id: string): Reply {
-    let fault = askCancel(this.database, id);
-    if (fault != "") {
-      return BadRequest(fault);
+    let asked: DbAssignment[] = [{ column: "cancel_asked", value: `${Date.now()}` }];
+    let wrote = setOn(this.database, threadRepository(), { id: id, values: asked });
+    if (!wrote.ok) {
+      return BadRequest(wrote.error);
     }
     let v: CancelAskedView = { asked: true };
     return OkJson(v);
@@ -277,10 +278,11 @@ export class ThreadService {
     let agentId = ownedThread(this.database, id, tags);
     // Before anything else: with the previous stop still on the row, the run
     // below would come straight back as "cancelled" and burn the turn.
-    let cleared = clearCancel(this.database, id);
-    if (cleared != "") {
+    let unasked: DbAssignment[] = [{ column: "cancel_asked", value: "" }];
+    let cleared = setOn(this.database, threadRepository(), { id: id, values: unasked });
+    if (!cleared.ok) {
       return BadRequest("the last stop on this conversation could not be lifted, so a new "
-        + "message would come back cancelled — " + cleared);
+        + "message would come back cancelled — " + cleared.error);
     }
     if (body == "") {
       return BadRequest("a body is required: {\"text\":\"...\"}");
