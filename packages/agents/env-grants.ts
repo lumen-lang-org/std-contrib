@@ -1,7 +1,8 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbOrder, DbRepository, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { EnvRow, envBySlug, envMapping, envReachAddr, envStampLess } from "./environments.ts";
+import { envGrantRepository } from "./routes/sandbox/environments/entities/env-grant.entity.ts";
 
 // A grant is how a browser is let into an environment's own origin.
 //
@@ -32,15 +33,7 @@ export type EnvGrantRow = {
 };
 
 export function envGrantsMapping(): DbRepository {
-  let fs: DbField[] = [
-    field("id", "id", "text"),
-    field("slug", "slug", "text"),
-    field("owner", "owner", "text"),
-    field("expiresAt", "expires_at", "text"),
-    field("usedAt", "used_at", "text"),
-    field("createdAt", "created_at", "text"),
-  ];
-  return repository({ table: "env_grants", idField: "id", idColumn: "id", fields: fs });
+  return envGrantRepository();
 }
 
 export function envGrantsPlan(db: Db): Migration[] {
