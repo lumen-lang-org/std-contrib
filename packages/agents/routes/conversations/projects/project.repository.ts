@@ -32,12 +32,21 @@ export class ProjectRepository {
     return persist(this.database, this.projects, document);
   }
 
+  /** The conversations are let go of first, and the row only if that worked.
+   *
+   *  The other order loses: a project deleted while its threads still name it
+   *  leaves them pointing at nothing, out of every project listing and with no
+   *  briefing, and the caller is told the delete succeeded. Failing here
+   *  instead leaves the project and its conversations exactly as they were. */
   remove(id: string): DbResult {
     let sweep: DbSweep = {
       values: [{ column: "project_id", value: "" }],
       match: [{ column: "project_id", operator: "=", value: id }],
     };
-    setWhere(this.database, threadRepository(), sweep);
+    let loosed = setWhere(this.database, threadRepository(), sweep);
+    if (!loosed.ok) {
+      return loosed;
+    }
     return deleteById(this.database, this.projects, id);
   }
 
