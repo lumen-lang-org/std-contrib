@@ -14,7 +14,14 @@ import { ToolSpec } from "./provider.ts";
 let database: Db = sqlite();
 
 function seeded(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_tools_test.db" };
+  let file = "/tmp/agents_tools_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
@@ -148,7 +155,14 @@ test("nothing is mounted, so nothing is described", () => {
 });
 
 function artifactFresh(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_tools_test.db" };
+  let file = "/tmp/agents_tools_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS artifact_versions");
@@ -335,7 +349,14 @@ test("the briefing overflow line points at search_artifacts, not a listing that 
 });
 
 function scriptFresh(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_tools_test.db" };
+  let file = "/tmp/agents_tools_test.db";
+  // Rebuilt from an empty file: the plan ALTERs tables this fixture does
+  // not drop, so re-running it over a leftover database stops partway
+  // and the suite then tests a schema production never has.
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS artifact_versions");
