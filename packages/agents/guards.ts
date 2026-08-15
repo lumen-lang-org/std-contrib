@@ -16,7 +16,7 @@ export function pgOnly(db: Db, said: string): Guarded {
 export function roleAtLeast(req: Request, role: string, said: string): Guarded {
   let tags = callerTags(req);
   if (role == "signed-in") {
-    if (guestTag(tags) != "" || owningTag(tags) == "" || owningTag(tags) == UNKNOWN_TAG) {
+    if (guestTag(tags) != "" || (owningTag(tags) == "" && tags.length > 0) || owningTag(tags) == UNKNOWN_TAG) {
       return reject(BadRequest(said));
     }
     return resolve();
@@ -38,7 +38,7 @@ export function roleAtLeast(req: Request, role: string, said: string): Guarded {
 // the same as being told no.
 export function ownedOrEmpty(req: Request): Guarded {
   let tags = callerTags(req);
-  if (owningTag(tags) == "" || owningTag(tags) == UNKNOWN_TAG) {
+  if ((owningTag(tags) == "" && tags.length > 0) || owningTag(tags) == UNKNOWN_TAG) {
     return reject(Ok("[]"));
   }
   return resolve();
