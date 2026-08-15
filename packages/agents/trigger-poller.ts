@@ -192,7 +192,7 @@ function sendMessage(token: string, chatId: string, text: string, markup: string
   let ask = "{\"chat_id\":" + chatId + ",\"text\":" + JSON.stringify(text)
     + (markup == "" ? "" : ",\"reply_markup\":" + markup) + "}";
   let res = http.request(api(token, "sendMessage"), "POST", ask, jsonHeaders());
-  if (jsonText(res.body, "ok").trim() == "" && res.status >= 400) {
+  if (!res.ok) {
     throw new Error("telegram refused the message: " + `${res.status}`);
   }
 }
