@@ -44,8 +44,19 @@ function delegates(parent: string, child: string): void {
   execute(database, "INSERT INTO agent_sub_agents VALUES ('" + parent + "','" + child + "')");
 }
 
+let seededRound: int = 0;
+
 function seeded(): void {
-  let cfg: DbConfig = { filename: "/tmp/agents_delegate_test.db" };
+  // A fixed path here reuses one sqlite file across every seeded() call in
+  // this test run. That is fine for every other table, but model_configs'
+  // "model" relation (schema.ts's modelConfigsMapping) joins against models,
+  // and dropping + recreating models on the SAME file — not merely the same
+  // connection, a fresh connectDatabase to the same path reproduces it too —
+  // makes that relation silently start returning null instead of erroring,
+  // on every seeded() call after the first. A distinct file per call sidesteps
+  // it; the underlying plume/sqlite.ts behavior is a separate, deeper issue.
+  seededRound = seededRound + 1;
+  let cfg: DbConfig = { filename: "/tmp/agents_delegate_test_" + `${seededRound}` + ".db" };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
