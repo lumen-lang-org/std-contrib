@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbRepository, existsById } from "../plume/plume.ts";
+import { DbRepository, countWhere } from "../plume/plume.ts";
 import { ScopeNode } from "./routes/authoring/scopes/scope.utils.ts";
 
 export function jsonId(document: string): string {
@@ -34,7 +34,16 @@ export function createFault(db: Db, repo: DbRepository, document: string): strin
   if (id == "") {
     return "an \"id\" is required";
   }
-  if (existsById(db, repo, id)) {
+  // countWhere rather than existsById, because existsById answers false both
+  // for "no such row" and for "the query did not run", and this guard is the
+  // only thing standing between a POST and persist's upsert. Unreadable, it
+  // used to report no clash and the create would overwrite the row it was
+  // meant to refuse.
+  let held = countWhere(db, repo, repo.idColumn + " = " + db.placeholder, [id]);
+  if (held < 0) {
+    return "could not check whether \"" + id + "\" already exists";
+  }
+  if (held > 0) {
     return "\"" + id + "\" already exists; a POST creates, and changing a row is a PUT";
   }
   return "";
