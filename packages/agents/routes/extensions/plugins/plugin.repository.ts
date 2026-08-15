@@ -60,20 +60,35 @@ export class PluginRepository {
     return findById(this.database, mcpServerRepository(), id);
   }
 
+  /** Why this plugin cannot be installed, or "". A count that could not be
+   *  taken is refused rather than read as no clash: installing over a name
+   *  that is already here is what this exists to prevent. */
   clash(manifest: Manifest): string {
-    if (countWhere(this.database, this.plugins, "plugin_name = " + placeholderAt(this.database, 1), [manifest.pluginName]) > 0) {
+    let named = countWhere(this.database, this.plugins, "plugin_name = " + placeholderAt(this.database, 1), [manifest.pluginName]);
+    if (named < 0) {
+      return "could not check whether \"" + manifest.pluginName + "\" is already installed";
+    }
+    if (named > 0) {
       return "\"" + manifest.pluginName + "\" is already installed — remove it first to install it again";
     }
     let i: int = 0;
     while (i < manifest.skills.length) {
-      if (countWhere(this.database, skillRepository(), "skill_name = " + placeholderAt(this.database, 1), [manifest.skills[i].skillName]) > 0) {
+      let skills = countWhere(this.database, skillRepository(), "skill_name = " + placeholderAt(this.database, 1), [manifest.skills[i].skillName]);
+      if (skills < 0) {
+        return "could not check whether a skill called \"" + manifest.skills[i].skillName + "\" already exists here";
+      }
+      if (skills > 0) {
         return "a skill called \"" + manifest.skills[i].skillName + "\" already exists here; rename it, or remove it, before installing this plugin";
       }
       i = i + 1;
     }
     let c: int = 0;
     while (c < manifest.connectors.length) {
-      if (countWhere(this.database, mcpServerRepository(), "server_name = " + placeholderAt(this.database, 1), [manifest.connectors[c].serverName]) > 0) {
+      let servers = countWhere(this.database, mcpServerRepository(), "server_name = " + placeholderAt(this.database, 1), [manifest.connectors[c].serverName]);
+      if (servers < 0) {
+        return "could not check whether a connector called \"" + manifest.connectors[c].serverName + "\" already exists here";
+      }
+      if (servers > 0) {
         return "a connector called \"" + manifest.connectors[c].serverName + "\" already exists here";
       }
       c = c + 1;

@@ -82,9 +82,16 @@ export class SkillService {
     let base = from.skillName + "-local";
     let name = base;
     let n: int = 2;
-    while (this.repository.named(name) > 0) {
+    // A name is only free if the count says so. Unreadable, the loop would
+    // stop on its first turn and hand back a name something else may hold.
+    let taken = this.repository.named(name);
+    while (taken > 0) {
       name = base + "-" + `${n}`;
       n = n + 1;
+      taken = this.repository.named(name);
+    }
+    if (taken < 0) {
+      return refusing("could not check whether \"" + name + "\" is already taken");
     }
     let made = localCopyOf(from, crypto.randomUUID(), name);
     let written = this.repository.save(JSON.stringify(made));
