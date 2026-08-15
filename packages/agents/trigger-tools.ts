@@ -110,8 +110,14 @@ function workflowSaid(db: Db, owner: string, said: string): WorkflowRow {
   let sql = "SELECT id FROM workflows WHERE owner = " + db.placeholder
     + " AND LOWER(name) = " + placeholderAt(db, 2);
   if (db.query(sql, [owner, said.toLowerCase()]) && db.rows() == 1) {
-    let row2: WorkflowRow = JSON.parse<WorkflowRow>(findById(db, workflowsMapping(), db.value(0, 0)));
-    return row2;
+    // The id came from the SELECT above, so the row was there a moment ago —
+    // but "" is also what a read that did not run answers, and parsing it
+    // throws out of the turn rather than answering the tool call.
+    let named = findById(db, workflowsMapping(), db.value(0, 0));
+    if (named != "") {
+      let row2: WorkflowRow = JSON.parse<WorkflowRow>(named);
+      return row2;
+    }
   }
   let none: WorkflowRow = {
     id: "", owner: "", agentId: "", modelChoiceId: "", name: "", description: "",

@@ -810,7 +810,15 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     if (!db.query(sql, [now, now, row.id])) {
       return no("nothing was published — \"" + row.name + "\" still runs the version it ran before.");
     }
-    let fresh: WorkflowRow = JSON.parse<WorkflowRow>(findById(db, workflowsMapping(), row.id));
+    // Read back for the description only. findById answers "" for a row that
+    // has gone as well as for a read that did not run, and JSON.parse of ""
+    // throws out of the whole turn — so the publish, which has already
+    // happened, would be reported as nothing at all.
+    let after = findById(db, workflowsMapping(), row.id);
+    if (after == "") {
+      return yes("Published — messages and the clock now run what you see.");
+    }
+    let fresh: WorkflowRow = JSON.parse<WorkflowRow>(after);
     return yes("Published — messages and the clock now run what you see. " + describe(fresh, false));
   }
 
