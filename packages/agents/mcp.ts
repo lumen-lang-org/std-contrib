@@ -99,7 +99,7 @@ function rpcWith(endpoint: string, extra: Map<string, string>, id: int, method: 
   body = body + "}";
 
   let res = http.request(endpoint, "POST", body, headers);
-  if (res.status == 0) {
+  if (res.status < 0) {
     let failed: McpCall = { ok: false, text: "", error: "no answer from " + endpoint };
     return failed;
   }

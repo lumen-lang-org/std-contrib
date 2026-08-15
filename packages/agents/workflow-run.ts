@@ -238,7 +238,7 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
   }
   let body = node.method == "GET" ? "" : fill(node.body, ctx);
   let res = http.request(url, node.method, body, headers);
-  if (res.status == 0) {
+  if (res.status < 0) {
     return stepFailed("no answer from " + url);
   }
   if (res.status < 200 || res.status > 299) {

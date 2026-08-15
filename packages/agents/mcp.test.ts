@@ -32,6 +32,7 @@ test("an unreachable server is a refusal, not a crash", () => {
   let r = initialize(server("http", "http://127.0.0.1:1", true), "");
   expect(!r.ok);
   expect(r.error != "");
+  expect(r.error.indexOf("no answer from") >= 0);
 });
 
 test("a reply that spells out a null error is a success", () => {
