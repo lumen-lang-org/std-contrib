@@ -20,7 +20,9 @@ import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { documentFilesMapping } from "./document-files.ts";
 import { DocumentRepository } from "./routes/knowledge/documents/document.repository.ts";
-import { migrationFault, wholePlan, bearerRefused, askedPick, blankRouter, mergedRouter, preEncodedCandidates, candidatesFault, routerRowFault, withCanonicalCandidates, routerJson, allRouters, routerInUse, publishMenu } from "./api.ts";
+import { migrationFault, wholePlan, bearerRefused, askedPick, publishMenu } from "./api.ts";
+import { blankRouter, candidatesFault, mergedRouter, preEncodedCandidates, routerJson, routerRowFault, withCanonicalCandidates } from "./routes/inference/model-routers/model-router.utils.ts";
+import { ModelRouterService } from "./routes/inference/model-routers/model-router.service.ts";
 import { blankChoice, choiceRowFault, mergedChoice } from "./routes/inference/model-choices/model-choice.utils.ts";
 import { ModelChoiceService } from "./routes/inference/model-choices/model-choice.service.ts";
 import { chatConfigFault, configFault, mergedConfig } from "./routes/inference/model-configs/model-config.utils.ts";
@@ -1038,7 +1040,8 @@ test("a router is written as a real array and comes back as one", () => {
   expect(settled.candidatesJson.indexOf("\"when\":\"plans\"") >= 0);
   persist(database, modelRoutersMapping(), JSON.stringify(settled));
 
-  let wire = routerJson(allRouters(database)[0]);
+  let routers = new ModelRouterService(database);
+  let wire = routerJson(routers.repository.all()[0]);
   expect(wire.indexOf("\"candidates\":[{") >= 0);
   expect(wire.indexOf("candidatesJson") < 0);
   expect(wire.indexOf("\"escalateOnly\":false") >= 0);
@@ -1128,13 +1131,14 @@ test("neither a choice nor a router can be deleted out from under what points at
     kind: "router", configId: "", routerId: "rt-1", tier: "", enabled: true, rank: 0 };
   persist(database, modelChoicesMapping(), JSON.stringify(onMenu));
 
-  expect(routerInUse(database, "rt-1").indexOf("menu choice") >= 0);
-  expect(routerInUse(database, "rt-1").indexOf("repoint") >= 0);
+  let routers = new ModelRouterService(database);
+  expect(routers.inUse("rt-1").indexOf("menu choice") >= 0);
+  expect(routers.inUse("rt-1").indexOf("repoint") >= 0);
   let configs = new ModelConfigService(database);
   expect(configs.inUse("c-fast").indexOf("router") >= 0);
   deleteById(database, modelChoicesMapping(), "ch-auto");
-  expect(routerInUse(database, "rt-1") == "");
-  expect(routerInUse(database, "rt-never-existed") == "");
+  expect(routers.inUse("rt-1") == "");
+  expect(routers.inUse("rt-never-existed") == "");
 
   let fast: ModelChoiceRow = { id: "ch-fast", label: "Fast", description: "quickly",
     kind: "config", configId: "c-fast", routerId: "", tier: "", enabled: true, rank: 1 };
