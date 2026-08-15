@@ -1,5 +1,5 @@
 import { Db } from "../../../plume/driver.ts";
-import { DbRepository, executeWith, persist, placeholderAt } from "../../../plume/plume.ts";
+import { DbMatch, DbRepository, DbSweep, deleteWhere, persist, placeholderAt, setOn, setWhere } from "../../../plume/plume.ts";
 import { IndexJobRow, JOB_FAILED, JOB_INDEXED, JOB_INDEXING, JOB_QUEUED, indexJobRepository } from "./entities/index-job.entity.ts";
 
 export class JobRepository {
@@ -49,37 +49,43 @@ export class JobRepository {
   }
 
   markIndexed(id: string, chunks: int, now: string): void {
-    executeWith(this.database, "UPDATE index_jobs SET status = " + this.database.placeholder
-      + ", chunks = " + placeholderAt(this.database, 2)
-      + ", updated_at = " + placeholderAt(this.database, 3)
-      + " WHERE id = " + placeholderAt(this.database, 4),
-      [JOB_INDEXED, `${chunks}`, now, id]);
+    setOn(this.database, this.jobs, {
+      id: id,
+      values: [
+        { column: "status", value: JOB_INDEXED },
+        { column: "chunks", value: `${chunks}` },
+        { column: "updated_at", value: now },
+      ],
+    });
   }
 
   markFailed(id: string, why: string, now: string): void {
-    executeWith(this.database, "UPDATE index_jobs SET status = " + this.database.placeholder
-      + ", error = " + placeholderAt(this.database, 2)
-      + ", updated_at = " + placeholderAt(this.database, 3)
-      + " WHERE id = " + placeholderAt(this.database, 4),
-      [JOB_FAILED, why, now, id]);
+    setOn(this.database, this.jobs, {
+      id: id,
+      values: [
+        { column: "status", value: JOB_FAILED },
+        { column: "error", value: why },
+        { column: "updated_at", value: now },
+      ],
+    });
   }
 
   requeueStalled(before: string): void {
-    if (before == "") {
-      executeWith(this.database, "UPDATE index_jobs SET status = " + this.database.placeholder
-        + " WHERE status = " + placeholderAt(this.database, 2),
-        [JOB_QUEUED, JOB_INDEXING]);
-      return;
+    let match: DbMatch[] = [{ column: "status", operator: "=", value: JOB_INDEXING }];
+    if (before != "") {
+      match.push({ column: "updated_at", operator: "<", value: before });
     }
-    executeWith(this.database, "UPDATE index_jobs SET status = " + this.database.placeholder
-      + " WHERE status = " + placeholderAt(this.database, 2)
-      + " AND updated_at < " + placeholderAt(this.database, 3),
-      [JOB_QUEUED, JOB_INDEXING, before]);
+    let sweep: DbSweep = {
+      values: [{ column: "status", value: JOB_QUEUED }],
+      match: match,
+    };
+    setWhere(this.database, this.jobs, sweep);
   }
 
   forgetFinished(before: string): void {
-    executeWith(this.database, "DELETE FROM index_jobs WHERE status = " + this.database.placeholder
-      + " AND updated_at < " + placeholderAt(this.database, 2), [JOB_INDEXED, before]);
+    deleteWhere(this.database, this.jobs,
+      "status = " + this.database.placeholder + " AND updated_at < " + placeholderAt(this.database, 2),
+      [JOB_INDEXED, before]);
   }
 
   pending(scope: string): IndexJobRow[] {
