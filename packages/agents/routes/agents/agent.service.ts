@@ -68,6 +68,12 @@ export class AgentService {
     if (wrong != "") {
       return refusing(wrong);
     }
+    if (body.isDefault) {
+      let cleared = this.repository.clearDefaults();
+      if (!cleared.ok) {
+        return refusing(cleared.error);
+      }
+    }
     let written = this.repository.save(JSON.stringify(body));
     if (!written.ok) {
       return refusing(written.error);
@@ -84,7 +90,10 @@ export class AgentService {
       return refusing(wrong);
     }
     if (body.isDefault) {
-      this.repository.clearDefaults();
+      let cleared = this.repository.clearDefaults();
+      if (!cleared.ok) {
+        return refusing(cleared.error);
+      }
     }
     let written = this.repository.save(JSON.stringify(body));
     if (!written.ok) {
