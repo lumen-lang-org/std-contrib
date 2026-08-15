@@ -1,7 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
 import { Outcome, produced, refusing } from "../../../../rest/server.ts";
 import { stamp } from "../../../api-core.ts";
-import { credentialFor, forgetCredential, hasCredential, storeCredential } from "../../../credentials.ts";
+import { credentialFor, forgetCredential, forgetCredentialFault, hasCredential, storeCredential } from "../../../credentials.ts";
 import { AuthProviderAsk } from "./dtos/auth-provider-ask.dto.ts";
 import { AuthProviderResolvedView } from "./dtos/auth-provider-resolved-view.dto.ts";
 import { AuthProviderRecord } from "./dtos/auth-provider-record.dto.ts";
@@ -109,7 +109,10 @@ export class AuthProviderService {
   }
 
   forget(id: string): Outcome {
-    forgetCredential(this.repository.database, "oauth:" + id);
+    let dropped = forgetCredentialFault(this.repository.database, "oauth:" + id);
+    if (dropped != "") {
+      return refusing("the provider's secret is still stored: " + dropped);
+    }
     let gone = this.repository.remove(id);
     if (!gone.ok) {
       return refusing(gone.error);

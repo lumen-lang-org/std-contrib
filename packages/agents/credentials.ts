@@ -79,6 +79,23 @@ export function forgetCredential(db: Db, provider: string): bool {
   return deleteById(db, credentialsMapping(), credentialId(provider)).ok;
 }
 
+/** The same removal, said in a sentence a caller can pass on.
+ *
+ *  forgetCredential answers false for two different things — the credential
+ *  was never there, and the credential is there and will not go — and only the
+ *  second is a fault. Anything about to tell somebody their secret has been
+ *  removed wants this one. */
+export function forgetCredentialFault(db: Db, provider: string): string {
+  if (!existsById(db, credentialsMapping(), credentialId(provider))) {
+    return "";
+  }
+  let gone = deleteById(db, credentialsMapping(), credentialId(provider));
+  if (gone.ok) {
+    return "";
+  }
+  return gone.error;
+}
+
 export function destinationOf(url: string): string {
   let text = url.trim();
   let mark = text.indexOf("://");

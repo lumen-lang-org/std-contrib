@@ -2,7 +2,7 @@ import { Db } from "../../../../plume/driver.ts";
 import { Outcome, produced, refusing } from "../../../../rest/server.ts";
 import { stamp } from "../../../api-core.ts";
 import { accessTokenFor, connectionOf, forgetConnector, setToolOn, suppliedClientId, toolsOff, userTokenKey } from "../../../connect.ts";
-import { DestinationMove, destinationFault, forgetCredential, hasCredential, storeCredential } from "../../../credentials.ts";
+import { DestinationMove, destinationFault, forgetCredential, forgetCredentialFault, hasCredential, storeCredential } from "../../../credentials.ts";
 import { forgetRoster, rememberRoster, rosterOf, rosterWithSwitches } from "../../../mcp-roster.ts";
 import { toolListing } from "../../../mcp.ts";
 import { jsonId } from "../../../payload.ts";
@@ -222,14 +222,22 @@ export class ServerService {
     if (owner == "") {
       return refusing("nobody is signed in, so there is nothing of theirs to forget");
     }
-    forgetCredential(this.repository.database, userTokenKey(id, owner));
+    let dropped = forgetCredentialFault(this.repository.database, userTokenKey(id, owner));
+    if (dropped != "") {
+      return refusing("your token for this server is still stored: " + dropped);
+    }
     return produced("");
   }
 
   forgetStoredServer(id: string): string {
     let fault = this.repository.forget(id);
-    forgetCredential(this.repository.database, "mcp:" + id);
-    return fault;
+    let dropped = forgetCredentialFault(this.repository.database, "mcp:" + id);
+    if (fault != "") {
+      return fault;
+    }
+    // Said even with the row gone: once the server is deleted nothing in the
+    // console can reach the token it left behind.
+    return dropped;
   }
 
   forget(id: string): string {
