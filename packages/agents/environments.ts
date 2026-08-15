@@ -323,13 +323,22 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       envForward(opened, envForwardHost());
     }
     let slug = envSlugNew();
-    envSave(db, {
+    let kept = envSave(db, {
       threadId: e.threadId, name: name, image: e.image, network: e.network,
       status: "running", slug: slug,
       hostPort: opened, servePort: e.serve ? envServePort() : 0,
       serveCmd: e.command, syncAt: "",
       createdAt: e.now, lastUsedAt: e.now,
     });
+    if (kept != "") {
+      // The container is up, and unrecorded it is unreachable and unsweepable.
+      // Taken down again rather than left behind: an environment nobody can
+      // name is worse than one that has to be asked for twice.
+      envDocker(["rm", "-f", container]);
+      envNetworkDown(e.threadId, name);
+      return envRefused("the environment started but could not be written down, so it "
+        + "was taken down again: " + kept);
+    }
     let fresh: EnvEnsured = {
       ok: true,
       container: container,
@@ -401,13 +410,19 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   // Rows made before environments had names of their own get one here, rather
   // than in a migration that would have to invent randomness in SQL.
   let slug = row.slug == "" ? envSlugNew() : row.slug;
-  envSave(db, {
+  let kept = envSave(db, {
     threadId: row.threadId, name: row.name, image: row.image,
     network: row.network != 0 || serves, status: "running", slug: slug,
     hostPort: opened, servePort: serves ? envServePort() : 0,
     serveCmd: command, syncAt: row.syncAt,
     createdAt: row.createdAt, lastUsedAt: e.now,
   });
+  if (kept != "") {
+    // Not taken down: this container was already there and the row still
+    // describes it, only with an older port. Said, and the caller decides.
+    return envRefused("the environment is running, but where it is now could not be "
+      + "written down: " + kept);
+  }
   let back: EnvEnsured = {
     ok: true,
     container: container,
@@ -511,7 +526,14 @@ export function envBySlug(db: Db, slug: string): EnvRow {
   return rows.length == 0 ? none : rows[0];
 }
 
-function envSave(db: Db, k: EnvKeep): void {
+/** The row that says this container exists, and where its port is.
+ *
+ *  Returns why it could not be written, if it could not. The row is the only
+ *  record: docker is asked what is running, but nothing else remembers which
+ *  conversation a container belongs to, which port was published, or that it
+ *  should be swept. A container started and not recorded is a container
+ *  nothing will stop, reach or reuse. */
+function envSave(db: Db, k: EnvKeep): string {
   let row: EnvRow = {
     id: k.threadId + ":" + k.name, threadId: k.threadId, name: k.name, image: k.image,
     network: k.network ? 1 : 0, status: k.status, slug: k.slug,
@@ -519,7 +541,11 @@ function envSave(db: Db, k: EnvKeep): void {
     syncAt: k.syncAt,
     createdAt: k.createdAt, lastUsedAt: k.lastUsedAt,
   };
-  persist(db, envMapping(), JSON.stringify(row));
+  let written = persist(db, envMapping(), JSON.stringify(row));
+  if (!written.ok) {
+    return written.error;
+  }
+  return "";
 }
 
 export function envWorkspaceVolume(threadId: string): string {
@@ -986,13 +1012,19 @@ export function envIdle(db: Db, s: EnvSweep): int {
       envUnforward(row.hostPort);
       // The published port goes with the container. Leaving the old number in
       // the row would point the gateway at whatever takes that port next.
-      envSave(db, {
+      let noted = envSave(db, {
         threadId: row.threadId, name: row.name, image: row.image,
         network: row.network != 0, status: "stopped", slug: row.slug,
         hostPort: 0, servePort: row.servePort, serveCmd: row.serveCmd,
         syncAt: row.syncAt,
         createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
       });
+      if (noted != "") {
+        // The container is stopped either way; what is lost is the row saying
+        // so, and the old published port pointing at whatever takes it next.
+        console.error("environments: " + row.threadId + ":" + row.name
+          + " was stopped but still reads as running — " + noted);
+      }
       stopped = stopped + 1;
     }
     i = i + 1;
@@ -1028,13 +1060,18 @@ export function envReforward(db: Db, now: string): int {
       carried = carried + 1;
     }
     if (opened != row.hostPort) {
-      envSave(db, {
+      let noted = envSave(db, {
         threadId: row.threadId, name: row.name, image: row.image,
         network: row.network != 0, status: opened == 0 ? "stopped" : "running",
         slug: row.slug, hostPort: opened, servePort: row.servePort,
         serveCmd: row.serveCmd, syncAt: row.syncAt,
         createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
       });
+      if (noted != "") {
+        console.error("environments: " + row.threadId + ":" + row.name
+          + " came back on port " + `${opened}` + ", which could not be written down — "
+          + "the gateway will keep sending traffic to " + `${row.hostPort}` + ": " + noted);
+      }
     }
     i = i + 1;
   }
@@ -1056,7 +1093,11 @@ export function envForget(db: Db, threadId: string): void {
   envDocker(["volume", "rm", "-f", envHomeVolume(threadId)]);
   envDocker(["volume", "rm", "-f", envRunVolume(threadId)]);
   envDocker(["volume", "rm", "-f", envSkillsVolume(threadId)]);
-  deleteWhere(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId]);
+  let cleared = deleteWhere(db, envMapping(), "thread_id = " + placeholderAt(db, 1), [threadId]);
+  if (!cleared.ok) {
+    console.error("environments: the environments of " + threadId + " were taken down but "
+      + "their rows stayed: " + cleared.error);
+  }
 }
 
 /** Record how far a sync got, taking the stamp from the container's own clock.
@@ -1078,11 +1119,14 @@ export function envServing(db: Db): EnvRow[] {
   return JSON.parse<EnvRow[]>(listed);
 }
 
-export function envMarkSynced(db: Db, row: EnvRow, stamp: string): void {
+/** Returns why the sync mark could not be written, if it could not: unwritten,
+ *  the next sync compares against the older stamp and copies back files it has
+ *  already seen. */
+export function envMarkSynced(db: Db, row: EnvRow, stamp: string): string {
   if (stamp == "") {
-    return;
+    return "";
   }
-  envSave(db, {
+  return envSave(db, {
     threadId: row.threadId, name: row.name, image: row.image,
     network: row.network != 0, status: row.status, slug: row.slug,
     hostPort: row.hostPort, servePort: row.servePort, serveCmd: row.serveCmd,
@@ -1263,7 +1307,15 @@ export function envDrop(db: Db, threadId: string, name: string): bool {
   // network per environment means a leaked network per environment otherwise,
   // and docker's address pool is not endless.
   envNetworkDown(threadId, name);
-  deleteWhere(db, envMapping(), "id = " + placeholderAt(db, 1), [threadId + ":" + name]);
+  let cleared = deleteWhere(db, envMapping(), "id = " + placeholderAt(db, 1), [threadId + ":" + name]);
+  if (!cleared.ok) {
+    // The container is gone; the row saying it is there is not. Reported as
+    // not dropped, because the environment is still listed and still named,
+    // and answering "removed" would be a removal the next GET contradicts.
+    console.error("environments: " + threadId + ":" + name + " was taken down but its row "
+      + "stayed: " + cleared.error);
+    return false;
+  }
   if (envList(db, threadId).length == 0) {
     envDocker(["volume", "rm", "-f", envWorkspaceVolume(threadId)]);
     envDocker(["volume", "rm", "-f", envHomeVolume(threadId)]);

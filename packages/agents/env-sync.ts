@@ -291,7 +291,11 @@ export function envMaterialise(db: Db, slug: string, stageDir: string): EnvSynce
     // container runs as — docker cp decides that, and it decides wrong for a
     // hardened container. Handed over before anything tries to build.
     envOwnVolumes(row.threadId, row.image);
-    envMarkSynced(db, row, envSyncClock(row));
+    let marked = envMarkSynced(db, row, envSyncClock(row));
+    if (marked != "") {
+      console.error("env-sync: " + row.threadId + ":" + row.name + " was synced but the mark "
+        + "was not written, so the next sync copies these files back again: " + marked);
+    }
   }
   return put;
 }
