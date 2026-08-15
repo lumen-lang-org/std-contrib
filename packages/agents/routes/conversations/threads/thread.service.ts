@@ -176,7 +176,13 @@ export class ThreadService {
       return BadRequest("the article could not be attached: " + wrote);
     }
 
-    nameThread(this.database, id, story.headline);
+    // The view below reports this headline as the thread's title, so a name
+    // that did not land makes the reply disagree with the row.
+    let named = nameThread(this.database, id, story.headline);
+    if (named != "") {
+      console.error("threads: the conversation opened from story " + storyId
+        + " could not be named and will show untitled — " + named);
+    }
 
     let v: ThreadFromStoryView = {
       id: id, agentId: agentId, modelChoiceId: chosen, title: story.headline,

@@ -720,7 +720,11 @@ export function remixThread(db: Db, ask: RemixAsk): Remixed {
   // Named after what it was forked from, because a starting point's whole
   // claim is that somebody already decided what this conversation is.
   if (source.title != "") {
-    nameThread(db, fresh, source.title);
+    let named = nameThread(db, fresh, source.title);
+    if (named != "") {
+      console.error("remix: the fork of " + ask.sourceId + " could not be named \"" + source.title
+        + "\" and will show untitled — " + named);
+    }
   }
 
   let made: Remixed = { threadId: fresh, files: files, turns: turns, fault: "" };
@@ -823,7 +827,16 @@ export function routeChoice(db: Db, run: RouteRun): ChosenModel {
 
   let ask: RouteAsk = { userText: run.userText, tail: run.tail, previousKey: previousKey };
   let decided = routeTurn(router, pair.model, pair.config, ask, apiKey);
-  rememberRouteKey(db, run.threadId, decided.key);
+  // This write is what makes routeEvery "thread" mean anything: the branch at
+  // the top of this function reads it back and reuses the choice. Lost, the
+  // router silently becomes route-every-turn — the routing model runs again on
+  // each message and the conversation may change model mid-way, which is the
+  // one thing that setting exists to prevent.
+  let remembered = rememberRouteKey(db, run.threadId, decided.key);
+  if (remembered != "") {
+    console.error("router: thread " + run.threadId + " did not keep its route \"" + decided.key
+      + "\", so it will be routed again next turn — " + remembered);
+  }
 
   let routed: ChosenModel = {
     choiceId: chosen.choiceId,
