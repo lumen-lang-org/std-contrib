@@ -437,10 +437,23 @@ export function completeConnect(db: Db, master: string, state: string, code: str
     return { serverId: server.id, serverName: server.serverName, fault: stored };
   }
   if (got.refreshToken != "") {
-    storeCredential(db, { provider: refreshKey(key), apiKey: got.refreshToken,
+    // Refused, like the access token above it, and for a longer-lived reason:
+    // writeGrant marks the grant refreshable on the strength of this token, so
+    // losing it here produces a connection that reads as renewable, works
+    // until the access token expires, and then cannot come back — with nothing
+    // said at the moment it could still have been retried.
+    let keptRefresh = storeCredential(db, { provider: refreshKey(key), apiKey: got.refreshToken,
       masterKey: master, now: stamp() });
-  } else {
-    forgetCredential(db, refreshKey(key));
+    if (keptRefresh != "") {
+      return { serverId: server.id, serverName: server.serverName, fault: keptRefresh };
+    }
+  } else if (stillStored(db, refreshKey(key))) {
+    // Said rather than refused: this connection has no refresh token of its
+    // own, and the one left over belongs to a grant that has just been
+    // replaced. renew would try it, fail, and mark the grant unrefreshable,
+    // which is recoverable — but it should not be a surprise.
+    console.error("connect: " + server.serverName + " reconnected without a refresh token, and the "
+      + "previous one could not be removed — it is still stored");
   }
   let wroteGrant = writeGrant(db, key, server.id, pending.owner, got, false);
   if (wroteGrant != "") {
