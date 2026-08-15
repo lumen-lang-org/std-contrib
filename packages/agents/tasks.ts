@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbOrder, DbRepository, createTableSql, listOrdered, listWhere, placeholderAt } from "../plume/plume.ts";
+import { DbOrder, DbRepository, countWhere, createTableSql, listOrdered, listWhere, placeholderAt } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { next as nextFiring, fault as cronFault, civil, knownZone } from "../cron/cron.ts";
 import { scheduledTaskRepository } from "./routes/automation/tasks/entities/scheduled-task.entity.ts";
@@ -296,18 +296,15 @@ export function refuse(row: TaskRow): string {
   return "";
 }
 
+/** How many tasks this owner has running, or -1 when that cannot be counted.
+ *
+ *  Counted rather than listed and filtered: listWhere answers "[]" both for an
+ *  owner with no tasks and for a query that did not run, and this number is
+ *  what MAX_PER_OWNER is measured against — a cap that reads zero when the
+ *  count fails is no cap. */
 export function enabledCount(db: Db, owner: string): int {
-  let rows = JSON.parse<TaskRow[]>(listWhere(db, tasksMapping(),
-    "owner = " + db.placeholder, [owner]));
-  let n: int = 0;
-  let i: int = 0;
-  while (i < rows.length) {
-    if (rows[i].enabled) {
-      n = n + 1;
-    }
-    i = i + 1;
-  }
-  return n;
+  return countWhere(db, tasksMapping(),
+    "owner = " + db.placeholder + " AND enabled = true", [owner]);
 }
 
 export function tasksOf(db: Db, owner: string): string {

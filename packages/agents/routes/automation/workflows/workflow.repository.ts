@@ -32,15 +32,18 @@ export class WorkflowRepository {
     return findById(this.database, this.workflows, id);
   }
 
+  /** How many of this owner's workflows are running, or -1 when that cannot
+   *  be counted: a query that did not run answered 0 here, and 0 is the one
+   *  answer that lets the cap through. */
   enabledCount(owner: string): int {
     let sql = "SELECT COUNT(*) FROM workflows WHERE owner = " + this.database.placeholder + " AND enabled = true";
     if (!this.database.query(sql, [owner])) {
-      return 0;
+      return -1;
     }
     if (this.database.rows() == 0) {
-      return 0;
+      return -1;
     }
-    return parseInt(this.database.value(0, 0)) ?? 0;
+    return parseInt(this.database.value(0, 0)) ?? -1;
   }
 
   hasAgent(id: string): bool {

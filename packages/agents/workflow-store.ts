@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, listOrdered, listWhere, placeholderAt, repository } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
@@ -225,18 +225,11 @@ export function workflowsOf(db: Db, owner: string): string {
   });
 }
 
+/** How many workflows this owner has running, or -1 when that cannot be
+ *  counted, for the reason enabledCount in tasks.ts is counted. */
 export function enabledWorkflowCount(db: Db, owner: string): int {
-  let rows = JSON.parse<WorkflowRow[]>(listWhere(db, workflowsMapping(),
-    "owner = " + db.placeholder, [owner]));
-  let n: int = 0;
-  let i: int = 0;
-  while (i < rows.length) {
-    if (rows[i].enabled) {
-      n = n + 1;
-    }
-    i = i + 1;
-  }
-  return n;
+  return countWhere(db, workflowsMapping(),
+    "owner = " + db.placeholder + " AND enabled = true", [owner]);
 }
 
 export function workflowRunsOf(db: Db, workflowId: string, owner: string): string {

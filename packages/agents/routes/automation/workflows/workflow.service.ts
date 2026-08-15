@@ -54,7 +54,11 @@ export class WorkflowService {
     if (!this.repository.hasAgent(agentId)) {
       return refusing("no agent " + agentId);
     }
-    if (this.repository.enabledCount(owner) >= MAX_WORKFLOWS_PER_OWNER) {
+    let running = this.repository.enabledCount(owner);
+    if (running < 0) {
+      return refusing("how many workflows are already running could not be counted, so this one is not being added");
+    }
+    if (running >= MAX_WORKFLOWS_PER_OWNER) {
       return refusing("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — pause one before adding another");
     }
     let graphText = jsonRaw(body, "graph");
