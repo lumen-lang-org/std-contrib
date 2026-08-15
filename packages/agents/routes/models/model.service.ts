@@ -67,6 +67,12 @@ export class ModelService {
     if (moved != "") {
       return refusing(moved);
     }
+    if (row.enabled && row.kind == "embedding") {
+      let swept = this.repository.disableOtherEmbeddings(row.id);
+      if (!swept.ok) {
+        return refusing(swept.error);
+      }
+    }
     let written = this.repository.save(document);
     if (!written.ok) {
       return refusing(written.error);
