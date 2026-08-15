@@ -264,7 +264,9 @@ function writeGrant(db: Db, key: string, serverId: string, owner: string, got: G
     id: key, serverId: serverId, owner: owner,
     expiresAt: expiresAt, refreshable: refreshable, connectedAt: connectedAt,
   };
-  deleteById(db, mcpGrantsMapping(), key);
+  // No delete first: persist is an upsert on the same id, so the delete only
+  // adds a way to lose the grant — it lands, the write after it does not, and
+  // a connection that was working is gone rather than updated.
   let written = persist(db, mcpGrantsMapping(), JSON.stringify(row));
   if (!written.ok) {
     return written.error;
@@ -293,7 +295,9 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
     if (row.redirectUri == redirectUri && row.clientId != "" && sameClient) {
       return { row: row, fault: "" };
     }
-    deleteById(db, mcpOauthMapping(), server.id);
+    // The registration below is written with this same id, so this row is
+    // replaced whether or not it is removed first — and removing it first is
+    // the only way to end up with neither.
   }
 
   let found: Discovery = discover(server.endpoint);
@@ -540,7 +544,9 @@ function enable(db: Db, serverId: string): string {
     endpoint: server.endpoint, authKind: server.authKind,
     authHeader: server.authHeader, enabled: true,
   };
-  deleteById(db, mcpServersMapping(), serverId);
+  // Overwritten in place rather than deleted and rewritten, for the reason
+  // writeGrant is: a delete that lands in front of a write that does not takes
+  // the connector off the list altogether.
   let written = persist(db, mcpServersMapping(), JSON.stringify(on));
   if (!written.ok) {
     return written.error;
