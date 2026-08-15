@@ -666,9 +666,22 @@ export function pendingFor(db: Db, botId: string, chatId: string, nowMs: number)
   return held;
 }
 
+/** Remembers that a bot is waiting on a reply from one chat — and only one:
+ *  the clear before the write is what keeps that true, since trigger_pending
+ *  has no unique constraint on (bot_id, chat_id), only on id. pendingFor reads
+ *  it back with no ORDER BY, on the assumption there is at most one row to
+ *  find. Written with the clear unchecked, a bot's second question in a
+ *  conversation could leave the first one's row standing beside the new one —
+ *  and the next reply resumes whichever of the two the read happens to pick,
+ *  which may be the older run, at an earlier node, with answers a person has
+ *  already moved past. Refused rather than risked: a pending ask that cannot
+ *  be told apart from the one it was meant to replace is not remembered. */
 export function rememberAsk(db: Db, row: TriggerPendingRow): bool {
-  db.query("DELETE FROM trigger_pending WHERE bot_id = " + db.placeholder
+  let cleared = db.query("DELETE FROM trigger_pending WHERE bot_id = " + db.placeholder
     + " AND chat_id = " + placeholderAt(db, 2), [row.botId, row.chatId]);
+  if (!cleared) {
+    return false;
+  }
   return persist(db, triggerPendingMapping(), JSON.stringify(row)).ok;
 }
 

@@ -219,7 +219,12 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
       noteFault(noteThread(db, msg.id, resumed.threadId));
     }
     if ((resumed.waitingAt ?? "") != "") {
-      rememberOpenQuestion(db, msg, withGraph(flow, open.graph), resumed);
+      if (!rememberOpenQuestion(db, msg, withGraph(flow, open.graph), resumed)) {
+        noteFault(finishMessage(db, msg, "failed", resumed.runId, "",
+          "the workflow is waiting on another reply, but that could not be saved — "
+          + "a reply here will not resume it", Date.now() as number));
+        return;
+      }
       noteFault(finishMessage(db, msg, "done", resumed.runId, "", "", Date.now() as number));
       return;
     }
