@@ -82,3 +82,4 @@ packages/agents/script-cache/
 # (discover.ts.bak-showbiz and friends). Never source.
 *.ts.bak-*
 *.ts.bak
+probe_hours
