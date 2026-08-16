@@ -17,8 +17,9 @@ const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\
   + "\\\"reply\\\" (say text to the Telegram chat mid-walk and keep going), "
   + "\\\"ask\\\" (ask the Telegram chat and STOP until they answer; give options and they become tap buttons), "
   + "\\\"connector\\\" (call one tool on a connected server such as linear), "
-  + "\\\"switch\\\" (route on the previous step's answer — give cases, one per line; every branch first "
-  + "points at the next step, and connect_steps re-points each case)";
+  + "\\\"switch\\\" (route on a value that already exists, such as a field an http step returned or "
+  + "the option a chat tapped — give cases, one per line. Do NOT put one after an agent or a model "
+  + "to read what it said: give THAT step cases instead and it chooses its own way out)";
 const KINDS_SENTENCE = "the kinds are agent, model, web_search, knowledge, http, script, reply, ask, connector and switch";
 
 export type WorkflowToolCall = {
@@ -82,7 +83,7 @@ export function workflowTools(): ToolSpec[] {
     + "\"text\":{\"type\":\"string\",\"description\":\"What the step does: the instruction for agent or model, the query for web_search or knowledge, the url for http (GET).\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas, such as \\\"Search the news\\\".\"},"
     + "\"options\":{\"type\":\"string\",\"description\":\"ask only: the choices offered as tap buttons, one per line.\"},"
-    + "\"cases\":{\"type\":\"string\",\"description\":\"switch only: the values it routes on, one per line.\"},"
+    + "\"cases\":{\"type\":\"string\",\"description\":\"The ways out of this step, one per line, plus else for anything unmatched. On an agent or model step they are its outcomes: it answers as usual and names one, so no switch is needed after it. On a switch they are the values it matches. Every branch is drawn pointing at the next step; connect_steps re-points each one.\"},"
     + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id, from the Connectors page — such as linear.\"},"
     + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
     + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"},"
@@ -121,7 +122,7 @@ export function workflowTools(): ToolSpec[] {
     + "\"text\":{\"type\":\"string\",\"description\":\"What the step does. {{prev}} is the previous step's output.\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"A short label for the canvas.\"},"
     + "\"options\":{\"type\":\"string\",\"description\":\"ask only: the choices offered as tap buttons, one per line.\"},"
-    + "\"cases\":{\"type\":\"string\",\"description\":\"switch only: the values it routes on, one per line.\"},"
+    + "\"cases\":{\"type\":\"string\",\"description\":\"The ways out of this step, one per line, plus else for anything unmatched. On an agent or model step they are its outcomes: it answers as usual and names one, so no switch is needed after it. On a switch they are the values it matches. Every branch is drawn pointing at the next step; connect_steps re-points each one.\"},"
     + "\"server\":{\"type\":\"string\",\"description\":\"connector only: the server id — such as linear.\"},"
     + "\"tool\":{\"type\":\"string\",\"description\":\"connector only: the tool to call on it.\"},"
     + "\"arguments\":{\"type\":\"object\",\"description\":\"connector only: the tool's arguments; {{prev}} and {{input}} fill in.\"},"
@@ -443,7 +444,11 @@ function saidNode(kind: string, text: string, title: string, id: string, idx: in
     query: made == "WEB_SEARCH" || made == "KNOWLEDGE" ? text : "",
     test: "", needle: "", subject: "",
     schedule: "", source: made == "SCRIPT" ? text : "",
-    cases: made == "TELEGRAM_ASK" ? extra.options : made == "SWITCH" ? extra.cases : "",
+    // An ask's cases are the options it offers. Everything else that was
+    // given cases branches on them, and for an agent or a model that means
+    // outcomes: the step names its own way out, so the switch that used to
+    // sit behind it reading its answer has nothing left to do.
+    cases: made == "TELEGRAM_ASK" ? extra.options : extra.cases,
     secrets: "", secretId: "",
   };
   return built;
@@ -551,9 +556,17 @@ function edgeOf(from: string, to: string): WfEdge {
   return e;
 }
 
+/** The edges out of one step: one per case when it branches, else the single
+ *  plain one.
+ *
+ *  What branches is a step CARRYING cases, not one particular kind — an agent
+ *  with outcomes fans out exactly as a switch does, which is what lets a
+ *  drafted workflow choose without a switch behind the chooser. An ask is the
+ *  exception: its cases are the buttons it offers, and the walk picks up from
+ *  its one plain way out when the reply lands. */
 function branchEdges(node: WfNode, from: string, to: string): WfEdge[] {
   let out: WfEdge[] = [];
-  if (node.type != "SWITCH") {
+  if (casesOf(node).length == 0 || node.type == "TELEGRAM_ASK") {
     out.push(edgeOf(from, to));
     return out;
   }
@@ -768,7 +781,21 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       i = i + 1;
     }
     nodes.push(startEndNode("END", "", saidSteps.length + 1));
-    edges.push(edgeOf(prevId, "end"));
+    // The last step reaches the end the same way it would reach any other:
+    // one edge, or one per case when it branches. A chain that ends on the
+    // chooser is drawn with every way out arriving, which is the drawing
+    // being honest about what may happen.
+    let lastNode = emptyNode();
+    let ln: int = 0;
+    while (ln < nodes.length) { if (nodes[ln].id == prevId) {
+      lastNode = nodes[ln];
+    } ln = ln + 1; }
+    let lastWays = branchEdges(lastNode, prevId, "end");
+    let lw: int = 0;
+    while (lw < lastWays.length) {
+      edges.push(lastWays[lw]);
+      lw = lw + 1;
+    }
     let view: WfView = { x: 0.0, y: 0.0, zoom: 0.6 };
     let graph: WfGraph = { nodes: nodes, edges: edges, view: view };
 

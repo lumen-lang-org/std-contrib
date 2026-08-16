@@ -549,3 +549,50 @@ test("a secret is attached by name, never created, and never leaves its address"
   expect(listed.text.indexOf("Bearer") < 0);
   expect(listed.text.indexOf("sk-t-1") < 0);
 });
+
+test("an agent given cases branches on its own, with no switch behind it", () => {
+  seeded();
+  let made = call("o1", "draft_workflow",
+    "{\"name\":\"Triage\",\"steps\":["
+    + "{\"kind\":\"agent\",\"text\":\"Say how urgent {{input}} is.\",\"title\":\"Classify\","
+    + "\"cases\":\"urgent\\nroutine\"}]}");
+  expect(made.ok);
+  let g = parseGraph(flowsFor("o1")[0].graph).graph;
+  expect(refuseGraph(g) == "");
+
+  let cid = "";
+  let i: int = 0;
+  while (i < g.nodes.length) {
+    if (g.nodes[i].type == "AGENT") { cid = g.nodes[i].id; }
+    // The point of the shape: the chooser IS the agent, so nothing else was
+    // added to read what it said.
+    expect(g.nodes[i].type != "SWITCH");
+    i = i + 1;
+  }
+  expect(cid != "");
+
+  // Its outcomes came through, and each one plus else is drawn.
+  let held = "";
+  i = 0;
+  while (i < g.nodes.length) {
+    if (g.nodes[i].id == cid) { held = g.nodes[i].cases ?? ""; }
+    i = i + 1;
+  }
+  expect(held == "urgent\nroutine");
+
+  let urgent = false;
+  let routine = false;
+  let elseWay = false;
+  i = 0;
+  while (i < g.edges.length) {
+    if (g.edges[i].from == cid) {
+      if (g.edges[i].when == "urgent") { urgent = true; }
+      if (g.edges[i].when == "routine") { routine = true; }
+      if (g.edges[i].when == "else") { elseWay = true; }
+    }
+    i = i + 1;
+  }
+  expect(urgent);
+  expect(routine);
+  expect(elseWay);
+});
