@@ -1,3 +1,4 @@
+import { civil } from "../cron/cron.ts";
 import { apiKeysPlan } from "./api-keys.ts";
 import { Request, Reply, Mount, mount, mountedRoutes, mountFault, dispatchedMounted, Respond, Ok, Created, OkJson, CreatedJson, NoContent, NotFound, BadRequest, Refused } from "../rest/server.ts";
 import { openApiDocument, openApiHandlerInfoOf, openApiOperations, openApiSchemaOf } from "../openapi/openapi.ts";
@@ -158,19 +159,86 @@ function apiToken(): string {
 
 
 
+/* The hours the digest may run, in the newsroom's own time.
+ *
+ * Round-the-clock was free when the model was a GPU in the operator's house. It is a paid
+ * call per feed now, and a 03:00 pass digests the same articles 01:00 already read -
+ * Tunisian newsrooms publish between breakfast and midnight, and the crawl has nothing
+ * new to say in between. Configurable rather than compiled, so the window follows the
+ * operator rather than a deploy.
+ *
+ * AGENTS_DISCOVER_HOURS is start-end in LOCAL hours, end exclusive; AGENTS_DISCOVER_TZ is
+ * an IANA zone. Unset means the always-on behaviour this replaced.
+ *
+ * The hour is read out of civil(), the cron package's own formatter, rather than computed
+ * from the epoch: Lumen will not narrow the i64 that Date.now() returns, and a formatter
+ * that already knows the zone is right across a daylight-saving change anyway. */
+function digestZone(): string {
+  let z = process.env["AGENTS_DISCOVER_TZ"] ?? "";
+  return z == "" ? "UTC" : z;
+}
+
+function localHourNow(): int {
+  // "2026-08-16 02:54:59 CET" - the hour is the two characters after the space.
+  let stamp = civil(digestZone(), Date.now() as i64);
+  let sp = stamp.indexOf(" ");
+  if (sp < 0) {
+    return 12;
+  }
+  return parseInt(stamp.slice(sp + 1, sp + 3), 10) ?? 12;
+}
+
+/* A window that wraps midnight is read the way a person means it. An unreadable setting
+ * leaves the digest running: a typo must not silently stop the feeds. */
+function withinDigestHours(): bool {
+  let said = process.env["AGENTS_DISCOVER_HOURS"] ?? "";
+  if (said == "") {
+    return true;
+  }
+  let dash = said.indexOf("-");
+  if (dash < 0) {
+    return true;
+  }
+  let start = parseInt(said.slice(0, dash), 10) ?? 0;
+  let end = parseInt(said.slice(dash + 1), 10) ?? 24;
+  if (start == end) {
+    return true;
+  }
+  let h = localHourNow();
+  if (start < end) {
+    return h >= start && h < end;
+  }
+  return h >= start || h < end;
+}
+
 function digestLoop(master: string, everyMs: int, lane: int, lanes: int): int {
   try {
     let db = openDatabase();
     while (true) {
+      /* Asleep outside the window, re-checked every ten minutes rather than computed as
+       * one long sleep: widening the hours then takes effect within a tick, no restart. */
+      if (!withinDigestHours()) {
+        process.sleep(600000);
+        continue;
+      }
       let feeds = allFeeds(db);
       // This lane's stride through the list. Lane 0 of 1 is every feed, which
       // is the single-threaded pass this replaced.
       let i: int = lane;
       while (i < feeds.length) {
         if (feeds[i].enabled) {
-          let fault = refreshFeed(db, feeds[i], master);
-          if (fault != "") {
-            console.error("discover: " + feeds[i].id + ": " + fault);
+          /* Containment per feed, not per pass: before this, one exception here
+           * returned from digestLoop entirely and every feed after this one in
+           * the stride starved until a restart - measured at 40 deaths, with
+           * geo:tr 110h stale behind a crashing geo:de. A feed that throws now
+           * loses its turn and nothing else. */
+          try {
+            let fault = refreshFeed(db, feeds[i], master);
+            if (fault != "") {
+              console.error("discover: " + feeds[i].id + ": " + fault);
+            }
+          } catch (e) {
+            console.error("discover: " + feeds[i].id + ": this feed crashed its refresh; the pass continues: " + e.message);
           }
         }
         i = i + lanes;

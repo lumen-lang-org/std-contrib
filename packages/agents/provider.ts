@@ -608,6 +608,14 @@ export function thinkingJson(provider: string, config: ModelConfigRow): string {
     if (provider == "vllm" || provider == "ollama") {
       return ",\"chat_template_kwargs\":{\"enable_thinking\":false}";
     }
+    /* DeepSeek's hybrid models reason by default and the digest never survives it:
+     * every call ran to the full answer budget (9000 out, three feeds, three
+     * "did not answer with JSON") because the reasoning consumed the whole cap before
+     * a brace was written. Nothing here disabled it - this branch had no deepseek arm,
+     * so "off" meant "send nothing". */
+    if (provider == "deepseek") {
+      return ",\"thinking\":{\"type\":\"disabled\"}";
+    }
     if (provider == "vertex") {
       return ",\"reasoning_effort\":\"low\"";
     }

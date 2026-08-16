@@ -71,6 +71,9 @@ export type DiscoverStory = {
 
 export type DiscoverRow = {
   id: string,
+  /* Empty while the story is on the feed; the millisecond stamp of the pass that dropped
+   * it once it is not. See migration 116 - nothing deletes a story. */
+  archivedAt: string,
   feedId: string,
   rank: int,
   headline: string,
@@ -115,6 +118,7 @@ export function discoverStoriesMapping(): DbRepository {
     field("bodyMd", "body_md", "text"),
     field("image", "image", "text"),
     field("readMinutes", "read_minutes", "int"),
+    field("archivedAt", "archived_at", "text"),
   ];
   return repository({ table: "discover_stories", idField: "id", idColumn: "id", fields: fs });
 }
@@ -179,6 +183,14 @@ export function discoverPlan(db: Db): Migration[] {
       "ALTER TABLE discover_stories ADD COLUMN source_titles " + db.textType + " NOT NULL DEFAULT ''"),
     migration("114", "prompts and other text the operator may edit",
       createTableSql(db, discoverTextMapping())),
+    /* A story leaves the page; it does not leave the database. The digest used to
+     * DELETE every row of a feed and write the new set, so a story that fell out of one
+     * pass was gone - with its generated body, its read time, and any link a reader had
+     * shared to it. Archiving keeps all of that: the feed reads the live rows,
+     * /discover/story/:id still resolves an archived one, and a story that comes back is
+     * un-archived rather than rebuilt. */
+    migration("128", "a story is archived, never deleted",
+      "ALTER TABLE discover_stories ADD COLUMN archived_at " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }
 
@@ -241,7 +253,8 @@ export function storiesFor(db: Db, feedId: string): DiscoverRow[] {
   let keys: DbOrder[] = [{ column: "rank" }];
   return JSON.parse<DiscoverRow[]>(
     listOrdered(db, discoverStoriesMapping(), {
-      where: "feed_id = " + db.placeholder,
+      // Live rows only. An archived story keeps its id and stays readable by link.
+      where: "feed_id = " + db.placeholder + " AND archived_at = ''",
       args: [feedId],
       order: keys,
     }));
@@ -253,7 +266,7 @@ export function storyById(db: Db, id: string): DiscoverRow {
     let none: DiscoverRow = {
       id: "", feedId: "", rank: 0, headline: "", summary: "", sources: "", sourceTitles: "",
       fetchedAt: "", why: "", madeAt: "", body: "", image: "", readMinutes: 0,
-      bodyMd: "",
+      bodyMd: "", archivedAt: "",
     };
     return none;
   }
@@ -398,10 +411,17 @@ export function freshFor(query: string, lang: string, country: string, cap: int)
 
   let cutoff = cutoffText();
   let kept: Hit[] = [];
+  let seenTitle = new Map<string, bool>();
   let i: int = 0;
   while (i < hits.length) {
     if (recent(effectiveStamp(hits[i]), cutoff)) {
-      kept.push(hits[i]);
+      let key = hits[i].title.trim().toLowerCase();
+      if (key == "" || !seenTitle.has(key)) {
+        if (key != "") {
+          seenTitle.set(key, true);
+        }
+        kept.push(hits[i]);
+      }
     }
     i = i + 1;
   }
@@ -547,6 +567,136 @@ function bodyFor(story: DiscoverStory, hits: Hit[]): string {
   return out;
 }
 
+/* The longest run of digits in a string.
+ *
+ * A newsroom article id (mosaiquefm /1527391/, babnet -334542.asp) is the one part of a
+ * URL a model retypes correctly: it is short, ASCII, and carries no meaning to garble.
+ * When the slug around it is corrupted, this still identifies the article. */
+/* The pool, round-robined across its hosts, newest first within each.
+ *
+ * freshFor sorts by recency alone, so the outlet that publishes through the night takes
+ * the top of the list. Measured 2026-08-16 on geo:tn: 16 of 40 snippets were mosaiquefm,
+ * and the model built ALL EIGHT cards from that one outlet while lapresse (12 snippets),
+ * babnet (6) and four other newsrooms went unread. Ranking by recency is right for one
+ * source and wrong across sources - "newest" then means "whoever posts most often".
+ *
+ * Nothing is dropped: the same 40 snippets reach the model, ordered so the first seven
+ * are seven different newsrooms. Recency still decides the order WITHIN a host, and the
+ * hosts themselves are offered in the order their freshest article arrived. */
+function spreadByHost(hits: Hit[]): Hit[] {
+  let out: Hit[] = [];
+  let used = new Map<int, bool>();
+  let remaining = hits.length;
+  while (remaining > 0) {
+    let seen = new Map<string, bool>();
+    let j: int = 0;
+    while (j < hits.length) {
+      if (!used.has(j)) {
+        let h = hostOf(hits[j].url);
+        if (!seen.has(h)) {
+          seen.set(h, true);
+          used.set(j, true);
+          out.push(hits[j]);
+          remaining = remaining - 1;
+        }
+      }
+      j = j + 1;
+    }
+  }
+  return out;
+}
+
+function longestDigits(s: string): string {
+  let best: string = "";
+  let cur: string = "";
+  let i: int = 0;
+  while (i < s.length) {
+    let c = s.charCodeAt(i);
+    if (c >= 48 && c <= 57) {
+      cur = cur + s[i];
+      if (cur.length > best.length) {
+        best = cur;
+      }
+    } else {
+      cur = "";
+    }
+    i = i + 1;
+  }
+  return best;
+}
+
+/* One model-written source, resolved to a URL that exists in the pool, or "".
+ *
+ * Order matters: an exact hit first, so a correctly copied URL costs nothing; then a
+ * citation number, because asLines() numbers the snippets and a model asked for a source
+ * often answers with that number; then the article id, which survives a mistyped slug.
+ * Anything still unmatched is discarded rather than stored - a URL that is in no hit is
+ * either invented or corrupted, and both are worse than one fewer source. */
+function resolveSource(raw: string, hits: Hit[]): string {
+  let s = raw.trim();
+  if (s == "") {
+    return "";
+  }
+  let i: int = 0;
+  while (i < hits.length) {
+    if (hits[i].url == s) {
+      return hits[i].url;
+    }
+    i = i + 1;
+  }
+  let bare = s.replaceAll("[", "").replaceAll("]", "").replaceAll("#", "").trim();
+  let n = parseInt(bare, 10) ?? 0;
+  if (n >= 1 && n <= hits.length && bare == `${n}`) {
+    return hits[n - 1].url;
+  }
+  let id = longestDigits(s);
+  if (id.length >= 5) {
+    i = 0;
+    while (i < hits.length) {
+      if (hits[i].url.indexOf(id) >= 0) {
+        return hits[i].url;
+      }
+      i = i + 1;
+    }
+  }
+  return "";
+}
+
+/* Every source on every card, resolved in place. Cards left with no resolvable source
+ * keep an empty list; the sources guard upstream already refuses those, and dedup treats
+ * an empty list as "no primary url" rather than throwing. */
+function resolveSources(stories: DiscoverStory[], hits: Hit[]): DiscoverStory[] {
+  let out: DiscoverStory[] = [];
+  let repaired: int = 0;
+  let i: int = 0;
+  while (i < stories.length) {
+    let fixed: string[] = [];
+    let s: int = 0;
+    while (s < stories[i].sources.length) {
+      let one = resolveSource(stories[i].sources[s], hits);
+      if (one != "") {
+        if (one != stories[i].sources[s]) {
+          repaired = repaired + 1;
+        }
+        fixed.push(one);
+      }
+      s = s + 1;
+    }
+    /* A NEW record: Lumen record fields are immutable, and assigning one is a parse
+     * error rather than a runtime surprise. Same lesson as the dedup pass. */
+    let rebuilt: DiscoverStory = {
+      headline: stories[i].headline, summary: stories[i].summary,
+      sources: fixed, fetchedAt: stories[i].fetchedAt, why: stories[i].why,
+    };
+    out.push(rebuilt);
+    i = i + 1;
+  }
+  if (repaired > 0) {
+    console.error("discover: repaired " + `${repaired}` + " mistyped source url(s)");
+  }
+  return out;
+}
+
 function imageFor(story: DiscoverStory, hits: Hit[]): string {
   let s: int = 0;
   while (s < story.sources.length) {
@@ -606,6 +756,34 @@ function readingMinutes(body: string): int {
   }
   let mins = words / 220;
   return mins < 1 ? 1 : mins;
+}
+
+/* A card's identity, taken from its PRIMARY SOURCE rather than its wording.
+ *
+ * The id used to be a hash of the headline, and the model rewrites headlines: the same
+ * story came back under a new id every pass, so its generated body was thrown away, its
+ * read time recomputed, and any link a reader had shared stopped resolving. The source
+ * url is what the story IS, it survives a rephrasing, and since sources are resolved
+ * against the pool it is a real url rather than something the model typed.
+ *
+ * The headline stays the fallback for a card with no source, which the guard upstream
+ * should already have refused. */
+function cardId(feedId: string, one: DiscoverStory): string {
+  let key = one.sources.length > 0 ? one.sources[0] : one.headline;
+  return feedId + ":" + stem(key);
+}
+
+/* The same story, stamped as no longer on the feed. A record field cannot be assigned in
+ * Lumen, so this builds a new one - and it goes back through persist(), which upserts on
+ * the id, rather than through hand-written SQL. */
+function archivedRow(row: DiscoverRow, at: string): DiscoverRow {
+  let gone: DiscoverRow = {
+    id: row.id, feedId: row.feedId, rank: row.rank, headline: row.headline,
+    summary: row.summary, sources: row.sources, sourceTitles: row.sourceTitles,
+    fetchedAt: row.fetchedAt, why: row.why, madeAt: row.madeAt, body: row.body,
+    image: row.image, readMinutes: row.readMinutes, bodyMd: row.bodyMd, archivedAt: at,
+  };
+  return gone;
 }
 
 function stem(text: string): string {
@@ -698,6 +876,31 @@ function scriptOk(text: string, outLang: string): bool {
   return false;
 }
 
+/* Characters that can NEVER legitimately appear in a card. A multilingual model
+ * under 4-bit quantization occasionally emits the right concept in the wrong
+ * script - 移民 for migrant, сф inside Hafsia - measured at 2.07% of output
+ * characters when the card is a translation, 0% when it is not. Meaning-correct
+ * but script-wrong, so no grammar or language check sees it; a byte-range scan
+ * does. Byte-level like scriptOk above: 227-237 are the UTF-8 lead bytes of
+ * kana, CJK and Hangul; 208-209 are Cyrillic. Latin is deliberately allowed -
+ * the prompt tells the model to keep a name it cannot render rather than
+ * invent a spelling. */
+function foreignScript(text: string, outLang: string): bool {
+  let cyrOk = outLang == "ru" || outLang == "uk" || outLang == "bg";
+  let i: int = 0;
+  while (i < text.length) {
+    let c = text.charCodeAt(i);
+    if (c >= 227 && c <= 237) {
+      return true;
+    }
+    if (!cyrOk && (c == 208 || c == 209)) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
 function digestPrompt(topic: string, count: int, outLang: string): string {
   let lead = outLang == "" ? ""
     : "WRITE EVERY headline, summary and why in " + langName(outLang) + ". The "
@@ -772,10 +975,186 @@ function digestPrompt(topic: string, count: int, outLang: string): string {
         + "card in another language is a failed card.");
 }
 
+function translateTries(): int {
+  let said = process.env["AGENTS_DISCOVER_RETRIES"] ?? "";
+  if (said == "") {
+    return 2;
+  }
+  let n = parseInt(said, 10) ?? 2;
+  return n < 1 ? 1 : n;
+}
+
+/* One card, translated on its own, checked deterministically, retried within a
+ * budget. Splitting translation out of the digest pass measured 4x less
+ * wrong-script contamination (2.07% -> 0.54%) - a single card is a small
+ * context with little cross-lingual pressure - and the residue is caught here
+ * by the same byte-level checks and simply retried: the model only has to be
+ * right once. An empty headline is the failure value; the caller drops the
+ * card, which costs one story and poisons nothing. */
+function translateCard(model: ModelRow, story: DiscoverStory, outLang: string, key: string): DiscoverStory {
+  let cfg: ModelConfigRow = {
+    id: "", modelId: model.id, temperature: 0.2, maxTokens: 900, topP: 1.0,
+    extra: "", thinking: "off", label: "", selectable: false, rank: 0,
+  };
+  let ask = "Translate this news card into " + langName(outLang) + ". Answer with "
+    + "JSON only: {\"headline\":\"...\",\"summary\":\"...\",\"why\":\"...\"}. "
+    + "Translate the MEANING. For a place, person, ministry or institution use "
+    + "its established " + langName(outLang) + " name; if you do not know the "
+    + "established name, keep it exactly as the source writes it, in its own "
+    + "letters. Never invent a spelling and never use characters from any other "
+    + "script. An empty why stays empty.
+/no_think";
+  let payload = JSON.stringify(story);
+  let tries: int = 0;
+  let budget = translateTries();
+  while (tries < budget) {
+    tries = tries + 1;
+    let asked = complete(model, cfg, ask, payload, key);
+    if (!asked.ok) {
+      continue;
+    }
+    let text = replyText(model.provider, asked.text).trim();
+    let open = text.indexOf("{");
+    let shut = text.lastIndexOf("}");
+    if (open < 0 || shut <= open) {
+      continue;
+    }
+    let body = text.slice(open, shut + 1);
+    let h = jsonText(body, "headline");
+    let s = jsonText(body, "summary");
+    let y = jsonText(body, "why");
+    if (h == "" || s == "") {
+      continue;
+    }
+    if (!scriptOk(h, outLang) || foreignScript(h + " " + s + " " + y, outLang)) {
+      continue;
+    }
+    let done: DiscoverStory = {
+      headline: h, summary: s, sources: story.sources,
+      fetchedAt: story.fetchedAt, why: y,
+    };
+    return done;
+  }
+  let none: DiscoverStory = { headline: "", summary: "", sources: story.sources, fetchedAt: "", why: "" };
+  return none;
+}
+
+function judgeOn(): bool {
+  return (process.env["AGENTS_DISCOVER_JUDGE"] ?? "1") != "0";
+}
+
+/* Rules 4 and 5, enforced per card instead of trusted to the digest pass.
+ *
+ * The digest prompt bans individual crime and showbiz, and an 8B model obeys
+ * MOST of the time - which for a public feed is the same as not obeying: one
+ * self-harm story on the Tunisia page is one too many, and one got through the
+ * day this was written (garbled in translation too - the model rendered
+ * "s'ouvre les veines" as "opens his arms"). A second look at ONE card is a
+ * question this model answers far more reliably than a rule buried in a long
+ * digest prompt over forty snippets. Fail-OPEN: if the judge cannot answer,
+ * the card stays - the digest prompt's own rules remain the first line, and a
+ * judge outage must not blank every feed. */
+/* One call for the whole feed, not one per card.
+ *
+ * The per-card judge was right and too expensive: twelve cards across twelve
+ * feeds turned one digest pass into ~150 requests against a single 8B on one
+ * 4070. vLLM began refusing - geo:tn logged "the model did not answer (http 0)"
+ * and kept two stale cards for hours - so the reviewer meant to improve the feed
+ * was starving it instead. A numbered list in, a list of numbers out: identical
+ * judgement, a twelfth of the load. Fail-OPEN is unchanged; an answer that will
+ * not parse drops nothing. */
+function judgeBatch(model: ModelRow, stories: DiscoverStory[], key: string): Map<int, bool> {
+  let drops = new Map<int, bool>();
+  if (stories.length == 0) {
+    return drops;
+  }
+  let cfg: ModelConfigRow = {
+    id: "", modelId: model.id, temperature: 0.0, maxTokens: 220, topP: 1.0,
+    extra: "", thinking: "off", label: "", selectable: false, rank: 0,
+  };
+  let ask = "You review a numbered list of news digest cards. Answer JSON only: "
+    + "{\"drop\":[numbers]} listing ONLY the numbers to drop; drop nothing is {\"drop\":[]}.
+"
+    + "The DEFAULT is keep. Drop only what clearly matches a rule below.
+
+"
+    + "drop yes - somebody's worst day: an individual crime, accident, fire, "
+    + "road crash, suicide, self-harm, missing person or family tragedy, where "
+    + "the story is about the victim or the incident itself.
+"
+    + "drop yes - showbiz as spectacle: a concert or festival REVIEW, how an "
+    + "artist was received, chart placings, album or single releases, tour "
+    + "dates, award nominations, celebrity relationships or lifestyle.
+
+"
+    + "KEEP (drop no) - these are NOT what the rules exclude, and dropping them "
+    + "is the common mistake:
+"
+    + "- Enforcement and inspection BY authorities: seizures, raids, closures, "
+    + "fines, recalls, smuggling or price-control operations. An institution "
+    + "acting is public business even when the word 'seized' appears.
+"
+    + "- Any law, policy, court ruling, trial of someone in a public role, or "
+    + "figures the authorities published.
+"
+    + "- SPORT: match results, transfers, signings, club and federation "
+    + "business. Sport is not showbiz.
+"
+    + "- Culture as institution: a festival's funding, programme, attendance "
+    + "figures, a cancellation, a heritage or artisanal initiative, a national "
+    + "commemoration.
+"
+    + "- Economy, industry, health services, infrastructure, digital "
+    + "government, education, environment, statistics, weather.
+
+"
+    + "When genuinely unsure, answer no.
+/no_think";
+  let tries: int = 0;
+  let budget = translateTries();
+  while (tries < budget) {
+    tries = tries + 1;
+    let listing = "";
+    let li: int = 0;
+    while (li < stories.length) {
+      listing = listing + `${li + 1}` + ". " + stories[li].headline
+        + " | " + stories[li].summary + "
+";
+      li = li + 1;
+    }
+    let asked = complete(model, cfg, ask, listing, key);
+    if (!asked.ok) {
+      continue;
+    }
+    let text = replyText(model.provider, asked.text).trim();
+    let open = text.indexOf("{");
+    let shut = text.lastIndexOf("}");
+    if (open < 0 || shut <= open) {
+      continue;
+    }
+    let raw = jsonRaw(text.slice(open, shut + 1), "drop");
+    if (raw == "") {
+      continue;
+    }
+    let nums = jsonList(raw);
+    let k: int = 0;
+    while (k < nums.length) {
+      let n = parseInt(nums[k].trim(), 10) ?? 0;
+      if (n >= 1 && n <= stories.length) {
+        drops.set(n - 1, true);
+      }
+      k = k + 1;
+    }
+    return drops;
+  }
+  return drops;
+}
+
 export function digest(db: Db, topic: string, query: string, lang: string, country: string, modelId: string, master: string): DiscoverTopic {
   let empty: WrittenStory[] = [];
   let readLang = country == "" ? lang : "";
   let hits = freshFor(query, readLang, country, readCap());
+  hits = spreadByHost(hits);
   let said = (why: string) => {
     let r: DiscoverTopic = {
       topic: topic, stories: empty, read: hits.length, fresh: hits.length,
@@ -801,7 +1180,7 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
   }
 
   let config: ModelConfigRow = {
-    id: "", modelId: model.id, temperature: 0.2, maxTokens: answerTokens(), topP: 1.0,
+    id: "", modelId: model.id, temperature: 0.6, maxTokens: answerTokens(), topP: 1.0,
     extra: "", thinking: "off", label: "", selectable: false, rank: 0,
   };
   let written = discoverText(db, "digest-prompt");
@@ -847,28 +1226,109 @@ export function digest(db: Db, topic: string, query: string, lang: string, count
       + (body.length > 160 ? body.slice(0, 160) + "…" : body));
   }
   let wrote: WrittenStory[] = [];
-  let parsed = JSON.parse<DiscoverStory[]>(raw);
+  /* A card the model emitted without its sources array used to crash the write
+   * path (bodyFor and refreshFeed dereference story.sources unguarded), and the
+   * digest loop's try/catch sits outside its while — one such card killed every
+   * feed until a restart, 40 times before this guard. Filter on the raw JSON
+   * BEFORE the typed parse: a dropped card costs one story, never the pass. */
+  let rawCards = jsonList(raw);
+  let wholeCards: string[] = [];
+  let lame: int = 0;
+  let rc: int = 0;
+  while (rc < rawCards.length) {
+    /* Presence of the key is not enough: "sources": null and "sources": "url"
+     * both pass a presence check, then .length throws downstream in dedup and
+     * bodyFor - which is what kept crashing geo:ma and geo:tr (contained by the
+     * per-feed catch, so the pass lived but those feeds never refreshed).
+     * Require a non-empty ARRAY. */
+    if (jsonList(jsonRaw(rawCards[rc], "sources")).length > 0 && jsonText(rawCards[rc], "headline") != "") {
+      wholeCards.push(rawCards[rc]);
+    } else {
+      lame = lame + 1;
+    }
+    rc = rc + 1;
+  }
+  if (lame > 0) {
+    console.error("discover: " + topic + ": dropped " + `${lame}` + " card(s) missing sources or headline");
+  }
+  /* Reassembling the survivors can still yield invalid JSON: jsonList hands back
+   * whatever fragments it found, and a truncated final card is a fragment. That
+   * threw straight out of digest() and cost geo:tr its refresh every pass
+   * ("JSON.parse: invalid JSON") until the per-feed catch made it visible. A
+   * digest that will not parse is a fault, not a crash - the feed keeps the
+   * cards it already had. */
+  let parsed: DiscoverStory[] = [];
+  try {
+    parsed = JSON.parse<DiscoverStory[]>("[" + wholeCards.join(",") + "]");
+  } catch (e) {
+    return said("the model's JSON did not parse: " + e.message);
+  }
+  /* Before anything reads a source: replace what the model typed with the real URL.
+   * Without this a mistyped slug means no image, no source title, and a link the reader
+   * cannot open - measured as 0 of 7 images on geo:tn while the images all existed. */
+  parsed = resolveSources(parsed, hits);
+  /* Judged once, before anything is written. The per-card call had to live
+   * inside the loop because each answer was about one card; a batch verdict is
+   * known up front, so the loop only consults it. */
+  let judgeDrops = new Map<int, bool>();
+  if (judgeOn()) {
+    judgeDrops = judgeBatch(model, parsed, key);
+  }
   let wrongLang: int = 0;
+  let poisoned: int = 0;
+  let judged: int = 0;
   let w: int = 0;
   while (w < parsed.length) {
-    if (!scriptOk(parsed[w].headline, lang)) {
+    let cand = parsed[w];
+    if (lang != "" && (!scriptOk(cand.headline, lang) || foreignScript(cand.headline + " " + cand.summary + " " + cand.why, lang))) {
+      /* Not in the target script, or carrying one that can never be right:
+       * translate it alone rather than dropping it - retried against the
+       * deterministic checks inside translateCard. */
+      cand = translateCard(model, cand, lang, key);
+      if (cand.headline == "") {
+        poisoned = poisoned + 1;
+        w = w + 1;
+        continue;
+      }
+    }
+    if (!scriptOk(cand.headline, lang)) {
       wrongLang = wrongLang + 1;
       w = w + 1;
       continue;
     }
-    let text = bodyFor(parsed[w], hits);
+    if (foreignScript(cand.headline + " " + cand.summary + " " + cand.why, lang)) {
+      poisoned = poisoned + 1;
+      w = w + 1;
+      continue;
+    }
+    if (judgeDrops.has(w)) {
+      judged = judged + 1;
+      w = w + 1;
+      continue;
+    }
+    let text = bodyFor(cand, hits);
     let one: WrittenStory = {
-      story: parsed[w], body: text, readMinutes: readingMinutes(text),
-      image: imageFor(parsed[w], hits),
-      sourceTitles: titlesFor(parsed[w], hits),
+      story: cand, body: text, readMinutes: readingMinutes(text),
+      image: imageFor(cand, hits),
+      sourceTitles: titlesFor(cand, hits),
     };
     wrote.push(one);
     w = w + 1;
+  }
+  if (poisoned > 0) {
+    console.error("discover: " + topic + ": dropped " + `${poisoned}` + " card(s) carrying a foreign script");
+  }
+  if (judged > 0) {
+    console.error("discover: " + topic + ": judge dropped " + `${judged}` + " card(s) as crime or showbiz");
   }
   if (wrote.length == 0 && wrongLang > 0) {
     let all: WrittenStory[] = [];
     let k: int = 0;
     while (k < parsed.length) {
+      if (foreignScript(parsed[k].headline + " " + parsed[k].summary + " " + parsed[k].why, lang)) {
+        k = k + 1;
+        continue;
+      }
       let t = bodyFor(parsed[k], hits);
       let o: WrittenStory = {
         story: parsed[k], body: t, readMinutes: readingMinutes(t),
@@ -1014,7 +1474,7 @@ export function carriedOver(kept: Map<string, string>, id: string, body: string)
 export function unreadableStories(db: Db, limit: int): DiscoverRow[] {
   let keys: DbOrder[] = [{ column: "made_at" }];
   let rows = JSON.parse<DiscoverRow[]>(listOrdered(db, discoverStoriesMapping(), {
-    where: "body <> '' AND body_md = ''",
+    where: "body <> '' AND body_md = '' AND archived_at = ''",
     order: keys,
   }));
   if (rows.length <= limit) {
@@ -1039,7 +1499,7 @@ export function withReadableBody(row: DiscoverRow, md: string): DiscoverRow {
     summary: row.summary, sources: row.sources, sourceTitles: row.sourceTitles,
     fetchedAt: row.fetchedAt,
     why: row.why, madeAt: row.madeAt, body: row.body, image: row.image,
-    readMinutes: row.readMinutes, bodyMd: md,
+    readMinutes: row.readMinutes, bodyMd: md, archivedAt: row.archivedAt,
   };
   return better;
 }
@@ -1063,24 +1523,78 @@ export function refreshFeed(db: Db, feed: DiscoverFeed, master: string): string 
     return "nothing worth a card";
   }
 
+  /* The prompt's rule 2 asks the model not to card the same event twice; it
+   * does anyway (measured: identical mineral-water cards from two urls of the
+   * same outlet). Dedup is set arithmetic, so do it in code: a card sharing a
+   * source URL with an earlier card, or repeating an earlier headline, is the
+   * same story - keep the first, which ranked higher. */
+  let seenSrc = new Map<string, bool>();
+  let seenHead = new Map<string, bool>();
+  let unique: WrittenStory[] = [];
+  let d: int = 0;
+  while (d < told.stories.length) {
+    let cand = told.stories[d];
+    /* PRIMARY source only. Matching on ANY shared url merged twenty distinct
+     * Tunisian stories into four, because the model cross-cites secondary urls
+     * however firmly the prompt forbids it, and the newest-ranked stat cards
+     * swallowed everything that touched their sources. Two cards naming the
+     * same FIRST url are the same event; a shared secondary is model
+     * sloppiness, not sameness. */
+    let dup: bool = seenHead.has(cand.story.headline.trim());
+    if (!dup && cand.story.sources.length > 0 && seenSrc.has(cand.story.sources[0])) {
+      dup = true;
+    }
+    if (!dup) {
+      seenHead.set(cand.story.headline.trim(), true);
+      if (cand.story.sources.length > 0) {
+        seenSrc.set(cand.story.sources[0], true);
+      }
+      unique.push(cand);
+    }
+    d = d + 1;
+  }
+  if (unique.length < told.stories.length) {
+    console.error("discover: " + feed.id + ": merged " + `${told.stories.length - unique.length}` + " duplicate card(s)");
+  }
+
   let now = `${Date.now()}`;
   let kept = readableSoFar(db, feed.id);
-  deleteWhere(db, discoverStoriesMapping(), "feed_id = " + db.placeholder, [feed.id]);
+  /* What the feed holds BEFORE this pass, so the ones it drops can be archived after.
+   * Read through the repository, like every other access to this table. */
+  let before = storiesFor(db, feed.id);
+  let live = new Map<string, bool>();
   let i: int = 0;
-  while (i < told.stories.length) {
-    let written = told.stories[i];
+  while (i < unique.length) {
+    let written = unique[i];
     let one = written.story;
     let row: DiscoverRow = {
-      id: feed.id + ":" + stem(one.headline), feedId: feed.id, rank: i,
+      id: cardId(feed.id, one), feedId: feed.id, rank: i, archivedAt: "",
       headline: one.headline, summary: one.summary,
       sources: one.sources.join("\n"), sourceTitles: written.sourceTitles,
       fetchedAt: one.fetchedAt,
       why: one.why, madeAt: now,
       body: written.body, image: written.image, readMinutes: written.readMinutes,
-      bodyMd: carriedOver(kept, feed.id + ":" + stem(one.headline), written.body),
+      bodyMd: carriedOver(kept, cardId(feed.id, one), written.body),
     };
     persist(db, discoverStoriesMapping(), JSON.stringify(row));
+    live.set(row.id, true);
     i = i + 1;
+  }
+
+  /* Anything the feed held and this pass did not choose is archived. The rows it DID
+   * choose were upserted above, which also un-archives a story that came back under the
+   * same source. Nothing is deleted here or anywhere else. */
+  let gone: int = 0;
+  let b: int = 0;
+  while (b < before.length) {
+    if (!live.has(before[b].id)) {
+      persist(db, discoverStoriesMapping(), JSON.stringify(archivedRow(before[b], now)));
+      gone = gone + 1;
+    }
+    b = b + 1;
+  }
+  if (gone > 0) {
+    console.error("discover: " + feed.id + ": archived " + `${gone}` + " story(ies) off the feed");
   }
   let after: DiscoverFeed = {
     id: feed.id, topic: feed.topic, query: feed.query, lang: feed.lang,
