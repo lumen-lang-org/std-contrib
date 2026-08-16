@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist, placeholderAt } from "../plume/plume.ts";
+import { DbMatch, DbOrder, DbRepository, createTableSql, deleteById, findById, listOrdered, persist, placeholderAt, setWhere } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { storeCredential, credentialFor, forgetCredential } from "./credentials.ts";
 import { envKeyRepository } from "./routes/sandbox/env-keys/entities/env-key.entity.ts";
@@ -250,7 +250,9 @@ export function envKeyNames(db: Db, owner: string, imageId: string): string[] {
 }
 
 export function touchEnvKeys(db: Db, owner: string, imageId: string, now: string): void {
-  db.query("UPDATE env_keys SET last_used_at = " + db.placeholder
-    + " WHERE owner = " + placeholderAt(db, 2) + " AND image_id = " + placeholderAt(db, 3),
-    [now, owner, imageId]);
+  let match: DbMatch[] = [
+    { column: "owner", operator: "=", value: owner },
+    { column: "image_id", operator: "=", value: imageId },
+  ];
+  setWhere(db, envKeysMapping(), { values: [{ column: "last_used_at", value: now }], match: match });
 }
