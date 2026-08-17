@@ -4,6 +4,7 @@ import { listWhere, placeholderAt } from "../plume/plume.ts";
 import { AgentRow, McpServerRow, SkillRow, SkillFileRow, agentsMapping, mcpServersMapping, skillsMapping, skillFilesMapping } from "./schema.ts";
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
+import { reservedHere } from "./reserved.ts";
 import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape } from "./scan.ts";
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
@@ -269,7 +270,13 @@ export function mountTools(db: Db, agentId: string, master: string, owner: strin
         i = i + 1;
         continue;
       }
-      if (mountedIndex(tools, offered[i].name) >= 0) {
+      if (reservedHere(offered[i].name)) {
+        // Left out rather than mounted: a provider refuses a request whose
+        // tool names repeat, and it refuses the whole of it, so one shared
+        // name would take the conversation down rather than one tool.
+        faults.push(server.serverName + " offers \"" + offered[i].name
+          + "\", which is a name this deployment already answers to, so it is not mounted");
+      } else if (mountedIndex(tools, offered[i].name) >= 0) {
         faults.push(server.serverName + " also offers \"" + offered[i].name + "\", which is already mounted");
       } else {
         let t: MountedTool = {
