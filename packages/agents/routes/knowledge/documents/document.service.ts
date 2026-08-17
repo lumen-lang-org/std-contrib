@@ -68,7 +68,8 @@ export class DocumentService {
     if (key == "") {
       return refusing("no credential for " + provider);
     }
-    let badName = sourceFault(body.source, body.body);
+    let named = body.source.trim();
+    let badName = sourceFault(named, body.body);
     if (badName != "") {
       return refusing(badName);
     }
@@ -76,13 +77,13 @@ export class DocumentService {
     if (ready != "") {
       return refusing(ready);
     }
-    let jobId = this.repository.queueUpload(body.source, normalScope(body.scope), embedderId, body.body, stamp());
+    let jobId = this.repository.queueUpload(named, normalScope(body.scope), embedderId, body.body, stamp());
     if (jobId == "") {
       return refusing("the document could not be queued");
     }
     let v: DocumentQueued = {
       job: jobId,
-      source: body.source,
+      source: named,
       scope: normalScope(body.scope),
       status: JOB_QUEUED,
     };
