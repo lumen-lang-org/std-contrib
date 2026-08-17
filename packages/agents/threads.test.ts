@@ -1,5 +1,6 @@
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, threadMessageRows, nameThread, titlingConfigId, titleThread } from "./threads.ts";
+import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, threadMessageRows, nameThread, titlingConfigId, titleThread, EVAL_CASE_KEY } from "./threads.ts";
+import { threadForCase } from "./evals.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
 import { projectsPlan } from "./projects.ts";
 import { artifactPlan, putArtifact, listArtifacts, TURN_SEQ_NONE } from "./artifacts.ts";
@@ -1026,4 +1027,17 @@ test("a conversation nobody offered cannot be remixed, however the id was found"
   });
   expect(missing.threadId == "");
   expect(missing.fault.indexOf("no conversation") >= 0);
+});
+
+test("an eval case gets a conversation of its own, and it stays out of the list", () => {
+  seededMenu();
+  let ordinary = openThread(database, { agentId: "a1", owner: "u-alice", now: "1000000000000" });
+  let room = threadForCase(database, "a1", "u-alice");
+  expect(room != "");
+  expect(room != ordinary);
+  expect(threadRouteKey(database, room) == EVAL_CASE_KEY);
+
+  let rows: ThreadListing[] = listThreads(database, { tags: [], limit: 50, offset: 0, project: "" });
+  expect(rows.length == 1);
+  expect(rows[0].id == ordinary);
 });

@@ -136,6 +136,16 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
 }
 
 export function runAgentTraced(db: Db, agentId: string, userText: string, master: string, tracer: Tracer): AgentRun {
+  return runAgentFor(db, agentId, userText, master, "", tracer);
+}
+
+/** The same run, for a named person.
+ *
+ *  An agent whose tools sit behind someone's own OAuth grant mounts none of
+ *  them for a caller it cannot name, and then answers, plausibly, that it has
+ *  no such tools. Anything running an agent outside a conversation has to say
+ *  who it is running for. */
+export function runAgentFor(db: Db, agentId: string, userText: string, master: string, owner: string, tracer: Tracer): AgentRun {
   let path: string[] = [];
   let fresh: Turn[] = [];
   let noChunks: string[] = [];
@@ -149,7 +159,7 @@ export function runAgentTraced(db: Db, agentId: string, userText: string, master
     excludeChunks: noChunks,
     modelConfigId: "",
     baseSeq: TURN_SEQ_NONE,
-    owner: "",
+    owner: owner,
     think: false,
     scope: "",
   };

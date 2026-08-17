@@ -119,6 +119,10 @@ export type ThreadOpen = {
   now: string,
 };
 
+/** The route key an eval case's conversation carries, so a run of forty cases
+ *  does not arrive as forty conversations in somebody's list. */
+export const EVAL_CASE_KEY: string = "eval-case";
+
 export function openThread(db: Db, open: ThreadOpen): string {
   let id = crypto.randomUUID();
   let row: ThreadRow = {
@@ -189,7 +193,7 @@ export function sweepEmptyThreads(db: Db, before: string): void {
 export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
   let out: ThreadListing[] = [];
   let newest: DbOrder[] = [{ column: "created_at", direction: "desc" }];
-  let hidden = "route_key <> 'project-files'";
+  let hidden = "route_key <> 'project-files' AND route_key <> '" + EVAL_CASE_KEY + "'";
   let clause = ownerClause(db, page.tags, 1);
   clause = clause == "" ? hidden : hidden + " AND " + clause;
   let args = page.tags;

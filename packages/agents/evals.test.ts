@@ -1,5 +1,5 @@
 import { langfuseBackend, otlpBackend, noBackend } from "../tracing/backend.ts";
-import { EvalItem, Verdict, evalApiBase, readVerdict, judgePrompt, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
+import { DatasetSummary, EvalItem, Verdict, hasDataset, namesJson, onlyOne, evalApiBase, readVerdict, judgePrompt, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
 
 function item(question: string, expected: string): EvalItem {
   let none: string[] = [];
@@ -153,4 +153,37 @@ test("a case can name the folders an answer should come from", () => {
 
   let usedWrong: string[] = ["/policies"];
   expect(reachedScore(expected, usedWrong) == 0.0);
+});
+
+test("a case's expectations are written as JSON the reader takes back", () => {
+  let none: string[] = [];
+  expect(namesJson(none) == "[]");
+
+  let two: string[] = ["warehouse_stock", "part_price"];
+  expect(namesJson(two) == "[\"warehouse_stock\",\"part_price\"]");
+
+  let quoted: string[] = ["say \"hello\""];
+  expect(namesIn(namesJson(quoted))[0] == "say \"hello\"");
+});
+
+test("a set of cases is known by name, not by position", () => {
+  let sets: DatasetSummary[] = [
+    { name: "parts-desk-evals", description: "" },
+    { name: "scoped-rag", description: "how retrieval is scoped" },
+  ];
+  expect(hasDataset(sets, "scoped-rag"));
+  expect(!hasDataset(sets, "Scoped-RAG"));
+  expect(!hasDataset(sets, ""));
+});
+
+test("a run can be asked for one case rather than the top of the set", () => {
+  let a = item("first?", "1");
+  let b: EvalItem = { id: "i2", question: "second?", expected: "2",
+    expectedTools: [], expectedAgents: [], expectedScopes: [] };
+  let both: EvalItem[] = [a, b];
+
+  expect(onlyOne(both, "").length == 2);
+  expect(onlyOne(both, "i2").length == 1);
+  expect(onlyOne(both, "i2")[0].question == "second?");
+  expect(onlyOne(both, "gone").length == 0);
 });

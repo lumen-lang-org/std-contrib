@@ -1,7 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
 import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../../tracing/tracing.ts";
 import { AgentRetrievalRow } from "../../../knowledge.ts";
-import { runAgentTraced } from "../../../run.ts";
+import { runAgentFor } from "../../../run.ts";
 import { recordRun } from "../../../runlog.ts";
 import { tracerFor } from "../../../trace.ts";
 import { runsSince, utcDayStartText } from "../../../usage.ts";
@@ -202,7 +202,7 @@ export class AgentService {
 
   run(id: string, text: string, owner: string): RunResult {
     let tracer = tracerFor(this.repository.database, this.master);
-    let answered = runAgentTraced(this.repository.database, id, text, this.master, tracer);
+    let answered = runAgentFor(this.repository.database, id, text, this.master, owner, tracer);
 
     let runId = recordRun(this.repository.database, {
       agentId: id, threadId: "", owner: owner,

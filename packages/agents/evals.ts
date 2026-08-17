@@ -1,8 +1,9 @@
 import { Db } from "../plume/driver.ts";
-import { AgentRun, runAgentTraced, hasName } from "./run.ts";
+import { AgentRun, runAgentFor, runAgentTraced, hasName } from "./run.ts";
 import { TraceBackend, hasDatasets } from "../tracing/backend.ts";
 import { Tracer, traceId, tracerForCallee, tracerBackend, flush, tracerWithMoreSpans, tracing, noTracer, resetTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonText, jsonList, jsonStringMember, jsonUnescape } from "./scan.ts";
+import { openThread, rememberRouteKey, runInThread, EVAL_CASE_KEY } from "./threads.ts";
 
 export type EvalItem = {
   id: string,
@@ -50,11 +51,332 @@ export type EvalRun = {
 
 const PASS_MARK: number = 0.7;
 
+/* A sentinel below any score a judge could mean, so "the score would not read
+   as a number" stays distinct from "the score was negative", which clamps. */
+const NO_SCORE: number = -1.0e30;
+
 export function evalApiBase(backend: TraceBackend): string {
   if (!hasDatasets(backend)) {
     return "";
   }
   return backend.apiBase;
+}
+
+export type DatasetSummary = {
+  name: string,
+  description: string,
+};
+
+/** A case as someone writes it, before the backend has an id for it. */
+export type NewCase = {
+  dataset: string,
+  question: string,
+  expected: string,
+  expectedTools: string[],
+  expectedAgents: string[],
+  expectedScopes: string[],
+};
+
+export function datasetSummaries(base: string, auth: string): DatasetSummary[] {
+  let out: DatasetSummary[] = [];
+  if (base == "") {
+    return out;
+  }
+  let res = http.request(base + "/api/public/v2/datasets?limit=100", "GET", "", jsonHeaders(auth));
+  if (!res.ok || res.status != 200) {
+    return out;
+  }
+  let rows = jsonList(jsonRaw(res.body, "data"));
+  let i: int = 0;
+  while (i < rows.length) {
+    let name = jsonText(rows[i], "name");
+    if (name != "") {
+      let one: DatasetSummary = { name: name, description: jsonText(rows[i], "description") };
+      out.push(one);
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+export function hasDataset(names: DatasetSummary[], wanted: string): bool {
+  let i: int = 0;
+  while (i < names.length) {
+    if (names[i].name == wanted) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
+export function createDataset(base: string, auth: string, name: string, description: string): bool {
+  if (base == "" || name == "") {
+    return false;
+  }
+  let body = "{\"name\":" + JSON.stringify(name)
+    + ",\"description\":" + JSON.stringify(description) + "}";
+  let res = http.request(base + "/api/public/v2/datasets", "POST", body, jsonHeaders(auth));
+  return res.ok && res.status >= 200 && res.status < 300;
+}
+
+export function namesJson(names: string[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < names.length) {
+    if (i > 0) {
+      out = out + ",";
+    }
+    out = out + JSON.stringify(names[i]);
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+/** Writes one case in the shape `datasetItems` reads back: the question under
+ *  `input`, and everything the run is expected to reach under `expectedOutput`.
+ *  Returns the backend's id for it, "" when the write was refused. */
+export function addCase(base: string, auth: string, made: NewCase): string {
+  if (base == "" || made.dataset == "" || made.question == "") {
+    return "";
+  }
+  let input = "{\"question\":" + JSON.stringify(made.question) + "}";
+  let expected = "{\"answer\":" + JSON.stringify(made.expected)
+    + ",\"tools\":" + namesJson(made.expectedTools)
+    + ",\"agents\":" + namesJson(made.expectedAgents)
+    + ",\"scopes\":" + namesJson(made.expectedScopes) + "}";
+  let body = "{\"datasetName\":" + JSON.stringify(made.dataset)
+    + ",\"input\":" + input
+    + ",\"expectedOutput\":" + expected + "}";
+  let res = http.request(base + "/api/public/dataset-items", "POST", body, jsonHeaders(auth));
+  if (!res.ok || res.status < 200 || res.status >= 300) {
+    return "";
+  }
+  return jsonText(res.body, "id");
+}
+
+/** Rewrites a case in place. Langfuse takes the same document as a new case
+ *  with the id filled in, so an edit is a write rather than a patch: every
+ *  field is sent, and what is not sent is cleared. */
+export function updateCase(base: string, auth: string, id: string, made: NewCase): bool {
+  if (base == "" || id == "" || made.dataset == "" || made.question == "") {
+    return false;
+  }
+  let input = "{\"question\":" + JSON.stringify(made.question) + "}";
+  let expected = "{\"answer\":" + JSON.stringify(made.expected)
+    + ",\"tools\":" + namesJson(made.expectedTools)
+    + ",\"agents\":" + namesJson(made.expectedAgents)
+    + ",\"scopes\":" + namesJson(made.expectedScopes) + "}";
+  let body = "{\"id\":" + JSON.stringify(id)
+    + ",\"datasetName\":" + JSON.stringify(made.dataset)
+    + ",\"input\":" + input
+    + ",\"expectedOutput\":" + expected + "}";
+  let res = http.request(base + "/api/public/dataset-items", "POST", body, jsonHeaders(auth));
+  return res.ok && res.status >= 200 && res.status < 300;
+}
+
+export function deleteCase(base: string, auth: string, id: string): bool {
+  if (base == "" || id == "") {
+    return false;
+  }
+  let res = http.request(base + "/api/public/dataset-items/" + id, "DELETE", "", jsonHeaders(auth));
+  return res.ok && res.status >= 200 && res.status < 300;
+}
+
+export type ScoreLine = {
+  name: string,
+  value: number,
+  comment: string,
+};
+
+/** One case as it was actually run: which trace it left, and what the scorers
+ *  said about it afterwards. */
+export type RunCase = {
+  itemId: string,
+  question: string,
+  traceId: string,
+  at: string,
+  latency: number,
+  scores: ScoreLine[],
+};
+
+export type RunLine = {
+  name: string,
+  at: string,
+  items: int,
+};
+
+export type RunDetail = {
+  name: string,
+  dataset: string,
+  at: string,
+  cases: RunCase[],
+};
+
+export function datasetRuns(base: string, auth: string, dataset: string, limit: int): RunLine[] {
+  let out: RunLine[] = [];
+  if (base == "" || dataset == "") {
+    return out;
+  }
+  let url = base + "/api/public/datasets/" + dataset + "/runs?limit=" + `${limit}`;
+  let res = http.request(url, "GET", "", jsonHeaders(auth));
+  if (!res.ok || res.status != 200) {
+    return out;
+  }
+  let rows = jsonList(jsonRaw(res.body, "data"));
+  let i: int = 0;
+  while (i < rows.length) {
+    let name = jsonText(rows[i], "name");
+    if (name != "") {
+      let one: RunLine = { name: name, at: jsonText(rows[i], "createdAt"), items: 0 };
+      out.push(one);
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+export function traceFacts(base: string, auth: string, into: RunCase): RunCase {
+  if (base == "" || into.traceId == "") {
+    return into;
+  }
+  let res = http.request(base + "/api/public/traces/" + into.traceId, "GET", "", jsonHeaders(auth));
+  if (!res.ok || res.status != 200) {
+    return into;
+  }
+  let scores: ScoreLine[] = [];
+  let rows = jsonList(jsonRaw(res.body, "scores"));
+  let i: int = 0;
+  while (i < rows.length) {
+    let name = jsonText(rows[i], "name");
+    if (name != "") {
+      let line: ScoreLine = {
+        name: name,
+        value: parseFloat(jsonRaw(rows[i], "value")) ?? 0.0,
+        comment: jsonText(rows[i], "comment"),
+      };
+      scores.push(line);
+    }
+    i = i + 1;
+  }
+  let out: RunCase = {
+    itemId: into.itemId,
+    question: into.question,
+    traceId: into.traceId,
+    at: jsonText(res.body, "timestamp"),
+    latency: parseFloat(jsonRaw(res.body, "latency")) ?? 0.0,
+    scores: scores,
+  };
+  return out;
+}
+
+/** What a past run did, case by case. The dataset is read alongside it so a
+ *  case still reads as its question rather than as an id. */
+export function runDetail(base: string, auth: string, dataset: string, runName: string): RunDetail {
+  let cases: RunCase[] = [];
+  if (base == "" || dataset == "" || runName == "") {
+    let nothing: RunDetail = { name: runName, dataset: dataset, at: "", cases: cases };
+    return nothing;
+  }
+  let url = base + "/api/public/datasets/" + dataset + "/runs/" + runName;
+  let res = http.request(url, "GET", "", jsonHeaders(auth));
+  if (!res.ok || res.status != 200) {
+    let missing: RunDetail = { name: runName, dataset: dataset, at: "", cases: cases };
+    return missing;
+  }
+
+  let asked = datasetItems(base, auth, dataset, 200);
+  let rows = jsonList(jsonRaw(res.body, "datasetRunItems"));
+  let i: int = 0;
+  while (i < rows.length) {
+    let itemId = jsonText(rows[i], "datasetItemId");
+    let empty: ScoreLine[] = [];
+    let one: RunCase = {
+      itemId: itemId,
+      question: questionOf(asked, itemId),
+      traceId: jsonText(rows[i], "traceId"),
+      at: jsonText(rows[i], "createdAt"),
+      latency: 0.0,
+      scores: empty,
+    };
+    cases.push(traceFacts(base, auth, one));
+    i = i + 1;
+  }
+  let out: RunDetail = {
+    name: runName,
+    dataset: dataset,
+    at: jsonText(res.body, "createdAt"),
+    cases: cases,
+  };
+  return out;
+}
+
+/** One past execution of a single case: which run it belonged to, the trace it
+ *  left, and what the scorers said. */
+export type CaseRun = {
+  runName: string,
+  at: string,
+  traceId: string,
+  latency: number,
+  scores: ScoreLine[],
+};
+
+/** A case's own history, newest first.
+ *
+ *  Walked run by run rather than read from an index, because the backend keeps
+ *  runs and not cases: the question "how has this case been doing" is ours, and
+ *  answering it means looking through the runs that contain it. */
+export function caseRuns(base: string, auth: string, dataset: string, itemId: string, most: int): CaseRun[] {
+  let out: CaseRun[] = [];
+  if (base == "" || dataset == "" || itemId == "") {
+    return out;
+  }
+  let runs = datasetRuns(base, auth, dataset, 25);
+  let r: int = 0;
+  while (r < runs.length && out.length < most) {
+    let url = base + "/api/public/datasets/" + dataset + "/runs/" + runs[r].name;
+    let res = http.request(url, "GET", "", jsonHeaders(auth));
+    if (res.ok && res.status == 200) {
+      let rows = jsonList(jsonRaw(res.body, "datasetRunItems"));
+      let i: int = 0;
+      while (i < rows.length && out.length < most) {
+        if (jsonText(rows[i], "datasetItemId") == itemId) {
+          let empty: ScoreLine[] = [];
+          let one: RunCase = {
+            itemId: itemId,
+            question: "",
+            traceId: jsonText(rows[i], "traceId"),
+            at: jsonText(rows[i], "createdAt"),
+            latency: 0.0,
+            scores: empty,
+          };
+          let told = traceFacts(base, auth, one);
+          let line: CaseRun = {
+            runName: runs[r].name,
+            at: told.at == "" ? one.at : told.at,
+            traceId: told.traceId,
+            latency: told.latency,
+            scores: told.scores,
+          };
+          out.push(line);
+        }
+        i = i + 1;
+      }
+    }
+    r = r + 1;
+  }
+  return out;
+}
+
+export function questionOf(items: EvalItem[], itemId: string): string {
+  let i: int = 0;
+  while (i < items.length) {
+    if (items[i].id == itemId) {
+      return items[i].question;
+    }
+    i = i + 1;
+  }
+  return "a case that has since been removed";
 }
 
 function jsonHeaders(auth: string): Map<string, string> {
@@ -216,8 +538,8 @@ export function readVerdict(text: string): Verdict {
     };
     return unusable;
   }
-  let parsed = parseFloat(raw);
-  if (parsed == null) {
+  let parsed = parseFloat(raw) ?? NO_SCORE;
+  if (parsed == NO_SCORE) {
     let unreadable: Verdict = {
       score: 0.0,
       reason: "the judge's score was not a number: " + raw,
@@ -344,7 +666,43 @@ export type EvalRequest = {
   runName: string,
   master: string,
   maxItems: int,
+  // Who the run is for. An agent whose tools are reached by a person's own
+  // grant answers differently for a caller it cannot name, so a case about
+  // one of those has to be run as somebody.
+  owner: string,
+  // One case's id, "" for the first `maxItems` of the set. A caller that wants
+  // to watch the cases go by runs them one at a time rather than waiting on
+  // the whole set, and this is how it names the one it means.
+  onlyItem: string,
 };
+
+export function onlyOne(items: EvalItem[], wanted: string): EvalItem[] {
+  let out: EvalItem[] = [];
+  if (wanted == "") {
+    return items;
+  }
+  let i: int = 0;
+  while (i < items.length) {
+    if (items[i].id == wanted) {
+      out.push(items[i]);
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+/* A case runs in a conversation of its own. Outside a thread an agent has no
+   artifacts, no workspace, no scripts and nothing schedulable, so an eval of
+   anything this deployment offers would score the absence of the tools rather
+   than the model. Fresh per case, so one case cannot read another's files. */
+export function threadForCase(db: Db, agentId: string, owner: string): string {
+  let id = openThread(db, { agentId: agentId, owner: owner, now: `${Date.now()}` });
+  if (id == "") {
+    return "";
+  }
+  rememberRouteKey(db, id, EVAL_CASE_KEY);
+  return id;
+}
 
 export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun {
   let agentId = request.agentId;
@@ -365,8 +723,12 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
   }
   let auth = backend.authValue;
 
-  let items = datasetItems(base, auth, dataset, maxItems);
+  let reach = request.onlyItem == "" ? maxItems : 200;
+  let items = onlyOne(datasetItems(base, auth, dataset, reach), request.onlyItem);
   if (items.length == 0) {
+    if (request.onlyItem != "") {
+      return noEvals(dataset, runName, "no case " + request.onlyItem + " in \"" + dataset + "\"");
+    }
     return noEvals(dataset, runName, "no cases in dataset \"" + dataset + "\"");
   }
 
@@ -377,7 +739,12 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
   let i: int = 0;
   while (i < items.length) {
     let caseTracer = resetTracer(tracer);
-    let answered = runAgentTraced(db, agentId, items[i].question, master, caseTracer);
+    let room = threadForCase(db, agentId, request.owner);
+    // Without a room the run still happens, with the remote servers it can
+    // reach and nothing of this deployment's own.
+    let answered = room == ""
+      ? runAgentFor(db, agentId, items[i].question, master, request.owner, caseTracer)
+      : runInThread(db, room, items[i].question, master, caseTracer).run;
 
     let delegations: int = 0;
     let s: int = 0;
