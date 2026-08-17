@@ -11,13 +11,10 @@ import { ThreadAsk, inheritedPick, openThread, runInThreadWith, threadTurns, thr
 import { tracerFor } from "./trace.ts";
 import { fileBlock, queueOutbound, queueOutboundFile, queueOutboundWith } from "./triggers.ts";
 import { RunContext, runAgentAt } from "./run.ts";
-import { retrieveWeb, asWebContext } from "./webrag.ts";
 import { agentScopes, asContext, embeddingModel, retrieve, retrievalFor } from "./knowledge.ts";
 import { callTool } from "./mcp.ts";
 import { ScriptGiven, ScriptOut, ensureBuilt, runScript } from "./script-wasm.ts";
 
-const WEB_TOP_K: int = 6;
-const WEB_MAX_CHARS: int = 6000;
 const KNOW_TOP_K: int = 6;
 
 function stepOk(output: string): StepResult {
@@ -194,7 +191,7 @@ function runScriptStep(node: WfNode, ctx: WalkCtx, runId: string): StepResult {
   if (!built.ok) {
     return stepFailed(built.error);
   }
-  let dir = "/tmp/joule-script-run/" + runId + "-" + node.id;
+  let dir = "/tmp/agents-script-run/" + runId + "-" + node.id;
   let ran = runScript(built.path, scriptGiven(ctx), dir);
   if (!ran.ok) {
     return stepFailed(ran.error);
@@ -352,15 +349,11 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       return withInput(outcomeStep(node, askModel(db, agent, ask.master, said + outcomeAsk(node))), said);
     }
     if (node.type == "WEB_SEARCH") {
+      /* The built-in web index left with Discover (it was Joule's, not this
+       * engine's). The node stays loadable so an old graph still validates;
+       * it fails with the way forward rather than answering from nothing. */
       let asked = fill(node.query, ctx);
-      let found = retrieveWeb(asked, WEB_TOP_K, WEB_MAX_CHARS);
-      if (!found.ok) {
-        return withInput(stepFailed(found.error), asked);
-      }
-      if (found.found.length == 0) {
-        return withInput(stepOk("The web index has nothing for: " + found.query), asked);
-      }
-      return withInput(stepOk(asWebContext(found.found)), asked);
+      return withInput(stepFailed("web search is no longer built in - mount a search tool (MCP) and use an AGENT step"), asked);
     }
     if (node.type == "KNOWLEDGE") {
       let asked = fill(node.query, ctx);

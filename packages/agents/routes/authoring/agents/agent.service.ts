@@ -5,13 +5,11 @@ import { runAgentTraced } from "../../../run.ts";
 import { recordRun } from "../../../runlog.ts";
 import { tracerFor } from "../../../trace.ts";
 import { runsSince, utcDayStartText } from "../../../usage.ts";
-import { AgentWebRagRow } from "../../../webrag.ts";
 import { Model } from "../../inference/models/entities/model.entity.ts";
 import { Outcome, produced, refusing } from "../../../../rest/server.ts";
 import { AgentBody } from "./dtos/agent-body.dto.ts";
 import { RetrievalSetup } from "./dtos/retrieval-setup.dto.ts";
 import { RunResult } from "./dtos/run-result.dto.ts";
-import { WebRagSetup } from "./dtos/web-rag-setup.dto.ts";
 import { AgentRepository } from "./agent.repository.ts";
 import { runResultOf } from "./agent.utils.ts";
 
@@ -38,10 +36,6 @@ export class AgentService {
 
   scopes(id: string): string[] {
     return this.repository.scopes(id);
-  }
-
-  webRag(id: string): AgentWebRagRow {
-    return this.repository.webRag(id);
   }
 
   runs(id: string, tags: string[], limit: int): string {
@@ -204,32 +198,6 @@ export class AgentService {
       return refusing(written.error);
     }
     return produced(this.repository.retrieval(id));
-  }
-
-  setWebRag(id: string, body: WebRagSetup): Outcome {
-    if (body.queryMode == "generated") {
-      let document = this.repository.model(body.queryModelId);
-      if (document == "") {
-        return refusing("queryMode generated needs an existing chat model as queryModelId");
-      }
-      let model: Model = JSON.parse<Model>(document);
-      if (model.kind != "chat") {
-        return refusing(model.label + " is not a chat model");
-      }
-    }
-    let row: AgentWebRagRow = {
-      agentId: id,
-      enabled: body.enabled,
-      topK: body.topK,
-      maxChars: body.maxChars,
-      queryMode: body.queryMode,
-      queryModelId: body.queryModelId,
-    };
-    let written = this.repository.saveWebRag(row);
-    if (!written.ok) {
-      return refusing(written.error);
-    }
-    return produced(this.repository.storedWebRag(id));
   }
 
   run(id: string, text: string, owner: string): RunResult {

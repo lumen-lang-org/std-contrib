@@ -307,7 +307,7 @@ function clientFor(db: Db, server: McpServerRow, master: string, redirectUri: st
 
   let clientId = supplied;
   if (supplied == "") {
-    let made = registerClient(found.registerUrl, redirectUri, "Joule");
+    let made = registerClient(found.registerUrl, redirectUri, "Agents");
     if (made.fault != "") {
       if (found.registerUrl == "") {
         return noClient(server.serverName + " does not hand out OAuth clients automatically,"

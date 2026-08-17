@@ -15,7 +15,6 @@ import { projectBriefing } from "./projects.ts";
 import { StepStart, StepClose, beginStep, endStep, endStepAt, recordThought, recordPartial, clearPartial } from "./steps.ts";
 import { jsonText } from "./scan.ts";
 import { Retrieved, embeddingModel, agentScopes, retrievalFor, retrieve, retrieveExcluding, asContext } from "./knowledge.ts";
-import { WebPassage, webRagFor, generateQuery, retrieveWeb, asWebContext, webSummary, webSearchTools, callWebSearchTool, callReadLinkTool } from "./webrag.ts";
 import { cardHintFor } from "./toolcards.ts";
 import { casesBriefing } from "./plugincards.ts";
 import { FileToolResult, workspaceTools, callWorkspaceTool } from "./workspace.ts";
@@ -233,12 +232,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     }
   }
   let specs = toolSpecs(mounted);
-  let webSpecs = webSearchTools();
-  let ws: int = 0;
-  while (ws < webSpecs.length) {
-    specs.push(webSpecs[ws]);
-    ws = ws + 1;
-  }
   if (stillWaiting(mounted) > 0) {
     specs.push(findToolsSpec(mounted));
   }
@@ -388,30 +381,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
     trace = endSpan(trace, retrieveSpan, { input: userText, output: passageSummary(retrieved) });
   }
 
-  let webFound: WebPassage[] = [];
-  let webWant = webRagFor(db, agent.id);
-  if (webWant.enabled) {
-    let webSpan = startSpan("web-retrieve", TRACE_RETRIEVER, agentSpan.id);
-    let webQuery = generateQuery(db, webWant, userText, master);
-    let webGot = retrieveWeb(webQuery, webWant.topK, webWant.maxChars);
-    if (!webGot.ok) {
-      notes.push("web retrieval failed: " + webGot.error);
-    } else {
-      webFound = webGot.found;
-      if (webFound.length == 0) {
-        notes.push("the web index had nothing for \"" + webQuery + "\"");
-      } else {
-        notes.push(webSummary(webQuery, webFound));
-      }
-    }
-    if (on) {
-      trace = endSpan(trace, webSpan, {
-        input: webQuery,
-        output: `${webFound.length}` + " passages",
-      });
-    }
-  }
-
   let context: Turn[] = [];
   let carried: int = 0;
   while (carried < prior.length) {
@@ -420,9 +389,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   }
   if (retrieved.length > 0) {
     context.push(userTurn(asContext(retrieved)));
-  }
-  if (webFound.length > 0) {
-    context.push(userTurn(asWebContext(webFound)));
   }
   context.push(userTurn(userText));
   let steps: AgentStep[] = [];
@@ -671,8 +637,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, name: calls[i].name, args: calls[i].args,
         nowMs: Date.now() as number,
       });
-      let websearched = callWebSearchTool(calls[i].name, calls[i].args);
-      let linkread = callReadLinkTool(calls[i].name, calls[i].args);
       if (calls[i].name == "find_tools") {
         let query = jsonText(calls[i].args, "query");
         if (query == "") {
@@ -749,16 +713,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = known.ok;
         resultText = known.text;
         from = "knowledge";
-        calledTools.push(calls[i].name);
-      } else if (linkread != "") {
-        resultOk = true;
-        resultText = linkread;
-        from = "web-index";
-        calledTools.push(calls[i].name);
-      } else if (websearched != "") {
-        resultOk = true;
-        resultText = websearched;
-        from = "web-index";
         calledTools.push(calls[i].name);
       } else if (skilled.handled) {
         resultOk = skilled.ok;

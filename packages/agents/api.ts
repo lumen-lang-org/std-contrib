@@ -1,5 +1,3 @@
-import { civil } from "../cron/cron.ts";
-import { apiKeysPlan } from "./api-keys.ts";
 import { Request, Reply, Mount, mount, mountedRoutes, mountFault, dispatchedMounted, Respond, Ok, Created, OkJson, CreatedJson, NoContent, NotFound, BadRequest, Refused } from "../rest/server.ts";
 import { openApiDocument, openApiHandlerInfoOf, openApiOperations, openApiSchemaOf } from "../openapi/openapi.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
@@ -19,9 +17,7 @@ import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText
 import { CardPluginApi } from "./routes/extensions/card-plugins/card-plugin.controller.ts";
 import { ToolCardApi } from "./routes/authoring/tool-cards/tool-card.controller.ts";
 import { McpServerApi } from "./routes/connectivity/mcp-server/mcp-server.controller.ts";
-import { PlaygroundApi } from "./routes/ops/playground/playground.controller.ts";
 import { CompletionApi } from "./routes/inference/completions/completion.controller.ts";
-import { V1Api } from "./routes/ops/v1/v1.controller.ts";
 import { TaskApi } from "./routes/automation/tasks/task.controller.ts";
 import { DocumentApi } from "./routes/knowledge/documents/document.controller.ts";
 import { PreviewApi } from "./routes/conversations/preview/preview.controller.ts";
@@ -45,11 +41,9 @@ import { AgentApi } from "./routes/authoring/agents/agent.controller.ts";
 import { AgentBody } from "./routes/authoring/agents/dtos/agent-body.dto.ts";
 import { RetrievalSetup } from "./routes/authoring/agents/dtos/retrieval-setup.dto.ts";
 import { ScopeGrant } from "./routes/authoring/agents/dtos/scope-grant.dto.ts";
-import { WebRagSetup } from "./routes/authoring/agents/dtos/web-rag-setup.dto.ts";
 import { OpenApiDocApi } from "./routes/ops/openapi-doc/openapi-doc.controller.ts";
 import { ProviderApi } from "./routes/inference/providers/provider.controller.ts";
 import { WorkflowApi } from "./routes/automation/workflows/workflow.controller.ts";
-import { DiscoverApi } from "./routes/knowledge/discover/discover.controller.ts";
 import { TemplateApi } from "./routes/extensions/templates/template.controller.ts";
 import { TriggerApi } from "./routes/automation/triggers/trigger.controller.ts";
 import { ProjectApi } from "./routes/conversations/projects/project.controller.ts";
@@ -58,7 +52,6 @@ import { CaptchaApi } from "./routes/identity/captcha/captcha.controller.ts";
 import { EnvKeyApi } from "./routes/sandbox/env-keys/env-key.controller.ts";
 import { EnvTemplateApi } from "./routes/sandbox/env-templates/env-template.controller.ts";
 import { SecretApi } from "./routes/identity/secrets/secret.controller.ts";
-import { ApiKeyApi } from "./routes/identity/api-keys/api-key.controller.ts";
 import { JobApi } from "./routes/knowledge/jobs/job.controller.ts";
 import { SandboxLimitsApi } from "./routes/sandbox/sandbox-limits/sandbox-limits.controller.ts";
 import { ScopeApi } from "./routes/authoring/scopes/scope.controller.ts";
@@ -86,9 +79,7 @@ const WORKSPACE_SWEEP_MS: int = 15000;
 import { WireRef, wireView } from "./artifacts-fence.ts";
 import { indexingPlan } from "./indexing.ts";
 import { knowledgePlan } from "./knowledge.ts";
-import { webRagPlan } from "./webrag.ts";
 import { toolCardsPlan } from "./toolcards.ts";
-import { allFeeds, asArticleContext, discoverPlan, feedById, refreshFeed, storyById } from "./discover.ts";
 import { cardPluginsPlan } from "./plugincards.ts";
 import { tasksPlan } from "./tasks.ts";
 import { workflowsPlan } from "./workflow-store.ts";
@@ -133,12 +124,6 @@ function publicPath(target: string): bool {
   if (path == "/healthz") {
     return true;
   }
-  if (path == "/v1") {
-    return true;
-  }
-  if (path.length >= 4 && path.substring(0, 4) == "/v1/") {
-    return true;
-  }
   return false;
 }
 
@@ -159,128 +144,6 @@ function apiToken(): string {
 
 
 
-
-/* The hours the digest may run, in the newsroom's own time.
- *
- * Round-the-clock was free when the model was a GPU in the operator's house. It is a paid
- * call per feed now, and a 03:00 pass digests the same articles 01:00 already read -
- * Tunisian newsrooms publish between breakfast and midnight, and the crawl has nothing
- * new to say in between. Configurable rather than compiled, so the window follows the
- * operator rather than a deploy.
- *
- * AGENTS_DISCOVER_HOURS is start-end in LOCAL hours, end exclusive; AGENTS_DISCOVER_TZ is
- * an IANA zone. Unset means the always-on behaviour this replaced.
- *
- * The hour is read out of civil(), the cron package's own formatter, rather than computed
- * from the epoch: Lumen will not narrow the i64 that Date.now() returns, and a formatter
- * that already knows the zone is right across a daylight-saving change anyway. */
-function digestZone(): string {
-  let z = process.env["AGENTS_DISCOVER_TZ"] ?? "";
-  return z == "" ? "UTC" : z;
-}
-
-function localHourNow(): int {
-  // "2026-08-16 02:54:59 CET" - the hour is the two characters after the space.
-  let stamp = civil(digestZone(), Date.now() as i64);
-  let sp = stamp.indexOf(" ");
-  if (sp < 0) {
-    return 12;
-  }
-  return parseInt(stamp.slice(sp + 1, sp + 3), 10) ?? 12;
-}
-
-/* A window that wraps midnight is read the way a person means it. An unreadable setting
- * leaves the digest running: a typo must not silently stop the feeds. */
-function withinDigestHours(): bool {
-  let said = process.env["AGENTS_DISCOVER_HOURS"] ?? "";
-  if (said == "") {
-    return true;
-  }
-  let dash = said.indexOf("-");
-  if (dash < 0) {
-    return true;
-  }
-  let start = parseInt(said.slice(0, dash), 10) ?? 0;
-  let end = parseInt(said.slice(dash + 1), 10) ?? 24;
-  if (start == end) {
-    return true;
-  }
-  let h = localHourNow();
-  if (start < end) {
-    return h >= start && h < end;
-  }
-  return h >= start || h < end;
-}
-
-function digestLoop(master: string, everyMs: int, lane: int, lanes: int): int {
-  try {
-    let db = openDatabase();
-    while (true) {
-      /* Asleep outside the window, re-checked every ten minutes rather than computed as
-       * one long sleep: widening the hours then takes effect within a tick, no restart. */
-      if (!withinDigestHours()) {
-        process.sleep(600000);
-        continue;
-      }
-      let feeds = allFeeds(db);
-      // This lane's stride through the list. Lane 0 of 1 is every feed, which
-      // is the single-threaded pass this replaced.
-      let i: int = lane;
-      while (i < feeds.length) {
-        if (feeds[i].enabled) {
-          /* Containment per feed, not per pass: before this, one exception here
-           * returned from digestLoop entirely and every feed after this one in
-           * the stride starved until a restart - measured at 40 deaths, with
-           * geo:tr 110h stale behind a crashing geo:de. A feed that throws now
-           * loses its turn and nothing else. */
-          try {
-            let fault = refreshFeed(db, feeds[i], master);
-            if (fault != "") {
-              console.error("discover: " + feeds[i].id + ": " + fault);
-            }
-          } catch (e) {
-            console.error("discover: " + feeds[i].id + ": this feed crashed its refresh; the pass continues: " + e.message);
-          }
-        }
-        i = i + lanes;
-      }
-      process.sleep(everyMs);
-    }
-  } catch (e) {
-    console.error("discover: the digest pass stopped");
-  }
-  return 0;
-}
-
-/* How many feeds to digest at once.
- *
- * One unless an operator says otherwise, so a deployment that sets nothing runs
- * the pass it ran before. Worth raising only where the model behind the digest
- * batches - a hosted API or vLLM - and worth leaving alone where it does not,
- * because lanes against a one-at-a-time server only move the queue. */
-function discoverLanes(): int {
-  let said = process.env["AGENTS_DISCOVER_LANES"] ?? "";
-  if (said == "") {
-    return 1;
-  }
-  let n = parseInt(said, 10) ?? 1;
-  if (n < 1) {
-    return 1;
-  }
-  return n > 8 ? 8 : n;
-}
-
-function discoverEveryMs(): int {
-  let said = process.env["AGENTS_DISCOVER_EVERY_MS"] ?? "";
-  if (said == "") {
-    return 0;
-  }
-  let n = parseInt(said, 10) ?? 0;
-  if (n > 0 && n < 60000) {
-    return 60000;
-  }
-  return n;
-}
 
 function sweepLoop(idleMs: int): int {
   try {
@@ -433,23 +296,11 @@ export function wholePlan(db: Db): Migration[] {
     t = t + 1;
   }
   let knowledge = knowledgePlan(db);
-  let webRag = webRagPlan(db);
-  let wr: int = 0;
-  while (wr < webRag.length) {
-    knowledge.push(webRag[wr]);
-    wr = wr + 1;
-  }
   let cards = toolCardsPlan(db);
   let tc: int = 0;
   while (tc < cards.length) {
     knowledge.push(cards[tc]);
     tc = tc + 1;
-  }
-  let discover = discoverPlan(db);
-  let dc: int = 0;
-  while (dc < discover.length) {
-    knowledge.push(discover[dc]);
-    dc = dc + 1;
   }
   let cardPlugins = cardPluginsPlan(db);
   let cp: int = 0;
@@ -563,12 +414,6 @@ export function wholePlan(db: Db): Migration[] {
   while (ro < roster.length) {
     plan.push(roster[ro]);
     ro = ro + 1;
-  }
-  let keys = apiKeysPlan(db);
-  let kp: int = 0;
-  while (kp < keys.length) {
-    plan.push(keys[kp]);
-    kp = kp + 1;
   }
   return plan;
 }
@@ -828,18 +673,6 @@ function main(): void {
   }
   console.log(`stopping environments idle for ${ENV_IDLE_MS}ms`);
   Worker.run(() => sweepLoop(sweepIdle));
-  let discoverEvery = discoverEveryMs();
-  if (discoverEvery > 0) {
-    let lanes = discoverLanes();
-    let started: int = 0;
-    while (started < lanes) {
-      // Bound per iteration: the lambda outlives this loop and must not read a
-      // counter that has moved on by the time the worker runs.
-      let lane = started;
-      Worker.run(() => digestLoop(master, discoverEvery, lane, lanes));
-      started = started + 1;
-    }
-  }
 
   // Built from the same @openapi/@schema decorators AgentApi's own routes
   // and DTOs already carry — a second AgentApi instance, alongside the one
@@ -852,9 +685,8 @@ function main(): void {
     openApiSchemaOf(new AgentBody("", "", "", "", "", false, false, "", "")),
     openApiSchemaOf(new RetrievalSetup("", 0, 0.0, false)),
     openApiSchemaOf(new ScopeGrant("")),
-    openApiSchemaOf(new WebRagSetup(false, 5, 6000, "verbatim", "")),
   ];
-  let openApiDoc = openApiDocument("Joule agents — agents route", "0.1.0", agentOps, agentSchemas);
+  let openApiDoc = openApiDocument("Agents API", "0.1.0", agentOps, agentSchemas);
 
   let mounts: Mount[] = [
     new AgentApi(db, master),
@@ -866,9 +698,6 @@ function main(): void {
     new ProjectApi(db),
     new WorkflowApi(db),
     new SecretApi(db, master),
-    new ApiKeyApi(db),
-    new V1Api(db),
-    new PlaygroundApi(db),
     new CompletionApi(db),
     new EnvironmentApi(db),
     new EnvTemplateApi(db),
@@ -894,7 +723,6 @@ function main(): void {
     new PluginApi(db),
     new ArtifactApi(db),
     new PreviewApi(db),
-    new DiscoverApi(db),
     new LibraryApi(db),
     new ToolCardApi(db),
     new CardPluginApi(db),

@@ -5,7 +5,6 @@ import { migrate, migration, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, McpServerRow, AgentRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, enabledChoices, configForChoice } from "./schema.ts";
 import { traceConfigMapping } from "./trace.ts";
 import { TraceConfigRow } from "./routes/ops/tracing/entities/trace-config.entity.ts";
-import { DiscoverFeed, allFeeds, ensureGeoFeed, geoCode, discoverFeedsMapping } from "./discover.ts";
 import { AgentRetrievalRow, Retrieved, agentRetrievalMapping, grantScope, agentScopes } from "./knowledge.ts";
 import { storeCredential, credentialFor } from "./credentials.ts";
 import { UNKNOWN_TAG, tagsFromHeader, identityUnreadable, owningTag } from "./owner.ts";
@@ -1155,53 +1154,6 @@ test("neither a choice nor a router can be deleted out from under what points at
   recordRun(database, { agentId: "a1", threadId: "", owner: "", question: "hi",
     run: emptyRun("hi"), modelChoiceId: "ch-auto", routeNote: "" });
   expect(choices.inUse("ch-auto") == "");
-});
-
-test("a country code is two ISO letters or nothing at all", () => {
-  expect(geoCode("GB") == "GB");
-  expect(geoCode("tn") == "TN");
-  expect(geoCode(" de ") == "DE");
-  expect(geoCode("XX") == "");
-  expect(geoCode("T1") == "");
-  expect(geoCode("") == "");
-  expect(geoCode("GBR") == "");
-  expect(geoCode("<script>") == "");
-});
-
-test("the first reader from a place creates its feed, once", () => {
-  fresh();
-  ensureGeoFeed(database, "gb");
-  ensureGeoFeed(database, "GB");
-  let feeds = allFeeds(database);
-  expect(feeds.length == 1);
-  expect(feeds[0].id == "geo:gb");
-  expect(feeds[0].country == "GB");
-  expect(feeds[0].lang == "");
-  expect(feeds[0].enabled);
-  expect(feeds[0].digestedAt == "");
-  ensureGeoFeed(database, "XX");
-  ensureGeoFeed(database, "??");
-  ensureGeoFeed(database, "England");
-  expect(allFeeds(database).length == 1);
-});
-
-test("place feeds are capped, so a GET cannot mint rows forever", () => {
-  fresh();
-  let i: int = 0;
-  while (i < 40) {
-    let a = i / 26;
-    let b = i - a * 26;
-    let cc = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(a, a + 1)
-      + "ABCDEFGHIJKLMNOPQRSTUVWXYZ".slice(b, b + 1);
-    let row: DiscoverFeed = {
-      id: "geo:" + cc.toLowerCase(), topic: "Local news", query: "news",
-      lang: "", country: cc, enabled: true, digestedAt: "",
-    };
-    persist(database, discoverFeedsMapping(), JSON.stringify(row));
-    i = i + 1;
-  }
-  ensureGeoFeed(database, "QQ");
-  expect(allFeeds(database).length == 40);
 });
 
 test("a thread id alone is not authorisation, and refusal is a 404", () => {

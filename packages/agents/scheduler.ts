@@ -7,7 +7,6 @@ import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, wit
 import { ResumeAsk, WorkflowAsk, resumeWorkflow, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
-import { discoverModelId, discoverStoriesMapping, readable, unreadableStories, withReadableBody } from "./discover.ts";
 import { recordRun } from "./runlog.ts";
 import { TURN_SEQ_NONE, binaryKind, kindOf, putArtifact } from "./artifacts.ts";
 import { TRIGGER_ASK_TTL_MS, TriggerInboxRow, TriggerPendingRow, botById, claimMessage, finishMessage, forgetAsk, noteThread, pendingFor, plainly, queueOutbound, rememberAsk, testingDraft, threadForChat } from "./triggers.ts";
@@ -109,7 +108,6 @@ function main(): void {
     console.log("scheduler: walked " + `${walked}` + " workflows");
   }
 
-  reflow(db, master);
 
   sweep(db);
 
@@ -300,29 +298,6 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
     return;
   }
   noteFault(finishMessage(db, msg, "done", done.runId, plainly(done.answer), "", Date.now() as number));
-}
-
-const REFLOW_PER_PASS: int = 3;
-
-function reflow(db: Db, master: string): void {
-  let waiting = unreadableStories(db, REFLOW_PER_PASS);
-  let i: int = 0;
-  let done: int = 0;
-  while (i < waiting.length) {
-    try {
-      let better = readable(db, waiting[i].body, discoverModelId(), master);
-      if (better != "") {
-        persist(db, discoverStoriesMapping(), JSON.stringify(withReadableBody(waiting[i], better)));
-        done = done + 1;
-      }
-    } catch (e) {
-      console.error("scheduler: reflow " + waiting[i].id + ": " + e.message);
-    }
-    i = i + 1;
-  }
-  if (done > 0) {
-    console.log("scheduler: made " + `${done}` + " stories readable");
-  }
 }
 
 function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {

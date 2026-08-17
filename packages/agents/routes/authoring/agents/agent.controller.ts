@@ -10,7 +10,6 @@ import { RunBody } from "./dtos/run-body.dto.ts";
 import { ScopeGrant } from "./dtos/scope-grant.dto.ts";
 import { ServerLink } from "./dtos/server-link.dto.ts";
 import { SkillLink } from "./dtos/skill-link.dto.ts";
-import { WebRagSetup } from "./dtos/web-rag-setup.dto.ts";
 import { agentExists, guestRunsLeft } from "./agent.guard.ts";
 import { AgentService } from "./agent.service.ts";
 import { scopeFromPath } from "./agent.utils.ts";
@@ -117,18 +116,6 @@ export class AgentApi {
   @Guard(theAgent)
   setRetrieval(@PathVariable("id") id: string, @Valid @RequestBody body: RetrievalSetup): Reply {
     return answered(this.agents.setRetrieval(id, body));
-  }
-
-  @Get("/:id/web-rag")
-  @Guard(theAgent)
-  webRag(@PathVariable("id") id: string): Reply {
-    return OkJson(this.agents.webRag(id));
-  }
-
-  @Put("/:id/web-rag")
-  @Guard(theAgent)
-  setWebRag(@PathVariable("id") id: string, @Valid @RequestBody body: WebRagSetup): Reply {
-    return answered(this.agents.setWebRag(id, body));
   }
 
   @Post("/:id/run")

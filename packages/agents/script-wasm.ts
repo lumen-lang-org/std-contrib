@@ -9,7 +9,7 @@ export function wasmtimeBin(): string {
 }
 
 export function scriptCacheDir(): string {
-  return process.env("AGENTS_SCRIPT_CACHE") ?? "/tmp/joule-script-wasm";
+  return process.env("AGENTS_SCRIPT_CACHE") ?? "/tmp/agents-script-wasm";
 }
 
 export const SCRIPT_TIMEOUT_S: int = 5;

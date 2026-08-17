@@ -5,7 +5,6 @@ import { flush, traceId, tracing, tracerWithMoreSpans, tracerWithSession } from 
 import { GUEST_DAILY_RUNS, askedChoice, choiceFault, guestQuotaJson, guestTag, stamp } from "../../../api-core.ts";
 import { TURN_SEQ_NONE } from "../../../artifacts.ts";
 import { wireView, WireRef } from "../../../artifacts-fence.ts";
-import { asArticleContext, feedById, storyById } from "../../../discover.ts";
 import { envEnsure, envList } from "../../../environments.ts";
 import { envMaterialise } from "../../../env-sync.ts";
 import { holdsOwner, owningTag } from "../../../owner.ts";
@@ -134,21 +133,22 @@ export class ThreadService {
     return out;
   }
 
+  /* A thread opened on supplied context - the generalized form of what
+   * from-story did when stories lived in this database. The caller (the
+   * Discover reader, or anything else) sends the article text it wants the
+   * conversation seeded with; this service no longer knows what a story is. */
   fromStory(body: string, owner: string): Reply {
     if (body == "") {
-      return BadRequest("a body is required: {\"storyId\":\"tech-en:ab12cd34\",\"agentId\":\"a1\"}");
+      return BadRequest("a body is required: {\"agentId\":\"a1\",\"title\":\"...\",\"context\":\"...\"}");
     }
-    let storyId = jsonText(body, "storyId");
     let agentId = jsonText(body, "agentId");
-    if (storyId == "" || agentId == "") {
-      return BadRequest("a storyId and an agentId are required");
+    let context = jsonUnescape(jsonText(body, "context"));
+    let title = jsonUnescape(jsonText(body, "title"));
+    if (agentId == "" || context == "") {
+      return BadRequest("an agentId and a context are required");
     }
     if (!existsById(this.database, agentRepository(), agentId)) {
       return BadRequest("no agent " + agentId);
-    }
-    let story = storyById(this.database, storyId);
-    if (story.id == "") {
-      return NotFound("story " + storyId);
     }
 
     let id = openThread(this.database, {
@@ -169,23 +169,23 @@ export class ThreadService {
       chosen = "";
     }
 
-    let feed = feedById(this.database, story.feedId);
-    let seed = [userTurn(asArticleContext(story, feed.topic))];
+    let seed = [userTurn(context)];
     let wrote = appendTurns(this.database, id, seed, 0);
     if (wrote != "") {
-      return BadRequest("the article could not be attached: " + wrote);
+      return BadRequest("the context could not be attached: " + wrote);
     }
 
-    // The view below reports this headline as the thread's title, so a name
-    // that did not land makes the reply disagree with the row.
-    let named = nameThread(this.database, id, story.headline);
-    if (named != "") {
-      console.error("threads: the conversation opened from story " + storyId
-        + " could not be named and will show untitled — " + named);
+    if (title != "") {
+      // The view below reports this title as the thread name, so a name that
+      // did not land makes the reply disagree with the row.
+      let named = nameThread(this.database, id, title);
+      if (named != "") {
+        console.error("threads: the seeded conversation could not be named and will show untitled — " + named);
+      }
     }
 
     let v: ThreadFromStoryView = {
-      id: id, agentId: agentId, modelChoiceId: chosen, title: story.headline,
+      id: id, agentId: agentId, modelChoiceId: chosen, title: title,
     };
     return CreatedJson(v);
   }

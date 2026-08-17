@@ -8,7 +8,6 @@ import { mcpServerRepository } from "../../connectivity/servers/entities/mcp-ser
 import { modelConfigRepository } from "../../inference/model-configs/entities/model-config.entity.ts";
 import { modelRepository } from "../../inference/models/entities/model.entity.ts";
 import { skillRepository } from "../skills/entities/skill.entity.ts";
-import { AgentWebRagRow, agentWebRagRepository } from "./entities/agent-web-rag.entity.ts";
 import { runRepository } from "../../conversations/runs/entities/run.entity.ts";
 
 // The runs table's own mapping, minus relations — the same shape
@@ -122,26 +121,6 @@ export class AgentRepository {
 
   retrieval(id: string): string {
     return findById(this.database, agentRetrievalRepository(), id);
-  }
-
-  webRag(id: string): AgentWebRagRow {
-    let held = findById(this.database, agentWebRagRepository(), id);
-    if (held == "") {
-      let none: AgentWebRagRow = {
-        agentId: id, enabled: false, topK: 5, maxChars: 6000,
-        queryMode: "verbatim", queryModelId: "",
-      };
-      return none;
-    }
-    return JSON.parse<AgentWebRagRow>(held);
-  }
-
-  saveWebRag(row: AgentWebRagRow): DbResult {
-    return persist(this.database, agentWebRagRepository(), JSON.stringify(row));
-  }
-
-  storedWebRag(id: string): string {
-    return findById(this.database, agentWebRagRepository(), id);
   }
 
   model(id: string): string {

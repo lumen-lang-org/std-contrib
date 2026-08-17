@@ -5,7 +5,6 @@ import { urlEncode } from "./mcp-oauth.ts";
 import { caller } from "./caller.service.ts";
 import { jsonText, jsonUnescape } from "./scan.ts";
 import { enabledChoices, modelChoicesMapping } from "./schema.ts";
-import { upstreamBase } from "./search-gateway.ts";
 import { ToolCardRow } from "./toolcards.ts";
 
 export function stamp(): string {
@@ -131,47 +130,6 @@ export function choiceFault(db: Db, choiceId: string): string {
     return "no model choice " + choiceId;
   }
   return "model choice " + choiceId + " is not offered";
-}
-
-export function forwardProduct(req: Request, product: string): Reply {
-  let q = queryParam(req, "q", "");
-  if (q.trim() == "") {
-    return BadRequest("a query is required: ?q=...");
-  }
-  let url = upstreamBase() + "/" + product + "?q=" + urlEncode(q);
-  if (product != "suggest") {
-    let k = queryParam(req, "k", "");
-    if (k != "") {
-      url = url + "&k=" + urlEncode(k);
-    }
-    let hybrid = queryParam(req, "hybrid", "");
-    if (hybrid != "") {
-      url = url + "&hybrid=" + urlEncode(hybrid);
-    }
-  }
-  if (product == "retrieve") {
-    let mc = queryParam(req, "max_chars", "");
-    if (mc != "") {
-      url = url + "&max_chars=" + urlEncode(mc);
-    }
-  }
-  let site = queryParam(req, "site", "");
-  if (site != "") {
-    url = url + "&site=" + urlEncode(site);
-  }
-  let lang = queryParam(req, "lang", "");
-  if (lang != "") {
-    url = url + "&lang=" + urlEncode(lang);
-  }
-  let country = queryParam(req, "country", "");
-  if (country != "") {
-    url = url + "&country=" + urlEncode(country);
-  }
-  let res = http.request(url, "GET", "", new Map<string, string>());
-  if (!res.ok) {
-    return Refused(502, "the search service did not answer");
-  }
-  return Respond(res.status, res.body, "application/json");
 }
 
 export function toolCardFault(row: ToolCardRow): string {
