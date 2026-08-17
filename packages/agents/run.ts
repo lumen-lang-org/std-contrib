@@ -5,6 +5,7 @@ import { credentialFor } from "./credentials.ts";
 import { Completion, ToolSpec, ToolCall, Turn, toolSpec, complete, completeTurns, streamTurns, replyText, assistantText, assistantThinking, toolCallsFrom, truncationFault, userTurn, assistantTurn, toolTurn } from "./provider.ts";
 import { Mounted, mountTools, mountedIndex, toolSpecs, callMounted, serverOf, findTools, findToolsSpec, stillWaiting, deferredBriefing, NO_PLACEHOLDER_ARGS, TEXT_CARD, agentChildren, delegateToolName, delegateDescription, delegateSchema, artifactTools, callArtifactTool, scriptTools, envBriefing, callScriptTool, callServeTool, skillTools, callSkillTool, skillBriefing, FILE_FENCE } from "./tools.ts";
 import { taskTools, callTaskTool, maySchedule } from "./task-tools.ts";
+import { fenceTag, fenceBriefing, fenced, untrustedSource } from "./untrusted.ts";
 import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
@@ -442,6 +443,10 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   }
 
   system = system + "\n\n" + TEXT_CARD;
+  // One tag for the whole run: every round's results carry it, and the
+  // model is told once what it means.
+  let tag = fenceTag();
+  system = system + "\n\n" + fenceBriefing(tag);
 
   let last: Completion = {
     ok: false,
@@ -776,9 +781,16 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
           let recalled = findTools(mounted, calls[i].name, 1);
           if (recalled.found.length > 0) {
             mounted = recalled.mounted;
-            specs = toolSpecs(mounted);
-            if (stillWaiting(mounted) > 0) {
-              specs.push(findToolsSpec(mounted));
+            // Appended, not rebuilt. Rebuilding from `mounted` returns the
+            // servers' tools alone, so a model that guessed the name of one
+            // deferred tool lost every artifact, script and workspace tool it
+            // had for the rest of the run -- and then answered that it could
+            // not read the file it had just written.
+            let f: int = 0;
+            while (f < recalled.found.length) {
+              specs.push(toolSpec(recalled.found[f].name, recalled.found[f].description,
+                recalled.found[f].schema));
+              f = f + 1;
             }
           }
         }
@@ -824,7 +836,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         ok: resultOk,
       };
       steps.push(step);
-      context.push(toolTurn(calls[i].id, calls[i].name, resultText));
+      // What the model reads is wrapped when it came from outside; what is
+      // recorded above is the result itself, so a trace still shows the text
+      // rather than the packaging.
+      let read = untrustedSource(from) ? fenced(tag, from, calls[i].name, resultText) : resultText;
+      context.push(toolTurn(calls[i].id, calls[i].name, read));
       i = i + 1;
     }
   }
