@@ -3,7 +3,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Retrieved, embeddingModel, createDocuments, indexDocument, retrieve, asContext, normalScope, scopeClause, scopeArgs, splitIntoChunks } from "./knowledge.ts";
+import { Retrieved, embeddingModel, createDocuments, indexDocument, retrieve, asContext, normalScope, scopeClause, scopeArgs, splitIntoChunks, plainSource } from "./knowledge.ts";
 import { scopeCovers } from "./routes/authoring/scopes/scope.utils.ts";
 
 let database: Db = sqlite();
@@ -287,4 +287,16 @@ test("no scopes granted reads nothing, rather than everything", () => {
   let r = retrieve(database, m, none, "question", 3, "sk-fake");
   expect(!r.ok);
   expect(r.error.indexOf("no scopes granted") >= 0);
+});
+
+test("a source with a hyphen is filed, not promised and dropped", () => {
+  expect(plainSource("release-notes"));
+  expect(plainSource("eval-note"));
+  expect(plainSource("handbook_2026"));
+  expect(plainSource("Handbook"));
+  // And the rule still holds a line: a path, a space or a quote is not a name.
+  expect(!plainSource(""));
+  expect(!plainSource("a/b"));
+  expect(!plainSource("two words"));
+  expect(!plainSource("drop';--"));
 });

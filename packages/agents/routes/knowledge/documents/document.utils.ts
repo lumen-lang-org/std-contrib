@@ -1,5 +1,4 @@
-import { safeIdentifier } from "../../../../plume/plume.ts";
-import { SourceListing, normalScope } from "../../../knowledge.ts";
+import { SourceListing, normalScope, plainSource } from "../../../knowledge.ts";
 import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
 import { DocumentFileView } from "./dtos/document-file-view.dto.ts";
 import { DocumentSummary } from "./dtos/document-summary.dto.ts";
@@ -50,7 +49,7 @@ export function sourceFault(source: string, body: string): string {
   if (source.trim() == "") {
     return "a document needs a source to be filed under";
   }
-  if (!safeIdentifier(source)) {
+  if (!plainSource(source)) {
     return "a source must be a plain name: letters, digits, _ and -";
   }
   if (body.trim() == "") {
