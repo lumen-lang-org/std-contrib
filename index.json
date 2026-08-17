@@ -87,7 +87,7 @@
     {
       "name": "code-index",
       "version": "0.1.0",
-      "summary": "Codebase symbol index (cidx): map/find/refs/search/rank, persistent cache, 8 languages \u2014 AI navigation, no vector DB.",
+      "summary": "Codebase symbol index (cidx): map/find/refs/search/rank, persistent cache, 8 languages — AI navigation, no vector DB.",
       "path": "packages/code-index"
     },
     {
@@ -99,7 +99,7 @@
     {
       "name": "tracing",
       "version": "0.1.0",
-      "summary": "OpenTelemetry traces for AI runs over OTLP/HTTP: spans, generations, tools, token usage \u2014 six backends, Langfuse-compatible.",
+      "summary": "OpenTelemetry traces for AI runs over OTLP/HTTP: spans, generations, tools, token usage — six backends, Langfuse-compatible.",
       "path": "packages/tracing"
     },
     {
@@ -123,7 +123,7 @@
     {
       "name": "websocket",
       "version": "0.1.0",
-      "summary": "RFC 6455 websockets: handshake, frames, server and client \u2014 a browser connects, exchanges and closes clean.",
+      "summary": "RFC 6455 websockets: handshake, frames, server and client — a browser connects, exchanges and closes clean.",
       "path": "packages/websocket"
     },
     {
@@ -141,7 +141,7 @@
     {
       "name": "agents",
       "version": "0.1.0",
-      "summary": "Agents, prompts, models, MCP links and sub-agents as database rows \u2014 run, evaluated and reconfigured over HTTP without a restart.",
+      "summary": "Agents, prompts, models, MCP links and sub-agents as database rows — run, evaluated and reconfigured over HTTP without a restart.",
       "path": "packages/agents"
     },
     {
@@ -167,6 +167,12 @@
       "version": "0.1.0",
       "summary": "OpenAPI 3.0 document generation for rest controllers: @openapi/@schema decorators, cross-referenced against the real Route[].",
       "path": "packages/openapi"
+    },
+    {
+      "name": "mail",
+      "version": "0.1.0",
+      "summary": "Sending mail: one Mailer interface, Resend and SendGrid implementations, one HTML shell.",
+      "path": "packages/mail"
     }
   ]
 }

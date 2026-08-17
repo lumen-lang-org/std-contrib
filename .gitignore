@@ -83,3 +83,4 @@ packages/agents/script-cache/
 *.ts.bak-*
 *.ts.bak
 probe_hours
+/.lumen-libxev-*/

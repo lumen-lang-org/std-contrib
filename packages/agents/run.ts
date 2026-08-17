@@ -10,6 +10,7 @@ import { workflowTools, callWorkflowTool } from "./workflow-tools.ts";
 import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
 import { projectTools, callProjectTool } from "./project-tools.ts";
+import { mailTools, callMailTool } from "./mail-tools.ts";
 import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { projectBriefing } from "./projects.ts";
@@ -297,6 +298,14 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       while (pj < groups.length && (anywhere || where.scope == "projects")) {
         specs.push(groups[pj]);
         pj = pj + 1;
+      }
+      // Empty unless this deployment can really send, so a model is never
+      // offered a way to mail somebody that is going to fail at the far end.
+      let posts = mailTools(db, master);
+      let ml: int = 0;
+      while (ml < posts.length && (anywhere || where.scope == "mail")) {
+        specs.push(posts[ml]);
+        ml = ml + 1;
       }
       let knowing = knowledgeTools();
       let kn: int = 0;
@@ -652,6 +661,9 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         owner: where.owner, name: calls[i].name, args: calls[i].args,
         nowMs: Date.now() as number,
       });
+      let posted = callMailTool(db, master, {
+        name: calls[i].name, args: calls[i].args,
+      });
       if (calls[i].name == "find_tools") {
         let query = jsonText(calls[i].args, "query");
         if (query == "") {
@@ -728,6 +740,11 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = known.ok;
         resultText = known.text;
         from = "knowledge";
+        calledTools.push(calls[i].name);
+      } else if (posted.handled) {
+        resultOk = posted.ok;
+        resultText = posted.text;
+        from = "mail";
         calledTools.push(calls[i].name);
       } else if (skilled.handled) {
         resultOk = skilled.ok;

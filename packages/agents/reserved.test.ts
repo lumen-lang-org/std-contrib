@@ -56,6 +56,7 @@ test("the names that actually collided are the ones a big server brings", () => 
   expect(reservedHere("list_documents"));
   // and the door to the deferred ones is ours too
   expect(reservedHere("find_tools"));
+  expect(reservedHere("send_email"));
   // while a server's own vocabulary is left alone
   expect(!reservedHere("list_issues"));
   expect(!reservedHere("list_teams"));

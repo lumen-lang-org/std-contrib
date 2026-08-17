@@ -20,7 +20,7 @@
 export type WfNode = {
   id: string,
   // START, END, AGENT, LLM, CONDITION, WEB_SEARCH, KNOWLEDGE, MCP, HTTP,
-  // SCRIPT.
+  // SCRIPT, EMAIL.
   type: string,
   // What the canvas shows on the node.
   name: string,
@@ -42,7 +42,7 @@ export type WfNode = {
   // WEB_SEARCH, KNOWLEDGE: what to look for, templated.
   query: string,
   // CONDITION: how to test — "contains", "equals", "lacks" — what to look
-  // for, and the text to test. An empty subject means the previous node's
+  // for, and the text to test. EMAIL reads `subject` as the subject line. An empty subject means the previous node's
   // output, which is what a condition is almost always about. "lacks" and
   // not "matches": there is no pattern language here, and offering one that
   // silently fell back to substring search would be worse than not having it.
@@ -92,6 +92,16 @@ export type WfNode = {
   // that mark finally means what it says — absent parses to null instead of
   // refusing the document.
   botId?: string,
+  // EMAIL: who it goes to, one address or several separated by commas,
+  // templated like everything else — so a step can mail whoever an earlier
+  // step named. The subject is `subject` and the message is `body`, both
+  // shared with the kinds above: a node is one kind at a time, and a second
+  // pair of fields meaning the same thing would only be a second thing to
+  // keep in step. Who it comes FROM is not here and never will be — that is
+  // the deployment's own address, and a graph that could set it would be a
+  // graph that could send mail as anybody. Optional, for the reason `source`
+  // is.
+  to?: string,
   // HTTP: extra headers, one `Name: value` per line, values templated. For
   // everything that is NOT a secret — a content type, an accept, a version
   // pin. Optional, for the reason `source` is.
@@ -220,7 +230,7 @@ export const MAX_TEXT: int = 4000;
 // is a process this deployment pays for.
 export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY", "TELEGRAM_ASK"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY", "TELEGRAM_ASK", "EMAIL"];
 
 /** Whether this is where a walk begins.
  *
@@ -570,6 +580,18 @@ function refuseNode(node: WfNode): string {
     if (body.trim() == "") { return label + " has no script in it yet"; }
     if (body.length > MAX_SOURCE) {
       return label + " is " + `${body.length}` + " characters of script — the most one step may carry is " + `${MAX_SOURCE}`;
+    }
+  }
+  if (node.type == "EMAIL") {
+    // Templated fields cannot be checked for shape here — "{{input}}" is a
+    // valid address until it is filled — so this asks only that each one is
+    // there. Whether the filled text is an address is the runner's answer,
+    // and it refuses the whole step rather than sending half of it.
+    if ((node.to ?? "").trim() == "") { return label + " has nobody to send to"; }
+    if (node.subject.trim() == "") { return label + " has no subject line"; }
+    if (node.body.trim() == "") { return label + " has no message in it yet"; }
+    if ((node.to ?? "").length > MAX_NAME * 4) {
+      return label + " names more addresses than a step may carry";
     }
   }
   if (node.type == "HTTP") {

@@ -18,6 +18,10 @@ test("a server's answer is somebody else's text; our own families are not", () =
   expect(!untrustedSource("projects"));
   expect(!untrustedSource("knowledge"));
   expect(!untrustedSource("bots"));
+  // A send_email result is a receipt this platform wrote, not something a
+  // stranger said. Fencing it would tell the model to disregard its own
+  // confirmation.
+  expect(!untrustedSource("mail"));
   expect(!untrustedSource(""));
 });
 

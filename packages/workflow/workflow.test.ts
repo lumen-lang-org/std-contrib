@@ -648,3 +648,41 @@ test("an http step's headers are Name: value lines, and anything else is refused
   // A node stored before headers existed parses to none, not a refusal.
   expect(headerLines(plain).length == 0);
 });
+
+/** An EMAIL node, whole, since the record is flat. */
+function mailNode(id: string, to: string, subject: string, body: string): WfNode {
+  let n: WfNode = {
+    id: id, type: "EMAIL", name: "Tell them", x: 0.0, y: 0.0,
+    instruction: "", agentId: "",
+    serverId: "", tool: "", args: "",
+    url: "", method: "", body: body,
+    query: "", test: "", needle: "",
+    subject: subject, schedule: "", source: "",
+    to: to,
+  };
+  return n;
+}
+
+test("a mail step names somebody, a subject and a message, or it is refused", () => {
+  let good = graphOf([node("s", "START"),
+    mailNode("m", "{{input}}", "Your report", "Here it is.\n\n{{prev}}"), node("z", "END")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "z", "")]);
+  // Templated fields are addresses only once they are filled, so the graph
+  // asks that they are there and the runner asks what they say.
+  expect(refuse(good) == "");
+
+  let nobody = graphOf([node("s", "START"),
+    mailNode("m", "  ", "Your report", "Here it is."), node("z", "END")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "z", "")]);
+  expect(refuse(nobody).indexOf("nobody to send to") > 0);
+
+  let untitled = graphOf([node("s", "START"),
+    mailNode("m", "a@b.com", "", "Here it is."), node("z", "END")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "z", "")]);
+  expect(refuse(untitled).indexOf("no subject line") > 0);
+
+  let empty = graphOf([node("s", "START"),
+    mailNode("m", "a@b.com", "Your report", ""), node("z", "END")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "z", "")]);
+  expect(refuse(empty).indexOf("no message") > 0);
+});

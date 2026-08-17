@@ -1,5 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
+import { MailAsk } from "../mail/mail.ts";
+import { sendMail } from "./mail-send.ts";
 import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, casesOf, emptyNode, fill, headerLines, outcomeAsk, outcomeFrom, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
@@ -244,6 +246,26 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
   return stepOk(res.body);
 }
 
+/* A step that sends mail.
+ *
+ * Everything about it is templated except who it is from: a step can mail an
+ * address an earlier step produced, and can never change the sender. The
+ * failure is a step failure like any other, so a workflow that could not send
+ * stops with the reason on the step rather than carrying on as though it had.
+ */
+function mailStep(db: Db, master: string, node: WfNode, ctx: WalkCtx): StepResult {
+  let ask: MailAsk = {
+    to: fill(node.to ?? "", ctx),
+    subject: fill(node.subject, ctx),
+    body: fill(node.body, ctx),
+  };
+  let sent = sendMail(db, master, ask);
+  if (!sent.ok) {
+    return stepFailed(sent.fault);
+  }
+  return stepOk("Sent to " + sent.to + ", subject \"" + ask.subject + "\".");
+}
+
 export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): WorkflowDone {
   let parsed = parseGraph(row.graph);
   if (!parsed.ok) {
@@ -370,6 +392,11 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
       let url = fill(node.url, ctx);
       let body = node.method == "GET" ? "" : fill(node.body, ctx);
       return withInput(fetchStep(db, node, ctx, ask.owner, ask.master), node.method + " " + url + (body == "" ? "" : "\n" + body));
+    }
+    if (node.type == "EMAIL") {
+      let to = fill(node.to ?? "", ctx);
+      let subject = fill(node.subject, ctx);
+      return withInput(mailStep(db, ask.master, node, ctx), to + "\n" + subject);
     }
     if (node.type == "TELEGRAM_ASK") {
       let asking = fill(node.instruction, ctx);

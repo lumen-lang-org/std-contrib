@@ -27,7 +27,8 @@ export const FENCE_PREFIX: string = "untrusted-";
  *  is somebody else's text. */
 function ownVoice(from: string): bool {
   return from == "tools" || from == "tasks" || from == "workflows" || from == "bots"
-    || from == "agents" || from == "projects" || from == "knowledge" || from == "skills";
+    || from == "agents" || from == "projects" || from == "knowledge" || from == "skills"
+    || from == "mail";
 }
 
 export function untrustedSource(from: string): bool {

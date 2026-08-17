@@ -50,6 +50,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`websocket`](packages/websocket) | RFC 6455 websockets — handshake, frames, server and client |
 | [`socketio`](packages/socketio) | A socket.io server the official browser client connects to |
 | [`sse`](packages/sse) | Server-sent events — one-way push over a response that never ends, with resumption |
+| [`mail`](packages/mail) | Sending mail — one `Mailer` interface, Resend and SendGrid behind it, one HTML shell |
 | [`agents`](packages/agents) | Agents, prompts, models, MCP links and sub-agents as database rows — run and reconfigured over HTTP without a restart |
 
 ## Using a package
