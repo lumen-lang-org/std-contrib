@@ -77,6 +77,22 @@ so a change — through this API or from anything else touching the same tables 
 is visible to the very next request. That is met by not doing the thing that
 would break it, rather than by machinery.
 
+### The database it opens
+
+`AGENTS_PG_HOST` set means PostgreSQL: `AGENTS_PG_DATABASE` (default
+`agents`), `AGENTS_PG_USER` (default `agents`), `AGENTS_PG_PASSWORD`. Unset
+means SQLite at `AGENTS_DB_FILE` (default `/tmp/agents_api.db`) - zero setup,
+right for trying it, wrong for keeping anything. Migrations run at boot
+either way; a migration that fails stops the server rather than being logged.
+
+Two features ask for PostgreSQL by name: knowledge (pgvector - SQLite has no
+vector type) and the indexing queue. Everything else runs on both.
+
+```sh
+AGENTS_PG_HOST=127.0.0.1 AGENTS_PG_PASSWORD=... ./api    # postgres
+./api                                                     # sqlite, throwaway
+```
+
 ### Credentials, over the API
 
 ```
@@ -302,6 +318,43 @@ failure against a type that declares them present.
 
 The run reports which prompt version and model answered, so a caller records
 what happened rather than what it assumed would.
+
+## Consuming it, end to end
+
+The whole consumer surface is four calls. Open a thread on an agent, say
+something, read the transcript, watch the steps:
+
+```sh
+curl -X POST :8100/threads -d '{"agentId":"a1"}'
+# -> {"id":"t1",...}
+
+curl -X POST :8100/threads/t1/messages -d '{"text":"What changed this week?"}'
+# -> the reply, with the run recorded
+
+curl :8100/threads/t1            # the transcript
+curl :8100/threads/t1/steps      # tool calls, retrievals, delegations as they ran
+```
+
+A thread opened with `{"agentId":"a1","title":"...","context":"..."}` via
+`/threads/from-story` is seeded with text the CALLER supplies - a reader
+attaching an article, a pipeline attaching a report. The engine does not know
+where the text came from.
+
+Knowledge rides the same pattern (PostgreSQL only): upload, let the queue
+index, and agents whose scopes match retrieve it on their own.
+
+```sh
+curl -X POST ':8100/documents?model=m-embed' \
+  -d '{"id":"d1","source":"handbook","scope":"/policies","body":"..."}'
+# -> 202 Accepted: queued
+curl ':8100/jobs'                        # the indexing journal
+curl ':8100/documents?scope=/policies'   # queued and failed float to the top
+```
+
+Sub-agents are rows, not configuration files: an agent's `subAgents` list
+(see the one-read view above) is who it may delegate to, and the Delegation
+section below is how a run decides to. `/completions` is the fourth surface,
+for callers that want one answer rather than a conversation.
 
 ## Calling tools
 
