@@ -330,6 +330,17 @@ function officeTextStore(db: Db, artifactId: string, version: int, text: string,
 }
 
 function officeTextCommand(ext: string): string {
+  if (ext == "docx") {
+    // Straight to text, one container. It used to go through the PDF we draw
+    // for the reader and then pdftotext, which is two containers and two cold
+    // LibreOffice starts: 46 seconds in front of somebody filling a template.
+    return "cd /work && HOME=/work XDG_CACHE_HOME=/work"
+      + " timeout " + `${OFFICE_RENDER_SECONDS}`
+      + " soffice --headless --norestore --nolockcheck"
+      + " -env:UserInstallation=file:///work/lo"
+      + " --convert-to 'txt:Text (encoded):UTF8' --outdir /work /work/in.docx"
+      + " >/dev/null 2>&1 && mv /work/in.txt /work/out.txt";
+  }
   if (ext == "xlsx") {
     return "cd /work && HOME=/work XDG_CACHE_HOME=/work"
       + " timeout " + `${OFFICE_RENDER_SECONDS}`
@@ -426,8 +437,8 @@ export function officeText(db: Db, ask: OfficeRenderAsk): OfficeTexted {
 
   let inExt = "pdf";
   let bytes = ask.body;
-  if (ext == "xlsx") {
-    inExt = "xlsx";
+  if (ext == "xlsx" || ext == "docx") {
+    inExt = ext;
   } else if (ext != "pdf") {
     let drawn = officeRender(db, ask);
     if (!drawn.ok) {

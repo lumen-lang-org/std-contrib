@@ -305,21 +305,32 @@ test("a workbook is read as its cells, every sheet, not as a paginated picture",
   expect(ran.indexOf("pdftotext") < 0);
 });
 
-test("a document already drawn for the reader is not converted twice", () => {
+test("a .docx is read in one container, not through the PDF and back", () => {
   fresh();
   dockerReads("Q3 field notes");
-  let drawn = officeRender(database, {
-    artifactId: "a1", version: 1, path: "/a.docx", body: SOME_BODY, now: "1700000000000",
-  });
-  expect(drawn.ok);
-  let afterRender = argvLines().length;
-
   let out = readText("/a.docx", 1, SOME_BODY);
+
   expect(out.ok);
   expect(out.text == "Q3 field notes");
-  // one container for the text, and none for a PDF we already hold
-  expect(argvLines().length == afterRender + 5);
-  expect(argvLines()[afterRender + 2].indexOf("pdftotext") > 0);
+  // Five lines is one container: run, cp in, exec, cp out, rm. Through the
+  // PDF it was two, and two cold LibreOffice starts.
+  expect(argvLines().length == 5);
+  expect(argvLines()[1].indexOf(":/work/in.docx") > 0);
+  expect(argvLines()[2].indexOf("--convert-to 'txt:") > 0);
+  expect(argvLines()[2].indexOf("pdftotext") < 0);
+});
+
+test("a deck still goes through the page it is drawn on", () => {
+  fresh();
+  dockerReads("Slide one");
+  let out = readText("/a.pptx", 1, SOME_BODY);
+
+  expect(out.ok);
+  // A PDF first, then the text out of it: LibreOffice has no honest text
+  // filter for slides, and the PDF is the one we already draw for the reader.
+  expect(argvLines().length == 10);
+  expect(argvLines()[2].indexOf("--convert-to pdf") > 0);
+  expect(argvLines()[7].indexOf("pdftotext") > 0);
 });
 
 test("the words are kept against the version, so the second read runs nothing", () => {
