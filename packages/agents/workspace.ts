@@ -2,6 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { DbOrder, DbRepository, persist, findById, listOrdered, executeWith, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { binaryKind, getArtifact, getVersion, kindOf, listArtifacts, utf8Length } from "./artifacts.ts";
+import { officeTextExt } from "./office-render.ts";
 import { uploadBytesMax } from "./caps.ts";
 import { ModelRow } from "./schema.ts";
 import { Upload, uploadDocument } from "./knowledge.ts";
@@ -255,9 +256,16 @@ export function callWorkspaceTool(db: Db, threadId: string, name: string, argsNa
     let artifact = getArtifact(db, threadId, argsName);
     if (artifact.id != "") {
       if (binaryKind(kindOf(argsName))) {
+        // One route, not two. Offered both, a model reaches for the script —
+        // it did, twice, on a workbook read_artifact would have answered in
+        // one call — so the tool that can read this kind is the only one named.
+        let route = officeTextExt(argsName) != ""
+          ? "read_artifact answers with its words. Call read_artifact with path "
+            + argsName + " and do not open it in a script to find out what it says."
+          : "There are no words in this kind of file to read. Name " + argsName
+            + " in run_script's paths and open it in the environment.";
         let binary: FileToolResult = { handled: true, ok: false,
-          text: argsName + " is a binary document — read it with run_script in the office environment"
-            + " (read-docx for .docx), naming it in paths.", line: 0, changed: "" };
+          text: argsName + " is a document, not a text file. " + route, line: 0, changed: "" };
         return binary;
       }
       let current = getVersion(db, artifact.id, artifact.currentVersion);

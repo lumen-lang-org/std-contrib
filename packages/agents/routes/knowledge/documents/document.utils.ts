@@ -94,6 +94,35 @@ export function queuedSummary(job: IndexJobRow, hasFile: bool): DocumentSummary 
   return out;
 }
 
+/* A file whose bytes are held and whose words are not in the corpus: a scan,
+ * a picture, a format nothing here reads, or one uploaded before the reader
+ * existed. It is listed because it is there. Listing the corpus alone made
+ * such a file vanish from the page the moment it was uploaded, which read as
+ * a failed upload rather than as a file that cannot be searched. */
+export function keptSummary(source: string, scope: string): DocumentSummary {
+  let out: DocumentSummary = {
+    source: source,
+    scope: normalScope(scope),
+    chunks: 0,
+    bytes: 0,
+    status: "kept",
+    error: "",
+    hasFile: true,
+  };
+  return out;
+}
+
+export function listedAlready(shown: DocumentSummary[], source: string): bool {
+  let i: int = 0;
+  while (i < shown.length) {
+    if (shown[i].source == source) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
 export function indexedSummary(row: SourceListing, hasFile: bool): DocumentSummary {
   let out: DocumentSummary = {
     source: row.source,

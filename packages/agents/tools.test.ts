@@ -210,6 +210,47 @@ test("an edit through the tool changes the file and answers with the context ech
   expect(getVersion(database, row.id, 2).body == "l1\nl2\ntotal: 42\nl4\nl5\n");
 });
 
+test("reading a document never hands the model base64, and says where the bytes are", () => {
+  artifactFresh();
+  // What the console stores for an upload it cannot read as text: the file's
+  // own bytes, base64. Nothing about that string is useful to a model, and a
+  // real photograph's would be hundreds of thousands of characters.
+  let bytes = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAAAAAAA";
+  putArtifact(database, {
+    threadId: "t1", path: "/swatch.png", title: "swatch.png", content: bytes,
+    note: "", origin: "uploaded", mustCreate: false, turnSeq: 1, now: "1000",
+  });
+  let got = callArtifactTool(database, {
+    threadId: "t1", agentId: "", name: "read_artifact",
+    args: "{\"path\":\"/swatch.png\"}", turnSeq: 2, now: "2000",
+  });
+
+  expect(got.handled);
+  expect(!got.ok);
+  expect(got.text.indexOf(bytes) < 0);
+  expect(got.text.indexOf("iVBORw0") < 0);
+  expect(got.text.indexOf("run_script") > 0);
+  expect(got.text.indexOf("/swatch.png") > 0);
+  // and it forbids the answer the old behaviour invited
+  expect(got.text.indexOf("do not tell the person the document is empty") > 0
+    || got.text.indexOf("Do not tell the person the document is empty") > 0);
+});
+
+test("a text artifact is still handed over whole, character for character", () => {
+  artifactFresh();
+  putArtifact(database, {
+    threadId: "t1", path: "/notes.md", title: "", content: "alpha\nbeta\n",
+    note: "", origin: "uploaded", mustCreate: false, turnSeq: 1, now: "1000",
+  });
+  let got = callArtifactTool(database, {
+    threadId: "t1", agentId: "", name: "read_artifact",
+    args: "{\"path\":\"/notes.md\"}", turnSeq: 2, now: "2000",
+  });
+
+  expect(got.ok);
+  expect(got.text == "alpha\nbeta\n");
+});
+
 test("a note absent from the edit call is synthesized, never blank", () => {
   artifactFresh();
   putArtifact(database, {

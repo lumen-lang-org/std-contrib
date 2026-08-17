@@ -34,10 +34,13 @@ export class DocumentApi {
     return Accepted(outcome.document);
   }
 
+  /* The model is optional: a caller that names one gets the document read and
+   *  its words queued for the corpus, and one that does not gets the file kept
+   *  and nothing else. Both are honest outcomes, and the answer says which. */
   @Put("/file")
   @Guard(needsPg)
-  keepFile(@RequestBody sent: string): Reply {
-    return answered(this.documents.keepFile(sent));
+  keepFile(@RequestParam("model", "") modelId: string, @RequestBody sent: string): Reply {
+    return answered(this.documents.keepFile(modelId, sent));
   }
 
   @Get("/file")

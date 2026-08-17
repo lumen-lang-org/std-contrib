@@ -11,7 +11,8 @@ import { FileToolResult } from "./workspace.ts";
 import { envEnsure, envNamed, envServePort } from "./environments.ts";
 import { envMaterialise } from "./env-sync.ts";
 import { EnvGranted, envGrantMint, envHostFor, envThreadOwner, envZone } from "./env-grants.ts";
-import { putArtifact, getArtifact, getVersion, utf8Length } from "./artifacts.ts";
+import { putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
+import { officeText } from "./office-render.ts";
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
 import { wireView } from "./artifacts-fence.ts";
@@ -33,6 +34,15 @@ export type Mounted = {
 };
 
 const MOUNT_DIRECTLY = 12;
+
+/* How much of a document read_artifact will put in front of the model.
+ *
+ * A text artifact is handed over whole, because somebody wrote it and knows
+ * how big it is. A document is different: nobody sizes a PDF before attaching
+ * it, and a hundred-page one extracts to more than any context we run. Sixty
+ * thousand characters is roughly fifteen pages of dense text, and what is left
+ * out is said in the tool's own answer. */
+const READ_TEXT_MAX: int = 60000;
 
 export function findToolsSpec(mounted: Mounted): ToolSpec {
   return toolSpec("find_tools",
@@ -417,6 +427,8 @@ export function artifactTools(): ToolSpec[] {
   out.push(toolSpec("read_artifact",
     "Read the current version of one of this conversation's artifacts, whole. "
     + "Artifacts are self-contained — no remote scripts, styles or fonts — so what comes back is all of it, with nothing left to fetch. "
+    + "This is also how you read a document somebody attached: a .pdf, .docx, .pptx or .xlsx is converted and comes back as its text, "
+    + "so never open one in a script to find out what it says — that is slower, it can fail on a real document, and this tool has already done it. "
     + "Whole is the cost as well as the promise: when you want one line — to check a value, or to have the exact text "
     + "edit_artifact needs as old — search_artifacts returns it with its line number and leaves the rest unread.",
     "{\"type\":\"object\",\"properties\":{"
@@ -458,6 +470,52 @@ export function artifactTools(): ToolSpec[] {
     + "\"note\":{\"type\":\"string\",\"description\":\"Why this version exists, in a few words.\"}},"
     + "\"required\":[\"path\",\"old\",\"new\"]}"));
   return out;
+}
+
+/* What read_artifact answers when the artifact is a document.
+ *
+ * It used to answer with the body, and the body of a document is base64 of its
+ * own bytes. So a model asking to read an attached PDF got a wall of base64,
+ * spent the context on it, and then wrote a PDF parser in a script sandbox to
+ * find out what the file said — a regex over the content streams, invented
+ * again on every conversation, right on the easy documents and confidently
+ * wrong on the rest.
+ *
+ * Now the platform reads it, once, and caches the words against the version.
+ * When it cannot — an image, a scan, an archive — the answer says so and
+ * points at run_script, which is the one place the real bytes are useful.
+ * What it never does is print base64 at a model. */
+function readDocument(db: Db, artifactId: string, version: int, path: string,
+                      body: string, now: string): FileToolResult {
+  let words = officeText(db, {
+    artifactId: artifactId, version: version, path: path, body: body, now: now,
+  });
+  if (!words.ok) {
+    let refused: FileToolResult = {
+      handled: true, ok: false,
+      text: words.fault + ". " + path + " is stored as its own bytes, which are not"
+        + " printed here because they are not text. To work with the file itself, name "
+        + path + " in run_script's paths — it arrives in the environment under that"
+        + " name — and open it there. Do not tell the person the document is empty or"
+        + " says nothing: this tool did not read it.",
+      line: 0, changed: "",
+    };
+    return refused;
+  }
+  let text = words.text;
+  let cut = "";
+  if (text.length > READ_TEXT_MAX) {
+    cut = "\n\n[Cut off at " + `${READ_TEXT_MAX}` + " characters of " + `${text.length}` + "."
+      + " The rest of the document is not here, so do not answer from its absence.]";
+    text = text.slice(0, READ_TEXT_MAX);
+  }
+  let read: FileToolResult = {
+    handled: true, ok: true,
+    text: path + ", read as text. Layout, images and anything drawn are not here,"
+      + " so describe only what the words support.\n\n" + text + cut,
+    line: 0, changed: "",
+  };
+  return read;
 }
 
 export type ArtifactToolCall = {
@@ -526,6 +584,9 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
           + ", which is not in its history.", line: 0, changed: ""
       };
       return broken;
+    }
+    if (binaryKind(kindOf(path))) {
+      return readDocument(db, artifact.id, artifact.currentVersion, path, current.body, call.now);
     }
     let read: FileToolResult = {
       handled: true,

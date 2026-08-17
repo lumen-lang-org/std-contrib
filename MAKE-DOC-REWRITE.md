@@ -59,7 +59,7 @@ is already complete:
 `tools/office/` is our own code: `read_docx.py` (pandoc → markdown),
 `fill_docx.py` (docxtpl for jinja templates; our own XML run-merging path for
 `<ANGLE>` placeholders), `merge_runs.py`. `office-render.ts` runs
-`agents-office-render:1` per conversion, cached on `<artifactId>:<version>`.
+`agents-office-render:2` per conversion, cached on `<artifactId>:<version>`.
 `make-doc` / `make-sheet` / `make-deck` already exist as skill names in
 `tools.ts:585` and `app/src/console.ts:66-68`.
 

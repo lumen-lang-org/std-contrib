@@ -4,7 +4,7 @@ import { connectDatabase, execute, createTableSql } from "../plume/plume.ts";
 import { Migration, migrate, migration, forgetMigrations } from "../plume/migrate.ts";
 import { officeRendersMapping } from "./schema.ts";
 import { envDockerOverride } from "./environments.ts";
-import { OfficeRenderAsk, OfficeRendered, officeRender, officeRenderCached, officeRenderExt, officeRenderImageOverride } from "./office-render.ts";
+import { OfficeRenderAsk, OfficeRendered, OfficeTexted, officeRender, officeRenderCached, officeRenderExt, officeRenderImageOverride, officeText, officeTextCached, officeTextExt } from "./office-render.ts";
 
 let database: Db = sqlite();
 
@@ -245,6 +245,129 @@ test("a body that is not base64 is refused without starting a conversion", () =>
   expect(out.fault.indexOf("base64") > 0);
   let asked = argvLines();
   expect(asked.length == 0 || asked[asked.length - 1].indexOf("rm -f") == 0);
+});
+
+function dockerReads(said: string): void {
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"cp\" ]; then case \"$2\" in\n"
+    + "  *:*out.txt) printf '" + said + "' > \"$3\";;\n"
+    + "  *:*) printf '%%PDF-1.4' > \"$3\";;\n"
+    + "esac; fi\n"
+    + "exit 0\n");
+}
+
+function readText(path: string, version: int, body: string): OfficeTexted {
+  let ask: OfficeRenderAsk = {
+    artifactId: "a1", version: version, path: path, body: body, now: "1700000000000",
+  };
+  return officeText(database, ask);
+}
+
+test("a PDF can be read even though it is never drawn", () => {
+  expect(officeTextExt("/notes.pdf") == "pdf");
+  expect(officeTextExt("/a.docx") == "docx");
+  expect(officeTextExt("/a.xlsx") == "xlsx");
+  expect(officeTextExt("/a.pptx") == "pptx");
+  expect(officeRenderExt("/notes.pdf") == "");
+  expect(officeTextExt("/a.png") == "");
+  expect(officeTextExt("/a.md") == "");
+});
+
+test("a PDF is read with pdftotext, and nothing converts it first", () => {
+  fresh();
+  dockerReads("Sales are up.");
+  let out = readText("/q3.pdf", 1, SOME_BODY);
+
+  expect(out.ok);
+  expect(out.text == "Sales are up.");
+  let asked = argvLines();
+  expect(asked.length == 5);
+  expect(asked[1].indexOf(":/work/in.pdf") > 0);
+  expect(asked[2].indexOf("pdftotext") > 0);
+  expect(asked[2].indexOf("soffice") < 0);
+  expect(asked[4].indexOf("rm -f agents-render-") == 0);
+});
+
+test("a workbook is read as its cells, every sheet, not as a paginated picture", () => {
+  fresh();
+  dockerReads("north,12\nsouth,9\n");
+  let out = readText("/sales.xlsx", 1, SOME_BODY);
+
+  expect(out.ok);
+  expect(out.text.indexOf("south,9") > 0);
+  let ran = argvLines()[2];
+  expect(ran.indexOf("--convert-to 'csv:") > 0);
+  // the last token of the filter is what asks for all of them
+  expect(ran.indexOf(",-1'") > 0);
+  expect(ran.indexOf("cat /work/in*.csv") > 0);
+  expect(ran.indexOf("pdftotext") < 0);
+});
+
+test("a document already drawn for the reader is not converted twice", () => {
+  fresh();
+  dockerReads("Q3 field notes");
+  let drawn = officeRender(database, {
+    artifactId: "a1", version: 1, path: "/a.docx", body: SOME_BODY, now: "1700000000000",
+  });
+  expect(drawn.ok);
+  let afterRender = argvLines().length;
+
+  let out = readText("/a.docx", 1, SOME_BODY);
+  expect(out.ok);
+  expect(out.text == "Q3 field notes");
+  // one container for the text, and none for a PDF we already hold
+  expect(argvLines().length == afterRender + 5);
+  expect(argvLines()[afterRender + 2].indexOf("pdftotext") > 0);
+});
+
+test("the words are kept against the version, so the second read runs nothing", () => {
+  fresh();
+  dockerReads("Sales are up.");
+  let first = readText("/q3.pdf", 1, SOME_BODY);
+  expect(first.ok);
+  expect(!first.cached);
+  let ran = argvLines().length;
+
+  let second = readText("/q3.pdf", 1, SOME_BODY);
+  expect(second.ok);
+  expect(second.cached);
+  expect(second.text == first.text);
+  expect(argvLines().length == ran);
+  expect(officeTextCached(database, "a1", 1) == "Sales are up.");
+});
+
+test("a scan holds no words, and says so rather than answering nothing", () => {
+  fresh();
+  dockerReads("");
+  let out = readText("/scan.pdf", 1, SOME_BODY);
+
+  expect(!out.ok);
+  expect(out.fault.indexOf("scan") > 0);
+  expect(out.text == "");
+  expect(officeTextCached(database, "a1", 1) == "");
+  expect(argvLines()[argvLines().length - 1].indexOf("rm -f agents-render-") == 0);
+});
+
+test("a format with no words in it is refused before any container exists", () => {
+  fresh();
+  dockerReads("nothing");
+  let out = readText("/photo.png", 1, SOME_BODY);
+
+  expect(!out.ok);
+  expect(out.fault.indexOf(".pdf") > 0);
+  expect(argvLines().length == 0);
+});
+
+test("a reader that will not start names the image, and stores nothing", () => {
+  fresh();
+  dockerAbsent();
+  let out = readText("/q3.pdf", 1, SOME_BODY);
+
+  expect(!out.ok);
+  expect(out.fault.indexOf("agents-office-render:test") > 0);
+  expect(officeTextCached(database, "a1", 1) == "");
 });
 
 test("a conversion names an artifact, a version and a body", () => {

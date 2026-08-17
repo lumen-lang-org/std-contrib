@@ -3,7 +3,8 @@ import { DbResult, deleteWhere, findById, listWhere, persist, placeholderAt } fr
 import { credentialFor } from "../../../credentials.ts";
 import { DocumentFileRow, documentFileId, emptyDocumentFile } from "./document.utils.ts";
 import { Retrieval, SourceListing, createDocuments, embeddingModel, listSources, normalScope, retrieve } from "../../../knowledge.ts";
-import { ModelRow, modelsMapping } from "../../../schema.ts";
+import { ModelRow, modelsMapping, officeRendersMapping } from "../../../schema.ts";
+import { OfficeRenderAsk, OfficeTexted, officeText } from "../../../office-render.ts";
 import { documentRepository } from "./entities/document.entity.ts";
 import { documentFileRepository } from "./entities/document-file.entity.ts";
 import { JobRepository } from "../jobs/job.repository.ts";
@@ -92,6 +93,29 @@ export class DocumentRepository {
 
   saveFile(row: DocumentFileRow): DbResult {
     return persist(this.database, documentFileRepository(), JSON.stringify(row));
+  }
+
+  /** What the document says, read by the platform rather than guessed at.
+   *
+   *  Keyed on the file's own id so a document previewed and a document
+   *  indexed do not convert twice; version 1 because a kept file has no
+   *  history, which is why forgetWords runs before every save. */
+  readWords(row: DocumentFileRow, now: string): OfficeTexted {
+    let ask: OfficeRenderAsk = {
+      artifactId: "file:" + row.id,
+      version: 1,
+      path: row.filename,
+      body: row.bytes,
+      now: now,
+    };
+    return officeText(this.database, ask);
+  }
+
+  /** A file replaced under a name it already had is a different document, so
+   *  nothing converted from the old bytes may outlive it. */
+  forgetWords(fileId: string): DbResult {
+    return deleteWhere(this.database, officeRendersMapping(),
+      "artifact_id = " + placeholderAt(this.database, 1), ["file:" + fileId]);
   }
 
   fileFor(scope: string, source: string): DocumentFileRow {

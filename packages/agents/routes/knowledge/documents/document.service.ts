@@ -10,7 +10,7 @@ import { DocumentSummary } from "./dtos/document-summary.dto.ts";
 import { DocumentUpload } from "./dtos/document-upload.dto.ts";
 import { DocumentAnswer, DocumentPassage } from "./dtos/document-passage.dto.ts";
 import { DocumentRepository } from "./document.repository.ts";
-import { DocumentFileRow, FILE_BASE64_MAX, decodedSize, documentFileId, firstText, holdsSource, indexedSummary, queuedSummary, sourceFault } from "./document.utils.ts";
+import { DocumentFileRow, FILE_BASE64_MAX, decodedSize, documentFileId, firstText, holdsSource, indexedSummary, keptSummary, listedAlready, queuedSummary, sourceFault } from "./document.utils.ts";
 
 export class DocumentService {
   repository: DocumentRepository;
@@ -36,6 +36,14 @@ export class DocumentService {
     while (i < rows.length) {
       out.push(indexedSummary(rows[i], holdsSource(originals, rows[i].source)));
       i = i + 1;
+    }
+
+    let f: int = 0;
+    while (f < originals.length) {
+      if (!listedAlready(out, originals[f])) {
+        out.push(keptSummary(originals[f], scope));
+      }
+      f = f + 1;
     }
     return out;
   }
@@ -81,7 +89,47 @@ export class DocumentService {
     return produced(JSON.stringify(v));
   }
 
-  keepFile(sent: string): Outcome {
+  /* Putting a document's words into the corpus, having kept its bytes.
+   *
+   * The console used to do this in the browser, and for anything it could not
+   * read as text it uploaded a sentence of its own — "the original is kept and
+   * can be opened from the list" — which was then embedded and retrieved like
+   * any other passage. A question about a contract could come back with our
+   * own apology about pdf extraction, in our own voice, indistinguishable from
+   * the document. Retrieval has no distance floor, so in a small corpus that
+   * was not a long shot; it was most of the answers.
+   *
+   * Now the file is read here or it is not indexed at all, and the reason is
+   * returned rather than written into the corpus. A note means the bytes are
+   * kept and the words are not searchable, which is a smaller lie than none. */
+  indexKeptFile(modelId: string, row: DocumentFileRow): string {
+    if (modelId == "") {
+      return "no embedding model was named, so the file is kept but not searchable";
+    }
+    let embedderId = this.repository.embeddingId(modelId);
+    if (embedderId == "") {
+      return "no usable embedding model " + modelId;
+    }
+    let provider = this.repository.embeddingProvider(modelId);
+    if (this.repository.credential(provider) == "") {
+      return "no credential for " + provider;
+    }
+    let words = this.repository.readWords(row, stamp());
+    if (!words.ok) {
+      return words.fault;
+    }
+    let ready = this.repository.prepareVectorTable(modelId);
+    if (ready != "") {
+      return ready;
+    }
+    let jobId = this.repository.queueUpload(row.source, row.scope, embedderId, words.text, stamp());
+    if (jobId == "") {
+      return "the document could not be queued";
+    }
+    return "";
+  }
+
+  keepFile(modelId: string, sent: string): Outcome {
     if (sent == "") {
       return refusing("a body is required: {\"source\":\"...\",\"scope\":\"...\",\"filename\":\"...\",\"mime\":\"...\",\"contentBase64\":\"...\"}");
     }
@@ -112,11 +160,13 @@ export class DocumentService {
       size: decodedSize(content),
       createdAt: stamp(),
     };
+    this.repository.forgetWords(row.id);
     let written = this.repository.saveFile(row);
     if (!written.ok) {
       return refusing(written.error);
     }
-    let v: DocumentStored = { stored: true };
+    let note = this.indexKeptFile(modelId, row);
+    let v: DocumentStored = { stored: true, indexed: note == "", note: note };
     return produced(JSON.stringify(v));
   }
 
