@@ -140,7 +140,7 @@ Three byte caps, all of them defaulting to the number they were when they were
 constants — set none of these and nothing changes:
 
 ```sh
-AGENTS_ARTIFACT_BYTES_MAX=524288     # one artifact body (joule.sh runs 29360128 — see TELEGRAM-FILES.md)
+AGENTS_ARTIFACT_BYTES_MAX=524288     # one artifact body (a large deployment runs 29360128 — see TELEGRAM-FILES.md)
 AGENTS_THREAD_BYTES_MAX=104857600    # one thread's artifacts, every version
 AGENTS_UPLOAD_BYTES_MAX=1048576      # one workspace file
 ```
@@ -549,6 +549,24 @@ how.
 off, no embedding model, no scopes, no credential, nothing close enough. An
 agent that answered without its documents looks exactly like one that answered
 from them.
+
+### One prompt, one answer: POST /completions
+
+For a caller that is a service rather than a conversation. Name a model choice
+from the operator's menu (or a config directly), send system and input, get
+the reply text and the token counts back. No router on purpose: a router costs
+a second completion to pick a model the caller here has already picked.
+
+```
+POST /completions
+{"modelConfigId":"c1","system":"Answer briefly.","input":"What is Plume?","maxTokens":400}
+-> {"ok":true,"text":"...","model":"...","inputTokens":12,"outputTokens":48,"runId":"..."}
+```
+
+Every call lands in the runs table under route note `completions`, failed ones
+included - a failed call spends real time and often real tokens, and an
+unrecorded failure is invisible spend. A daemon calling the port directly
+names itself in `X-USER` like any other trusted-proxy caller.
 
 ### Retrieval, the older way
 
