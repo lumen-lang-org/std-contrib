@@ -440,6 +440,8 @@ export type TemplateRow = {
   image: string,
   bootstrap: string,
   serve: string,
+  // The conversation prepared from this template, which a card forks.
+  preparedThread: string,
   /** What the prepared conversation opens with, in the words of whoever
    *  prepared it. */
   request: string,
@@ -726,6 +728,8 @@ export function schemaPlan(db: Db): Migration[] {
       "ALTER TABLE templates ADD COLUMN serve " + db.textType + " NOT NULL DEFAULT ''"),
     migration("127", "and the request the prepared conversation opens with",
       "ALTER TABLE templates ADD COLUMN request " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("128", "and which conversation was prepared from it",
+      "ALTER TABLE templates ADD COLUMN prepared_thread " + db.textType + " NOT NULL DEFAULT ''"),
     migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),

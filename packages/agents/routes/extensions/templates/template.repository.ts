@@ -1,10 +1,12 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, executeWith, existsById, findById, listOrdered, listWhere, persist, placeholderAt } from "../../../../plume/plume.ts";
 import { templateFileRepository } from "./entities/template-file.entity.ts";
 import { templateRepository } from "./entities/template.entity.ts";
 import { EnvEnsure, EnvEnsured, envEnsure } from "../../../environments.ts";
 import { envHostFor } from "../../../env-grants.ts";
-import { ThreadRow, appendTurns } from "../../../threads.ts";
+import { ThreadRow, appendTurns, markReplayable } from "../../../threads.ts";
+import { TURN_SEQ_NONE, putArtifact } from "../../../artifacts.ts";
+import { TemplateFileBody } from "./dtos/template-file-body.dto.ts";
 import { threadRepository } from "../../conversations/threads/entities/thread.entity.ts";
 import { Turn, ToolCall, assistantTurn, userTurn } from "../../../provider.ts";
 
@@ -123,6 +125,44 @@ export class TemplateRepository {
 
   hostFor(slug: string): string {
     return envHostFor(slug);
+  }
+
+  /** The template's own files, laid into a conversation as artifacts. The
+   *  same write the console's "start from" used to make in an empty thread;
+   *  now it happens once, when the starting point is prepared. */
+  layFiles(threadId: string, label: string, files: TemplateFileBody[], now: string): string[] {
+    let wrote: string[] = [];
+    let i: int = 0;
+    while (i < files.length) {
+      let put = putArtifact(this.database, {
+        threadId: threadId, path: files[i].path, title: files[i].title,
+        content: files[i].body, note: "started from template " + label,
+        origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE, now: now,
+      });
+      if (put.ok) {
+        wrote.push(files[i].path);
+      }
+      i = i + 1;
+    }
+    return wrote;
+  }
+
+  /** A prepared conversation is a starting point: it shows in the list a fork
+   *  is taken from. */
+  offer(threadId: string): string {
+    return markReplayable(this.database, threadId, true);
+  }
+
+  /** Which conversation this template prepared, so a card can open it. */
+  notePrepared(templateId: string, threadId: string): string {
+    let wrote = executeWith(this.database,
+      "UPDATE templates SET prepared_thread = " + placeholderAt(this.database, 1)
+      + " WHERE id = " + placeholderAt(this.database, 2),
+      [threadId, templateId]);
+    if (wrote.ok) {
+      return "";
+    }
+    return wrote.error;
   }
 
   /** The transcript a prepared conversation opens with: the request, then the

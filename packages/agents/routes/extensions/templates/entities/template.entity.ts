@@ -40,9 +40,15 @@ export class Template {
   @Column("request", "text")
   request: string;
 
+  // The conversation prepared from this template. A card opens THAT, forked,
+  // rather than writing the file into an empty thread and asking an agent to
+  // fill it: a starting point is a conversation somebody already had.
+  @Column("prepared_thread", "text")
+  preparedThread: string;
+
   constructor(id: string, label: string, description: string, kind: string, skillName: string,
               visibility: string, featuredRank: int, image: string, bootstrap: string,
-              serve: string, request: string) {
+              serve: string, request: string, preparedThread: string) {
     this.id = id;
     this.label = label;
     this.description = description;
@@ -54,6 +60,7 @@ export class Template {
     this.bootstrap = bootstrap;
     this.serve = serve;
     this.request = request;
+    this.preparedThread = preparedThread;
   }
 }
 

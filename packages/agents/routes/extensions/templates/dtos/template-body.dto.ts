@@ -13,4 +13,6 @@ export type TemplateBody = {
   serve?: string,
   /** The first message of the conversation this prepares. */
   request?: string,
+  /** The conversation prepared from it. A card forks that one. */
+  preparedThread?: string,
 };

@@ -60,11 +60,22 @@ export function templateRequest(row: TemplateBody): string {
   if (asked != "") {
     return asked;
   }
+  if (row.kind != "project") {
+    return "Give me a " + row.label.toLowerCase() + " to start from.";
+  }
   return "Set up a " + row.label + " project and serve it so I can see it.";
 }
 
 /** The reply, which describes what is here rather than where it is. */
 export function templateReply(row: TemplateBody): string {
+  if (row.kind != "project") {
+    let doc = "Here it is, open in the panel beside this conversation.";
+    if (row.description != "") {
+      doc = doc + " " + row.description;
+    }
+    return doc + "\n\nTell me what it is about and I will fill it in, or edit"
+      + " it yourself in the panel. Every version is kept.";
+  }
   let said = "It is running, and the panel beside this conversation is showing it.";
   if (row.description != "") {
     said = said + " " + row.description;

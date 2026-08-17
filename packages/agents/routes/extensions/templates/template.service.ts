@@ -149,6 +149,41 @@ export class TemplateService {
    *
    *  This row's remaining job is to seed that conversation once. Nobody reaches
    *  it from the console. */
+  /* A document starting point: the same idea as a project one, without a
+   * server. The conversation is made once, the template's files are laid into
+   * it, and it opens with the request whoever prepared it wrote. A card then
+   * forks THIS, so nothing runs when somebody starts from a template — the
+   * four minutes and two timeouts that used to greet them were an agent being
+   * asked to fill a document nobody had said anything about yet. */
+  prepareDocument(row: TemplateBody, owner: string): Outcome {
+    let made = this.repository.startThread(owner, row.label, stamp());
+    if (made == "") {
+      return refusing("the conversation could not be started");
+    }
+    let listed = this.repository.filesOf(row.id);
+    let files: TemplateFileBody[] = listed == "" ? [] : JSON.parse<TemplateFileBody[]>(listed);
+    let wrote = this.repository.layFiles(made, row.label, files, stamp());
+    if (wrote.length == 0) {
+      return refusing("\"" + row.label + "\" holds no file to start from");
+    }
+    let greeted = this.repository.greet(made, templateRequest(row), templateReply(row));
+    if (greeted != "") {
+      return refusing(greeted);
+    }
+    let offered = this.repository.offer(made);
+    if (offered != "") {
+      return refusing(offered);
+    }
+    let noted = this.repository.notePrepared(row.id, made);
+    if (noted != "") {
+      return refusing(noted);
+    }
+    let view: TemplateStartedView = {
+      threadId: made, host: "", slug: "", building: false,
+    };
+    return produced(JSON.stringify(view));
+  }
+
   prepare(id: string, owner: string): Outcome {
     let t = this.repository.one(id);
     if (t == "" || t == "{}") {
@@ -156,7 +191,7 @@ export class TemplateService {
     }
     let row: TemplateBody = JSON.parse<TemplateBody>(t);
     if (row.kind != "project") {
-      return refusing("\"" + row.label + "\" is not a project starting point");
+      return this.prepareDocument(row, owner);
     }
     let command = templateStartCmd(row.bootstrap ?? "", row.serve ?? "");
     if (command == "" || (row.image ?? "") == "") {
