@@ -31,3 +31,6 @@ indexer
 trigger-poller
 api.prev*
 api.pre-*
+__pycache__/
+*.pyc
+probe*
