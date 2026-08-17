@@ -186,17 +186,37 @@ test("a converted version is stored, and the second read converts nothing", () =
   expect(argvLines().length == ranFirst);
 });
 
-test("a new version is its own conversion, and does not disturb the old one", () => {
+test("a new version with new bytes is its own conversion", () => {
   fresh();
   dockerConverts();
   let one = render("/a.docx", 1, SOME_BODY);
-  let two = render("/a.docx", 2, SOME_BODY);
+  let two = render("/a.docx", 2, "b3RoZXIgYnl0ZXM=");
 
   expect(one.ok);
   expect(two.ok);
   expect(!two.cached);
   expect(officeRenderCached(database, "a1", 1) != "");
   expect(officeRenderCached(database, "a1", 2) != "");
+});
+
+test("the same document is drawn once, whoever is holding it", () => {
+  fresh();
+  dockerConverts();
+  let mine = render("/a.docx", 1, SOME_BODY);
+  expect(mine.ok);
+  expect(!mine.cached);
+  let ran = argvLines().length;
+
+  // Another conversation, another artifact id, the same bytes: a template
+  // opened by a hundred people used to be twenty seconds each time.
+  let theirs: OfficeRenderAsk = {
+    artifactId: "a2", version: 1, path: "/a.docx", body: SOME_BODY, now: "1700000000001",
+  };
+  let out = officeRender(database, theirs);
+  expect(out.ok);
+  expect(out.cached);
+  expect(out.body == mine.body);
+  expect(argvLines().length == ran);
 });
 
 test("a failed conversion stores nothing, so a retry is a real retry", () => {

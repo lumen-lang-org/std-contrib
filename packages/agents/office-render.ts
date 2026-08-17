@@ -154,8 +154,20 @@ function officeRenderEncode(path: string): string {
   return enc.stdout.trim();
 }
 
+/* What a conversion is filed under: the bytes, not the artifact.
+ *
+ * It used to be artifactId:version, which is unique per conversation — so
+ * every person who opened the same template waited twenty seconds for
+ * LibreOffice to draw a document that had already been drawn a hundred times.
+ * The same bytes convert to the same page whoever holds them, so the digest
+ * of the body is the honest key, and the second opener waits for a database
+ * read. The old rows stay where they are and simply stop being found. */
 function officeRenderKey(artifactId: string, version: int): string {
   return artifactId + ":" + `${version}`;
+}
+
+function officeBytesKey(body: string): string {
+  return "sha:" + crypto.sha256(body);
 }
 
 export function officeRenderCached(db: Db, artifactId: string, version: int): string {
@@ -165,6 +177,24 @@ export function officeRenderCached(db: Db, artifactId: string, version: int): st
   }
   let row = JSON.parse<OfficeRenderRow>(held);
   return row.body;
+}
+
+/** The same conversion, found by what was converted rather than by whose copy
+ *  it was. A template opened by a hundred people is drawn once. */
+function officeCachedBytes(db: Db, body: string): string {
+  let held = findById(db, officeRendersMapping(), officeBytesKey(body));
+  if (held == "") {
+    return "";
+  }
+  let row = JSON.parse<OfficeRenderRow>(held);
+  return row.body;
+}
+
+function officeStoreBytes(db: Db, key: string, body: string, now: string): void {
+  let row: OfficeRenderRow = {
+    id: key, artifactId: "", version: 0, body: body, createdAt: now,
+  };
+  persist(db, officeRendersMapping(), JSON.stringify(row));
 }
 
 function officeRenderStore(db: Db, artifactId: string, version: int, body: string, now: string): void {
@@ -199,6 +229,9 @@ export function officeRender(db: Db, ask: OfficeRenderAsk): OfficeRendered {
   }
 
   let held = officeRenderCached(db, ask.artifactId, ask.version);
+  if (held == "") {
+    held = officeCachedBytes(db, ask.body);
+  }
   if (held != "") {
     let hit: OfficeRendered = { ok: true, body: held, cached: true, fault: "" };
     return hit;
@@ -257,6 +290,7 @@ function officeRenderConvert(db: Db, container: string, stage: string, ext: stri
       + `${OFFICE_RENDER_MAX / 1000000}` + "MB of PDF, which is too large to preview — download it instead");
   }
   officeRenderStore(db, ask.artifactId, ask.version, b64, ask.now);
+  officeStoreBytes(db, officeBytesKey(ask.body), b64, ask.now);
   let done: OfficeRendered = { ok: true, body: b64, cached: false, fault: "" };
   return done;
 }
@@ -430,6 +464,9 @@ export function officeText(db: Db, ask: OfficeRenderAsk): OfficeTexted {
   }
 
   let held = officeTextCached(db, ask.artifactId, ask.version);
+  if (held == "") {
+    held = officeCachedBytes(db, officeBytesKey(ask.body) + ":text");
+  }
   if (held != "") {
     let hit: OfficeTexted = { ok: true, text: held, cached: true, fault: "" };
     return hit;
@@ -457,6 +494,7 @@ export function officeText(db: Db, ask: OfficeRenderAsk): OfficeTexted {
       + " and nothing here reads pictures");
   }
   officeTextStore(db, ask.artifactId, ask.version, text, ask.now);
+  officeStoreBytes(db, officeBytesKey(ask.body) + ":text", text, ask.now);
   let done: OfficeTexted = { ok: true, text: text, cached: false, fault: "" };
   return done;
 }
