@@ -1158,7 +1158,12 @@ export function callSkillTool(db: Db, call: SkillToolCall): FileToolResult {
     }
     asked = jsonText(call.args, "name");
   } else {
-    if (!skillNamed(db, call.agentId, call.name)) {
+    // A skill may be called by its own name, but never by a name this
+    // deployment already answers to. search_web and the skill search-web
+    // differ by one character, and the shortcut used to hand the model its own
+    // instructions back: a tool that appeared to run, in six milliseconds,
+    // having searched nothing.
+    if (reservedHere(call.name) || !skillNamed(db, call.agentId, call.name)) {
       return not;
     }
     asked = call.name;

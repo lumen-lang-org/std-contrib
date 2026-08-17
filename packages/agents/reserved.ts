@@ -42,8 +42,9 @@ export function reservedToolNames(): string[] {
     // knowledge and skills
     "add_document", "list_documents", "forget_document", "set_banner",
     "list_skills", "create_skill", "change_skill", "use_skill",
-    // mail
+    // mail and the web
     "send_email",
+    "search_web",
     // the door to the deferred ones
     "find_tools",
   ];

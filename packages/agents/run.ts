@@ -11,6 +11,7 @@ import { triggerTools, callTriggerTool } from "./trigger-tools.ts";
 import { agentTools, callAgentTool } from "./agent-tools.ts";
 import { projectTools, callProjectTool } from "./project-tools.ts";
 import { mailTools, callMailTool } from "./mail-tools.ts";
+import { webTools, callWebTool } from "./web-tools.ts";
 import { knowledgeTools, callKnowledgeTool } from "./knowledge-tools.ts";
 import { TURN_SEQ_NONE, artifactBriefing } from "./artifacts.ts";
 import { projectBriefing } from "./projects.ts";
@@ -301,6 +302,13 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       }
       // Empty unless this deployment can really send, so a model is never
       // offered a way to mail somebody that is going to fail at the far end.
+      // Before the skill families below: a call named for a tool is a tool.
+      let webbed = webTools();
+      let wb: int = 0;
+      while (wb < webbed.length && (anywhere || where.scope == "web")) {
+        specs.push(webbed[wb]);
+        wb = wb + 1;
+      }
       let posts = mailTools(db, master);
       let ml: int = 0;
       while (ml < posts.length && (anywhere || where.scope == "mail")) {
@@ -664,6 +672,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let posted = callMailTool(db, master, {
         name: calls[i].name, args: calls[i].args,
       });
+      let searched = callWebTool({ name: calls[i].name, args: calls[i].args });
       if (calls[i].name == "find_tools") {
         let query = jsonText(calls[i].args, "query");
         if (query == "") {
@@ -745,6 +754,12 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         resultOk = posted.ok;
         resultText = posted.text;
         from = "mail";
+        calledTools.push(calls[i].name);
+      } else if (searched.handled) {
+        resultOk = searched.ok;
+        resultText = searched.text;
+        // "web", so run.ts fences it: these are somebody else's pages.
+        from = "web";
         calledTools.push(calls[i].name);
       } else if (skilled.handled) {
         resultOk = skilled.ok;

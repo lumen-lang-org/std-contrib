@@ -760,20 +760,41 @@ test("a person's own token outranks the deployment's, and absence falls back", (
 
 test("a skill called by its own name is a use_skill call", () => {
   seeded();
-  skill("k9", "search-web", "search the web", "Run websearch.py.");
+  skill("k9", "read-page", "read a page", "Run readpage.py.");
   execute(database, "INSERT INTO agent_skills VALUES ('a1','k9')");
 
   let direct = callSkillTool(database, {
     agentId: "a1",
-    name: "search_web",
-    args: "{\"query\":\"x\"}",
+    name: "read_page",
+    args: "{\"url\":\"x\"}",
   });
   expect(direct.handled);
   expect(direct.ok);
-  expect(direct.text.indexOf("websearch.py") >= 0);
+  expect(direct.text.indexOf("readpage.py") >= 0);
 
   let made_up = callSkillTool(database, { agentId: "a1", name: "browse_internet", args: "{}" });
   expect(!made_up.handled);
+});
+
+test("a skill may not answer to a name this deployment owns", () => {
+  seeded();
+  // The skill is search-web and the tool is search_web. The shortcut above
+  // used to match them, so the model called the tool, got the skill's own
+  // instructions back in six milliseconds, and believed it had searched.
+  skill("k10", "search-web", "search the web", "Call search_web with the query.");
+  execute(database, "INSERT INTO agent_skills VALUES ('a1','k10')");
+
+  let hijacked = callSkillTool(database, {
+    agentId: "a1", name: "search_web", args: "{\"query\":\"x\"}",
+  });
+  expect(!hijacked.handled);
+
+  // and the skill is still loadable the way a skill is loaded
+  let asked = callSkillTool(database, {
+    agentId: "a1", name: "use_skill", args: "{\"name\":\"search-web\"}",
+  });
+  expect(asked.handled);
+  expect(asked.ok);
 });
 
 test("a text edit on a binary document is refused with the route to the right tool", () => {
