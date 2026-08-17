@@ -1,5 +1,5 @@
 import { langfuseBackend, otlpBackend, noBackend } from "../tracing/backend.ts";
-import { DatasetSummary, EvalItem, Verdict, hasDataset, namesJson, onlyOne, evalApiBase, readVerdict, judgePrompt, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
+import { DatasetSummary, EvalItem, Verdict, hasDataset, namesJson, onlyOne, evalApiBase, readVerdict, judgePrompt, judgePrompt2, compareNumbers, numbersIn, namesIn, missingFrom, reachedScore, missingReason } from "./evals.ts";
 
 function item(question: string, expected: string): EvalItem {
   let none: string[] = [];
@@ -186,4 +186,21 @@ test("a run can be asked for one case rather than the top of the set", () => {
   expect(onlyOne(both, "i2").length == 1);
   expect(onlyOne(both, "i2")[0].question == "second?");
   expect(onlyOne(both, "gone").length == 0);
+});
+
+test("the judge is shown what the case built, not only what it said", () => {
+  let none: string[] = [];
+  let it: EvalItem = { id: "i1", question: "Draw the signup flow as a Mermaid file.",
+    expected: "A Mermaid flowchart at /signup.mmd with a branch for a failed verification.",
+    expectedTools: none, expectedAgents: none, expectedScopes: none };
+
+  let bare = judgePrompt2(it.question, it.expected, "Saved it to /signup.mmd.", "");
+  expect(bare.indexOf("Files the run left") < 0);
+
+  let made = "\n/signup.mmd (version 1):\nflowchart TD\n  A[email] --> B[verify]\n";
+  let shown = judgePrompt2(it.question, it.expected, "Saved it to /signup.mmd.", made);
+  expect(shown.indexOf("Files the run left in its conversation") > 0);
+  expect(shown.indexOf("flowchart TD") > 0);
+  // and the judge is told the file counts even when the answer does not quote it
+  expect(shown.indexOf("whether or not the answer quotes it back") > 0);
 });

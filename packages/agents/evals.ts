@@ -4,6 +4,7 @@ import { TraceBackend, hasDatasets } from "../tracing/backend.ts";
 import { Tracer, traceId, tracerForCallee, tracerBackend, flush, tracerWithMoreSpans, tracing, noTracer, resetTracer } from "../tracing/tracing.ts";
 import { jsonRaw, jsonText, jsonList, jsonStringMember, jsonUnescape } from "./scan.ts";
 import { openThread, rememberRouteKey, runInThread, EVAL_CASE_KEY } from "./threads.ts";
+import { ArtifactRow, listArtifacts, getVersion } from "./artifacts.ts";
 
 export type EvalItem = {
   id: string,
@@ -519,12 +520,21 @@ export type Verdict = {
 };
 
 export function judgePrompt(question: string, expected: string, answer: string): string {
+  return judgePrompt2(question, expected, answer, "");
+}
+
+export function judgePrompt2(question: string, expected: string, answer: string, made: string): string {
+  let files = made == "" ? ""
+    : "\n\nFiles the run left in its conversation, read from storage rather than from the answer:\n"
+      + made
+      + "\nJudge the work by these as well as by the answer. A file that exists and is right counts as done, "
+      + "whether or not the answer quotes it back.";
   return "Question asked:\n" + question
     + "\n\nReference answer:\n" + expected
     + "\n\nAnswer to judge:\n" + answer
     + "\n\nDoes the answer say the same thing as the reference? Wording, order and"
     + " extra detail do not matter; the facts and the numbers do. A missing"
-    + " number that the question asked for is a failure. Reply with JSON only:"
+    + " number that the question asked for is a failure." + files + " Reply with JSON only:"
     + " {\"score\": <0 to 1>, \"reason\": \"<one sentence>\"}";
 }
 
@@ -559,11 +569,51 @@ export function readVerdict(text: string): Verdict {
   return out;
 }
 
+/** How much of one file the judge is shown, and how many files. */
+const MADE_FILES_MAX: int = 6;
+const MADE_BYTES_MAX: int = 600;
+
+/** What the case left behind, for the judge to read.
+ *
+ *  A judge sees words, and when the deliverable IS a file the words are the
+ *  wrong thing to score: an agent that writes the page and answers in one line
+ *  was marked wrong, while one that pasted the whole file into its reply
+ *  passed. That scored how much a model quotes, not whether it can build. Each
+ *  case now has a conversation of its own, so what it made can simply be read.
+ */
+export function madeInCase(db: Db, threadId: string): string {
+  if (threadId == "") {
+    return "";
+  }
+  let held = listArtifacts(db, threadId);
+  if (held.length == 0) {
+    return "";
+  }
+  let out = "";
+  let i: int = 0;
+  while (i < held.length && i < MADE_FILES_MAX) {
+    let current = getVersion(db, held[i].id, held[i].currentVersion);
+    let body = current.id == "" ? "" : current.body;
+    let shown = body.length > MADE_BYTES_MAX ? body.slice(0, MADE_BYTES_MAX) + "\n... (cut)" : body;
+    out = out + "\n" + held[i].path + " (version " + `${held[i].currentVersion}` + "):\n" + shown + "\n";
+    i = i + 1;
+  }
+  if (held.length > MADE_FILES_MAX) {
+    out = out + "\n... and " + `${held.length - MADE_FILES_MAX}` + " more.\n";
+  }
+  return out;
+}
+
 export function judgeAnswer(db: Db, judgeAgentId: string, item: EvalItem, answer: string, master: string): Verdict {
+  return judgeAnswerWith(db, judgeAgentId, item, answer, "", master);
+}
+
+export function judgeAnswerWith(db: Db, judgeAgentId: string, item: EvalItem, answer: string,
+                                made: string, master: string): Verdict {
   if (judgeAgentId == "") {
     return compareNumbers(item, answer);
   }
-  let asked = runAgentTraced(db, judgeAgentId, judgePrompt(item.question, item.expected, answer), master, judgeTracer());
+  let asked = runAgentTraced(db, judgeAgentId, judgePrompt2(item.question, item.expected, answer, made), master, judgeTracer());
   if (!asked.ok) {
     let broken: Verdict = {
       score: 0.0,
@@ -764,7 +814,8 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
     let reason = "";
     let why = answered.error;
     if (answered.ok) {
-      let verdict = judgeAnswer(db, judgeAgentId, items[i], answered.text, master);
+      let verdict = judgeAnswerWith(db, judgeAgentId, items[i], answered.text,
+        madeInCase(db, room), master);
       score = verdict.score;
       reason = verdict.reason;
       if (verdict.ok) {
