@@ -4,7 +4,7 @@ import { BadRequest, OkJson, Refused, Reply } from "../../../../rest/server.ts";
 import { ModelChoiceRow, ModelConfigRow, configAndModel, modelChoicesMapping } from "../../../schema.ts";
 import { choiceFault } from "../../../api-core.ts";
 import { credentialFor, masterKey, masterKeyFault } from "../../../credentials.ts";
-import { Completion, ToolSpec, Turn, completeTurns, userTurn } from "../../../provider.ts";
+import { Completion, ToolSpec, Turn, completeTurns, replyText, userTurn } from "../../../provider.ts";
 import { RunRecord, recordRun } from "../../../runlog.ts";
 import { AgentRun } from "../../../run.ts";
 import { CompletionAsk } from "./dtos/completion-ask.dto.ts";
@@ -84,17 +84,22 @@ export class CompletionService {
     let noTools: ToolSpec[] = [];
     let answered: Completion = completeTurns(got.model, config, ask.system, turns, noTools, key);
 
+    /* Completion.text is the provider's raw wire body; the reply is inside
+     * it, per provider. Extract before anything records or returns it —
+     * discover and threads both learned this the same way. */
+    let said = answered.ok ? replyText(got.model.provider, answered.text) : "";
+
     /* Both outcomes are recorded: a failed call spends the caller's time and
      * often the provider's tokens, and an unrecorded failure is exactly the
      * invisible spend this endpoint exists to end. */
-    let runId = this.record(owner, ask, got.model.apiName, answered);
+    let runId = this.record(owner, ask, got.model.apiName, answered, said);
 
     if (!answered.ok) {
       return Refused(502, answered.error != "" ? answered.error : "the model did not answer");
     }
     let view: CompletionView = {
       ok: true,
-      text: answered.text,
+      text: said,
       model: got.model.apiName,
       inputTokens: answered.inputTokens,
       outputTokens: answered.outputTokens,
@@ -103,10 +108,10 @@ export class CompletionService {
     return OkJson<CompletionView>(view);
   }
 
-  record(owner: string, ask: CompletionAsk, modelApiName: string, answered: Completion): string {
+  record(owner: string, ask: CompletionAsk, modelApiName: string, answered: Completion, said: string): string {
     let noContext: Turn[] = [];
     let run: AgentRun = {
-      ok: answered.ok, text: answered.text, body: "", status: answered.status,
+      ok: answered.ok, text: said, body: "", status: answered.status,
       agentName: "", promptVersion: 0, modelApiName: modelApiName,
       error: answered.error,
       inputTokens: answered.inputTokens, outputTokens: answered.outputTokens,

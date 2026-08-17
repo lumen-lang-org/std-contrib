@@ -95,7 +95,7 @@ test("record writes a runs row that carries the spend and the completions route 
     ok: true, text: "fine", status: 200, error: "",
     inputTokens: 12, outputTokens: 34, counted: true,
   };
-  let runId = completions.record("alice", askOf("", "c-test", "what is up"), "test-model", answered);
+  let runId = completions.record("alice", askOf("", "c-test", "what is up"), "test-model", answered, "fine");
   expect(runId != "");
   let held = findById(database, runsMapping(), runId);
   expect(held != "");
