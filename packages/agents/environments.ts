@@ -1,9 +1,14 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, listOrdered, deleteWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, listOrdered, deleteWhere, countWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { environmentRepository } from "./routes/sandbox/environments/entities/environment.entity.ts";
 
 export const ENV_IDLE_MS: int = 900000;
+
+/** How many environments may hold a network at once. Well under what the
+ *  host's address pool allows, so the platform meets a limit it can explain
+ *  rather than one docker explains. */
+const ENV_LIVE_MAX: int = 200;
 
 /** Who a serving environment runs as, and where its HOME lives. 65534 is
  *  nobody: it owns nothing on the host and nothing in the image. */
@@ -307,13 +312,24 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     if (e.image == "") {
       return envRefused("an environment needs an image to build its container from");
     }
+    // Growth is what the cap is for. An environment that already exists may
+    // always come back, because refusing to warm one somebody is looking at
+    // is worse than the crowding it adds.
+    if (e.network || e.serve) {
+      let live = envLive(db);
+      if (live >= ENV_LIVE_MAX) {
+        return envRefused("this deployment is at its limit of " + `${ENV_LIVE_MAX}`
+          + " live environments. They release their networks when they go idle, so a new one"
+          + " can be made again shortly.");
+      }
+    }
     let make: EnvRun = {
       container: container, threadId: e.threadId, name: name, image: e.image,
       network: e.network, serve: e.serve,
     };
     let made = envMake(make);
     if (made.status != 0) {
-      return envRefused(envDockerFault("create the environment", made));
+      return envRefused(envMakeFault("create the environment", made));
     }
     if (e.start) {
       envStart(container, e.command);
@@ -371,10 +387,20 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     // the console polls serve every few seconds while one is coming up — and
     // the loser of that race would otherwise report a conflict it caused.
     if (rebuilt.status != 0 && !envRunning(container)) {
-      return envRefused(envDockerFault("rebuild the environment so it can serve", rebuilt));
+      return envRefused(envMakeFault("rebuild the environment so it can serve", rebuilt));
     }
     created = true;
   } else if (!envRunning(container)) {
+    // A stopped container remembers the NAME of its network, not the network,
+    // and the idle sweep took that away. Made again before the start rather
+    // than after the failure, which arrives as a container that cannot set up
+    // networking and says nothing about why.
+    if (make.network) {
+      let up = envNetworkUp(e.threadId, row.name);
+      if (up.status != 0) {
+        return envRefused(envMakeFault("start the environment", up));
+      }
+    }
     let started = envDocker(["start", container]);
     if (started.status == 0) {
       warmed = true;
@@ -386,7 +412,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       envDocker(["rm", "-f", container]);
       let remade = envMake(make);
       if (remade.status != 0 && !envRunning(container)) {
-        return envRefused(envDockerFault("start the environment", remade));
+        return envRefused(envMakeFault("start the environment", remade));
       }
       created = true;
     }
@@ -833,12 +859,50 @@ export function envNetworkName(threadId: string, name: string): string {
  *  keeps Langfuse's compose network out of reach — while publishing and
  *  outbound both keep working. What it does not do is hide the host; that is
  *  the firewall's job, not docker's. */
-function envNetworkUp(threadId: string, name: string): string {
-  let network = envNetworkName(threadId, name);
-  // Idempotent: `create` on an existing network fails harmlessly, and asking
-  // first would cost a round trip on every ensure.
-  envDocker(["network", "create", network]);
-  return network;
+/** Docker's word for a network that is already there. */
+function envNetworkThere(reply: EnvDockerReply): bool {
+  return (reply.stderr + reply.stdout).indexOf("already exists") >= 0;
+}
+
+/** Docker's word for a host with no address range left to give.
+ *
+ *  Worth telling apart, because the raw failure surfaces three layers later
+ *  as a container whose network is "not found" — a message that reads like a
+ *  glitch and invites a retry, when the truth is that nothing will work until
+ *  something is released. */
+function envPoolFull(reply: EnvDockerReply): bool {
+  return (reply.stderr + reply.stdout).indexOf("address pool") >= 0;
+}
+
+/** Made on the way up, and answered for. `create` on a network that already
+ *  exists is the ordinary case and not a failure; anything else is, and used
+ *  to be dropped on the floor. */
+function envNetworkUp(threadId: string, name: string): EnvDockerReply {
+  let made = envDocker(["network", "create", envNetworkName(threadId, name)]);
+  if (made.status != 0 && envNetworkThere(made)) {
+    let fine: EnvDockerReply = { status: 0, stdout: "", stderr: "" };
+    return fine;
+  }
+  return made;
+}
+
+/** How many environments hold a network at this moment.
+ *
+ *  Each one is a docker bridge and each bridge takes a subnet, so this is the
+ *  number the host's address pool runs out of. */
+export function envLive(db: Db): int {
+  let live = countWhere(db, envMapping(), "status = " + placeholderAt(db, 1), ["running"]);
+  return live < 0 ? 0 : live;
+}
+
+/** What to say when an environment could not be made. */
+function envMakeFault(doing: string, reply: EnvDockerReply): string {
+  if (envPoolFull(reply)) {
+    return "this deployment has no room for another environment: docker has no address range"
+      + " left to give one. Environments release theirs when they go idle, so this clears on"
+      + " its own; there is nothing here worth trying again now.";
+  }
+  return envDockerFault(doing, reply);
 }
 
 function envNetworkDown(threadId: string, name: string): void {
@@ -875,7 +939,10 @@ function envNameTaken(reply: EnvDockerReply): bool {
 
 function envMake(r: EnvRun): EnvDockerReply {
   if (r.network || r.serve) {
-    envNetworkUp(r.threadId, r.name);
+    let up = envNetworkUp(r.threadId, r.name);
+    if (up.status != 0) {
+      return up;
+    }
   }
   if (r.serve) {
     envOwnVolumes(r.threadId, r.image);
@@ -982,6 +1049,60 @@ function envRunArgs(r: EnvRun): string[] {
   return out;
 }
 
+/** Networks left behind by something that did not get to tidy up.
+ *
+ *  The idle sweep hands a network back when it stops an environment, so in
+ *  the ordinary run of things this finds nothing. It is here for the
+ *  extraordinary one: an engine killed between making a network and making
+ *  the container, or rows removed without their docker side. A bridge with
+ *  nobody on it still holds a subnet, and a host has a fixed number of those
+ *  to give — which is how a deployment comes to refuse every new environment
+ *  while looking completely idle.
+ *
+ *  Safe beside live work because docker refuses to remove a network that has
+ *  a container attached. The one window it cannot see is the moment between
+ *  a network being made and its container joining it; a run caught there is
+ *  refused with a reason and succeeds when asked again.
+ */
+export function envNetworkReap(db: Db): int {
+  let listed = envDocker(["network", "ls", "--filter", "name=agents-net-", "--format", "{{.Name}}"]);
+  if (listed.status != 0) {
+    return 0;
+  }
+  let keys: DbOrder[] = [{ column: "id" }];
+  let rows = listOrdered(db, envMapping(), {
+    where: "status = " + placeholderAt(db, 1),
+    args: ["running"],
+    order: keys,
+  });
+  let live: EnvRow[] = rows == "" || rows == "[]" ? [] : JSON.parse<EnvRow[]>(rows);
+  let names = listed.stdout.split("\n");
+  let gone: int = 0;
+  let i: int = 0;
+  while (i < names.length) {
+    let name = names[i].trim();
+    if (name != "" && !envNetworkWanted(live, name)) {
+      let dropped = envDocker(["network", "rm", name]);
+      if (dropped.status == 0) {
+        gone = gone + 1;
+      }
+    }
+    i = i + 1;
+  }
+  return gone;
+}
+
+function envNetworkWanted(live: EnvRow[], network: string): bool {
+  let i: int = 0;
+  while (i < live.length) {
+    if (envNetworkName(live[i].threadId, live[i].name) == network) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
 export type EnvSweep = {
   now: string,
   idleMs: int,
@@ -1009,6 +1130,13 @@ export function envIdle(db: Db, s: EnvSweep): int {
     let row = rows[i];
     if (!envStampLess(deadline, row.lastUsedAt)) {
       envDocker(["stop", envContainerName(row.threadId, row.name)]);
+      // And the network with it. A bridge takes a subnet whether anything is
+      // running on it or not, and the host has a few dozen to give: kept, one
+      // conversation's leftovers are enough to stop the next from starting at
+      // all. The next ensure makes it again before the container comes back.
+      if (row.network != 0 || row.servePort != 0) {
+        envNetworkDown(row.threadId, row.name);
+      }
       envUnforward(row.hostPort);
       // The published port goes with the container. Leaving the old number in
       // the row would point the gateway at whatever takes that port next.

@@ -34,3 +34,10 @@ api.pre-*
 __pycache__/
 *.pyc
 probe*
+# The copies kept beside `indexer` while a deployment is replaced, and the
+# build-time duplicate of api.ts. Same reasoning as api.prev* above: a binary
+# that reaches a commit is in the history for good, and api-build.ts is a copy
+# of a file that is already tracked.
+indexer.prev*
+indexer.running-*
+api-build.ts

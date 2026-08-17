@@ -37,6 +37,7 @@ import { chatConfigFault } from "./routes/inference/model-configs/model-config.u
 import { SkillApi } from "./routes/authoring/skills/skill.controller.ts";
 import { ScriptImageApi } from "./routes/authoring/script-images/script-image.controller.ts";
 import { TraceApi } from "./routes/ops/tracing/trace.controller.ts";
+import { EvalApi } from "./routes/ops/evals/eval.controller.ts";
 import { AgentApi } from "./routes/authoring/agents/agent.controller.ts";
 import { AgentBody } from "./routes/authoring/agents/dtos/agent-body.dto.ts";
 import { RetrievalSetup } from "./routes/authoring/agents/dtos/retrieval-setup.dto.ts";
@@ -68,7 +69,7 @@ import { runsSince, utcDayStartText, secondsToUtcMidnight, nextUtcMidnightIso } 
 import { workspacePlan } from "./workspace.ts";
 import { TURN_SEQ_NONE, artifactPlan } from "./artifacts.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
-import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envMarkSynced, envReforward, envServing } from "./environments.ts";
+import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envNetworkReap, envMarkSynced, envReforward, envServing } from "./environments.ts";
 import { envGrantsPlan, envGrantSweep } from "./env-grants.ts";
 import { envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
 
@@ -229,6 +230,12 @@ function sweepIdleEnvironments(db: Db): void {
   let stopped = envIdle(db, s);
   if (stopped > 0) {
     console.log(`stopped ${stopped} idle environment(s)`);
+  }
+  // What the stop above could not hand back, because whatever made it is no
+  // longer running to be asked. Rare, and cheap to be sure of.
+  let reaped = envNetworkReap(db);
+  if (reaped > 0) {
+    console.log(`released ${reaped} leftover environment network(s)`);
   }
   // A grant lives a minute; its row should not outlive the day, and this is
   // the sweep that is already running.
@@ -717,6 +724,7 @@ function main(): void {
     new ScopeApi(db),
     new JobApi(db),
     new TraceApi(db, master),
+    new EvalApi(db, master),
     new ServerApi(db, master),
     new ConnectApi(db, master),
     new AuthProviderApi(db, master),

@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, EnvOwnedRow } from "./environments.ts";
+import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envNetworkReap, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, EnvOwnedRow } from "./environments.ts";
 
 let database: Db = sqlite();
 
@@ -984,4 +984,123 @@ test("a container that is answering is left to get on with it", () => {
   }
   envProbeOverride("");
   envBindOverride("");
+});
+
+test("the sweep gives the network back, and waking the environment makes it again", () => {
+  fresh();
+  withThreads();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
+    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+
+  clearLog();
+  let s: EnvSweep = { now: `${1000 + ENV_IDLE_MS + 1}`, idleMs: ENV_IDLE_MS };
+  expect(envIdle(database, s) == 1);
+  let dropped = false;
+  let asked = argvLines();
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i] == "network rm agents-net-t1-web") { dropped = true; }
+    i = i + 1;
+  }
+  expect(dropped);
+
+  // Woken, the network is made again BEFORE the start: a stopped container
+  // holds the name of a network that is no longer there. Docker now says the
+  // container is down, which is what the sweep just made true.
+  dockerStoppedBehindOurBack();
+  clearLog();
+  envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
+    network: true, serve: true, command: "npm run dev", start: true, now: "2000000" });
+  let again = argvLines();
+  let made: int = -1;
+  let started: int = -1;
+  let j: int = 0;
+  while (j < again.length) {
+    if (again[j] == "network create agents-net-t1-web" && made < 0) { made = j; }
+    if (again[j].indexOf("start agents-env-t1-web") == 0 && started < 0) { started = j; }
+    j = j + 1;
+  }
+  expect(made >= 0);
+  expect(started >= 0);
+  expect(made < started);
+  envBindOverride("");
+});
+
+test("a host with no address range left says so, rather than passing on a missing network", () => {
+  fresh();
+  withThreads();
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"network\" ] && [ \"$2\" = \"create\" ]; then\n"
+    + "  echo 'Error response from daemon: all predefined address pools have been fully subnetted' >&2\n"
+    + "  exit 1\n"
+    + "fi\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
+    + "exit 0\n");
+
+  let refused = envEnsure(database, { threadId: "t9", name: "python", image: "python:3.12-slim",
+    network: true, serve: false, command: "", start: true, now: "1000" });
+  expect(!refused.ok);
+  expect(refused.fault.indexOf("no room for another environment") >= 0);
+  expect(refused.fault.indexOf("not found") < 0);
+
+  // And no container was made behind the refusal.
+  let asked = argvLines();
+  let ran = false;
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i].indexOf("run ") == 0) { ran = true; }
+    i = i + 1;
+  }
+  expect(!ran);
+});
+
+test("a network that is already there is not a failure", () => {
+  fresh();
+  withThreads();
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"network\" ] && [ \"$2\" = \"create\" ]; then\n"
+    + "  echo 'Error response from daemon: network with name agents-net-t8-python already exists' >&2\n"
+    + "  exit 1\n"
+    + "fi\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
+    + "exit 0\n");
+
+  let made = envEnsure(database, { threadId: "t8", name: "python", image: "python:3.12-slim",
+    network: true, serve: false, command: "", start: true, now: "1000" });
+  expect(made.ok);
+  expect(made.fault == "");
+});
+
+test("a network nobody is on is released, and a live one is left alone", () => {
+  fresh();
+  withThreads();
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"network\" ] && [ \"$2\" = \"ls\" ]; then\n"
+    + "  echo agents-net-t1-main\n"
+    + "  echo agents-net-t7-orphan\n"
+    + "fi\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
+    + "exit 0\n");
+  expect(envEnsure(database, { threadId: "t1", name: "main", image: "python:3.12-slim",
+    network: true, serve: false, command: "", start: true, now: "1000" }).ok);
+
+  clearLog();
+  expect(envNetworkReap(database) == 1);
+  let asked = argvLines();
+  let removed: string[] = [];
+  let i: int = 0;
+  while (i < asked.length) {
+    if (asked[i].indexOf("network rm ") == 0) { removed.push(asked[i]); }
+    i = i + 1;
+  }
+  expect(removed.length == 1);
+  expect(removed[0] == "network rm agents-net-t7-orphan");
 });
