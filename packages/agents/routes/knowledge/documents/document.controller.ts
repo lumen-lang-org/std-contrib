@@ -54,6 +54,17 @@ export class DocumentApi {
     return OkJson(documentFileViewOf(kept));
   }
 
+  /* Before /:source so "retrieve" is not read as a document name. */
+  @Get("/retrieve")
+  @Guard(needsPg)
+  retrieve(@RequestParam("q", "") question: string,
+           @RequestParam("scope", "/") scope: string,
+           @RequestParam("k", "5") k: string,
+           @RequestParam("model", "") modelId: string): Reply {
+    let want = parseInt(k, 10) ?? 5;
+    return answered(this.documents.passagesFor(modelId, scope, question, want));
+  }
+
   @Delete("/:source")
   @Guard(needsPg)
   remove(@PathVariable("source") source: string): Reply {

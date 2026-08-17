@@ -1,5 +1,5 @@
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationFault, streamFault, streamDetail, assistantThinking, replyText } from "./provider.ts";
+import { Completion, Turn, ToolSpec, complete, streamTurns, userTurn, chatEndpoint, chatEndpointFor, toolCallsFrom, stopReasonOf, truncationFault, streamFault, streamDetail, assistantThinking, replyText, vectorsFrom } from "./provider.ts";
 
 function model(provider: string, apiName: string, enabled: bool): ModelRow {
   let m: ModelRow = {
@@ -190,4 +190,36 @@ test("a reasoning model served without its parser has its thought taken out of t
   let emptyThought = "{\"choices\":[{\"message\":{\"content\":\"<think></think>\\n\\nFour.\"}}]}";
   expect(assistantThinking("vllm", emptyThought) == "");
   expect(replyText("vllm", emptyThought) == "Four.");
+});
+
+test("a batched embedding reply is read in order, and a miscount is refused", () => {
+  let three = "{\"object\":\"list\",\"data\":["
+    + "{\"index\":0,\"embedding\":[0.1,0.2,0.3]},"
+    + "{\"index\":1,\"embedding\":[0.4,0.5,0.6]},"
+    + "{\"index\":2,\"embedding\":[0.7,0.8,0.9]}]}";
+  let got = vectorsFrom(three, 3);
+  expect(got.ok);
+  expect(got.vectors.length == 3);
+  expect(got.dimensions == 3);
+  // Order is the contract: chunk 1's vector must not be filed under chunk 0.
+  expect(got.vectors[0] == "[0.1,0.2,0.3]");
+  expect(got.vectors[1] == "[0.4,0.5,0.6]");
+  expect(got.vectors[2] == "[0.7,0.8,0.9]");
+
+  // A short reply is refused rather than quietly indexing two of three chunks.
+  let short = vectorsFrom(three, 4);
+  expect(!short.ok);
+  expect(short.error.indexOf("4") >= 0);
+
+  let ragged = vectorsFrom("{\"data\":[{\"embedding\":[1,2,3]},{\"embedding\":[1,2]}]}", 2);
+  expect(!ragged.ok);
+  expect(ragged.error.indexOf("dimensions") >= 0);
+
+  let empty = vectorsFrom("{\"data\":[{\"embedding\":[]}]}", 1);
+  expect(!empty.ok);
+
+  let one = vectorsFrom("{\"data\":[{\"embedding\":[0.5,0.25]}]}", 1);
+  expect(one.ok);
+  expect(one.vectors.length == 1);
+  expect(one.dimensions == 2);
 });

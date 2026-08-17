@@ -1,8 +1,9 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbResult, deleteWhere, findById, persist, placeholderAt } from "../../../../plume/plume.ts";
+import { DbResult, deleteWhere, findById, listWhere, persist, placeholderAt } from "../../../../plume/plume.ts";
 import { credentialFor } from "../../../credentials.ts";
 import { DocumentFileRow, documentFileId, emptyDocumentFile } from "./document.utils.ts";
-import { SourceListing, createDocuments, embeddingModel, listSources, normalScope } from "../../../knowledge.ts";
+import { Retrieval, SourceListing, createDocuments, embeddingModel, listSources, normalScope, retrieve } from "../../../knowledge.ts";
+import { ModelRow, modelsMapping } from "../../../schema.ts";
 import { documentRepository } from "./entities/document.entity.ts";
 import { documentFileRepository } from "./entities/document-file.entity.ts";
 import { JobRepository } from "../jobs/job.repository.ts";
@@ -49,6 +50,35 @@ export class DocumentRepository {
 
   credential(provider: string): string {
     return credentialFor(this.database, provider, this.master);
+  }
+
+  embedder(modelId: string): ModelRow {
+    return embeddingModel(this.database, modelId);
+  }
+
+  /** The first embedding model an operator has switched on, for callers that
+   *  did not name one — the same choice the Knowledge page makes. */
+  firstEmbedder(): ModelRow {
+    let none = embeddingModel(this.database, "");
+    let listed = listWhere(this.database, modelsMapping(),
+      "kind = " + placeholderAt(this.database, 1), ["embedding"]);
+    if (listed == "" || listed == "[]") {
+      return none;
+    }
+    let rows = JSON.parse<ModelRow[]>(listed);
+    let i: int = 0;
+    while (i < rows.length) {
+      if (rows[i].enabled) {
+        return rows[i];
+      }
+      i = i + 1;
+    }
+    return none;
+  }
+
+  nearest(model: ModelRow, scope: string, question: string, k: int, key: string): Retrieval {
+    let scopes: string[] = [normalScope(scope)];
+    return retrieve(this.database, model, scopes, question, k, key);
   }
 
   prepareVectorTable(modelId: string): string {

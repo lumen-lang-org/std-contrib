@@ -8,6 +8,7 @@ import { DocumentQueued } from "./dtos/document-queued.dto.ts";
 import { DocumentStored } from "./dtos/document-stored.dto.ts";
 import { DocumentSummary } from "./dtos/document-summary.dto.ts";
 import { DocumentUpload } from "./dtos/document-upload.dto.ts";
+import { DocumentAnswer, DocumentPassage } from "./dtos/document-passage.dto.ts";
 import { DocumentRepository } from "./document.repository.ts";
 import { DocumentFileRow, FILE_BASE64_MAX, decodedSize, documentFileId, firstText, holdsSource, indexedSummary, queuedSummary, sourceFault } from "./document.utils.ts";
 
@@ -121,6 +122,53 @@ export class DocumentService {
 
   file(scope: string, source: string): DocumentFileRow {
     return this.repository.fileFor(scope, source);
+  }
+
+  /** What a question pulls back from the corpus.
+   *
+   *  The same retrieval an agent runs, offered directly so a person can see
+   *  what their documents answer before wiring an agent to them. */
+  passagesFor(modelId: string, scope: string, question: string, k: int): Outcome {
+    if (question.trim() == "") {
+      return refusing("ask something: ?q=how%20do%20refunds%20work");
+    }
+    if (k < 1 || k > 50) {
+      return refusing("k is between 1 and 50");
+    }
+    let model = modelId == "" ? this.repository.firstEmbedder() : this.repository.embedder(modelId);
+    if (model.id == "") {
+      return refusing(modelId == ""
+        ? "no embedding model is switched on — enable one under Settings, Models"
+        : "no usable embedding model " + modelId);
+    }
+    let key = this.repository.credential(model.provider);
+    if (key == "") {
+      return refusing("no credential for " + model.provider);
+    }
+    let got = this.repository.nearest(model, scope, question, k, key);
+    if (!got.ok) {
+      return refusing(got.error);
+    }
+    let passages: DocumentPassage[] = [];
+    let i: int = 0;
+    while (i < got.found.length) {
+      let one: DocumentPassage = {
+        id: got.found[i].id,
+        source: got.found[i].source,
+        scope: got.found[i].scope,
+        body: got.found[i].body,
+        distance: got.found[i].distance,
+      };
+      passages.push(one);
+      i = i + 1;
+    }
+    let answer: DocumentAnswer = {
+      question: question,
+      scope: normalScope(scope),
+      model: model.apiName == "" ? model.id : model.apiName,
+      found: passages,
+    };
+    return produced(JSON.stringify(answer));
   }
 
   remove(source: string): Outcome {

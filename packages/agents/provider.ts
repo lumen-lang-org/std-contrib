@@ -80,6 +80,21 @@ export type Embedding = {
   error: string,
 };
 
+/** Several vectors from one request.
+ *
+ *  The wire shape always took a list — `input` is an array and always was —
+ *  but every caller sent one string and paid a round trip per chunk. A
+ *  document of eight chunks measured 1.8s that way against vLLM and 0.37s
+ *  batched, because the server batches internally and the cost was almost all
+ *  handshake. `vectors` is in request order, which is what `index` in the
+ *  reply says and what every provider here returns. */
+export type Embeddings = {
+  ok: bool,
+  vectors: string[],
+  dimensions: int,
+  error: string,
+};
+
 export type WireKey = {
   ok: bool,
   key: string,
@@ -118,6 +133,70 @@ type EmbedAsk = {
   model: string,
   input: string[],
 };
+
+/** One request for many chunks.
+ *
+ *  Vertex is left on the one-at-a-time path: its predict body is a different
+ *  shape, and it is not what any deployment here embeds with. */
+export function embedTexts(model: ModelRow, texts: string[], apiKey: string): Embeddings {
+  if (texts.length == 0) {
+    let none: Embeddings = { ok: true, vectors: [], dimensions: model.dimensions, error: "" };
+    return none;
+  }
+  if (model.provider == "vertex") {
+    let one: string[] = [];
+    let width: int = 0;
+    let v: int = 0;
+    while (v < texts.length) {
+      let got = embedText(model, texts[v], apiKey);
+      if (!got.ok) {
+        let stopped: Embeddings = { ok: false, vectors: [], dimensions: 0, error: got.error };
+        return stopped;
+      }
+      one.push(got.vector);
+      width = got.dimensions;
+      v = v + 1;
+    }
+    let looped: Embeddings = { ok: true, vectors: one, dimensions: width, error: "" };
+    return looped;
+  }
+
+  let endpoint = endpointFor(model, "embeddings");
+  if (endpoint == "") {
+    let unknown: Embeddings = { ok: false, vectors: [], dimensions: 0,
+      error: "no embedding endpoint for \"" + model.provider + "\"" };
+    return unknown;
+  }
+  if (!model.enabled) {
+    let off: Embeddings = { ok: false, vectors: [], dimensions: 0,
+      error: model.label + " is disabled" };
+    return off;
+  }
+  if (apiKey == "") {
+    let keyless: Embeddings = { ok: false, vectors: [], dimensions: 0,
+      error: "no API key for " + model.provider };
+    return keyless;
+  }
+  let carried = wireKey(model.provider, apiKey);
+  if (!carried.ok) {
+    let unminted: Embeddings = { ok: false, vectors: [], dimensions: 0, error: carried.error };
+    return unminted;
+  }
+
+  let ask: EmbedAsk = { model: model.apiName, input: texts };
+  let res = http.request(endpoint, "POST", JSON.stringify(ask), authHeaders(model.provider, carried.key));
+  if (!res.ok) {
+    let dead: Embeddings = { ok: false, vectors: [], dimensions: 0,
+      error: "no answer from " + endpoint };
+    return dead;
+  }
+  if (res.status != 200) {
+    let refused: Embeddings = { ok: false, vectors: [], dimensions: 0,
+      error: "HTTP " + `${res.status}` + " " + res.body.substring(0, 120) };
+    return refused;
+  }
+  return vectorsFrom(res.body, texts.length);
+}
 
 export function embedText(model: ModelRow, text: string, apiKey: string): Embedding {
   let endpoint = endpointFor(model, "embeddings");
@@ -256,6 +335,73 @@ function vertexVectorFrom(body: string): Embedding {
   if (dims == 0) {
     out = { ok: false, vector: "", dimensions: 0, error: "the embedding is empty" };
   }
+  return out;
+}
+
+/** Every embedding in a reply, in the order they appear.
+ *
+ *  `vectorFrom` reads the first one and stops; this walks all of them. It
+ *  refuses a reply that carries a different number than was asked for rather
+ *  than filing chunk 5's vector under chunk 4. */
+export function vectorsFrom(body: string, want: int): Embeddings {
+  let vectors: string[] = [];
+  let dims: int = 0;
+  let from: int = 0;
+  while (true) {
+    let at = body.indexOf("\"embedding\"", from);
+    if (at < 0) {
+      break;
+    }
+    let rest = body.substring(at, body.length);
+    let open = rest.indexOf("[");
+    let close = rest.indexOf("]");
+    if (open < 0 || close < 0 || close < open) {
+      let malformed: Embeddings = {
+        ok: false, vectors: [], dimensions: 0,
+        error: "an embedding is not an array",
+      };
+      return malformed;
+    }
+    let literal = rest.substring(open, close + 1);
+    let commas: int = 0;
+    let i: int = 0;
+    while (i < literal.length) {
+      if (literal.substring(i, i + 1) == ",") {
+        commas = commas + 1;
+      }
+      i = i + 1;
+    }
+    let width = literal == "[]" ? 0 : commas + 1;
+    if (width == 0) {
+      let empty: Embeddings = {
+        ok: false, vectors: [], dimensions: 0, error: "an embedding is empty",
+      };
+      return empty;
+    }
+    if (dims == 0) {
+      dims = width;
+    }
+    if (width != dims) {
+      let ragged: Embeddings = {
+        ok: false, vectors: [], dimensions: 0,
+        error: "the reply mixes " + `${dims}` + " and " + `${width}` + " dimensions",
+      };
+      return ragged;
+    }
+    vectors.push(literal);
+    // Past this array's closing bracket. `open` and `close` are offsets into
+    // `rest`, so only one of them is added to `at`; adding both walks too far
+    // and steps over the next vector entirely.
+    from = at + close + 1;
+  }
+  if (vectors.length != want) {
+    let miscounted: Embeddings = {
+      ok: false, vectors: [], dimensions: 0,
+      error: "asked for " + `${want}` + " embeddings and the reply carried " + `${vectors.length}`,
+    };
+    return miscounted;
+  }
+  let out: Embeddings = { ok: true, vectors: vectors, dimensions: dims, error: "" };
   return out;
 }
 
