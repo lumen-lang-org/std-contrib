@@ -20,6 +20,7 @@ import { CardPluginApi } from "./routes/extensions/card-plugins/card-plugin.cont
 import { ToolCardApi } from "./routes/authoring/tool-cards/tool-card.controller.ts";
 import { McpServerApi } from "./routes/connectivity/mcp-server/mcp-server.controller.ts";
 import { PlaygroundApi } from "./routes/ops/playground/playground.controller.ts";
+import { CompletionApi } from "./routes/inference/completions/completion.controller.ts";
 import { V1Api } from "./routes/ops/v1/v1.controller.ts";
 import { TaskApi } from "./routes/automation/tasks/task.controller.ts";
 import { DocumentApi } from "./routes/knowledge/documents/document.controller.ts";
@@ -868,6 +869,7 @@ function main(): void {
     new ApiKeyApi(db),
     new V1Api(db),
     new PlaygroundApi(db),
+    new CompletionApi(db),
     new EnvironmentApi(db),
     new EnvTemplateApi(db),
     new EnvKeyApi(db, master),
