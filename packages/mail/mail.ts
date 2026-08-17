@@ -199,13 +199,38 @@ export function mailParagraphs(body: string): string {
   return out;
 }
 
-/** How a program's mail is dressed: the name at the top and the line at the
- *  bottom. Two strings rather than a template hook, because a program that
- *  wants its own markup can render the html itself and pass it through. */
+/** How a program's mail is dressed: the name at the top, an optional mark
+ *  beside it, and the line at the bottom. Strings rather than a template hook,
+ *  because a program that wants its own markup can render the html itself and
+ *  pass it through.
+ *
+ *  The mark is an absolute https URL to a PNG, and both of those are the mail
+ *  client's rules rather than a preference: an SVG is dropped by most of them
+ *  and a data: URI by nearly all, so a logo that is not hosted somewhere
+ *  public is a broken image in somebody's inbox. Empty leaves the name alone,
+ *  which is what a program with no logo to point at should do. */
 export type MailLook = {
   brand: string,
+  logo: string,
   footer: string,
 };
+
+/** The name at the top, with the mark beside it when there is one. A table
+ *  rather than flex or inline-block, because the older clients lay out one of
+ *  those and not the others. */
+function mailMark(look: MailLook): string {
+  let name = "<span style=\"font-size:16px; font-weight:800; color:#0f1419;"
+    + " letter-spacing:-0.01em;\">" + mailEscape(look.brand) + "</span>";
+  if (look.logo == "") {
+    return name;
+  }
+  return "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr>"
+    + "<td style=\"padding-right:9px; vertical-align:middle;\">"
+    + "<img src=\"" + mailEscape(look.logo) + "\" width=\"26\" height=\"26\" alt=\"\""
+    + " style=\"display:block; width:26px; height:26px; border:0;\"></td>"
+    + "<td style=\"vertical-align:middle;\">" + name + "</td>"
+    + "</tr></table>";
+}
 
 /** The shell a mail is wrapped in. Table-based, because that is the one
  *  layout every mail client agrees on. */
@@ -220,8 +245,7 @@ export function mailHtml(look: MailLook, subject: string, body: string): string 
     + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\""
     + " style=\"max-width:560px; background-color:#ffffff; border-radius:12px; overflow:hidden;\">"
     + "<tr><td style=\"padding:32px 40px 0;\">"
-    + "<div style=\"font-size:14px; font-weight:700; color:#0f1419;\">"
-    + mailEscape(look.brand) + "</div>"
+    + mailMark(look)
     + "</td></tr>"
     + "<tr><td style=\"padding:20px 40px 36px;\">"
     + "<h1 style=\"font-size:20px; font-weight:800; color:#0f1419; margin:0 0 16px;"
@@ -268,6 +292,8 @@ export type MailPost = {
   // key store: whoever holds the keys hands one over.
   key: string,
   brand: string,
+  // An absolute https URL to a PNG, or empty. See MailLook.
+  logo: string,
   footer: string,
 };
 
@@ -291,7 +317,7 @@ export function mailWith(mailer: Mailer, post: MailPost, ask: MailAsk): MailSent
     return mailRefused(who.fault);
   }
 
-  let look: MailLook = { brand: post.brand, footer: post.footer };
+  let look: MailLook = { brand: post.brand, logo: post.logo, footer: post.footer };
   let message: MailMessage = {
     from: post.from,
     to: who.addresses,

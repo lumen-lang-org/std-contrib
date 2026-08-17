@@ -41,7 +41,7 @@ function refusing(): Mailer {
 function post(): MailPost {
   let out: MailPost = {
     from: "Joule <hello@joule.sh>", replyTo: "", key: "k-1",
-    brand: "Joule", footer: "Sent by an agent.",
+    brand: "Joule", logo: "https://joule.sh/mail-mark.png", footer: "Sent by an agent.",
   };
   return out;
 }
@@ -130,10 +130,10 @@ test("an empty subject or body is refused before a request", () => {
 });
 
 test("a deployment with no from address, or no key, says which", () => {
-  let noFrom: MailPost = { from: "", replyTo: "", key: "k", brand: "J", footer: "f" };
+  let noFrom: MailPost = { from: "", replyTo: "", key: "k", brand: "J", logo: "", footer: "f" };
   expect(mailWith(noting(), noFrom, ask("a@b.com", "Hi", "text")).fault.indexOf("send from") > 0);
 
-  let noKey: MailPost = { from: "a@b.com", replyTo: "", key: "", brand: "J", footer: "f" };
+  let noKey: MailPost = { from: "a@b.com", replyTo: "", key: "", brand: "J", logo: "", footer: "f" };
   expect(mailWith(noting(), noKey, ask("a@b.com", "Hi", "text")).fault.indexOf("no credential for noting") == 0);
 });
 
@@ -157,22 +157,45 @@ test("prose becomes paragraphs, and markup in it becomes text", () => {
 });
 
 test("the shell carries the caller's own name and footer", () => {
-  let look: MailLook = { brand: "Joule", footer: "Sent by an agent on Joule." };
+  let look: MailLook = { brand: "Joule", logo: "", footer: "Sent by an agent on Joule." };
   let html = mailHtml(look, "Weekly report", "All quiet.");
 
   expect(html.indexOf("<!DOCTYPE html>") == 0);
-  expect(html.indexOf(">Joule</div>") > 0);
+  expect(html.indexOf(">Joule</span>") > 0);
   expect(html.indexOf("Sent by an agent on Joule.") > 0);
   expect(html.indexOf("Weekly report") > 0);
   expect(html.indexOf("All quiet.") > 0);
 });
 
 test("a subject with markup in it cannot break out of the shell", () => {
-  let look: MailLook = { brand: "J", footer: "f" };
+  let look: MailLook = { brand: "J", logo: "", footer: "f" };
   let html = mailHtml(look, "</title><script>x</script>", "body");
   expect(html.indexOf("<script>") < 0);
   expect(html.indexOf("&lt;script&gt;") > 0);
   expect(mailEscape("a & b") == "a &amp; b");
+});
+
+test("a mark is drawn beside the name, and its absence is not a broken image", () => {
+  let bare: MailLook = { brand: "Joule", logo: "", footer: "f" };
+  let plain = mailHtml(bare, "Hello", "text");
+  expect(plain.indexOf("<img") < 0);
+  expect(plain.indexOf(">Joule</span>") > 0);
+
+  let marked: MailLook = { brand: "Joule", logo: "https://joule.sh/mail-mark.png", footer: "f" };
+  let html = mailHtml(marked, "Hello", "text");
+  expect(html.indexOf("<img src=\"https://joule.sh/mail-mark.png\"") > 0);
+  // Sized in the tag as well as the style: a client that drops the style
+  // still lays the mail out around a 26px mark rather than a full-size one.
+  expect(html.indexOf("width=\"26\" height=\"26\"") > 0);
+  expect(html.indexOf("alt=\"\"") > 0);
+  expect(html.indexOf(">Joule</span>") > 0);
+});
+
+test("a logo url cannot carry markup out of its attribute", () => {
+  let bad: MailLook = { brand: "J", logo: "https://x/a.png\" onerror=\"steal()", footer: "f" };
+  let html = mailHtml(bad, "Hello", "text");
+  expect(html.indexOf("onerror=\"steal") < 0);
+  expect(html.indexOf("&quot; onerror=") > 0);
 });
 
 test("both transports are the same interface, and name their own credential", () => {

@@ -19,6 +19,16 @@ const MAIL_BRAND: string = "Joule";
 
 const MAIL_FOOTER: string = "Sent by an agent on Joule.";
 
+/* The mark, where a mail client can fetch it. AGENTS_MAIL_LOGO moves it for a
+ * deployment served from another origin; empty leaves the name on its own,
+ * which is better than a broken image. */
+const MAIL_LOGO: string = "https://joule.sh/mail-mark.png";
+
+function mailLogo(): string {
+  let said = (process.env("AGENTS_MAIL_LOGO") ?? "").trim();
+  return said == "" ? MAIL_LOGO : said;
+}
+
 /* What a test sets instead of the environment.
  *
  * A Lumen program reads its configuration from the environment and cannot
@@ -111,6 +121,7 @@ export function sendMail(db: Db, master: string, ask: MailAsk): MailSent {
     replyTo: mailReplyTo(),
     key: credentialFor(db, found.mailer.credential, master),
     brand: MAIL_BRAND,
+    logo: mailLogo(),
     footer: MAIL_FOOTER,
   };
   return mailWith(found.mailer, post, ask);
