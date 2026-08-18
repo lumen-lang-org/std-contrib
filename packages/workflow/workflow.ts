@@ -710,8 +710,13 @@ function hasCycle(graph: WfGraph): bool {
   return peeled.length < graph.nodes.length;
 }
 
-/** Everything wrong with a node's own fields, or "". */
-function refuseNode(node: WfNode): string {
+/** Everything wrong with a node's own fields, or "".
+ *
+ *  `ready` is what separates a drawing from a workflow. Off, this asks only
+ *  that the node is a node — a known kind, an id, within its bounds — which is
+ *  what a half-finished drawing has to satisfy to be stored at all. On, it
+ *  also asks that somebody has said what the step does. */
+function refuseNode(node: WfNode, ready: bool): string {
   if (node.id == "") { return "a node has no id"; }
   if (!knownType(node.type)) {
     return "\"" + node.type + "\" is not a step this can run — the kinds are "
@@ -740,6 +745,7 @@ function refuseNode(node: WfNode): string {
     }
     d = d + 1;
   }
+  if (!ready) { return ""; }
   if (node.type == "AGENT" && node.instruction.trim() == "") { return label + " needs an instruction — what should the agent do?"; }
   if (node.type == "LLM" && node.instruction.trim() == "") { return label + " needs an instruction — what should the model be asked?"; }
   // TELEGRAM_REPLY: what to say. Telegram-specific on purpose, the way the
@@ -968,6 +974,22 @@ function opensBefore(graph: WfGraph, id: string): bool {
  *  time. A model authors these as often as a person does, so each refusal is
  *  a sentence the model can act on in its next call. */
 export function refuse(graph: WfGraph): string {
+  return refuseGraphAt(graph, true);
+}
+
+/** What a DRAWING must satisfy, which is much less.
+ *
+ *  A step somebody has dropped but not filled in yet is the ordinary state of
+ *  a graph being drawn, and refusing it means the whole drawing cannot be
+ *  stored — so the work is lost on a reload and nobody is told why. This asks
+ *  only that the document is a graph: known kinds, unique ids, within its
+ *  bounds, edges that arrive somewhere. Whether each step is ready is asked at
+ *  publish, which is the moment it starts to matter. */
+export function refuseDraft(graph: WfGraph): string {
+  return refuseGraphAt(graph, false);
+}
+
+function refuseGraphAt(graph: WfGraph, ready: bool): string {
   if (graph.nodes.length == 0) { return "a workflow with no steps has nothing to run"; }
   if (graph.nodes.length > MAX_NODES) {
     return "that is " + `${graph.nodes.length}` + " steps — the most a workflow may have is " + `${MAX_NODES}`;
@@ -975,7 +997,7 @@ export function refuse(graph: WfGraph): string {
   let starts: int = 0;
   let i: int = 0;
   while (i < graph.nodes.length) {
-    let bad = refuseNode(graph.nodes[i]);
+    let bad = refuseNode(graph.nodes[i], ready);
     if (bad != "") { return bad; }
     if (isEntry(graph.nodes[i].type)) { starts = starts + 1; }
     let j = i + 1;
@@ -985,7 +1007,7 @@ export function refuse(graph: WfGraph): string {
     }
     i = i + 1;
   }
-  if (starts == 0) { return "a workflow needs a START step — where does it begin?"; }
+  if (ready && starts == 0) { return "a workflow needs a START step — where does it begin?"; }
   if (starts > 1) { return "a workflow begins in one place, not " + `${starts}` + " — a START step or a Telegram step, not both"; }
   // No END requirement. A walk ends at any step with nothing wired after it,
   // and what that step answered IS the workflow's answer — the walk has said
@@ -1001,7 +1023,7 @@ export function refuse(graph: WfGraph): string {
   // graph with no reply step is a bot that reads and never answers, and the
   // person who finds that out is the one on the phone. Refused here, where
   // the sentence can say what to add, rather than discovered there.
-  if (startOf(graph).type == "TELEGRAM") {
+  if (ready && startOf(graph).type == "TELEGRAM") {
     let speaks = false;
     let r: int = 0;
     while (r < graph.nodes.length) {
@@ -1032,7 +1054,7 @@ export function refuse(graph: WfGraph): string {
     let named = one.name == "" ? one.id : one.name;
     if (isRepeat(one.type)) {
       let closing = mergeAfter(graph, one.id);
-      if (closing == "") {
+      if (ready && closing == "") {
         return named + " has no MERGE after it, so what it works through has nowhere to gather";
       }
       let inside = nextId(graph, one.id, "");
@@ -1045,7 +1067,7 @@ export function refuse(graph: WfGraph): string {
         hops = hops + 1;
       }
     }
-    if (one.type == "MERGE" && !opensBefore(graph, one.id)) {
+    if (ready && one.type == "MERGE" && !opensBefore(graph, one.id)) {
       return named + " gathers results, but nothing before it works through a list";
     }
     g = g + 1;

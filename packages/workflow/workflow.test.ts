@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_ITEMS, MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, aggregated, asJsonList, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, itemsOf, matches, outcomeAsk, outcomeFrom, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
+import { MAX_ITEMS, MAX_NODES, refuseDraft, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, aggregated, asJsonList, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, itemsOf, matches, outcomeAsk, outcomeFrom, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -956,4 +956,46 @@ test("every turn of a body is written into the trail, in order", () => {
   expect(seen.join(",") == "s,m,a,a,g");
   expect(ran.steps[2].output == "a:one");
   expect(ran.steps[3].output == "a:two");
+});
+
+// --- a drawing in progress -------------------------------------------------
+
+test("a step nobody has filled in stops a publish, not a save", () => {
+  // An HTTP step with no url: what the board looks like a second after
+  // somebody drops one.
+  let bare: WfNode = {
+    id: "h", type: "HTTP", name: "", x: 0.0, y: 0.0,
+    instruction: "", agentId: "", serverId: "", tool: "", args: "",
+    url: "", method: "GET", body: "", query: "", test: "", needle: "",
+    subject: "", schedule: "", source: "",
+  };
+  let g = graphOf([node("s", "START"), bare], [edge("e1", "s", "h", "")]);
+  expect(refuse(g).indexOf("url") >= 0);
+  expect(refuseDraft(g) == "");
+});
+
+test("a drawing may be half-wired, and still may not be nonsense", () => {
+  // A repeat whose gather has not been drawn yet: fine to store, not to run.
+  let half = graphOf(
+    [node("s", "START"), node("m", "MAP"), node("a", "AGENT")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "a", "")]);
+  expect(refuse(half).indexOf("MERGE") >= 0);
+  expect(refuseDraft(half) == "");
+
+  // What a drawing may never be: a kind nothing can run, two steps sharing an
+  // id, an edge that arrives nowhere, or more steps than a workflow may hold.
+  expect(refuseDraft(graphOf([node("s", "START"), node("x", "KAFKA")], [])) != "");
+  expect(refuseDraft(graphOf([node("s", "START"), node("s", "AGENT")], [])) != "");
+  expect(refuseDraft(graphOf([node("s", "START")], [edge("e", "s", "ghost", "")])) != "");
+  let many: WfNode[] = [node("s", "START")];
+  let i: int = 0;
+  while (i <= MAX_NODES) { many.push(node("n" + `${i}`, "AGENT")); i = i + 1; }
+  let none: WfEdge[] = [];
+  expect(refuseDraft(graphOf(many, none)) != "");
+});
+
+test("a drawing with no entry is storable, and refused at publish", () => {
+  let orphan = graphOf([node("a", "AGENT")], []);
+  expect(refuseDraft(orphan) == "");
+  expect(refuse(orphan).indexOf("START") >= 0);
 });

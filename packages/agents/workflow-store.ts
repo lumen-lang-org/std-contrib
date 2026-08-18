@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, listOrdered, listWhere, placeholderAt, repository, skipLocked } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
-import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
+import { WfGraph, refuse as refuseGraph, refuseDraft as refuseDrawing, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
 import { knownZone } from "../cron/cron.ts";
 import { workflowRepository } from "./routes/automation/workflows/entities/workflow.entity.ts";
@@ -175,7 +175,19 @@ export function timingOf(graph: WfGraph, zone: string, nowMs: number): WfTiming 
   return every;
 }
 
+/** What a workflow being EDITED must satisfy: the row's own fields, and a
+ *  graph that is a graph. Whether every step is filled in is asked at publish
+ *  — see refuseDraft — because a drawing in progress is the normal state of
+ *  one being drawn, and refusing to store it loses the work. */
+export function refuseDraftWorkflow(row: WorkflowRow): string {
+  return refuseRow(row, false);
+}
+
 export function refuseWorkflow(row: WorkflowRow): string {
+  return refuseRow(row, true);
+}
+
+function refuseRow(row: WorkflowRow, ready: bool): string {
   if (row.name.trim() == "") {
     return "a workflow needs a name for the list";
   }
@@ -189,7 +201,7 @@ export function refuseWorkflow(row: WorkflowRow): string {
   if (!parsed.ok) {
     return parsed.error;
   }
-  let wrong = refuseGraph(parsed.graph);
+  let wrong = ready ? refuseGraph(parsed.graph) : refuseDrawing(parsed.graph);
   if (wrong != "") {
     return wrong;
   }

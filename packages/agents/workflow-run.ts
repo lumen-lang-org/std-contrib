@@ -2,7 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
 import { MailAsk } from "../mail/mail.ts";
 import { sendMail } from "./mail-send.ts";
-import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, aggregated, asJsonList, casesOf, emptyNode, fill, headerLines, itemsOf, matches, outcomeAsk, outcomeFrom, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
+import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, aggregated, asJsonList, casesOf, emptyNode, fill, headerLines, itemsOf, matches, outcomeAsk, outcomeFrom, refuse, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
 import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
@@ -288,6 +288,20 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
       error: parsed.error,
     };
     return refused;
+  }
+  // A draft may hold a step nobody has finished — that is what drafts are for
+  // — and a workflow never published runs its draft. Say which step, once,
+  // rather than failing partway through on an empty url.
+  let notReady = refuse(parsed.graph);
+  if (notReady != "") {
+    let unfinished: WorkflowDone = {
+      ok: false,
+      runId: "",
+      threadId: "",
+      answer: "",
+      error: notReady,
+    };
+    return unfinished;
   }
   let agentDoc = findById(db, agentsMapping(), row.agentId);
   if (agentDoc == "") {

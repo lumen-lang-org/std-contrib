@@ -4,7 +4,7 @@ import { stamp } from "../../../api-core.ts";
 import { holdsOwner } from "../../../owner.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../../scan.ts";
 import { ensureBuilt } from "../../../script-wasm.ts";
-import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt } from "../../../workflow-store.ts";
+import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, nextWorkflowFire, parseGraph, refuseDraftWorkflow, refuseWorkflow, timingOf, withWorkflowNextAt } from "../../../workflow-store.ts";
 import { ScriptCheckFailed } from "./dtos/script-check-failed.dto.ts";
 import { ScriptCheckFresh } from "./dtos/script-check-fresh.dto.ts";
 import { WorkflowRepository } from "./workflow.repository.ts";
@@ -159,7 +159,7 @@ export class WorkflowService {
       publishedGraph: mine.publishedGraph ?? "", publishedAt: mine.publishedAt ?? "",
       createdAt: mine.createdAt, updatedAt: stamp(),
     };
-    let wrong = refuseWorkflow(edited);
+    let wrong = refuseDraftWorkflow(edited);
     if (wrong != "") {
       return refusing(wrong);
     }
