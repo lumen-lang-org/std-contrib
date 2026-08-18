@@ -23,8 +23,8 @@ export class AgentService {
     this.master = master;
   }
 
-  listing(owner: string, enabledOnly: bool): string {
-    return this.repository.listing(owner, enabledOnly);
+  listing(owner: string, enabledOnly: bool, onlyMine: bool): string {
+    return this.repository.listing(owner, enabledOnly, onlyMine);
   }
 
   one(id: string): string {

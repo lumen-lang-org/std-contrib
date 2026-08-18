@@ -1,5 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
-import { OWNED_PROMPT, ownedRowsClause } from "../../../owner.ts";
+import { OWNED_PROMPT, myRowsClause, ownedRowsClause } from "../../../owner.ts";
 import { DbOrder, DbRepository, DbResult, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../../../../plume/plume.ts";
 import { PromptRecord } from "./dtos/prompt-body.dto.ts";
 import { promptRepository } from "./entities/prompt.entity.ts";
@@ -13,10 +13,11 @@ export class PromptRepository {
     this.prompts = promptRepository();
   }
 
-  all(owner: string): string {
+  all(owner: string, onlyMine: bool): string {
     let keys: DbOrder[] = [{ column: "prompt_name" }, { column: "version" }];
     return listOrdered(this.database, this.prompts, {
-      where: ownedRowsClause(this.database, OWNED_PROMPT, 1),
+      where: onlyMine ? myRowsClause(this.database, OWNED_PROMPT, 1)
+        : ownedRowsClause(this.database, OWNED_PROMPT, 1),
       args: [owner],
       order: keys,
     });

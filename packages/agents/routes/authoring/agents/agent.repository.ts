@@ -1,7 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, pageOrdered, persist, placeholderAt, repository, setEvery, unlink, unlinkAllPointingAt, unlinkAllOwnedBy } from "../../../../plume/plume.ts";
 import { AgentRetrievalRow, agentScopes, embeddingModel, grantScope, revokeScope } from "../../../knowledge.ts";
-import { OWNED_AGENT, ownedRowsClause, ownerClause } from "../../../owner.ts";
+import { OWNED_AGENT, myRowsClause, ownedRowsClause, ownerClause } from "../../../owner.ts";
 import { agentRepository } from "./entities/agent.entity.ts";
 import { agentRetrievalRepository } from "./entities/agent-retrieval.entity.ts";
 import { mcpServerRepository } from "../../connectivity/servers/entities/mcp-server.entity.ts";
@@ -31,9 +31,10 @@ export class AgentRepository {
     this.agents = agentRepository();
   }
 
-  listing(owner: string, enabledOnly: bool): string {
+  listing(owner: string, enabledOnly: bool, onlyMine: bool): string {
     let keys: DbOrder[] = [{ column: "agent_name" }];
-    let mine = ownedRowsClause(this.database, OWNED_AGENT, 1);
+    let mine = onlyMine ? myRowsClause(this.database, OWNED_AGENT, 1)
+      : ownedRowsClause(this.database, OWNED_AGENT, 1);
     if (enabledOnly) {
       return listOrdered(this.database, this.agents, {
         where: mine + " AND enabled = " + placeholderAt(this.database, 2),

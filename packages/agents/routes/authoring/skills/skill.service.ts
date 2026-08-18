@@ -14,11 +14,11 @@ export class SkillService {
     this.repository = new SkillRepository(database);
   }
 
-  listing(owner: string, featuredOnly: bool): string {
+  listing(owner: string, featuredOnly: bool, onlyMine: bool): string {
     if (featuredOnly) {
       return this.repository.featured();
     }
-    return this.repository.listing(owner);
+    return this.repository.listing(owner, onlyMine);
   }
 
   one(id: string): string {

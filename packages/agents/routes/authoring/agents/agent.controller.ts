@@ -38,8 +38,11 @@ export class AgentApi {
 
   @Get("/")
   list(@RequestParam("enabled", "") enabled: string,
+       @RequestParam("mine", "") mine: string,
        @From(filingAs) owner: string): Reply {
-    return Ok(this.agents.listing(owner, enabled == "true"));
+    // Everything you may USE by default; only what is yours when asked, which
+    // is what a screen for managing them wants.
+    return Ok(this.agents.listing(owner, enabled == "true", mine == "true"));
   }
 
   @Get("/:id")

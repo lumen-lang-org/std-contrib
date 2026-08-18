@@ -110,6 +110,14 @@ export function ownedRowsClause(db: Db, kind: string, at: int): string {
     + " OR id IN (" + held + " AND owner = " + placeholderAt(db, at) + "))";
 }
 
+/** Only the rows this owner wrote — not the deployment's, which everybody
+ *  may use but nobody but an operator may change. `ownedRowsClause` answers
+ *  what you may USE; this answers what is YOURS. */
+export function myRowsClause(db: Db, kind: string, at: int): string {
+  return "id IN (SELECT row_id FROM row_owners WHERE kind = '" + kind + "'"
+    + " AND owner = " + placeholderAt(db, at) + ")";
+}
+
 export function ownerOfRow(db: Db, kind: string, id: string): string {
   let sql = "SELECT owner FROM row_owners WHERE kind = '" + kind + "'"
     + " AND row_id = " + placeholderAt(db, 1);

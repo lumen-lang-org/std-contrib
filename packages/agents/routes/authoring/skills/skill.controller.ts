@@ -28,8 +28,9 @@ export class SkillApi {
 
   @Get("/")
   list(@RequestParam("featured", "") featured: string,
+       @RequestParam("mine", "") mine: string,
        @From(filingAs) owner: string): Reply {
-    return Ok(this.skills.listing(owner, featured == "1"));
+    return Ok(this.skills.listing(owner, featured == "1", mine == "true"));
   }
 
   @Get("/:id")

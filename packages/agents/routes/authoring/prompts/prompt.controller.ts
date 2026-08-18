@@ -15,8 +15,9 @@ export class PromptApi {
 
   @Get("/")
   list(@RequestParam("name", "") name: string,
+       @RequestParam("mine", "") mine: string,
        @From(filingAs) owner: string): Reply {
-    return Ok(this.prompts.listing(owner, name));
+    return Ok(this.prompts.listing(owner, name, mine == "true"));
   }
 
   @Post("/")

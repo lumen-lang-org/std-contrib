@@ -12,9 +12,9 @@ export class PromptService {
     this.repository = new PromptRepository(database);
   }
 
-  listing(owner: string, name: string): string {
+  listing(owner: string, name: string, onlyMine: bool): string {
     if (name == "") {
-      return this.repository.all(owner);
+      return this.repository.all(owner, onlyMine);
     }
     return this.repository.named(owner, name);
   }
