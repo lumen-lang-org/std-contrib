@@ -24,6 +24,13 @@ from artifact_path import resolve_input  # noqa: E402
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
+# The same parts fill_docx.py writes to. They have to be the same set: this
+# is what the model reads BEFORE filling, so a placeholder the filler would
+# happily replace but this never reports is one nobody knows to answer — the
+# document comes back with <COMPANY> still in its header and a run that said
+# it was done.
+PARTS = re.compile(r"^word/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$")
+
 
 def markdown(path: Path) -> str:
     out = subprocess.run(
@@ -46,15 +53,21 @@ def paragraph_texts(path: Path) -> list[str]:
     run inside a <w:p>, joined in document order, so a run Word split
     mid-word (its own spell-check markers do this) still joins back into one
     piece.
+
+    Every part a placeholder can hide in, not only the body: a template puts
+    <DATE> in the body and <COMPANY> in a header, and a scan of document.xml
+    alone reports half a document. Paragraphs nested in a table come along
+    for free — iter() walks the whole tree, and a table cell holds ordinary
+    <w:p>.
     """
-    with zipfile.ZipFile(path) as z:
-        xml = z.read("word/document.xml")
-    root = ET.fromstring(xml)
     out: list[str] = []
-    for p in root.iter(f"{W}p"):
-        joined = "".join(t.text or "" for t in p.iter(f"{W}t"))
-        if joined.strip():
-            out.append(joined)
+    with zipfile.ZipFile(path) as z:
+        for part in sorted(n for n in z.namelist() if PARTS.match(n)):
+            root = ET.fromstring(z.read(part))
+            for p in root.iter(f"{W}p"):
+                joined = "".join(t.text or "" for t in p.iter(f"{W}t"))
+                if joined.strip():
+                    out.append(joined)
     return out
 
 
