@@ -3,7 +3,8 @@ import { existsById, findById, persist } from "../plume/plume.ts";
 import { MailAsk } from "../mail/mail.ts";
 import { sendMail } from "./mail-send.ts";
 import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, aggregated, asJsonList, casesOf, emptyNode, fill, headerLines, itemsOf, matches, outcomeAsk, outcomeFrom, refuse, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
-import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
+import { WorkflowRow, WorkflowRunRow, parseGraph, runsToday, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
+import { runsPerOwnerDay } from "./caps.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
 import { SecretService } from "./routes/identity/secrets/secret.service.ts";
@@ -63,6 +64,9 @@ export type WorkflowAsk = {
 // A workflow may call a workflow, but not forever. Three is a parent, a child
 // and a grandchild, which is as far as a drawing stays readable.
 const MAX_DEPTH: int = 3;
+// Named, because the scheduler reads it back: a day's budget spent is not a
+// broken workflow, and must not count toward pausing one.
+export const OVER_DAILY_RUNS: string = "that is enough runs for today";
 // A pause is a step, and a step holds the run open. The graph refuses more
 // than MAX_WAIT_SECONDS; this is the same bound in the place that sleeps.
 const MAX_WAIT_MS: int = 60000;
@@ -288,6 +292,21 @@ export function runWorkflow(db: Db, row: WorkflowRow, ask: WorkflowAsk): Workflo
       error: parsed.error,
     };
     return refused;
+  }
+  // What one account may spend of the deployment's model budget in a day. A
+  // sub-workflow counts, because it costs the same as any other run.
+  let already = runsToday(db, row.owner, ask.nowMs);
+  let allowed = runsPerOwnerDay();
+  if (already >= allowed) {
+    let spent: WorkflowDone = {
+      ok: false,
+      runId: "",
+      threadId: "",
+      answer: "",
+      error: OVER_DAILY_RUNS + ": " + `${already}` + " today, and " + `${allowed}`
+        + " is the most one account may start. It starts again at midnight UTC.",
+    };
+    return spent;
   }
   // A draft may hold a step nobody has finished — that is what drafts are for
   // — and a workflow never published runs its draft. Say which step, once,

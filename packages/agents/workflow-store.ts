@@ -181,6 +181,29 @@ export function timingOf(graph: WfGraph, zone: string, nowMs: number): WfTiming 
  *  graph that is a graph. Whether every step is filled in is asked at publish
  *  — see refuseDraft — because a drawing in progress is the normal state of
  *  one being drawn, and refusing to store it loses the work. */
+/** The instant this UTC day began, in milliseconds. */
+export function dayBegan(nowMs: number): number {
+  let day: number = 86400000.0;
+  let whole = nowMs - (nowMs % day);
+  return whole;
+}
+
+/** How many runs this owner has started today, finished or not.
+ *
+ *  Counted from the runs themselves rather than kept as a number on the owner:
+ *  a counter is a second thing to keep true, and this table already knows. */
+export function runsToday(db: Db, owner: string, nowMs: number): int {
+  let sql = "SELECT COUNT(*) FROM workflow_runs WHERE owner = " + placeholderAt(db, 1)
+    + " AND started_at >= " + placeholderAt(db, 2);
+  if (!db.query(sql, [owner, `${dayBegan(nowMs)}`])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
+  return parseInt(db.value(0, 0), 10) ?? 0;
+}
+
 /** What a run started by hand should be given as {{input}}.
  *
  *  Beside the workflow rather than on it: the row is written by persist from
@@ -379,6 +402,25 @@ export function claimDueWorkflow(db: Db, nowMs: number): WorkflowRow {
 
 /** As markRan is for a task, and returning a fault for the same reason: an
  *  unrecorded run stays claimed and stays due. */
+/** Put down, not failed. A day's budget spent says nothing about the drawing,
+ *  so the failure count is untouched and the workflow is not paused — it takes
+ *  its next turn on the clock, and a manual one waits to be asked again. */
+export function markWorkflowShelved(db: Db, row: WorkflowRow, why: string, nowMs: number): string {
+  let ahead = nextWorkflowFire(row, nowMs);
+  let again = row.kind == "every" && ahead.ok ? ahead.at : "";
+  let sql = "UPDATE workflows SET running_since = '',"
+    + " last_run_at = " + db.placeholder
+    + ", last_status = 'shelved', last_error = " + placeholderAt(db, 2)
+    + ", next_at = " + placeholderAt(db, 3)
+    + ", updated_at = " + placeholderAt(db, 4)
+    + " WHERE id = " + placeholderAt(db, 5);
+  let now = `${nowMs}`;
+  if (!db.query(sql, [now, why, again, now, row.id])) {
+    return "\"" + row.id + "\" was not put down, so it is still claimed and still due";
+  }
+  return "";
+}
+
 export function markWorkflowRan(db: Db, row: WorkflowRow, runId: string, nowMs: number): string {
   let ahead = nextWorkflowFire(row, nowMs);
   let stillOn = row.kind == "manual" || (row.kind == "every" && ahead.ok);

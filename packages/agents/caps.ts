@@ -29,3 +29,16 @@ export function threadBytesMax(): int {
 export function uploadBytesMax(): int {
   return bytesCap(process.env("AGENTS_UPLOAD_BYTES_MAX") ?? "", 1048576);
 }
+
+/** How many workflow runs one account may start in a day.
+ *
+ *  A workflow with an agent step on a schedule spends the deployment's model
+ *  budget unattended, and a public sign-up means the budget is a stranger's to
+ *  spend. Counted per owner over a UTC day, and settable for a deployment that
+ *  wants a different answer.
+ *
+ *  Zero here would mean nobody may run anything, which is never what somebody
+ *  meant to type, so bytesCap's floor of 1 is right for this too. */
+export function runsPerOwnerDay(): int {
+  return bytesCap(process.env("AGENTS_RUNS_PER_OWNER_DAY") ?? "", 200);
+}

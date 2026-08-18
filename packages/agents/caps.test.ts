@@ -1,4 +1,4 @@
-import { bytesCap, artifactBytesMax, threadBytesMax, uploadBytesMax } from "./caps.ts";
+import { bytesCap, artifactBytesMax, runsPerOwnerDay, threadBytesMax, uploadBytesMax } from "./caps.ts";
 
 test("a number is taken, surrounding space and all", () => {
   expect(bytesCap("4096", 10) == 4096);
@@ -21,4 +21,5 @@ test("with nothing set every cap is the number this shipped with", () => {
   expect(artifactBytesMax() == 524288);
   expect(threadBytesMax() == 104857600);
   expect(uploadBytesMax() == 1048576);
+  expect(runsPerOwnerDay() == 200);
 });

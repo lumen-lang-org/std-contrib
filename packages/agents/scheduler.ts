@@ -3,8 +3,8 @@ import { postgres } from "../plume/postgres.ts";
 import { connectDatabase, findById, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
-import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, takeNextInput, withGraph, workflowsMapping } from "./workflow-store.ts";
-import { ResumeAsk, WorkflowAsk, resumeWorkflow, runWorkflow } from "./workflow-run.ts";
+import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, markWorkflowShelved, takeNextInput, withGraph, workflowsMapping } from "./workflow-store.ts";
+import { OVER_DAILY_RUNS, ResumeAsk, WorkflowAsk, resumeWorkflow, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
 import { recordRun } from "./runlog.ts";
@@ -309,6 +309,10 @@ function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {
     : (flow.publishedGraph ?? "") == "" ? flow.graph : (flow.publishedGraph ?? "");
   let done = runWorkflow(db, withGraph(flow, bytes), ask);
   if (!done.ok) {
+    if (done.error.startsWith(OVER_DAILY_RUNS)) {
+      noteFault(markWorkflowShelved(db, flow, done.error, Date.now() as number));
+      return;
+    }
     noteFault(markWorkflowFailed(db, flow, done.error, Date.now() as number));
     return;
   }
