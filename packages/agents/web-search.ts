@@ -24,6 +24,7 @@
  */
 
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
+import { RankedPassage } from "./web-rerank.ts";
 
 /** How many passages one call may ask for. Ten pages of prose is already more
  *  than an answer needs, and the cost of a bad query is paid in context. */
@@ -36,6 +37,22 @@ const SEARCH_COUNT_DEFAULT: int = 5;
 const SEARCH_PASSAGE_MAX: int = 1500;
 
 const SEARCH_ANSWER_MAX: int = 9000;
+
+/* The index's max_chars is a budget for the WHOLE answer, not for each
+ * passage — measured: the same query at 2000 comes back with one passage, at
+ * 20000 with six, at 200000 with twenty, and k does not move it at all. This
+ * deployment asked for 3000 and was served exactly one passage for every
+ * search it has ever run, whatever it asked k for. So the budget is asked for
+ * per passage wanted, and generously, since each one is clipped to
+ * SEARCH_PASSAGE_MAX on the way out anyway. */
+const SEARCH_CHARS_EACH: int = 4000;
+
+const SEARCH_CHARS_MAX: int = 200000;
+
+export function searchBudget(count: int): int {
+  let want = count * SEARCH_CHARS_EACH;
+  return want > SEARCH_CHARS_MAX ? SEARCH_CHARS_MAX : want;
+}
 
 
 export function searchBase(): string {
@@ -124,7 +141,14 @@ function searchClipped(text: string, cap: int): string {
 /** The index's answer, as the model reads it: one block per page, the url on
  *  its own line so a citation can be copied out of it. */
 export function searchPassages(document: string, count: int): Searched {
-  let rows = jsonList(jsonRaw(document, "passages"));
+  let noOrder: RankedPassage[] = [];
+  return searchPassagesRanked(document, count, noOrder);
+}
+
+/** The same, read in a given order. `order` empty is the index's own order,
+ *  which is what every caller that cannot rank passes. */
+export function searchPassagesRanked(document: string, count: int, order: RankedPassage[]): Searched {
+  let rows = orderedRows(jsonList(jsonRaw(document, "passages")), order);
   if (rows.length == 0) {
     let none: Searched = {
       ok: true, found: 0,
@@ -161,6 +185,26 @@ export function searchPassages(document: string, count: int): Searched {
   return done;
 }
 
+/** The rows an order names, best first; the rows as they came when it names
+ *  nothing. An order that disagrees with the rows it was built from is
+ *  ignored rather than trusted — it would silently read the wrong passage. */
+function orderedRows(rows: string[], order: RankedPassage[]): string[] {
+  if (order.length == 0 || order.length != rows.length) {
+    return rows;
+  }
+  let out: string[] = [];
+  let i: int = 0;
+  while (i < order.length) {
+    let at = order[i].was;
+    if (at < 0 || at >= rows.length) {
+      return rows;
+    }
+    out.push(rows[at]);
+    i = i + 1;
+  }
+  return out;
+}
+
 /** An index this deployment can search. One function, so an index with
  *  another wire format is another module and not an edit here. */
 export type WebIndex = {
@@ -181,7 +225,7 @@ function searchMode(): string {
 function passageFind(base: string, query: string, count: int): Searched {
   let mode = searchMode();
   let url = base + "/retrieve?q=" + searchEncoded(query.trim())
-    + "&k=" + `${count}` + "&max_chars=" + `${SEARCH_PASSAGE_MAX * 2}`
+    + "&k=" + `${count}` + "&max_chars=" + `${searchBudget(count)}`
     + (mode == "" ? "" : "&mode=" + searchEncoded(mode));
   let headers = new Map<string, string>();
   headers.set("accept", "application/json");
@@ -217,4 +261,36 @@ export function searchWith(index: WebIndex, base: string, query: string, count: 
 
 export function searchWeb(query: string, count: int): Searched {
   return searchWith(passageIndex(), searchBase(), query, count);
+}
+
+/** The document the index answered with, so a caller that means to rank the
+ *  passages itself has them to rank. */
+export function searchRaw(base: string, query: string, count: int): string {
+  let mode = searchMode();
+  let url = base + "/retrieve?q=" + searchEncoded(query.trim())
+    + "&k=" + `${count}` + "&max_chars=" + `${searchBudget(count)}`
+    + (mode == "" ? "" : "&mode=" + searchEncoded(mode));
+  let headers = new Map<string, string>();
+  headers.set("accept", "application/json");
+  let res = http.request(url, "GET", "", headers);
+  if (res.status < 200 || res.status > 299) {
+    return "";
+  }
+  return res.body;
+}
+
+/** Passage text in the index's order, which is what gets embedded. */
+export function passageTexts(document: string): string[] {
+  let rows = jsonList(jsonRaw(document, "passages"));
+  let out: string[] = [];
+  let i: int = 0;
+  while (i < rows.length) {
+    let text = jsonText(rows[i], "text");
+    if (text.trim() == "") {
+      text = jsonText(rows[i], "snippet");
+    }
+    out.push(jsonText(rows[i], "title") + "\n" + text);
+    i = i + 1;
+  }
+  return out;
 }

@@ -8,7 +8,9 @@
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
-import { searchCount, searchReady, searchWeb } from "./web-search.ts";
+import { searchBase, searchCount, searchPassagesRanked, searchQueryFault, searchRaw, searchReady, searchWeb, passageTexts } from "./web-search.ts";
+import { rerankOrder, widenedCount } from "./web-rerank.ts";
+import { Db } from "../plume/driver.ts";
 
 export const SEARCH_WEB: string = "search_web";
 
@@ -37,6 +39,41 @@ export type WebToolCall = {
   name: string,
   args: string,
 };
+
+/** search_web, with the passages put in the order they should be read.
+ *
+ *  The index ranks lexically and will not rank by its own embeddings, so the
+ *  index is asked for a wider set and this deployment's embedding model puts
+ *  that set in order. Everything about it degrades to the plain search:
+ *  no embedder, a refusal, an unreadable vector — all keep the index's order.
+ *  See web-rerank.ts. */
+export function callWebToolRanked(db: Db, master: string, call: WebToolCall): FileToolResult {
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
+  if (call.name != SEARCH_WEB) {
+    return not;
+  }
+  let query = jsonText(call.args, "query");
+  let want = searchCount(jsonText(call.args, "count"));
+  let bad = searchQueryFault(query);
+  if (bad != "") {
+    let refused: FileToolResult = { handled: true, ok: false, text: bad, line: 0, changed: "" };
+    return refused;
+  }
+  let document = searchRaw(searchBase(), query, widenedCount(want));
+  if (document == "") {
+    // The wide read failed; the ordinary one is a second chance rather than
+    // an error, and it is the path every other caller already takes.
+    return callWebTool(call);
+  }
+  let order = rerankOrder(db, master, query, passageTexts(document));
+  let found = searchPassagesRanked(document, want, order);
+  if (!found.ok) {
+    let no: FileToolResult = { handled: true, ok: false, text: found.fault, line: 0, changed: "" };
+    return no;
+  }
+  let read: FileToolResult = { handled: true, ok: true, text: found.text, line: 0, changed: "" };
+  return read;
+}
 
 export function callWebTool(call: WebToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };

@@ -1,4 +1,4 @@
-import { Searched, WebIndex, searchCount, searchPassages, searchQueryFault, searchReady, searchWith } from "./web-search.ts";
+import { Searched, WebIndex, searchCount, searchPassages, searchQueryFault, searchReady, searchWith, searchBudget } from "./web-search.ts";
 import { SEARCH_WEB, callWebTool, webTools } from "./web-tools.ts";
 import { reservedHere } from "./reserved.ts";
 
@@ -138,4 +138,16 @@ test("search_web is a name this deployment owns, so a skill cannot answer to it"
   // The skill is called search-web and the tool search_web. Before the guard
   // in callSkillTool, the skill answered the tool call with its own body.
   expect(reservedHere(SEARCH_WEB));
+});
+
+test("the index's char budget is asked for per passage, not for the whole answer", () => {
+  // Measured against the real index: max_chars is a budget for everything it
+  // returns, and k does not move it. At 3000 — what this deployment used to
+  // send — one passage came back for every search it ever ran.
+  expect(searchBudget(1) < searchBudget(5));
+  expect(searchBudget(5) < searchBudget(20));
+  // Five passages get room for five, not for one.
+  expect(searchBudget(5) >= 5 * 3000);
+  // and it is bounded, so a wide search cannot ask for the whole crawl
+  expect(searchBudget(10000) == searchBudget(100000));
 });
