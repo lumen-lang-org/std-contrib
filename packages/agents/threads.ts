@@ -1154,6 +1154,19 @@ export function nameThread(db: Db, threadId: string, said: string): string {
   return wrote.error;
 }
 
+/* Which model names a conversation.
+ *
+ * Worth setting to the cheapest, nearest model a deployment has, because this
+ * call is SYNCHRONOUS and sits between the answer being finished and the reply
+ * being returned: the title only needs the user's first message, but the person
+ * waits for it with a complete answer already rendered and a spinner still
+ * saying "Answering…". On joule.sh, unset, it fell through to the router's own
+ * remote config and cost about 35 seconds of exactly that. Pointed at the local
+ * 4B it costs about two, and the first reply went from ~59s to ~4.5s.
+ *
+ * withinTitleBudget caps this at TITLE_MAX_TOKENS and clears `thinking`, so a
+ * reasoning model is a fair choice here — it will not spend the whole budget
+ * thinking and hand back nothing. */
 export function titlingConfigId(db: Db): string {
   let named = process.env("AGENTS_TITLE_CONFIG_ID") ?? "";
   if (named != "" && configAndModel(db, named).fault == "") {
