@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { ARTIFACT_MAX, THREAD_BYTES_MAX, TURN_SEQ_NONE, artifactPlan, putArtifact, getArtifact, getVersion } from "./artifacts.ts";
+import { ARTIFACT_MAX, THREAD_BYTES_MAX, TURN_SEQ_NONE, artifactPlan, putArtifact, getArtifact, getVersion, excerptOf } from "./artifacts.ts";
 import { ArtifactEdit, editArtifact } from "./artifacts-edit.ts";
 
 let database: Db = sqlite();
@@ -255,4 +255,24 @@ test("a concurrent change inside the edited region refuses as changed-underneath
   expect(done.fault.indexOf("changed while you were editing") >= 0);
   let row = getArtifact(database, "t1", "/notes.md");
   expect(getVersion(database, row.id, 3).id == "");
+});
+
+test("an excerpt never cuts a character in half - the cut backs off to a utf-8 boundary", () => {
+  // 398 ascii bytes, then a three-byte arrow spanning bytes 398..400: a cut
+  // at 400 would land inside it, which is exactly the prod card that reached
+  // a browser as a byte array instead of a string.
+  let head = "";
+  let i: int = 0;
+  while (i < 398) {
+    head = head + "a";
+    i = i + 1;
+  }
+  let body = head + "→ and the rest of the sentence";
+  let cut = excerptOf(body, 400);
+  expect(cut.length == 398);
+  expect(cut == head);
+  // A cut that lands on a boundary is untouched.
+  expect(excerptOf(body, 398) == head);
+  // Short bodies come back whole.
+  expect(excerptOf("short", 400) == "short");
 });

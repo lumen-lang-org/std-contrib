@@ -585,6 +585,21 @@ export type ArtifactCard = {
 
 const EXCERPT = 400;
 
+/** A cut that never splits a character. Strings here are UTF-8 bytes, so
+ *  slice(0, n) can land inside a multibyte character — and a string that is
+ *  not valid UTF-8 leaves this process as a byte array, which a browser then
+ *  chokes on. Backing off past any continuation bytes lands on a boundary. */
+export function excerptOf(body: string, at: int): string {
+  if (body.length <= at) {
+    return body;
+  }
+  let cut = at;
+  while (cut > 0 && (body.charCodeAt(cut) & 0xC0) == 0x80) {
+    cut = cut - 1;
+  }
+  return body.slice(0, cut);
+}
+
 export function libraryFor(db: Db, tags: string[], cap: int): ArtifactCard[] {
   let none: ArtifactCard[] = [];
   let where = "thread_id IN (SELECT id FROM threads";
@@ -615,7 +630,7 @@ export function libraryFor(db: Db, tags: string[], cap: int): ArtifactCard[] {
     if (!binaryKind(row.kind)) {
       let held = getVersion(db, row.id, row.currentVersion);
       let body = held.body;
-      excerpt = body.length > EXCERPT ? body.slice(0, EXCERPT) : body;
+      excerpt = excerptOf(body, EXCERPT);
     }
     let card: ArtifactCard = {
       id: row.id, threadId: row.threadId, threadTitle: "",
