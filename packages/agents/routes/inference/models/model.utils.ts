@@ -28,6 +28,10 @@ export function choicesJson(rows: MenuChoice[]): string {
       + ",\"label\":" + JSON.stringify(rows[i].label)
       + ",\"description\":" + JSON.stringify(rows[i].description)
       + ",\"kind\":" + JSON.stringify(rows[i].kind)
+      // Which configuration it names. Not a secret — a config holds a model,
+      // a temperature and a token budget — and a form that offers this menu
+      // has to store what the choice points at.
+      + ",\"configId\":" + JSON.stringify(rows[i].configId)
       + ",\"tier\":" + JSON.stringify(rows[i].tier) + "}";
     i = i + 1;
   }
