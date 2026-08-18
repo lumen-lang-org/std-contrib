@@ -4,6 +4,7 @@ import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, OkJs
 import { FilePull } from "./dtos/file-pull.dto.ts";
 import { corpusIsPostgres, fileNamed, threadOwned } from "./file.guard.ts";
 import { FileService } from "./file.service.ts";
+import { owningCaller } from "../../../api-core.ts";
 
 @controller("/threads/:id/files")
 @bindings
@@ -75,7 +76,7 @@ export class WorkspaceApi {
   @Guard(needsPg)
   @Guard(theThread)
   promote(@PathVariable("id") id: string, @PathVariable("name") name: string,
-          @RequestBody sent: string): Reply {
-    return answered(this.files.promote(id, name, sent));
+          @RequestBody sent: string, @From(owningCaller) owner: string): Reply {
+    return answered(this.files.promote(owner, id, name, sent));
   }
 }

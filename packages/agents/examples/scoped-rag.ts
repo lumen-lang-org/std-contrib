@@ -102,12 +102,12 @@ function main(): void {
   }
 
   let stored = credentialFor(db, "mistral", master);
-  let engineering = uploadDocument(db, embedder, "plume_relations", "/engineering/plume",
+  let engineering = uploadDocument(db, embedder, "", "plume_relations", "/engineering/plume",
     "A plume relation is a correlated subquery, not a join. An agent with three servers and two sub-agents is still one row, because each relation produces its own JSON that the database nests.\n\n"
     + "MySQL's JSON_ARRAYAGG does not preserve the order of what it aggregates, so plume does not aggregate in SQL: a subquery's ORDER BY is honoured for which rows come back and ignored for the order they sit in.", stored);
   console.log("uploaded  /engineering/plume  chunks=" + `${engineering.chunks}` + " " + engineering.error);
 
-  let hr = uploadDocument(db, embedder, "leave_policy", "/hr/policies",
+  let hr = uploadDocument(db, embedder, "", "leave_policy", "/hr/policies",
     "Annual leave is 28 days including public holidays. Carry-over is capped at five days and expires on 31 March.\n\n"
     + "Sick leave beyond three consecutive days requires a note. There is no cap on paid sick leave in the first year.", stored);
   console.log("uploaded  /hr/policies       chunks=" + `${hr.chunks}` + " " + hr.error);

@@ -26,7 +26,7 @@ function kept(source: string, filename: string): string {
 test("a file kept without an embedding model is kept, and says it is not searchable", () => {
   fresh();
   let documents = new DocumentService(database, "0123456789abcdef0123456789abcdef");
-  let out = documents.keepFile("", kept("contract", "contract.pdf"));
+  let out = documents.keepFile("", "", kept("contract", "contract.pdf"));
 
   expect(out.fault == "");
   let stored = JSON.parse<DocumentStored>(out.document);
@@ -38,12 +38,12 @@ test("a file kept without an embedding model is kept, and says it is not searcha
 test("a kept file is on the page even with nothing of it in the corpus", () => {
   fresh();
   let documents = new DocumentService(database, "0123456789abcdef0123456789abcdef");
-  documents.keepFile("", kept("contract", "contract.pdf"));
+  documents.keepFile("", "", kept("contract", "contract.pdf"));
 
   // It used to be listed from the corpus alone, so a document nobody could
   // read disappeared the moment it was uploaded — which reads as a failed
   // upload rather than as a file that cannot be searched.
-  let listed = documents.listing("/specs");
+  let listed = documents.listing("", "/specs");
   expect(listed.length == 1);
   expect(listed[0].source == "contract");
   expect(listed[0].status == "kept");
@@ -54,9 +54,9 @@ test("a kept file is on the page even with nothing of it in the corpus", () => {
 test("a folder with nothing in it lists nothing", () => {
   fresh();
   let documents = new DocumentService(database, "0123456789abcdef0123456789abcdef");
-  documents.keepFile("", kept("contract", "contract.pdf"));
+  documents.keepFile("", "", kept("contract", "contract.pdf"));
 
-  expect(documents.listing("/elsewhere").length == 0);
+  expect(documents.listing("", "/elsewhere").length == 0);
 });
 
 test("a kept file is named once, whatever else the corpus knows about it", () => {

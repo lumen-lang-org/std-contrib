@@ -126,7 +126,7 @@ function askModel(db: Db, agent: AgentRow, master: string, prompt: string): Step
   return stepOk(replyText(model.provider, asked.text).trim());
 }
 
-function lookUp(db: Db, agent: AgentRow, master: string, question: string): StepResult {
+function lookUp(db: Db, agent: AgentRow, owner: string, master: string, question: string): StepResult {
   let want = retrievalFor(db, agent.id);
   if (want.embeddingModelId == "" || !want.enabled) {
     return stepFailed(agent.agentName + " has no document retrieval set up — a KNOWLEDGE step needs it");
@@ -146,7 +146,7 @@ function lookUp(db: Db, agent: AgentRow, master: string, question: string): Step
   if (key == "") {
     return stepFailed("no credential for " + embedder.provider);
   }
-  let found = retrieve(db, embedder, granted, question, KNOW_TOP_K, key);
+  let found = retrieve(db, embedder, owner, granted, question, KNOW_TOP_K, key);
   if (!found.ok) {
     return stepFailed(found.error);
   }
@@ -379,7 +379,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
     }
     if (node.type == "KNOWLEDGE") {
       let asked = fill(node.query, ctx);
-      return withInput(lookUp(db, agent, ask.master, asked), asked);
+      return withInput(lookUp(db, agent, ask.owner, ask.master, asked), asked);
     }
     if (node.type == "MCP") {
       let args = fill(node.args, ctx);

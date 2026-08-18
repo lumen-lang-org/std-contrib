@@ -22,14 +22,16 @@ export class ScopeRepository {
     this.database = database;
   }
 
-  pending(): IndexJobRow[] {
-    return new JobRepository(this.database).pending("");
+  pending(owner: string): IndexJobRow[] {
+    return new JobRepository(this.database).pending(owner, "");
   }
 
-  counts(prefix: string, pendingScopes: string[]): ScopeNode[] {
+  counts(owner: string, prefix: string, pendingScopes: string[]): ScopeNode[] {
     let out: ScopeNode[] = [];
-    let sql = "SELECT scope, COUNT(*) FROM documents GROUP BY scope ORDER BY scope";
-    if (!this.database.query(sql, [])) {
+    let sql = "SELECT scope, COUNT(*) FROM documents"
+      + " WHERE (owner = '' OR owner = " + this.database.placeholder + ")"
+      + " GROUP BY scope ORDER BY scope";
+    if (!this.database.query(sql, [owner])) {
       return out;
     }
 

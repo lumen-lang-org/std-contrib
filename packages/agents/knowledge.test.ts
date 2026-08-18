@@ -1,9 +1,9 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { connectDatabase, persist, execute, dropTable } from "../plume/plume.ts";
+import { connectDatabase, persist, execute, executeWith, dropTable, safeIdentifier } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { ModelRow, modelsMapping, modelConfigsMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, schemaPlan } from "./schema.ts";
-import { Retrieved, embeddingModel, createDocuments, indexDocument, retrieve, asContext, normalScope, scopeClause, scopeArgs, splitIntoChunks, plainSource } from "./knowledge.ts";
+import { Retrieved, embeddingModel, createDocuments, indexDocument, listSources, ownerStem, retrieve, asContext, normalScope, scopeClause, scopeArgs, splitIntoChunks, plainSource } from "./knowledge.ts";
 import { scopeCovers } from "./routes/authoring/scopes/scope.utils.ts";
 
 let database: Db = sqlite();
@@ -98,6 +98,7 @@ test("indexing with a chat model is refused before a request is made", () => {
   let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true,\"contextTokens\":0}");
   expect(indexDocument(database, chat, {
     id: "d1",
+    owner: "",
     source: "s",
     scope: "/x",
     body: "body",
@@ -108,7 +109,7 @@ test("searching with a chat model is refused too", () => {
   fresh();
   let chat: ModelRow = JSON.parse<ModelRow>("{\"id\":\"m1\",\"label\":\"Mistral Small\",\"apiName\":\"mistral-small-latest\",\"provider\":\"mistral\",\"kind\":\"chat\",\"dimensions\":0,\"baseUrl\":\"\",\"enabled\":true,\"contextTokens\":0}");
   let anywhere: string[] = ["/"];
-  let r = retrieve(database, chat, anywhere, "question", 3, "sk-fake");
+  let r = retrieve(database, chat, "", anywhere, "question", 3, "sk-fake");
   expect(!r.ok);
   expect(r.error.indexOf("not an embedding model") >= 0);
 });
@@ -117,9 +118,9 @@ test("k is bounded, so a search cannot ask for everything", () => {
   fresh();
   let m = embeddingModel(database, "e1");
   let all: string[] = ["/"];
-  expect(!retrieve(database, m, all, "q", 0, "sk-fake").ok);
-  expect(!retrieve(database, m, all, "q", 1000, "sk-fake").ok);
-  expect(retrieve(database, m, all, "q", 0, "sk-fake").error.indexOf("between 1 and 100") >= 0);
+  expect(!retrieve(database, m, "", all, "q", 0, "sk-fake").ok);
+  expect(!retrieve(database, m, "", all, "q", 1000, "sk-fake").ok);
+  expect(retrieve(database, m, "", all, "q", 0, "sk-fake").error.indexOf("between 1 and 100") >= 0);
 });
 
 test("a document id must be a plain name", () => {
@@ -127,6 +128,7 @@ test("a document id must be a plain name", () => {
   let m = embeddingModel(database, "e1");
   expect(indexDocument(database, m, {
     id: "a b; DROP TABLE documents",
+    owner: "",
     source: "s",
     scope: "/x",
     body: "body",
@@ -284,7 +286,7 @@ test("no scopes granted reads nothing, rather than everything", () => {
   fresh();
   let m = embeddingModel(database, "e1");
   let none: string[] = [];
-  let r = retrieve(database, m, none, "question", 3, "sk-fake");
+  let r = retrieve(database, m, "", none, "question", 3, "sk-fake");
   expect(!r.ok);
   expect(r.error.indexOf("no scopes granted") >= 0);
 });
@@ -299,4 +301,52 @@ test("a source with a hyphen is filed, not promised and dropped", () => {
   expect(!plainSource("a/b"));
   expect(!plainSource("two words"));
   expect(!plainSource("drop';--"));
+});
+
+test("a chunk id carries its owner, so two people may both file a notes", () => {
+  // The deployment's own rows keep the ids they already have, which is what
+  // lets a corpus written before ownership stay where it is.
+  expect(ownerStem("") == "");
+  let mine = ownerStem("6ca102d0-d1bc-4fb3-88bd-f531fb717c4a");
+  let yours = ownerStem("8c4b5356-aa7b-4bdd-a33b-db1d4bb1eb15");
+  expect(mine != "");
+  expect(mine != yours);
+  expect(safeIdentifier(mine + "notes"));
+});
+
+test("the corpus is read as the deployment's plus the caller's, never anybody else's", () => {
+  fresh();
+  // Built here rather than by createDocuments, which needs pgvector: what is
+  // under test is the WHERE clause, and it is the same one either way.
+  execute(database, "CREATE TABLE IF NOT EXISTS documents ("
+    + "id text PRIMARY KEY, owner text NOT NULL DEFAULT '', source text NOT NULL, "
+    + "scope text NOT NULL, body text NOT NULL, model_id text NOT NULL)");
+
+  let shared = executeWith(database,
+    "INSERT INTO documents (id, owner, source, scope, body, model_id) VALUES "
+    + "('d_shared', '', 'handbook', '/notes', 'the deployment handbook', 'e1')", []);
+  expect(shared.ok);
+  executeWith(database,
+    "INSERT INTO documents (id, owner, source, scope, body, model_id) VALUES "
+    + "('d_mine', 'owner-a', 'notes', '/notes', 'what A wrote', 'e1')", []);
+  executeWith(database,
+    "INSERT INTO documents (id, owner, source, scope, body, model_id) VALUES "
+    + "('d_yours', 'owner-b', 'notes', '/notes', 'what B wrote', 'e1')", []);
+
+  let seen = listSources(database, "owner-a", "/notes");
+  let names = "";
+  let i: int = 0;
+  while (i < seen.length) {
+    names = names + seen[i].source + " ";
+    i = i + 1;
+  }
+  expect(names.indexOf("handbook") >= 0);
+  expect(names.indexOf("notes") >= 0);
+  expect(seen.length == 2);
+
+  // B's row is in the same scope under the same source name and is still not
+  // A's to read, which is the whole of what owner buys.
+  let count = executeWith(database,
+    "SELECT COUNT(*) FROM documents WHERE owner = 'owner-b'", []);
+  expect(count.ok);
 });

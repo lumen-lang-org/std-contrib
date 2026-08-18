@@ -19,11 +19,11 @@ export class DocumentService {
     this.repository = new DocumentRepository(database, master);
   }
 
-  listing(asked: string): DocumentSummary[] {
+  listing(owner: string, asked: string): DocumentSummary[] {
     let scope = normalScope(asked);
-    let originals = this.repository.filedSources(scope);
+    let originals = this.repository.filedSources(owner, scope);
 
-    let waiting = this.repository.waitingJobs(scope);
+    let waiting = this.repository.waitingJobs(owner, scope);
     let out: DocumentSummary[] = [];
     let w: int = 0;
     while (w < waiting.length) {
@@ -31,7 +31,7 @@ export class DocumentService {
       w = w + 1;
     }
 
-    let rows = this.repository.indexedSources(scope);
+    let rows = this.repository.indexedSources(owner, scope);
     let i: int = 0;
     while (i < rows.length) {
       out.push(indexedSummary(rows[i], holdsSource(originals, rows[i].source)));
@@ -48,7 +48,7 @@ export class DocumentService {
     return out;
   }
 
-  upload(modelId: string, sent: string): Outcome {
+  upload(owner: string, modelId: string, sent: string): Outcome {
     if (sent == "") {
       return refusing("a body is required");
     }
@@ -56,14 +56,18 @@ export class DocumentService {
     if (body.scope == "") {
       return refusing("a document needs a scope: \"/specs/plume\"");
     }
-    if (modelId == "") {
-      return refusing("name the embedding model: ?model=e1");
+    // Which model does the embedding is an operator's business, and the models
+    // listing is an operator's route, so somebody filing their own document has
+    // no way to name one. Unnamed means the deployment's own choice.
+    let chosen = modelId == "" ? this.repository.firstEmbedder().id : modelId;
+    if (chosen == "") {
+      return refusing("this deployment has no embedding model switched on, so nothing can be indexed");
     }
-    let embedderId = this.repository.embeddingId(modelId);
+    let embedderId = this.repository.embeddingId(chosen);
     if (embedderId == "") {
-      return refusing("no usable embedding model " + modelId);
+      return refusing("no usable embedding model " + chosen);
     }
-    let provider = this.repository.embeddingProvider(modelId);
+    let provider = this.repository.embeddingProvider(chosen);
     let key = this.repository.credential(provider);
     if (key == "") {
       return refusing("no credential for " + provider);
@@ -73,11 +77,11 @@ export class DocumentService {
     if (badName != "") {
       return refusing(badName);
     }
-    let ready = this.repository.prepareVectorTable(modelId);
+    let ready = this.repository.prepareVectorTable(chosen);
     if (ready != "") {
       return refusing(ready);
     }
-    let jobId = this.repository.queueUpload(named, normalScope(body.scope), embedderId, body.body, stamp());
+    let jobId = this.repository.queueUpload(owner, named, normalScope(body.scope), embedderId, body.body, stamp());
     if (jobId == "") {
       return refusing("the document could not be queued");
     }
@@ -103,15 +107,16 @@ export class DocumentService {
    * Now the file is read here or it is not indexed at all, and the reason is
    * returned rather than written into the corpus. A note means the bytes are
    * kept and the words are not searchable, which is a smaller lie than none. */
-  indexKeptFile(modelId: string, row: DocumentFileRow): string {
-    if (modelId == "") {
-      return "no embedding model was named, so the file is kept but not searchable";
+  indexKeptFile(owner: string, modelId: string, row: DocumentFileRow): string {
+    let chosen = modelId == "" ? this.repository.firstEmbedder().id : modelId;
+    if (chosen == "") {
+      return "this deployment has no embedding model switched on, so the file is kept but not searchable";
     }
-    let embedderId = this.repository.embeddingId(modelId);
+    let embedderId = this.repository.embeddingId(chosen);
     if (embedderId == "") {
-      return "no usable embedding model " + modelId;
+      return "no usable embedding model " + chosen;
     }
-    let provider = this.repository.embeddingProvider(modelId);
+    let provider = this.repository.embeddingProvider(chosen);
     if (this.repository.credential(provider) == "") {
       return "no credential for " + provider;
     }
@@ -119,18 +124,18 @@ export class DocumentService {
     if (!words.ok) {
       return words.fault;
     }
-    let ready = this.repository.prepareVectorTable(modelId);
+    let ready = this.repository.prepareVectorTable(chosen);
     if (ready != "") {
       return ready;
     }
-    let jobId = this.repository.queueUpload(row.source, row.scope, embedderId, words.text, stamp());
+    let jobId = this.repository.queueUpload(owner, row.source, row.scope, embedderId, words.text, stamp());
     if (jobId == "") {
       return "the document could not be queued";
     }
     return "";
   }
 
-  keepFile(modelId: string, sent: string): Outcome {
+  keepFile(owner: string, modelId: string, sent: string): Outcome {
     if (sent == "") {
       return refusing("a body is required: {\"source\":\"...\",\"scope\":\"...\",\"filename\":\"...\",\"mime\":\"...\",\"contentBase64\":\"...\"}");
     }
@@ -152,7 +157,8 @@ export class DocumentService {
     }
     let filed = normalScope(scope);
     let row: DocumentFileRow = {
-      id: documentFileId(filed, source),
+      id: documentFileId(owner, filed, source),
+      owner: owner,
       source: source,
       scope: filed,
       filename: firstText(ask.filename ?? "", source),
@@ -166,20 +172,20 @@ export class DocumentService {
     if (!written.ok) {
       return refusing(written.error);
     }
-    let note = this.indexKeptFile(modelId, row);
+    let note = this.indexKeptFile(owner, modelId, row);
     let v: DocumentStored = { stored: true, indexed: note == "", note: note };
     return produced(JSON.stringify(v));
   }
 
-  file(scope: string, source: string): DocumentFileRow {
-    return this.repository.fileFor(scope, source);
+  file(owner: string, scope: string, source: string): DocumentFileRow {
+    return this.repository.fileFor(owner, scope, source);
   }
 
   /** What a question pulls back from the corpus.
    *
    *  The same retrieval an agent runs, offered directly so a person can see
    *  what their documents answer before wiring an agent to them. */
-  passagesFor(modelId: string, scope: string, question: string, k: int): Outcome {
+  passagesFor(owner: string, modelId: string, scope: string, question: string, k: int): Outcome {
     if (question.trim() == "") {
       return refusing("ask something: ?q=how%20do%20refunds%20work");
     }
@@ -196,7 +202,7 @@ export class DocumentService {
     if (key == "") {
       return refusing("no credential for " + model.provider);
     }
-    let got = this.repository.nearest(model, scope, question, k, key);
+    let got = this.repository.nearest(owner, model, scope, question, k, key);
     if (!got.ok) {
       return refusing(got.error);
     }
@@ -222,12 +228,12 @@ export class DocumentService {
     return produced(JSON.stringify(answer));
   }
 
-  remove(source: string): Outcome {
-    let gone = this.repository.deleteBySource(source);
+  remove(owner: string, source: string): Outcome {
+    let gone = this.repository.deleteBySource(owner, source);
     if (!gone.ok) {
       return refusing("\"" + source + "\" is still in the corpus — the delete failed, so agents keep retrieving it.");
     }
-    let filed = this.repository.forgetFiles(source);
+    let filed = this.repository.forgetFiles(owner, source);
     if (!filed.ok) {
       return refusing("\"" + source + "\" left the corpus, but its kept file could not be deleted.");
     }

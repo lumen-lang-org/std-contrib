@@ -163,3 +163,19 @@ export function boolJson(v: bool): string {
   }
   return "false";
 }
+
+/** Who a request is filing as.
+ *
+ *  Ordinarily the caller. `?as=deployment` means the deployment itself, whose
+ *  rows carry no owner and are everybody's to read — publishing, and the only
+ *  way to edit what was published. Nothing here decides whether the caller may
+ *  ask for it: the console holds the roles and refuses the parameter to anyone
+ *  who is not an operator, exactly as it refuses the operator routes. */
+export const AS_DEPLOYMENT: string = "deployment";
+
+export function filingAs(req: Request): string {
+  if (queryParam(req, "as", "") == AS_DEPLOYMENT) {
+    return "";
+  }
+  return owningCaller(req);
+}

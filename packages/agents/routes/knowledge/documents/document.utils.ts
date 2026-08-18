@@ -1,4 +1,4 @@
-import { SourceListing, normalScope, plainSource } from "../../../knowledge.ts";
+import { SourceListing, normalScope, ownerStem, plainSource } from "../../../knowledge.ts";
 import { IndexJobRow } from "../jobs/entities/index-job.entity.ts";
 import { DocumentFileView } from "./dtos/document-file-view.dto.ts";
 import { DocumentSummary } from "./dtos/document-summary.dto.ts";
@@ -7,6 +7,7 @@ export const FILE_BASE64_MAX: int = 24 * 1024 * 1024;
 
 export type DocumentFileRow = {
   id: string,
+  owner: string,
   source: string,
   scope: string,
   filename: string,
@@ -16,13 +17,16 @@ export type DocumentFileRow = {
   createdAt: string,
 };
 
-export function documentFileId(scope: string, source: string): string {
-  return normalScope(scope) + "/" + source;
+/** Keyed with the owner so two people may keep a file of the same name in the
+ *  same scope. Empty for the deployment's own, which keeps every existing key. */
+export function documentFileId(owner: string, scope: string, source: string): string {
+  return ownerStem(owner) + normalScope(scope) + "/" + source;
 }
 
 export function emptyDocumentFile(): DocumentFileRow {
   let none: DocumentFileRow = {
     id: "",
+    owner: "",
     source: "",
     scope: "",
     filename: "",

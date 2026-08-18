@@ -88,7 +88,7 @@ export class FileService {
     return produced(JSON.stringify(view));
   }
 
-  promote(threadId: string, fileName: string, sent: string): Outcome {
+  promote(owner: string, threadId: string, fileName: string, sent: string): Outcome {
     if (sent == "") {
       return refusing(PROMOTE_BODY_HELP);
     }
@@ -102,7 +102,7 @@ export class FileService {
       return refusing("no credential for " + provider);
     }
 
-    let stored = this.repository.promote(threadId, fileName, body.scope, body.modelId, key, stamp());
+    let stored = this.repository.promote(owner, threadId, fileName, body.scope, body.modelId, key, stamp());
     if (!stored.ok) {
       return refusing(stored.error);
     }

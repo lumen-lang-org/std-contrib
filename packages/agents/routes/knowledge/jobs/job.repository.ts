@@ -11,10 +11,10 @@ export class JobRepository {
     this.jobs = indexJobRepository();
   }
 
-  enqueue(source: string, scope: string, modelId: string, body: string, now: string): string {
+  enqueue(owner: string, source: string, scope: string, modelId: string, body: string, now: string): string {
     let id = crypto.randomUUID();
     let row: IndexJobRow = {
-      id: id, source: source, scope: scope, modelId: modelId, body: body,
+      id: id, owner: owner, source: source, scope: scope, modelId: modelId, body: body,
       status: JOB_QUEUED, chunks: 0, error: "", createdAt: now, updatedAt: now,
     };
     let written = persist(this.database, this.jobs, JSON.stringify(row));
@@ -26,14 +26,14 @@ export class JobRepository {
 
   claimNext(now: string): IndexJobRow {
     let none: IndexJobRow = {
-      id: "", source: "", scope: "", modelId: "", body: "",
+      id: "", owner: "", source: "", scope: "", modelId: "", body: "",
       status: "", chunks: 0, error: "", createdAt: "", updatedAt: "",
     };
     let sql = "UPDATE index_jobs SET status = " + this.database.placeholder
       + ", updated_at = " + placeholderAt(this.database, 2)
       + " WHERE id = (SELECT id FROM index_jobs WHERE status = " + placeholderAt(this.database, 3)
       + " ORDER BY created_at LIMIT 1" + skipLocked(this.database) + ")"
-      + " RETURNING id, source, scope, model_id, body";
+      + " RETURNING id, owner, source, scope, model_id, body";
     if (!this.database.query(sql, [JOB_INDEXING, now, JOB_QUEUED])) {
       return none;
     }
@@ -41,8 +41,9 @@ export class JobRepository {
       return none;
     }
     let claimed: IndexJobRow = {
-      id: this.database.value(0, 0), source: this.database.value(0, 1), scope: this.database.value(0, 2),
-      modelId: this.database.value(0, 3), body: this.database.value(0, 4),
+      id: this.database.value(0, 0), owner: this.database.value(0, 1),
+      source: this.database.value(0, 2), scope: this.database.value(0, 3),
+      modelId: this.database.value(0, 4), body: this.database.value(0, 5),
       status: JOB_INDEXING, chunks: 0, error: "", createdAt: "", updatedAt: now,
     };
     return claimed;
@@ -88,14 +89,15 @@ export class JobRepository {
       [JOB_INDEXED, before]);
   }
 
-  pending(scope: string): IndexJobRow[] {
+  pending(owner: string, scope: string): IndexJobRow[] {
     let out: IndexJobRow[] = [];
-    let sql = "SELECT id, source, scope, status, chunks, error, created_at FROM index_jobs"
-      + " WHERE status <> " + this.database.placeholder + " AND status <> " + placeholderAt(this.database, 2);
-    let args: string[] = [JOB_INDEXED, ""];
+    let sql = "SELECT id, owner, source, scope, status, chunks, error, created_at FROM index_jobs"
+      + " WHERE status <> " + this.database.placeholder + " AND status <> " + placeholderAt(this.database, 2)
+      + " AND (owner = '' OR owner = " + placeholderAt(this.database, 3) + ")";
+    let args: string[] = [JOB_INDEXED, "", owner];
     if (scope != "") {
-      sql = sql + " AND scope = " + placeholderAt(this.database, 3);
-      args = [JOB_INDEXED, "", scope];
+      sql = sql + " AND scope = " + placeholderAt(this.database, 4);
+      args = [JOB_INDEXED, "", owner, scope];
     }
     sql = sql + " ORDER BY created_at";
     if (!this.database.query(sql, args)) {
@@ -104,10 +106,11 @@ export class JobRepository {
     let i: int = 0;
     while (i < this.database.rows()) {
       let row: IndexJobRow = {
-        id: this.database.value(i, 0), source: this.database.value(i, 1), scope: this.database.value(i, 2),
-        modelId: "", body: "", status: this.database.value(i, 3),
-        chunks: parseInt(this.database.value(i, 4)) ?? 0, error: this.database.value(i, 5),
-        createdAt: this.database.value(i, 6), updatedAt: "",
+        id: this.database.value(i, 0), owner: this.database.value(i, 1),
+        source: this.database.value(i, 2), scope: this.database.value(i, 3),
+        modelId: "", body: "", status: this.database.value(i, 4),
+        chunks: parseInt(this.database.value(i, 5)) ?? 0, error: this.database.value(i, 6),
+        createdAt: this.database.value(i, 7), updatedAt: "",
       };
       out.push(row);
       i = i + 1;

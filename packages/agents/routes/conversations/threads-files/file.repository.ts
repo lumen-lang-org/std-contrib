@@ -67,9 +67,9 @@ export class FileRepository {
     return credentialFor(this.database, provider, this.master);
   }
 
-  promote(threadId: string, fileName: string, scope: string, modelId: string, key: string, now: string): Upload {
+  promote(owner: string, threadId: string, fileName: string, scope: string, modelId: string, key: string, now: string): Upload {
     let embedder = embeddingModel(this.database, modelId);
-    return promoteFile(this.database, embedder, threadId, fileName, scope, key, now);
+    return promoteFile(this.database, embedder, owner, threadId, fileName, scope, key, now);
   }
 
   forget(threadId: string, fileName: string): string {

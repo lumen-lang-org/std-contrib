@@ -391,7 +391,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         if (embedKey == "") {
           notes.push("no credential for " + embedder.provider + ", so nothing was retrieved");
         } else {
-          let found = retrieveExcluding(db, embedder, granted, excludeChunks, userText, want.topK, embedKey);
+          let found = retrieveExcluding(db, embedder, where.owner, granted, excludeChunks, userText, want.topK, embedKey);
           if (!found.ok) {
             notes.push("retrieval failed: " + found.error);
           } else {

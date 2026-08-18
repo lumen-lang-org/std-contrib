@@ -7,6 +7,9 @@ export class DocumentFile {
   @Column("id", "text")
   id: string;
 
+  @Column("owner", "text")
+  owner: string;
+
   @Column("source", "text")
   source: string;
 
@@ -28,8 +31,9 @@ export class DocumentFile {
   @Column("created_at", "text")
   createdAt: string;
 
-  constructor(id: string, source: string, scope: string, filename: string, mime: string, bytes: string, size: int, createdAt: string) {
+  constructor(id: string, owner: string, source: string, scope: string, filename: string, mime: string, bytes: string, size: int, createdAt: string) {
     this.id = id;
+    this.owner = owner;
     this.source = source;
     this.scope = scope;
     this.filename = filename;

@@ -10,7 +10,7 @@ export class JobService {
     this.repository = new JobRepository(database);
   }
 
-  pending(): JobView[] {
-    return this.repository.pending("").map(jobViewOf);
+  pending(owner: string): JobView[] {
+    return this.repository.pending(owner, "").map(jobViewOf);
   }
 }

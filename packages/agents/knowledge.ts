@@ -69,6 +69,7 @@ export function createDocuments(db: Db, model: ModelRow): string {
   }
   let made = execute(db, "CREATE TABLE IF NOT EXISTS documents ("
     + "id " + db.textType + " PRIMARY KEY, "
+    + "owner " + db.textType + " NOT NULL DEFAULT '', "
     + "source " + db.textType + " NOT NULL, "
     + "scope " + db.textType + " NOT NULL, "
     + "body " + db.textType + " NOT NULL, "
@@ -77,11 +78,19 @@ export function createDocuments(db: Db, model: ModelRow): string {
   if (!made.ok) {
     return made.error;
   }
+  // The table predates the column, and it is made here rather than in the
+  // migration plan because nothing creates it until an embedding model exists.
+  let owned = execute(db, "ALTER TABLE documents ADD COLUMN IF NOT EXISTS owner "
+    + db.textType + " NOT NULL DEFAULT ''");
+  if (!owned.ok) {
+    return owned.error;
+  }
   return "";
 }
 
 export type DocumentChunk = {
   id: string,
+  owner: string,
   source: string,
   scope: string,
   body: string,
@@ -89,6 +98,7 @@ export type DocumentChunk = {
 
 export function indexDocument(db: Db, model: ModelRow, chunk: DocumentChunk, apiKey: string): string {
   let id = chunk.id;
+  let owner = chunk.owner;
   let source = chunk.source;
   let scope = chunk.scope;
   let body = chunk.body;
@@ -107,11 +117,12 @@ export function indexDocument(db: Db, model: ModelRow, chunk: DocumentChunk, api
   }
   executeWith(db, "DELETE FROM documents WHERE id = " + placeholderAt(db, 1), [id]);
   let written = executeWith(db,
-    "INSERT INTO documents (id, source, scope, body, model_id, embedding) VALUES ("
+    "INSERT INTO documents (id, owner, source, scope, body, model_id, embedding) VALUES ("
     + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ", "
     + placeholderAt(db, 3) + ", " + placeholderAt(db, 4) + ", "
-    + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ")",
-    [id, source, normalScope(scope), body, model.id, vector.vector]);
+    + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ", "
+    + placeholderAt(db, 7) + ")",
+    [id, owner, source, normalScope(scope), body, model.id, vector.vector]);
   if (!written.ok) {
     return written.error;
   }
@@ -209,12 +220,19 @@ export function scopeArgs(scopes: string[]): string[] {
   return out;
 }
 
-export function retrieve(db: Db, model: ModelRow, scopes: string[], question: string, k: int, apiKey: string): Retrieval {
+export function retrieve(db: Db, model: ModelRow, owner: string, scopes: string[], question: string, k: int, apiKey: string): Retrieval {
   let none: string[] = [];
-  return retrieveExcluding(db, model, scopes, none, question, k, apiKey);
+  return retrieveExcluding(db, model, owner, scopes, none, question, k, apiKey);
 }
 
-export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], excludeIds: string[], question: string, k: int, apiKey: string): Retrieval {
+/** Owner is not one filter among the others.
+ *
+ *  Everything else here narrows what is worth reading; this decides what may be
+ *  read at all. A scope is a shelf and two people may name the same one, so
+ *  without this clause a question asked in /notes answers out of somebody
+ *  else's /notes. The deployment's own rows carry no owner and are everybody's,
+ *  which is what makes a shared corpus and a private one the same table. */
+export function retrieveExcluding(db: Db, model: ModelRow, owner: string, scopes: string[], excludeIds: string[], question: string, k: int, apiKey: string): Retrieval {
   let none: Retrieved[] = [];
   if (k <= 0 || k > 100) {
     let bad: Retrieval = { ok: false, found: none, error: "k must be between 1 and 100" };
@@ -241,8 +259,8 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
     let failed: Retrieval = { ok: false, found: none, error: vector.error };
     return failed;
   }
-  let where = scopeClause(db, scopes, 3);
-  let at = 3 + scopes.length * 2;
+  let where = scopeClause(db, scopes, 4);
+  let at = 4 + scopes.length * 2;
   let notIn = "";
   if (excludeIds.length > 0) {
     notIn = " AND id NOT IN (";
@@ -259,9 +277,10 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
   }
   let sql = "SELECT id, source, scope, body, (embedding <=> " + placeholderAt(db, 1) + ") AS distance"
     + " FROM documents WHERE model_id = " + placeholderAt(db, 2)
+    + " AND (owner = '' OR owner = " + placeholderAt(db, 3) + ")"
     + " AND " + where + notIn
     + " ORDER BY embedding <=> " + placeholderAt(db, at) + " LIMIT " + `${k}`;
-  let args: string[] = [vector.vector, model.id];
+  let args: string[] = [vector.vector, model.id, owner];
   let bound = scopeArgs(scopes);
   let b: int = 0;
   while (b < bound.length) {
@@ -297,6 +316,17 @@ export function retrieveExcluding(db: Db, model: ModelRow, scopes: string[], exc
   }
   let out: Retrieval = { ok: true, found: found, error: "" };
   return out;
+}
+
+/** The prefix a chunk id carries so two people may both file a "notes".
+ *
+ *  Empty for the deployment's own rows, which is what leaves every id already
+ *  in the corpus exactly as it was and asks nobody to re-index. */
+export function ownerStem(owner: string): string {
+  if (owner == "") {
+    return "";
+  }
+  return "u" + fnv1a(owner) + "_";
 }
 
 function fnv1a(text: string): string {
@@ -393,7 +423,7 @@ export function splitIntoChunks(body: string, maxChars: int): string[] {
   return out;
 }
 
-export function uploadDocument(db: Db, model: ModelRow, source: string, scope: string, body: string, apiKey: string): Upload {
+export function uploadDocument(db: Db, model: ModelRow, owner: string, source: string, scope: string, body: string, apiKey: string): Upload {
   if (source == "") {
     let unnamed: Upload = {
       ok: false,
@@ -419,7 +449,8 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
     return odd;
   }
 
-  let cleared = executeWith(db, "DELETE FROM documents WHERE source = " + placeholderAt(db, 1), [source]);
+  let cleared = executeWith(db, "DELETE FROM documents WHERE source = " + placeholderAt(db, 1)
+    + " AND owner = " + placeholderAt(db, 2), [source, owner]);
   if (!cleared.ok) {
     let blocked: Upload = {
       ok: false,
@@ -429,9 +460,9 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
     return blocked;
   }
 
-  let stem = source;
+  let stem = ownerStem(owner) + source;
   if (stem.length > 48) {
-    stem = stem.slice(0, 39) + "_" + fnv1a(source);
+    stem = stem.slice(0, 39) + "_" + fnv1a(stem);
   }
 
   if (model.kind != "embedding") {
@@ -474,11 +505,12 @@ export function uploadDocument(db: Db, model: ModelRow, source: string, scope: s
       let id = stem + "_" + `${which}`;
       executeWith(db, "DELETE FROM documents WHERE id = " + placeholderAt(db, 1), [id]);
       let stored = executeWith(db,
-        "INSERT INTO documents (id, source, scope, body, model_id, embedding) VALUES ("
+        "INSERT INTO documents (id, owner, source, scope, body, model_id, embedding) VALUES ("
         + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ", "
         + placeholderAt(db, 3) + ", " + placeholderAt(db, 4) + ", "
-        + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ")",
-        [id, source, normalScope(scope), chunks[which], model.id, got.vectors[k]]);
+        + placeholderAt(db, 5) + ", " + placeholderAt(db, 6) + ", "
+        + placeholderAt(db, 7) + ")",
+        [id, owner, source, normalScope(scope), chunks[which], model.id, got.vectors[k]]);
       if (!stored.ok) {
         let refused: Upload = { ok: false, chunks: written,
           error: "chunk " + `${which}` + ": " + stored.error };
@@ -500,12 +532,14 @@ export type SourceListing = {
   bytes: int,
 };
 
-export function listSources(db: Db, scope: string): SourceListing[] {
+export function listSources(db: Db, owner: string, scope: string): SourceListing[] {
   let out: SourceListing[] = [];
   let where = normalScope(scope);
   let sql = "SELECT source, MIN(scope), COUNT(*), SUM(LENGTH(body)) FROM documents"
-    + " WHERE scope = " + db.placeholder + " GROUP BY source ORDER BY source";
-  if (!db.query(sql, [where])) {
+    + " WHERE scope = " + db.placeholder
+    + " AND (owner = '' OR owner = " + placeholderAt(db, 2) + ")"
+    + " GROUP BY source ORDER BY source";
+  if (!db.query(sql, [where, owner])) {
     return out;
   }
   let i: int = 0;
@@ -545,6 +579,17 @@ export function knowledgePlan(db: Db): Migration[] {
     migration("18", "scopes by agent",
       "CREATE INDEX IF NOT EXISTS scopes_by_agent ON agent_scopes (agent_id)"),
   ];
+  /* The corpus belongs to whoever filed it.
+   *
+   * IF EXISTS because `documents` is not made by a migration at all: it needs
+   * the vector width of an embedding model, so createDocuments builds it the
+   * first time one is configured and this is a no-op until then. Postgres only,
+   * which is also where the table can exist. */
+  if (db.name == "postgres") {
+    plan.push(migration("131", "the corpus belongs to whoever filed it",
+      "ALTER TABLE IF EXISTS documents ADD COLUMN IF NOT EXISTS owner "
+      + db.textType + " NOT NULL DEFAULT ''"));
+  }
   return plan;
 }
 

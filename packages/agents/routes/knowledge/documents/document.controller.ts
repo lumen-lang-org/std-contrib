@@ -3,6 +3,8 @@ import { bindings, controller } from "../../../../rest/controller.ts";
 import { Accepted, BadRequest, Guarded, NoContent, NotFound, OkJson, Reply, answered } from "../../../../rest/server.ts";
 import { corpusIsPostgres } from "./document.guard.ts";
 import { DocumentService } from "./document.service.ts";
+import { filingAs } from "../../../api-core.ts";
+import { roleAtLeast } from "../../../guards.ts";
 import { documentFileViewOf } from "./document.utils.ts";
 
 @controller("/documents")
@@ -20,14 +22,17 @@ export class DocumentApi {
 
   @Get("/")
   @Guard(needsPg)
-  list(@RequestParam("scope", "/") asked: string): Reply {
-    return OkJson(this.documents.listing(asked));
+  list(@RequestParam("scope", "/") asked: string,
+       @From(filingAs) owner: string): Reply {
+    return OkJson(this.documents.listing(owner, asked));
   }
 
   @Post("/")
   @Guard(needsPg)
-  upload(@RequestParam("model", "") modelId: string, @RequestBody sent: string): Reply {
-    let outcome = this.documents.upload(modelId, sent);
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a document yours to keep"))
+  upload(@RequestParam("model", "") modelId: string, @RequestBody sent: string,
+         @From(filingAs) owner: string): Reply {
+    let outcome = this.documents.upload(owner, modelId, sent);
     if (outcome.fault != "") {
       return BadRequest(outcome.fault);
     }
@@ -39,18 +44,21 @@ export class DocumentApi {
    *  and nothing else. Both are honest outcomes, and the answer says which. */
   @Put("/file")
   @Guard(needsPg)
-  keepFile(@RequestParam("model", "") modelId: string, @RequestBody sent: string): Reply {
-    return answered(this.documents.keepFile(modelId, sent));
+  @Guard(roleAtLeast("signed-in", "signing in is what makes a document yours to keep"))
+  keepFile(@RequestParam("model", "") modelId: string, @RequestBody sent: string,
+           @From(filingAs) owner: string): Reply {
+    return answered(this.documents.keepFile(owner, modelId, sent));
   }
 
   @Get("/file")
   @Guard(needsPg)
   file(@RequestParam("source", "") source: string,
-       @RequestParam("scope", "/") scope: string): Reply {
+       @RequestParam("scope", "/") scope: string,
+       @From(filingAs) owner: string): Reply {
     if (source == "") {
       return BadRequest("name the document: ?source=notes&scope=/specs");
     }
-    let kept = this.documents.file(scope, source);
+    let kept = this.documents.file(owner, scope, source);
     if (kept.id == "") {
       return NotFound("no kept file for " + source);
     }
@@ -63,15 +71,17 @@ export class DocumentApi {
   retrieve(@RequestParam("q", "") question: string,
            @RequestParam("scope", "/") scope: string,
            @RequestParam("k", "5") k: string,
-           @RequestParam("model", "") modelId: string): Reply {
+           @RequestParam("model", "") modelId: string,
+           @From(filingAs) owner: string): Reply {
     let want = parseInt(k, 10) ?? 5;
-    return answered(this.documents.passagesFor(modelId, scope, question, want));
+    return answered(this.documents.passagesFor(owner, modelId, scope, question, want));
   }
 
   @Delete("/:source")
   @Guard(needsPg)
-  remove(@PathVariable("source") source: string): Reply {
-    let gone = this.documents.remove(source);
+  remove(@PathVariable("source") source: string,
+         @From(filingAs) owner: string): Reply {
+    let gone = this.documents.remove(owner, source);
     if (gone.fault != "") {
       return BadRequest(gone.fault);
     }

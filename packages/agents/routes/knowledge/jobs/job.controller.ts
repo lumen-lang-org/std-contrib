@@ -3,6 +3,7 @@ import { bindings, controller } from "../../../../rest/controller.ts";
 import { Guarded, OkJson, Reply } from "../../../../rest/server.ts";
 import { jobsNeedPostgres } from "./job.guard.ts";
 import { JobService } from "./job.service.ts";
+import { filingAs } from "../../../api-core.ts";
 
 @controller("/jobs")
 @bindings
@@ -19,7 +20,7 @@ export class JobApi {
 
   @Get("/")
   @Guard(needsPg)
-  list(): Reply {
-    return OkJson(this.jobs.pending());
+  list(@From(filingAs) owner: string): Reply {
+    return OkJson(this.jobs.pending(owner));
   }
 }

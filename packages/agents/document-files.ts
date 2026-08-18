@@ -25,5 +25,7 @@ export function documentFilesPlan(db: Db): Migration[] {
   return [
     migration("104", "document_files: the original upload kept beside its text",
       createTableSql(db, documentFilesMappingV1())),
+    migration("130", "a kept file belongs to whoever uploaded it",
+      "ALTER TABLE document_files ADD COLUMN owner " + db.textType + " NOT NULL DEFAULT ''"),
   ];
 }

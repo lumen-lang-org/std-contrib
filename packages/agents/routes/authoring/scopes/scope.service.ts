@@ -10,8 +10,8 @@ export class ScopeService {
     this.repository = new ScopeRepository(database);
   }
 
-  tree(prefix: string): string {
-    let pending = scopeNamesOf(this.repository.pending());
-    return scopesJson(this.repository.counts(prefix, pending));
+  tree(owner: string, prefix: string): string {
+    let pending = scopeNamesOf(this.repository.pending(owner));
+    return scopesJson(this.repository.counts(owner, prefix, pending));
   }
 }

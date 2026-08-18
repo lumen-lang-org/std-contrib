@@ -8,6 +8,7 @@ export const JOB_FAILED: string = "failed";
 
 export type IndexJobRow = {
   id: string,
+  owner: string,
   source: string,
   scope: string,
   modelId: string,
@@ -24,6 +25,9 @@ export class IndexJob {
   @Id
   @Column("id", "text")
   id: string;
+
+  @Column("owner", "text")
+  owner: string;
 
   @Column("source", "text")
   source: string;
@@ -52,9 +56,10 @@ export class IndexJob {
   @Column("updated_at", "text")
   updatedAt: string;
 
-  constructor(id: string, source: string, scope: string, modelId: string, body: string,
+  constructor(id: string, owner: string, source: string, scope: string, modelId: string, body: string,
               status: string, chunks: int, fault: string, createdAt: string, updatedAt: string) {
     this.id = id;
+    this.owner = owner;
     this.source = source;
     this.scope = scope;
     this.modelId = modelId;

@@ -90,7 +90,7 @@ function drainOne(db: Db, master: string): bool {
   }
 
   console.log("indexing " + job.source + " into " + job.scope);
-  let stored = uploadDocument(db, embedder, job.source, job.scope, job.body, key);
+  let stored = uploadDocument(db, embedder, job.owner, job.source, job.scope, job.body, key);
   if (!stored.ok) {
     noteStatus(job.id, "failed", jobs.markFailed(job.id, stored.error, now()));
     console.log("  failed: " + stored.error);

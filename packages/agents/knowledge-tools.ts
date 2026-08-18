@@ -182,7 +182,7 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (embedder.id == "") {
       return no("this deployment has no enabled embedding model, so nothing can be indexed.");
     }
-    let id = new JobRepository(db).enqueue(source, scope, embedder.id, body, `${call.nowMs}`);
+    let id = new JobRepository(db).enqueue(call.owner, source, scope, embedder.id, body, `${call.nowMs}`);
     if (id == "") {
       return no("the indexing queue refused the job.");
     }
@@ -201,7 +201,7 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
 
   if (call.name == "list_documents") {
     let scope = normalScope(jsonText(call.args, "scope").trim());
-    let rows = listSources(db, scope);
+    let rows = listSources(db, call.owner, scope);
     if (rows.length == 0) {
       return yes("Nothing in " + scope + " yet — add_document files the first.");
     }
@@ -219,11 +219,12 @@ export function callKnowledgeTool(db: Db, call: KnowledgeToolCall): FileToolResu
     if (source == "") {
       return no("say which source: {\"source\":\"...\"} — list_documents shows them.");
     }
-    let gone = executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder, [source]);
+    let gone = executeWith(db, "DELETE FROM documents WHERE source = " + db.placeholder
+      + " AND owner = " + placeholderAt(db, 2), [source, call.owner]);
     if (!gone.ok) {
       return no("\"" + source + "\" is still in the corpus — the delete failed, so agents keep retrieving it.");
     }
-    let filed = new DocumentRepository(db, "").forgetFiles(source);
+    let filed = new DocumentRepository(db, "").forgetFiles(call.owner, source);
     if (!filed.ok) {
       return no("\"" + source + "\" left the corpus, but its kept file could not be deleted.");
     }

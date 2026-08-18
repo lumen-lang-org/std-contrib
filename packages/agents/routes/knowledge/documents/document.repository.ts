@@ -19,10 +19,11 @@ export class DocumentRepository {
     this.master = master;
   }
 
-  filedSources(scope: string): string[] {
+  filedSources(owner: string, scope: string): string[] {
     let out: string[] = [];
-    let sql = "SELECT source FROM document_files WHERE scope = " + placeholderAt(this.database, 1);
-    if (!this.database.query(sql, [normalScope(scope)])) {
+    let sql = "SELECT source FROM document_files WHERE scope = " + placeholderAt(this.database, 1)
+      + " AND (owner = '' OR owner = " + placeholderAt(this.database, 2) + ")";
+    if (!this.database.query(sql, [normalScope(scope), owner])) {
       return out;
     }
     let i: int = 0;
@@ -33,12 +34,12 @@ export class DocumentRepository {
     return out;
   }
 
-  waitingJobs(scope: string): IndexJobRow[] {
-    return new JobRepository(this.database).pending(scope);
+  waitingJobs(owner: string, scope: string): IndexJobRow[] {
+    return new JobRepository(this.database).pending(owner, scope);
   }
 
-  indexedSources(scope: string): SourceListing[] {
-    return listSources(this.database, scope);
+  indexedSources(owner: string, scope: string): SourceListing[] {
+    return listSources(this.database, owner, scope);
   }
 
   embeddingId(modelId: string): string {
@@ -77,9 +78,9 @@ export class DocumentRepository {
     return none;
   }
 
-  nearest(model: ModelRow, scope: string, question: string, k: int, key: string): Retrieval {
+  nearest(owner: string, model: ModelRow, scope: string, question: string, k: int, key: string): Retrieval {
     let scopes: string[] = [normalScope(scope)];
-    return retrieve(this.database, model, scopes, question, k, key);
+    return retrieve(this.database, model, owner, scopes, question, k, key);
   }
 
   prepareVectorTable(modelId: string): string {
@@ -87,8 +88,8 @@ export class DocumentRepository {
     return createDocuments(this.database, embedder);
   }
 
-  queueUpload(source: string, scope: string, modelId: string, body: string, now: string): string {
-    return new JobRepository(this.database).enqueue(source, scope, modelId, body, now);
+  queueUpload(owner: string, source: string, scope: string, modelId: string, body: string, now: string): string {
+    return new JobRepository(this.database).enqueue(owner, source, scope, modelId, body, now);
   }
 
   saveFile(row: DocumentFileRow): DbResult {
@@ -118,8 +119,8 @@ export class DocumentRepository {
       "artifact_id = " + placeholderAt(this.database, 1), ["file:" + fileId]);
   }
 
-  fileFor(scope: string, source: string): DocumentFileRow {
-    let document = findById(this.database, documentFileRepository(), documentFileId(scope, source));
+  fileFor(owner: string, scope: string, source: string): DocumentFileRow {
+    let document = findById(this.database, documentFileRepository(), documentFileId(owner, scope, source));
     if (document == "") {
       return emptyDocumentFile();
     }
@@ -127,11 +128,15 @@ export class DocumentRepository {
     return row;
   }
 
-  deleteBySource(source: string): DbResult {
-    return deleteWhere(this.database, documentRepository(), "source = " + placeholderAt(this.database, 1), [source]);
+  deleteBySource(owner: string, source: string): DbResult {
+    return deleteWhere(this.database, documentRepository(),
+      "source = " + placeholderAt(this.database, 1)
+      + " AND owner = " + placeholderAt(this.database, 2), [source, owner]);
   }
 
-  forgetFiles(source: string): DbResult {
-    return deleteWhere(this.database, documentFileRepository(), "source = " + placeholderAt(this.database, 1), [source]);
+  forgetFiles(owner: string, source: string): DbResult {
+    return deleteWhere(this.database, documentFileRepository(),
+      "source = " + placeholderAt(this.database, 1)
+      + " AND owner = " + placeholderAt(this.database, 2), [source, owner]);
   }
 }

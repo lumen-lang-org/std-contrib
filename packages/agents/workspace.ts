@@ -134,7 +134,7 @@ export function deleteFile(db: Db, threadId: string, fileName: string): string {
   return "";
 }
 
-export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName: string, scope: string, apiKey: string, now: string): Upload {
+export function promoteFile(db: Db, model: ModelRow, owner: string, threadId: string, fileName: string, scope: string, apiKey: string, now: string): Upload {
   let file = getFile(db, threadId, fileName);
   if (file.id == "") {
     let missing: Upload = {
@@ -145,7 +145,7 @@ export function promoteFile(db: Db, model: ModelRow, threadId: string, fileName:
     return missing;
   }
   let source = sourceOf(fileName);
-  let stored = uploadDocument(db, model, source, scope, file.body, apiKey);
+  let stored = uploadDocument(db, model, owner, source, scope, file.body, apiKey);
   if (!stored.ok) {
     return stored;
   }
