@@ -168,11 +168,21 @@ export type WebIndex = {
   find: (base: string, query: string, count: int) => Searched,
 };
 
+/** How the index ranks. "vector" asks for semantic matching over the
+ *  embeddings the index already holds; empty sends nothing and takes the
+ *  index's own default. An index that does not know the parameter ignores
+ *  it, so this is safe to say to any of them. */
+function searchMode(): string {
+  return (process.env("AGENTS_SEARCH_MODE") ?? "").trim();
+}
+
 /** The /retrieve shape: q, k and max_chars in, a "passages" array out, each
  *  carrying url, title and the page's own text. */
 function passageFind(base: string, query: string, count: int): Searched {
+  let mode = searchMode();
   let url = base + "/retrieve?q=" + searchEncoded(query.trim())
-    + "&k=" + `${count}` + "&max_chars=" + `${SEARCH_PASSAGE_MAX * 2}`;
+    + "&k=" + `${count}` + "&max_chars=" + `${SEARCH_PASSAGE_MAX * 2}`
+    + (mode == "" ? "" : "&mode=" + searchEncoded(mode));
   let headers = new Map<string, string>();
   headers.set("accept", "application/json");
   let res = http.request(url, "GET", "", headers);
