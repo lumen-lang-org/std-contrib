@@ -689,7 +689,7 @@ test("the naming call is capped whatever config it lands on", () => {
   };
   let capped = withinTitleBudget(roomy);
   expect(capped.maxTokens == TITLE_MAX_TOKENS);
-  expect(capped.thinking == "");
+  expect(capped.thinking == "off");
   expect(capped.id == "c-big" && capped.modelId == "m1" && capped.label == "Thinking");
 });
 

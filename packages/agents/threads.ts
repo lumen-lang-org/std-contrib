@@ -900,14 +900,19 @@ export function titlingUserText(said: string): string {
   return NAME_OPEN + "\n" + titleClip(text, TITLE_MESSAGE_CHARS) + "\n" + NAME_CLOSE;
 }
 
+/* "off", not "": empty means SEND NOTHING about thinking, and a hybrid model
+ * that reasons by default then reasons its way through the whole title budget.
+ * On joule.sh that was about 35 seconds of a person waiting with a finished
+ * answer on screen. thinkingJson has a real arm per provider for "off"; this
+ * is the same trap its own comment describes for the digest. */
 export function withinTitleBudget(config: ModelConfigRow): ModelConfigRow {
-  if (config.maxTokens == TITLE_MAX_TOKENS && config.thinking == "") {
+  if (config.maxTokens == TITLE_MAX_TOKENS && config.thinking == "off") {
     return config;
   }
   let capped: ModelConfigRow = {
     id: config.id, modelId: config.modelId, temperature: config.temperature,
     maxTokens: TITLE_MAX_TOKENS, topP: config.topP, extra: config.extra,
-    thinking: "", label: config.label, selectable: config.selectable,
+    thinking: "off", label: config.label, selectable: config.selectable,
     rank: config.rank,
   };
   return capped;
@@ -1164,7 +1169,7 @@ export function nameThread(db: Db, threadId: string, said: string): string {
  * remote config and cost about 35 seconds of exactly that. Pointed at the local
  * 4B it costs about two, and the first reply went from ~59s to ~4.5s.
  *
- * withinTitleBudget caps this at TITLE_MAX_TOKENS and clears `thinking`, so a
+ * withinTitleBudget caps this at TITLE_MAX_TOKENS and turns thinking OFF, so a
  * reasoning model is a fair choice here — it will not spend the whole budget
  * thinking and hand back nothing. */
 export function titlingConfigId(db: Db): string {
