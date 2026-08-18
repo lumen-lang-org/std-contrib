@@ -41,6 +41,20 @@ export const RERANK_MAX: int = 24;
  *  page rank about the same, and the short one costs less. */
 const RERANK_TEXT_MAX: int = 1200;
 
+/** Whether to rank at all.
+ *
+ *  On by default, off with AGENTS_SEARCH_RERANK=off. Measured on prod: the
+ *  ordering costs about 0.7s a search (one batched call to embed the query
+ *  and up to two dozen passages), and what it buys is uneven — on one query
+ *  it dropped a "Pointer (computer programming)" article out of the top
+ *  three for a question about a slow computer, on another the scores across
+ *  four different bread recipes sat inside a hundredth of each other and the
+ *  order barely moved. Worth having and worth being able to switch off,
+ *  which is why it is a variable rather than a decision baked in here. */
+export function rerankOn(): bool {
+  return (process.env("AGENTS_SEARCH_RERANK") ?? "").trim().toLowerCase() != "off";
+}
+
 export function widenedCount(count: int): int {
   let wide = count * RERANK_WIDEN;
   return wide > RERANK_MAX ? RERANK_MAX : wide;

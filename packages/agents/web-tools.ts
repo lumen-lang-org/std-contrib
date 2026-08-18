@@ -9,7 +9,7 @@ import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
 import { searchBase, searchCount, searchPassagesRanked, searchQueryFault, searchRaw, searchReady, searchWeb, passageTexts } from "./web-search.ts";
-import { rerankOrder, widenedCount } from "./web-rerank.ts";
+import { rerankOn, rerankOrder, widenedCount } from "./web-rerank.ts";
 import { Db } from "../plume/driver.ts";
 
 export const SEARCH_WEB: string = "search_web";
@@ -58,6 +58,9 @@ export function callWebToolRanked(db: Db, master: string, call: WebToolCall): Fi
   if (bad != "") {
     let refused: FileToolResult = { handled: true, ok: false, text: bad, line: 0, changed: "" };
     return refused;
+  }
+  if (!rerankOn()) {
+    return callWebTool(call);
   }
   let document = searchRaw(searchBase(), query, widenedCount(want));
   if (document == "") {
