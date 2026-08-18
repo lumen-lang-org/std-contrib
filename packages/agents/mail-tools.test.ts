@@ -4,7 +4,7 @@ import { connectDatabase, execute, createTableSql } from "../plume/plume.ts";
 import { Migration, migrate, migration, forgetMigrations } from "../plume/migrate.ts";
 import { credentialsMapping } from "./schema.ts";
 import { storeCredential } from "./credentials.ts";
-import { mailFromOverride, mailProviderNames, mailProviderOverride, mailerFor, mailReady } from "./mail-send.ts";
+import { mailFromOverride, mailProviderNames, mailProviderOverride, mailerFor, mailReady, mailsToday } from "./mail-send.ts";
 import { SEND_EMAIL, callMailTool, mailTools } from "./mail-tools.ts";
 
 let database: Db = sqlite();
@@ -23,8 +23,12 @@ function fresh(): void {
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS credentials");
+  execute(database, "DROP TABLE IF EXISTS mail_sent");
   let plan: Migration[] = [
     migration("1", "credentials", createTableSql(database, credentialsMapping())),
+    migration("2", "mail sent, so a day's worth can be counted",
+      "CREATE TABLE IF NOT EXISTS mail_sent (owner " + database.textType
+      + " NOT NULL, sent_at " + database.textType + " NOT NULL)"),
   ];
   migrate(database, plan);
 }
@@ -108,7 +112,7 @@ test("with no address to send from, nothing is offered however many keys are sto
 
 test("a call this family does not own is left for the next one", () => {
   fresh();
-  let other = callMailTool(database, KEY, { name: "write_artifact", args: "{}" });
+  let other = callMailTool(database, KEY, { name: "write_artifact", args: "{}", owner: "u-ann" });
   expect(!other.handled);
 });
 
@@ -120,6 +124,7 @@ test("a refusal never reads as a mail that went out", () => {
   let said = callMailTool(database, KEY, {
     name: SEND_EMAIL,
     args: "{\"to\":\"a@b.com\",\"subject\":\"Hi\",\"body\":\"Hello.\"}",
+    owner: "u-ann",
   });
 
   expect(said.handled);
@@ -136,8 +141,30 @@ test("a bad address is refused here, before any service is reached", () => {
   let said = callMailTool(database, KEY, {
     name: SEND_EMAIL,
     args: "{\"to\":\"not-an-address\",\"subject\":\"Hi\",\"body\":\"Hello.\"}",
+    owner: "u-ann",
   });
   expect(said.handled);
   expect(!said.ok);
   expect(said.text.indexOf("not an email address") > 0);
+});
+
+test("a day's mail is counted per owner, and one account's sending is not another's", () => {
+  fresh();
+  // Two of Ann's today, one of Bob's, and one of Ann's from yesterday: the
+  // count is what the cap is compared against, so a day boundary or a
+  // neighbour leaking into it is the whole bug this guards.
+  let today: number = 1787000000000.0;
+  let yesterday: number = today - 86400000.0;
+  execute(database, "INSERT INTO mail_sent (owner, sent_at) VALUES ('u-ann', '"
+    + `${today}` + "')");
+  execute(database, "INSERT INTO mail_sent (owner, sent_at) VALUES ('u-ann', '"
+    + `${today}` + "')");
+  execute(database, "INSERT INTO mail_sent (owner, sent_at) VALUES ('u-bob', '"
+    + `${today}` + "')");
+  execute(database, "INSERT INTO mail_sent (owner, sent_at) VALUES ('u-ann', '"
+    + `${yesterday}` + "')");
+
+  expect(mailsToday(database, "u-ann", today) == 2);
+  expect(mailsToday(database, "u-bob", today) == 1);
+  expect(mailsToday(database, "u-nobody", today) == 0);
 });
