@@ -11,6 +11,7 @@ import { AgentRun } from "./run.ts";
 import { userTurn } from "./provider.ts";
 import { runLogPlan, recordRun } from "./runlog.ts";
 import { tracePlan, tracerFor } from "./trace.ts";
+import { shipTraces, traceOutboxPlan } from "./trace-outbox.ts";
 import { jsonId, createFault } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonRaw } from "./scan.ts";
 import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceFault } from "./api-core.ts";
@@ -253,6 +254,32 @@ function sweepIdleEnvironments(db: Db): void {
  *  the reader looking at migrations over a wrong password. The two worker
  *  loops that call this have no such reader at all, so the line in the log is
  *  the only sign they are turning without a database. */
+const TRACE_SHIP_MS: int = 2000;
+
+/** Ships queued traces, forever. The same contract as sweepLoop and for the
+ *  same reason: nothing crosses the worker boundary but the closure itself,
+ *  the connection is this thread's own, and a collector outage costs retries
+ *  in a table rather than seconds in somebody's reply. */
+function traceShipLoop(): int {
+  try {
+    let db = openDatabase();
+    let master = masterKey();
+    console.log("trace outbox: shipping every " + `${TRACE_SHIP_MS}` + "ms");
+    while (true) {
+      try {
+        shipTraces(db, master);
+      }
+      catch (e) {
+        console.error("trace outbox: " + e.message);
+      }
+      process.sleep(TRACE_SHIP_MS);
+    }
+  } catch (e) {
+    console.error("trace outbox: no connection of its own — " + e.message);
+  }
+  return 0;
+}
+
 function openDatabase(): Db {
   let pgHost = process.env("AGENTS_PG_HOST") ?? "";
   if (pgHost != "") {
@@ -301,6 +328,12 @@ export function wholePlan(db: Db): Migration[] {
   while (t < traces.length) {
     plan.push(traces[t]);
     t = t + 1;
+  }
+  let outbox = traceOutboxPlan(db);
+  let ob: int = 0;
+  while (ob < outbox.length) {
+    plan.push(outbox[ob]);
+    ob = ob + 1;
   }
   let knowledge = knowledgePlan(db);
   let cards = toolCardsPlan(db);
@@ -680,6 +713,7 @@ function main(): void {
   }
   console.log(`stopping environments idle for ${ENV_IDLE_MS}ms`);
   Worker.run(() => sweepLoop(sweepIdle));
+  Worker.run(() => traceShipLoop());
 
   // Built from the same @openapi/@schema decorators AgentApi's own routes
   // and DTOs already carry — a second AgentApi instance, alongside the one

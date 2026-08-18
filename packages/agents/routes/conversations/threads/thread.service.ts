@@ -1,7 +1,8 @@
 import { Db } from "../../../../plume/driver.ts";
 import { DbAssignment, existsById, findById, setOn } from "../../../../plume/plume.ts";
 import { Reply, Respond, BadRequest, CreatedJson, NotFound, OkJson } from "../../../../rest/server.ts";
-import { flush, traceId, tracing, tracerWithMoreSpans, tracerWithSession } from "../../../../tracing/tracing.ts";
+import { traceId, tracing, tracerWithMoreSpans, tracerWithSession } from "../../../../tracing/tracing.ts";
+import { enqueueTrace } from "../../../trace-outbox.ts";
 import { GUEST_DAILY_RUNS, askedChoice, choiceFault, guestQuotaJson, guestTag, stamp } from "../../../api-core.ts";
 import { TURN_SEQ_NONE } from "../../../artifacts.ts";
 import { wireView, WireRef } from "../../../artifacts-fence.ts";
@@ -363,10 +364,19 @@ export class ThreadService {
       modelChoiceId: answered.modelChoiceId, routeNote: answered.routeNote,
     });
 
+    /* Queued, never flushed here: the collector upload took up to 27.9s on
+     * prod against ~3s of generation, and it sat between the finished answer
+     * and the reply carrying it. trace-outbox.ts says the rest. The id is
+     * handed out on faith — the shipper retries until it lands or gives up
+     * loudly, and a trace link that 404s for a minute is a better trade than
+     * every reply waiting on telemetry. */
     let traced = "";
     if (tracing(tracer) && run.spans.length > 0) {
-      if (flush(tracerWithMoreSpans(tracer, run.spans)).ok) {
+      let queued = enqueueTrace(this.database, tracerWithMoreSpans(tracer, run.spans));
+      if (queued == "") {
         traced = traceId(tracer);
+      } else {
+        console.error("trace outbox: a trace could not be queued — " + queued);
       }
     }
     let view = wireView(answered.text);
