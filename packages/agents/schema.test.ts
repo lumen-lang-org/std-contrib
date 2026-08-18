@@ -8,7 +8,7 @@ import { ROUTER_MAX_TOKENS, DERIVED_RANK_BASE, ModelRow, ModelConfigRow, PromptR
 
 let database: Db = sqlite();
 
-type PromptView = { id: string, promptName: string, version: int, body: string };
+type PromptView = { id: string, promptName: string, version: int };
 type ConfigView = { id: string, modelId: string, temperature: number, maxTokens: int, topP: number, extra: string, thinking: string };
 type NestedModelView = { id: string, label: string, apiName: string, provider: string, enabled: bool };
 type ConfigRowView = {
@@ -293,7 +293,7 @@ test("an agent arrives with its prompt, config, servers and sub-agents", () => {
   seeded();
   let agent: AgentView = JSON.parse<AgentView>(findById(database, agentsFull(database), "a1"));
   expect(agent.agentName == "lead");
-  expect(agent.prompt.body == "You lead, briefly.");
+  expect(agent.prompt.promptName == "lead" && agent.prompt.version == 2);
   expect(agent.config.maxTokens == 8192);
   expect(agent.servers.length == 2);
   expect(agent.subAgents.length == 1);
@@ -331,7 +331,7 @@ test("a prompt is versioned, so rolling back is pointing at an older row", () =>
   execute(database, "UPDATE agents SET prompt_id = 'p1' WHERE id = 'a1'");
   let after: AgentView = JSON.parse<AgentView>(findById(database, agentsFull(database), "a1"));
   expect(after.prompt.version == 1);
-  expect(after.prompt.body == "You lead.");
+  expect(after.prompt.id == "p1");
   expect(countWhere(database, promptsMapping(), "prompt_name = " + database.placeholder, ["lead"]) == 2);
 });
 

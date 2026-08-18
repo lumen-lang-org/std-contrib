@@ -31,7 +31,13 @@ export class Agent {
   @Column("updated_at", "text")
   updatedAt: string;
 
-  @HasOne("prompts", "prompt_id", "id", "id, prompt_name AS \"promptName\", version, body")
+  /* Which prompt, and which version of it — never its text. The body is the
+   * deployment's own writing, and an agent row is readable by anybody who may
+   * USE the agent, so carrying the text here handed every system prompt on the
+   * box to any signed-in caller and walked straight around the withholding
+   * /prompts does. Nothing reads it from here: a run looks the prompt up by
+   * promptId, and the console shows a name and a version. */
+  @HasOne("prompts", "prompt_id", "id", "id, prompt_name AS \"promptName\", version")
   prompt: string;
 
   @HasOne("model_configs", "model_config_id", "id", "id, model_id AS \"modelId\", temperature, max_tokens AS \"maxTokens\", top_p AS \"topP\", extra, thinking")
