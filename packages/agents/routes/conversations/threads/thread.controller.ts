@@ -68,6 +68,13 @@ export class ThreadApi {
     return this.threads.cancel(id);
   }
 
+  @Post("/:id/title")
+  @Guard(theThread)
+  title(@PathVariable("id") id: string, @RequestBody document: string,
+        @From(callerTags) tags: string[]): Reply {
+    return this.threads.title(id, document, tags);
+  }
+
   @Post("/:id/messages")
   @Guard(theThread)
   say(@PathVariable("id") id: string, @RequestBody document: string,

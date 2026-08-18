@@ -334,6 +334,7 @@ function fire(db: Db, task: TaskRow, master: string): void {
     pick: inheritedPick(),
     think: false,
     scope: "",
+    titledElsewhere: false,
 };
   let answered = runInThreadWith(db, threadId, ask);
 

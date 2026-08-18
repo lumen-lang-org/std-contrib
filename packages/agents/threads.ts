@@ -998,7 +998,14 @@ export function titleFrom(provider: string, body: string): Naming {
 }
 
 export function nameTurn(model: ModelRow, config: ModelConfigRow, said: string, apiKey: string): Naming {
-  let asked = complete(model, withinTitleBudget(config), titlingSystemPrompt(), titlingUserText(said), apiKey);
+  return nameTurnWith(model, config, titlingSystemPrompt(), said, apiKey);
+}
+
+/** The same call, told how to name. Separate so the instructions can come
+ *  from an agent an operator edits in the console rather than from this
+ *  file, which nobody can change without a deploy. */
+export function nameTurnWith(model: ModelRow, config: ModelConfigRow, how: string, said: string, apiKey: string): Naming {
+  let asked = complete(model, withinTitleBudget(config), how, titlingUserText(said), apiKey);
   if (!asked.ok) {
     return noName(withoutAddresses(asked.error, model.label));
   }
@@ -1159,6 +1166,39 @@ export function nameThread(db: Db, threadId: string, said: string): string {
   return wrote.error;
 }
 
+/** The agent that names conversations, when a deployment has appointed one.
+ *
+ *  An agent rather than a bare model config, because an agent is a row in the
+ *  console: its model, and the prompt that says how a name should read, are
+ *  both editable there by whoever runs the deployment. The environment names
+ *  only the id, so nothing about titling is compiled in.
+ *
+ *  Empty, or naming an agent that has since gone, falls through to the model
+ *  picking below and the built-in instructions. */
+export function titlingAgent(db: Db): AgentRow {
+  let named = (process.env("AGENTS_TITLE_AGENT_ID") ?? "").trim();
+  if (named == "") {
+    return emptyAgent();
+  }
+  let held = findById(db, agentsMapping(), named);
+  if (held == "") {
+    return emptyAgent();
+  }
+  let row: AgentRow = JSON.parse<AgentRow>(held);
+  if (!row.enabled || row.modelConfigId == "") {
+    return emptyAgent();
+  }
+  return row;
+}
+
+function emptyAgent(): AgentRow {
+  let none: AgentRow = {
+    id: "", agentName: "", description: "", modelConfigId: "", promptId: "",
+    enabled: false, isDefault: false, scriptImageId: "", updatedAt: "",
+  };
+  return none;
+}
+
 /* Which model names a conversation.
  *
  * Worth setting to the cheapest, nearest model a deployment has, because this
@@ -1212,7 +1252,11 @@ export function titleThread(db: Db, run: TitleRun): string {
   if (threadTitle(db, run.threadId) != "") {
     return "";
   }
-  let configId = titlingConfigId(db);
+  // The appointed agent first: its config, and its own prompt for how a name
+  // should read. Falling back to the model picking below and this file's
+  // instructions when no agent is appointed.
+  let appointed = titlingAgent(db);
+  let configId = appointed.id == "" ? titlingConfigId(db) : appointed.modelConfigId;
   if (configId == "") {
     return "";
   }
@@ -1220,8 +1264,18 @@ export function titleThread(db: Db, run: TitleRun): string {
   if (pair.fault != "") {
     return noName(pair.fault).note;
   }
+  let how = titlingSystemPrompt();
+  if (appointed.promptId != "") {
+    let promptDoc = findById(db, promptsMapping(), appointed.promptId);
+    if (promptDoc != "") {
+      let written = JSON.parse<PromptRow>(promptDoc).body;
+      if (written.trim() != "") {
+        how = written;
+      }
+    }
+  }
   let apiKey = credentialFor(db, pair.model.provider, run.master);
-  let named = nameTurn(pair.model, pair.config, run.userText, apiKey);
+  let named = nameTurnWith(pair.model, pair.config, how, run.userText, apiKey);
   if (named.title == "") {
     return named.note;
   }
@@ -1263,6 +1317,12 @@ export type ThreadAsk = {
   pick: ModelPick,
   think: bool,
   scope: string,
+  /** The caller is naming this conversation itself, alongside this call, so
+   *  do not stop to name it here. Titling only needs the user's first
+   *  message, so it can run beside the answer rather than after it — but only
+   *  a caller that can make two requests at once can do that, which is why
+   *  this is asked for rather than assumed. */
+  titledElsewhere: bool,
 };
 
 export function runInThread(db: Db, threadId: string, userText: string, master: string, tracer: Tracer): ThreadReply {
@@ -1273,6 +1333,7 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     pick: inheritedPick(),
     think: false,
     scope: "",
+    titledElsewhere: false,
   };
   return runInThreadWith(db, threadId, plain);
 }
@@ -1424,7 +1485,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
     recordChunks(db, threadId, held.length, shown);
   }
 
-  if (held.length == 0 && stored) {
+  if (held.length == 0 && stored && !ask.titledElsewhere) {
     let named = titleThread(db, { threadId: threadId, userText: userText, master: master });
     if (named != "") {
       notes.push(named);
@@ -1445,6 +1506,20 @@ export function threadMessages(db: Db, threadId: string): Turn[] {
     i = i + 1;
   }
   return out;
+}
+
+/** The first thing a person said in this conversation, which is all a title
+ *  needs. Empty when nothing has been asked yet. */
+export function firstAsked(db: Db, threadId: string): string {
+  let rows = threadMessageRows(db, threadId);
+  let i: int = 0;
+  while (i < rows.length) {
+    if (rows[i].role == "user") {
+      return rows[i].text;
+    }
+    i = i + 1;
+  }
+  return "";
 }
 
 export function threadMessageRows(db: Db, threadId: string): ThreadTurnRow[] {

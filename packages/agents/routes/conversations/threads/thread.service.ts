@@ -16,7 +16,7 @@ import { modelChoiceRepository } from "../../inference/models/entities/model-cho
 import { ModelChoiceBody } from "../../inference/model-choices/dtos/model-choice-body.dto.ts";
 import { jsonRaw, jsonText } from "../../../scan.ts";
 import { LiveStep, Thought, latestRound, partialOf, roundRunning, stepsOfRound, stepsOfThread, thoughtsOfRound, thoughtsOfThread } from "../../../steps.ts";
-import { ThreadTurnRow, appendTurns, listReplayable, listThreads, markReplayable, nameThread, openThread, ownedThread, rememberChoice, remixThread, runInThreadWith, threadChoice, threadMessageRows, threadOwner, threadTitle } from "../../../threads.ts";
+import { ThreadTurnRow, titleThread, firstAsked, appendTurns, listReplayable, listThreads, markReplayable, nameThread, openThread, ownedThread, rememberChoice, remixThread, runInThreadWith, threadChoice, threadMessageRows, threadOwner, threadTitle } from "../../../threads.ts";
 import { tracerFor } from "../../../trace.ts";
 import { nextUtcMidnightIso, runsSince, secondsToUtcMidnight, utcDayStartText } from "../../../usage.ts";
 import { agentRepository } from "../../authoring/agents/entities/agent.entity.ts";
@@ -274,6 +274,30 @@ export class ThreadService {
     return OkJson(v);
   }
 
+  /** Name the conversation, on its own. The say() call may be told the
+   *  caller is doing this, in which case the two run side by side and the
+   *  answer is never held up by the naming. Idempotent: a thread that
+   *  already has a name is left alone. */
+  title(id: string, body: string, tags: string[]): Reply {
+    ownedThread(this.database, id, tags);
+    // The caller's own copy of what was asked, because the point of this
+    // route is to run BESIDE the answer — and the turn it would otherwise be
+    // read from is not written until that answer is finished. Without it the
+    // naming works from an empty conversation and names it nothing.
+    let said = jsonText(body, "text");
+    if (said == "") {
+      said = firstAsked(this.database, id);
+    }
+    if (said == "") {
+      return BadRequest("nothing to name this from: send {\"text\":\"...\"} "
+        + "or call this once the first message is stored");
+    }
+    let note = titleThread(this.database,
+      { threadId: id, userText: said, master: this.master });
+    return OkJson("{\"title\":" + JSON.stringify(threadTitle(this.database, id))
+      + ",\"note\":" + JSON.stringify(note) + "}");
+  }
+
   say(id: string, body: string, tags: string[]): Reply {
     let agentId = ownedThread(this.database, id, tags);
     // Before anything else: with the previous stop still on the row, the run
@@ -329,6 +353,7 @@ export class ThreadService {
       userText: text, master: this.master, tracer: tracer, pick: pick,
       think: jsonText(body, "think") == "true",
       scope: jsonText(body, "scope"),
+      titledElsewhere: jsonText(body, "titledElsewhere") == "true",
     });
     let run = answered.run;
     let runId = recordRun(this.database, {

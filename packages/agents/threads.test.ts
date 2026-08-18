@@ -1,5 +1,5 @@
 import { Turn, ToolCall, toolCall, userTurn, assistantTurn, toolTurn } from "./provider.ts";
-import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, threadMessageRows, nameThread, titlingConfigId, titleThread, EVAL_CASE_KEY } from "./threads.ts";
+import { ModelPick, ThreadReply, ThreadListing, Naming, TITLE_MAX, TITLE_MAX_TOKENS, withinBudget, cutPoint, budgetFor, SUMMARY_MAX_CHARS, nextRound, threadBudget, threadPlan, threadsMapping, openThread, listThreads, sweepEmptyThreads, sweepIdleMs, recordChunks, chunksShownSince, appendTurns, roundIsStored, chooseModel, inheritedPick, threadChoice, threadRouteKey, rememberChoice, runInThreadWith, markReplayable, isReplayable, listReplayable, remixThread, cleanTitle, withinTitleBudget, titleFrom, threadTitle, threadMessageRows, nameThread, titlingConfigId, titleThread, firstAsked, EVAL_CASE_KEY } from "./threads.ts";
 import { threadForCase } from "./evals.ts";
 import { workspacePlan, putFile, listFiles } from "./workspace.ts";
 import { projectsPlan } from "./projects.ts";
@@ -487,6 +487,7 @@ function ask(threadId: string, choiceId: string): ThreadReply {
     pick: said,
     think: false,
     scope: "",
+    titledElsewhere: false,
   });
 }
 
@@ -498,6 +499,7 @@ function asks(threadId: string): ThreadReply {
     pick: inheritedPick(),
     think: false,
     scope: "",
+    titledElsewhere: false,
   });
 }
 
@@ -1040,4 +1042,37 @@ test("an eval case gets a conversation of its own, and it stays out of the list"
   let rows: ThreadListing[] = listThreads(database, { tags: [], limit: 50, offset: 0, project: "" });
   expect(rows.length == 1);
   expect(rows[0].id == ordinary);
+});
+
+test("a caller naming the conversation itself is not made to wait for the naming", () => {
+  // The whole point of the flag: the answer comes back without the second
+  // model call in front of it, so the thread is still unnamed afterwards and
+  // the caller's own POST /threads/:id/title is what names it.
+  seededMenu();
+  seedRouter(twoCandidates(), "turn", false);
+  let id = openThread(database, { agentId: "a1", owner: "", now: "1000000000000" });
+
+  let said = runInThreadWith(database, id, {
+    userText: "how many A-114 are in Lyon?",
+    master: testKey(),
+    tracer: noTracer(),
+    pick: inheritedPick(),
+    think: false,
+    scope: "",
+    titledElsewhere: true,
+  });
+  expect(said.baseSeq == 0);
+  expect(threadTitle(database, id) == "");
+});
+
+test("the naming call reads the first thing a person said, past the machinery around it", () => {
+  freshThreads();
+  let none: ToolCall[] = [];
+  let calls: ToolCall[] = [toolCall("c1", "warehouse_stock", "{}")];
+  let whole: Turn[] = [userTurn("how many A-114 are in Lyon?"), assistantTurn("", calls),
+                       toolTurn("c1", "warehouse_stock", "12"), assistantTurn("12 pallets", none)];
+  expect(appendTurns(database, "t-name", whole, 0) == "");
+  // Not the tool turn, not the assistant's answer — the question.
+  expect(firstAsked(database, "t-name") == "how many A-114 are in Lyon?");
+  expect(firstAsked(database, "t-never-asked") == "");
 });
