@@ -756,6 +756,12 @@ export function schemaPlan(db: Db): Migration[] {
       + "input " + db.textType + " NOT NULL)"),
     migration("135", "one waiting input per workflow",
       "CREATE UNIQUE INDEX IF NOT EXISTS workflow_inputs_by_flow ON workflow_inputs (workflow_id)"),
+    migration("136", "mail sent, so a day's worth can be counted",
+      "CREATE TABLE IF NOT EXISTS mail_sent ("
+      + "owner " + db.textType + " NOT NULL, "
+      + "sent_at " + db.textType + " NOT NULL)"),
+    migration("137", "counted by owner and by day",
+      "CREATE INDEX IF NOT EXISTS mail_sent_by_owner ON mail_sent (owner, sent_at)"),
     migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),

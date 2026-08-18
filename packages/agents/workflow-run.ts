@@ -268,13 +268,13 @@ function fetchStep(db: Db, node: WfNode, ctx: WalkCtx, owner: string, master: st
  * failure is a step failure like any other, so a workflow that could not send
  * stops with the reason on the step rather than carrying on as though it had.
  */
-function mailStep(db: Db, master: string, node: WfNode, ctx: WalkCtx): StepResult {
+function mailStep(db: Db, master: string, node: WfNode, ctx: WalkCtx, owner: string): StepResult {
   let ask: MailAsk = {
     to: fill(node.to ?? "", ctx),
     subject: fill(node.subject, ctx),
     body: fill(node.body, ctx),
   };
-  let sent = sendMail(db, master, ask);
+  let sent = sendMail(db, master, ask, owner);
   if (!sent.ok) {
     return stepFailed(sent.fault);
   }
@@ -440,7 +440,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
     if (node.type == "EMAIL") {
       let to = fill(node.to ?? "", ctx);
       let subject = fill(node.subject, ctx);
-      return withInput(mailStep(db, ask.master, node, ctx), to + "\n" + subject);
+      return withInput(mailStep(db, ask.master, node, ctx, ask.owner), to + "\n" + subject);
     }
     if (node.type == "TELEGRAM_ASK") {
       let asking = fill(node.instruction, ctx);

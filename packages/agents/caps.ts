@@ -42,3 +42,13 @@ export function uploadBytesMax(): int {
 export function runsPerOwnerDay(): int {
   return bytesCap(process.env("AGENTS_RUNS_PER_OWNER_DAY") ?? "", 200);
 }
+
+/** How many emails one account may send in a day.
+ *
+ *  Mail is the one thing an agent does that leaves the building and cannot be
+ *  recalled, and it goes out from this deployment's own address — so a run
+ *  that loops, or somebody who means harm, spends this deployment's reputation
+ *  rather than their own. Counted per owner over a UTC day. */
+export function mailsPerOwnerDay(): int {
+  return bytesCap(process.env("AGENTS_MAILS_PER_OWNER_DAY") ?? "", 20);
+}

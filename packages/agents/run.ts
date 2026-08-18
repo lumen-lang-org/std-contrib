@@ -670,7 +670,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
         nowMs: Date.now() as number,
       });
       let posted = callMailTool(db, master, {
-        name: calls[i].name, args: calls[i].args,
+        name: calls[i].name, args: calls[i].args, owner: where.owner,
       });
       let searched = callWebTool({ name: calls[i].name, args: calls[i].args });
       if (calls[i].name == "find_tools") {

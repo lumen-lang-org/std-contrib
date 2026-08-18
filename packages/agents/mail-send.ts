@@ -14,6 +14,8 @@ import { MailAsk, MailPost, MailSent, Mailer, mailRefused, mailWith } from "../m
 import { resendMailer } from "../mail/resend.ts";
 import { sendgridMailer } from "../mail/sendgrid.ts";
 import { credentialFor } from "./credentials.ts";
+import { executeWith, placeholderAt } from "../plume/plume.ts";
+import { mailsPerOwnerDay } from "./caps.ts";
 
 const MAIL_BRAND: string = "Joule";
 
@@ -111,7 +113,34 @@ export function mailReady(db: Db, master: string): bool {
   return credentialFor(db, found.mailer.credential, master) != "";
 }
 
-export function sendMail(db: Db, master: string, ask: MailAsk): MailSent {
+/** The instant this UTC day began, in milliseconds. */
+function dayBegan(nowMs: number): number {
+  let day: number = 86400000.0;
+  return nowMs - (nowMs % day);
+}
+
+/** How much of today's mail budget this owner has spent. */
+export function mailsToday(db: Db, owner: string, nowMs: number): int {
+  let sql = "SELECT COUNT(*) FROM mail_sent WHERE owner = " + placeholderAt(db, 1)
+    + " AND sent_at >= " + placeholderAt(db, 2);
+  if (!db.query(sql, [owner, `${dayBegan(nowMs)}`])) {
+    return 0;
+  }
+  if (db.rows() == 0) {
+    return 0;
+  }
+  return parseInt(db.value(0, 0), 10) ?? 0;
+}
+
+/** Every path out goes through here, so the budget is counted in one place
+ *  rather than at each door. */
+export function sendMail(db: Db, master: string, ask: MailAsk, owner: string): MailSent {
+  let allowed = mailsPerOwnerDay();
+  let already = mailsToday(db, owner, Date.now() as number);
+  if (already >= allowed) {
+    return mailRefused("that is " + `${already}` + " emails today, and " + `${allowed}`
+      + " is the most one account may send. It starts again at midnight UTC");
+  }
   let found = mailerFor(mailProviderChosen());
   if (!found.ok) {
     return mailRefused(found.fault);
@@ -124,5 +153,13 @@ export function sendMail(db: Db, master: string, ask: MailAsk): MailSent {
     logo: mailLogo(),
     footer: MAIL_FOOTER,
   };
-  return mailWith(found.mailer, post, ask);
+  let sent = mailWith(found.mailer, post, ask);
+  if (sent.ok) {
+    // Written after the fact, so a refusal by the transport costs nobody a
+    // slot: what is counted is mail that actually left.
+    executeWith(db, "INSERT INTO mail_sent (owner, sent_at) VALUES ("
+      + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ")",
+      [owner, `${Date.now() as number}`]);
+  }
+  return sent;
 }

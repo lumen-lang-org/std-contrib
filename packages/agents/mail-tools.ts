@@ -46,6 +46,7 @@ export function mailTools(db: Db, master: string): ToolSpec[] {
 export type MailToolCall = {
   name: string,
   args: string,
+  owner: string,
 };
 
 export function callMailTool(db: Db, master: string, call: MailToolCall): FileToolResult {
@@ -58,7 +59,7 @@ export function callMailTool(db: Db, master: string, call: MailToolCall): FileTo
     subject: jsonText(call.args, "subject"),
     body: jsonText(call.args, "body"),
   };
-  let sent = sendMail(db, master, ask);
+  let sent = sendMail(db, master, ask, call.owner);
   if (!sent.ok) {
     let refused: FileToolResult = {
       handled: true, ok: false,
