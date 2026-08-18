@@ -1,4 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
+import { OWNED_SKILL, ownRow } from "../../../owner.ts";
 import { Outcome, produced, refusing } from "../../../../rest/server.ts";
 import { createFault, jsonId } from "../../../payload.ts";
 import { SkillBody } from "./dtos/skill-body.dto.ts";
@@ -13,11 +14,11 @@ export class SkillService {
     this.repository = new SkillRepository(database);
   }
 
-  listing(featuredOnly: bool): string {
+  listing(owner: string, featuredOnly: bool): string {
     if (featuredOnly) {
       return this.repository.featured();
     }
-    return this.repository.listing();
+    return this.repository.listing(owner);
   }
 
   one(id: string): string {
@@ -36,7 +37,7 @@ export class SkillService {
     return this.repository.filesOf(id);
   }
 
-  create(document: string): Outcome {
+  create(owner: string, document: string): Outcome {
     let fault = createFault(this.repository.database, this.repository.skills, document);
     if (fault != "") {
       return refusing(fault);
@@ -49,6 +50,9 @@ export class SkillService {
     let written = this.repository.save(document);
     if (!written.ok) {
       return refusing(written.error);
+    }
+    if (!ownRow(this.repository.database, OWNED_SKILL, jsonId(document), owner)) {
+      return refusing("the skill was written but could not be filed under an owner");
     }
     return produced(this.repository.one(jsonId(document)));
   }
@@ -74,7 +78,7 @@ export class SkillService {
     return produced(this.repository.one(id));
   }
 
-  copyLocal(id: string): Outcome {
+  copyLocal(owner: string, id: string): Outcome {
     let from: SkillBody = JSON.parse<SkillBody>(this.repository.one(id));
     if (from.source != "repo") {
       return refusing("this skill is already yours to edit — copying it would only make a second name for the same instructions");
@@ -97,6 +101,9 @@ export class SkillService {
     let written = this.repository.save(JSON.stringify(made));
     if (!written.ok) {
       return refusing(written.error);
+    }
+    if (!ownRow(this.repository.database, OWNED_SKILL, made.id, owner)) {
+      return refusing("the copy was written but could not be filed under an owner");
     }
     let listed = this.repository.fileRowsOf(from.id);
     let files: SkillFileBody[] = listed == "" || listed == "[]"

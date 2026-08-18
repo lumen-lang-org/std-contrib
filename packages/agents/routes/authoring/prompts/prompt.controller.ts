@@ -1,4 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
+import { filingAs } from "../../../api-core.ts";
 import { bindings, controller } from "../../../../rest/controller.ts";
 import { BadRequest, Created, Ok, Reply } from "../../../../rest/server.ts";
 import { PromptService } from "./prompt.service.ts";
@@ -13,13 +14,14 @@ export class PromptApi {
   }
 
   @Get("/")
-  list(@RequestParam("name", "") name: string): Reply {
-    return Ok(this.prompts.listing(name));
+  list(@RequestParam("name", "") name: string,
+       @From(filingAs) owner: string): Reply {
+    return Ok(this.prompts.listing(owner, name));
   }
 
   @Post("/")
-  create(@RequestBody sent: string): Reply {
-    let made = this.prompts.create(sent);
+  create(@RequestBody sent: string, @From(filingAs) owner: string): Reply {
+    let made = this.prompts.create(owner, sent);
     if (made.fault != "") {
       return BadRequest(made.fault);
     }

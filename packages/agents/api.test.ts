@@ -46,7 +46,15 @@ function testKey(): string {
 }
 
 function fresh(): string {
-  let cfg: DbConfig = { filename: "/tmp/agents_api_track_test.db" };
+  // The file, not a list of drops. The list below cannot be kept complete as
+  // the plan grows: index_jobs was never on it, so a second run re-applied
+  // every migration against a table that already had the column one of them
+  // adds, and thirty-seven tests failed on a schema that was actually correct.
+  let file = "/tmp/agents_api_track_test.db";
+  if (fs.existsSync(file)) {
+    fs.rmSync(file, false);
+  }
+  let cfg: DbConfig = { filename: file };
   connectDatabase(database, cfg);
   forgetMigrations(database);
   execute(database, "DROP TABLE IF EXISTS agent_sub_agents");
@@ -665,8 +673,8 @@ test("healthz says which build, how far the schema got, and whether docker is th
 
 function keptFile(source: string, scope: string, bytes: string): DocumentFileRow {
   let row: DocumentFileRow = {
-    id: documentFileId(scope, source),
-    source: source, scope: scope,
+    id: documentFileId("", scope, source),
+    owner: "", source: source, scope: scope,
     filename: source + ".pdf", mime: "application/pdf",
     bytes: bytes, size: decodedSize(bytes), createdAt: "1700000000000",
   };
@@ -677,11 +685,11 @@ test("a kept original is found by the pair that names it, however the scope was 
   expect(fresh() == "");
   let files = new DocumentRepository(database, "");
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "aGVsbG8gcGRm")));
-  expect(files.fileFor("/e2e", "notes").bytes == "aGVsbG8gcGRm");
-  expect(files.fileFor("/e2e/", "notes").bytes == "aGVsbG8gcGRm");
-  expect(files.fileFor("e2e", "notes").filename == "notes.pdf");
-  expect(files.fileFor("/other", "notes").id == "");
-  expect(files.fileFor("/e2e", "absent").id == "");
+  expect(files.fileFor("", "/e2e", "notes").bytes == "aGVsbG8gcGRm");
+  expect(files.fileFor("", "/e2e/", "notes").bytes == "aGVsbG8gcGRm");
+  expect(files.fileFor("", "e2e", "notes").filename == "notes.pdf");
+  expect(files.fileFor("", "/other", "notes").id == "");
+  expect(files.fileFor("", "/e2e", "absent").id == "");
 });
 
 test("re-uploading a document replaces its kept copy rather than adding one", () => {
@@ -690,7 +698,7 @@ test("re-uploading a document replaces its kept copy rather than adding one", ()
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "dHdv")));
   expect(countWhere(database, documentFilesMapping(), "source = ?", ["notes"]) == 1);
-  expect(files.fileFor("/e2e", "notes").bytes == "dHdv");
+  expect(files.fileFor("", "/e2e", "notes").bytes == "dHdv");
 });
 
 test("deleting a document takes its original with it, in every folder", () => {
@@ -699,10 +707,10 @@ test("deleting a document takes its original with it, in every folder", () => {
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/spec", "dHdv")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("other", "/e2e", "dGhyZWU=")));
-  files.forgetFiles("notes");
-  expect(files.fileFor("/e2e", "notes").id == "");
-  expect(files.fileFor("/spec", "notes").id == "");
-  expect(files.fileFor("/e2e", "other").bytes == "dGhyZWU=");
+  files.forgetFiles("", "notes");
+  expect(files.fileFor("", "/e2e", "notes").id == "");
+  expect(files.fileFor("", "/spec", "notes").id == "");
+  expect(files.fileFor("", "/e2e", "other").bytes == "dGhyZWU=");
 });
 
 test("the folder listing learns which sources have an original in one query", () => {
@@ -710,7 +718,7 @@ test("the folder listing learns which sources have an original in one query", ()
   let files = new DocumentRepository(database, "");
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("notes", "/e2e", "b25l")));
   persist(database, documentFilesMapping(), JSON.stringify(keptFile("elsewhere", "/spec", "dHdv")));
-  let mine = files.filedSources("/e2e");
+  let mine = files.filedSources("", "/e2e");
   expect(mine.length == 1);
   expect(holdsSource(mine, "notes"));
   expect(!holdsSource(mine, "unindexed"));

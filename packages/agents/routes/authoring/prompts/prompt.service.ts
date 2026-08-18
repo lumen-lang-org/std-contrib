@@ -1,4 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
+import { OWNED_PROMPT, ownRow } from "../../../owner.ts";
 import { Outcome, produced, refusing } from "../../../../rest/server.ts";
 import { PromptBody } from "./dtos/prompt-body.dto.ts";
 import { Prompt } from "./entities/prompt.entity.ts";
@@ -11,14 +12,14 @@ export class PromptService {
     this.repository = new PromptRepository(database);
   }
 
-  listing(name: string): string {
+  listing(owner: string, name: string): string {
     if (name == "") {
-      return this.repository.all();
+      return this.repository.all(owner);
     }
-    return this.repository.named(name);
+    return this.repository.named(owner, name);
   }
 
-  create(sent: string): Outcome {
+  create(owner: string, sent: string): Outcome {
     if (sent == "") {
       return refusing("a body is required");
     }
@@ -41,6 +42,9 @@ export class PromptService {
     let written = this.repository.save(JSON.stringify(row));
     if (!written.ok) {
       return refusing(written.error);
+    }
+    if (!ownRow(this.repository.database, OWNED_PROMPT, id, owner)) {
+      return refusing("the prompt was written but could not be filed under an owner");
     }
     return produced(this.repository.one(id));
   }

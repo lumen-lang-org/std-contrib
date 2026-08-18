@@ -1,4 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
+import { OWNED_AGENT, ownRow } from "../../../owner.ts";
 import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../../tracing/tracing.ts";
 import { AgentRetrievalRow } from "../../../knowledge.ts";
 import { runAgentFor } from "../../../run.ts";
@@ -22,8 +23,8 @@ export class AgentService {
     this.master = master;
   }
 
-  listing(enabledOnly: bool): string {
-    return this.repository.listing(enabledOnly);
+  listing(owner: string, enabledOnly: bool): string {
+    return this.repository.listing(owner, enabledOnly);
   }
 
   one(id: string): string {
@@ -54,7 +55,7 @@ export class AgentService {
     return runsSince(this.repository.database, guest, utcDayStartText(at));
   }
 
-  create(body: AgentBody): Outcome {
+  create(owner: string, body: AgentBody): Outcome {
     if (this.repository.exists(body.id)) {
       return refusing("\"" + body.id + "\" already exists; a POST creates, and changing a row is a PUT");
     }
@@ -71,6 +72,9 @@ export class AgentService {
     let written = this.repository.save(JSON.stringify(body));
     if (!written.ok) {
       return refusing(written.error);
+    }
+    if (!ownRow(this.repository.database, OWNED_AGENT, body.id, owner)) {
+      return refusing("the agent was written but could not be filed under an owner");
     }
     return produced(this.repository.one(body.id));
   }

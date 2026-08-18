@@ -288,6 +288,19 @@ export function promptsMapping(): DbRepository {
   return withoutRelations(promptRepository());
 }
 
+/* The shape migration 3 created, frozen: it is generated from a mapping, so
+ * reading it from the live entity makes an applied migration change under us. */
+function promptsMappingV1(): DbRepository {
+  let fs: DbField[] = [
+    field("id", "id", "text"),
+    field("promptName", "prompt_name", "text"),
+    field("version", "version", "int"),
+    field("body", "body", "text"),
+    field("createdAt", "created_at", "text"),
+  ];
+  return repository({ table: "prompts", idField: "id", idColumn: "id", fields: fs });
+}
+
 export function mcpServersMapping(): DbRepository {
   return mcpServerRepository();
 }
@@ -697,7 +710,7 @@ export function schemaPlan(db: Db): Migration[] {
   let plan: Migration[] = [
     migration("1", "models", createTableSql(db, modelsMappingV1())),
     migration("2", "model configs", createTableSql(db, modelConfigsMappingV1())),
-    migration("3", "prompts", createTableSql(db, promptsMapping())),
+    migration("3", "prompts", createTableSql(db, promptsMappingV1())),
     migration("4", "mcp servers", createTableSql(db, mcpServersMappingV1())),
     migration("5", "agents", createTableSql(db, agentsMappingV1())),
     migration("6", "agent to mcp server",
@@ -730,6 +743,13 @@ export function schemaPlan(db: Db): Migration[] {
       "ALTER TABLE templates ADD COLUMN request " + db.textType + " NOT NULL DEFAULT ''"),
     migration("128", "and which conversation was prepared from it",
       "ALTER TABLE templates ADD COLUMN prepared_thread " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("132", "who owns an agent, a prompt or a skill",
+      "CREATE TABLE IF NOT EXISTS row_owners ("
+      + "kind " + db.textType + " NOT NULL, "
+      + "row_id " + db.textType + " NOT NULL, "
+      + "owner " + db.textType + " NOT NULL)"),
+    migration("133", "an owner is looked up by its row",
+      "CREATE UNIQUE INDEX IF NOT EXISTS row_owners_by_row ON row_owners (kind, row_id)"),
     migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),

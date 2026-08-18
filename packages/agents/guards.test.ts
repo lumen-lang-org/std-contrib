@@ -1,7 +1,8 @@
 import { Request } from "../rest/server.ts";
+import { sqlite } from "../plume/sqlite.ts";
 import { ownedOrEmpty, roleAtLeast } from "./guards.ts";
 import { guestTag } from "./api-core.ts";
-import { owningTag, UNKNOWN_TAG } from "./owner.ts";
+import { OWNED_AGENT, OWNED_PROMPT, OWNED_SKILL, ownedRowsClause, owningTag, UNKNOWN_TAG } from "./owner.ts";
 
 function withNoIdentity(): Request {
   let req: Request = {
@@ -62,4 +63,20 @@ test("guestTag only matches a single tag that says guest:", () => {
   expect(guestTag(real) == "");
   let none: string[] = [];
   expect(guestTag(none) == "");
+});
+
+test("a row with no owner is the deployment's, and everybody reads it", () => {
+  // The clause is what agents, prompts and skills are listed through, so the
+  // shape of it is the whole of who sees what.
+  let clause = ownedRowsClause(sqlite(), OWNED_AGENT, 1);
+  expect(clause.indexOf("id NOT IN") >= 0);
+  expect(clause.indexOf("kind = 'agent'") >= 0);
+  expect(clause.indexOf("owner = ") >= 0);
+});
+
+test("a kind is spelled into the clause and never taken from a caller", () => {
+  // Three constants, and no route hands this a string of its own.
+  expect(OWNED_AGENT == "agent");
+  expect(OWNED_PROMPT == "prompt");
+  expect(OWNED_SKILL == "skill");
 });

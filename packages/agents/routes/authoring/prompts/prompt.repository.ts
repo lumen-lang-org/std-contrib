@@ -1,5 +1,6 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, existsById, findById, listOrdered, pageOrdered, persist } from "../../../../plume/plume.ts";
+import { OWNED_PROMPT, ownedRowsClause } from "../../../owner.ts";
+import { DbOrder, DbRepository, DbResult, existsById, findById, listOrdered, pageOrdered, persist, placeholderAt } from "../../../../plume/plume.ts";
 import { PromptRecord } from "./dtos/prompt-body.dto.ts";
 import { promptRepository } from "./entities/prompt.entity.ts";
 
@@ -12,16 +13,21 @@ export class PromptRepository {
     this.prompts = promptRepository();
   }
 
-  all(): string {
+  all(owner: string): string {
     let keys: DbOrder[] = [{ column: "prompt_name" }, { column: "version" }];
-    return listOrdered(this.database, this.prompts, { order: keys });
+    return listOrdered(this.database, this.prompts, {
+      where: ownedRowsClause(this.database, OWNED_PROMPT, 1),
+      args: [owner],
+      order: keys,
+    });
   }
 
-  named(name: string): string {
+  named(owner: string, name: string): string {
     let newest: DbOrder[] = [{ column: "version", direction: "desc" }];
     return listOrdered(this.database, this.prompts, {
-      where: "prompt_name = " + this.database.placeholder,
-      args: [name],
+      where: "prompt_name = " + this.database.placeholder
+        + " AND " + ownedRowsClause(this.database, OWNED_PROMPT, 2),
+      args: [name, owner],
       order: newest,
     });
   }

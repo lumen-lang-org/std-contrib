@@ -2,7 +2,7 @@ import { Db } from "../../../../plume/driver.ts";
 import { bindings, controller } from "../../../../rest/controller.ts";
 import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, Ok, OkJson } from "../../../../rest/server.ts";
 import { OpenApiOperation, openapi } from "../../../../openapi/openapi.ts";
-import { callerTags, owningCaller } from "../../../api-core.ts";
+import { callerTags, owningCaller, filingAs } from "../../../api-core.ts";
 import { AgentBody } from "./dtos/agent-body.dto.ts";
 import { ChildLink } from "./dtos/child-link.dto.ts";
 import { RetrievalSetup } from "./dtos/retrieval-setup.dto.ts";
@@ -10,7 +10,7 @@ import { RunBody } from "./dtos/run-body.dto.ts";
 import { ScopeGrant } from "./dtos/scope-grant.dto.ts";
 import { ServerLink } from "./dtos/server-link.dto.ts";
 import { SkillLink } from "./dtos/skill-link.dto.ts";
-import { agentExists, guestRunsLeft } from "./agent.guard.ts";
+import { agentExists, agentOwned, guestRunsLeft } from "./agent.guard.ts";
 import { AgentService } from "./agent.service.ts";
 import { scopeFromPath } from "./agent.utils.ts";
 
@@ -28,13 +28,18 @@ export class AgentApi {
     return agentExists(this.agents, request);
   }
 
+  myAgent(request: Request): Guarded {
+    return agentOwned(this.agents, request);
+  }
+
   guestRuns(request: Request): Guarded {
     return guestRunsLeft(this.agents, request);
   }
 
   @Get("/")
-  list(@RequestParam("enabled", "") enabled: string): Reply {
-    return Ok(this.agents.listing(enabled == "true"));
+  list(@RequestParam("enabled", "") enabled: string,
+       @From(filingAs) owner: string): Reply {
+    return Ok(this.agents.listing(owner, enabled == "true"));
   }
 
   @Get("/:id")
@@ -44,8 +49,8 @@ export class AgentApi {
   }
 
   @Post("/")
-  create(@Valid @RequestBody body: AgentBody): Reply {
-    let made = this.agents.create(body);
+  create(@Valid @RequestBody body: AgentBody, @From(filingAs) owner: string): Reply {
+    let made = this.agents.create(owner, body);
     if (made.fault != "") {
       return BadRequest(made.fault);
     }
@@ -53,43 +58,43 @@ export class AgentApi {
   }
 
   @Put("/:id")
-  @Guard(theAgent)
+  @Guard(myAgent)
   update(@PathVariable("id") id: string, @Valid @RequestBody body: AgentBody): Reply {
     return answered(this.agents.update(id, body));
   }
 
   @Post("/:id/servers")
-  @Guard(theAgent)
+  @Guard(myAgent)
   addServer(@PathVariable("id") id: string, @RequestBody link: ServerLink): Reply {
     return answered(this.agents.attachServer(id, link.serverId));
   }
 
   @Post("/:id/sub-agents")
-  @Guard(theAgent)
+  @Guard(myAgent)
   addChild(@PathVariable("id") id: string, @RequestBody link: ChildLink): Reply {
     return answered(this.agents.attachChild(id, link.childId));
   }
 
   @Delete("/:id/sub-agents/:childId")
-  @Guard(theAgent)
+  @Guard(myAgent)
   removeChild(@PathVariable("id") id: string, @PathVariable("childId") childId: string): Reply {
     return answered(this.agents.detachChild(id, childId));
   }
 
   @Delete("/:id/servers/:serverId")
-  @Guard(theAgent)
+  @Guard(myAgent)
   removeServer(@PathVariable("id") id: string, @PathVariable("serverId") serverId: string): Reply {
     return answered(this.agents.detachServer(id, serverId));
   }
 
   @Post("/:id/skills")
-  @Guard(theAgent)
+  @Guard(myAgent)
   addSkill(@PathVariable("id") id: string, @RequestBody link: SkillLink): Reply {
     return answered(this.agents.attachSkill(id, link.skillId));
   }
 
   @Delete("/:id/skills/:skillId")
-  @Guard(theAgent)
+  @Guard(myAgent)
   removeSkill(@PathVariable("id") id: string, @PathVariable("skillId") skillId: string): Reply {
     return answered(this.agents.detachSkill(id, skillId));
   }
@@ -101,19 +106,19 @@ export class AgentApi {
   }
 
   @Post("/:id/scopes")
-  @Guard(theAgent)
+  @Guard(myAgent)
   grant(@PathVariable("id") id: string, @Valid @RequestBody body: ScopeGrant): Reply {
     return answered(this.agents.grant(id, body.scope));
   }
 
   @Delete("/:id/scopes/:scope")
-  @Guard(theAgent)
+  @Guard(myAgent)
   revoke(@PathVariable("id") id: string, @PathVariable("scope") scope: string): Reply {
     return answered(this.agents.revoke(id, scopeFromPath(scope)));
   }
 
   @Put("/:id/retrieval")
-  @Guard(theAgent)
+  @Guard(myAgent)
   setRetrieval(@PathVariable("id") id: string, @Valid @RequestBody body: RetrievalSetup): Reply {
     return answered(this.agents.setRetrieval(id, body));
   }
@@ -140,7 +145,7 @@ export class AgentApi {
   }
 
   @Delete("/:id")
-  @Guard(theAgent)
+  @Guard(myAgent)
   remove(@PathVariable("id") id: string): Reply {
     let gone = this.agents.forget(id);
     if (gone.fault != "") {

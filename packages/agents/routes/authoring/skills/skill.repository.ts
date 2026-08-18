@@ -1,4 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
+import { OWNED_SKILL, ownedRowsClause } from "../../../owner.ts";
 import { DbOrder, DbRepository, DbResult, countWhere, deleteById, deleteWhere, existsById, findById, linkOf, listOrdered, listWhere, persist, placeholderAt, unlinkAllPointingAt } from "../../../../plume/plume.ts";
 import { agentRepository } from "../agents/entities/agent.entity.ts";
 import { skillFileRepository } from "./entities/skill-file.entity.ts";
@@ -23,9 +24,13 @@ export class SkillRepository {
     });
   }
 
-  listing(): string {
+  listing(owner: string): string {
     let keys: DbOrder[] = [{ column: "skill_name" }];
-    return listOrdered(this.database, this.skills, { order: keys });
+    return listOrdered(this.database, this.skills, {
+      where: ownedRowsClause(this.database, OWNED_SKILL, 1),
+      args: [owner],
+      order: keys,
+    });
   }
 
   one(id: string): string {

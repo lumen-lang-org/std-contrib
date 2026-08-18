@@ -97,7 +97,7 @@ test("a message a bot has taken is claimed for its run", () => {
 test("a document waiting to be indexed is claimed", () => {
   seeded("/tmp/agents_claims_jobs.db", indexingPlan(database));
   let jobs = new JobRepository(database);
-  let id = jobs.enqueue("/specs/plume.md", "/specs", "e1", "some text", `${NOW}`);
+  let id = jobs.enqueue("", "/specs/plume.md", "/specs", "e1", "some text", `${NOW}`);
   expect(id != "");
 
   let claimed = jobs.claimNext(`${NOW}`);

@@ -1,7 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
 import { DbOrder, DbRepository, DbResult, deleteById, existsById, findById, link, linkOf, listOrdered, pageOrdered, persist, placeholderAt, repository, setEvery, unlink, unlinkAllPointingAt, unlinkAllOwnedBy } from "../../../../plume/plume.ts";
 import { AgentRetrievalRow, agentScopes, embeddingModel, grantScope, revokeScope } from "../../../knowledge.ts";
-import { ownerClause } from "../../../owner.ts";
+import { OWNED_AGENT, ownedRowsClause, ownerClause } from "../../../owner.ts";
 import { agentRepository } from "./entities/agent.entity.ts";
 import { agentRetrievalRepository } from "./entities/agent-retrieval.entity.ts";
 import { mcpServerRepository } from "../../connectivity/servers/entities/mcp-server.entity.ts";
@@ -31,16 +31,19 @@ export class AgentRepository {
     this.agents = agentRepository();
   }
 
-  listing(enabledOnly: bool): string {
+  listing(owner: string, enabledOnly: bool): string {
     let keys: DbOrder[] = [{ column: "agent_name" }];
+    let mine = ownedRowsClause(this.database, OWNED_AGENT, 1);
     if (enabledOnly) {
       return listOrdered(this.database, this.agents, {
-        where: "enabled = " + this.database.placeholder,
-        args: ["1"],
+        where: mine + " AND enabled = " + placeholderAt(this.database, 2),
+        args: [owner, "1"],
         order: keys,
       });
     }
-    return listOrdered(this.database, this.agents, { order: keys });
+    return listOrdered(this.database, this.agents, {
+      where: mine, args: [owner], order: keys,
+    });
   }
 
   one(id: string): string {
