@@ -1,0 +1,48 @@
+# The engine's route to Langfuse, which now lives on the sandbox VM.
+#
+# Langfuse moved to joule-sandbox-env (100.109.60.43) and the engine on this box
+# has to reach it. It cannot do so directly: the tailnet between these two hosts
+# permits port 22 and nothing else, which was measured rather than guessed — a
+# plain listener on an unrelated port is unreachable from here while ssh to the
+# same address works. That is a Tailscale ACL and it belongs to whoever
+# administers the tailnet, not to this machine.
+#
+# So the route is the one port that is open. This forwards the docker bridge
+# address on this host to Langfuse on the VM, and the bridge address rather than
+# 127.0.0.1 is the whole point: the engine runs in a container, and a tunnel on
+# the host's loopback is a tunnel that container cannot see.
+#
+# If the ACL is ever widened to allow tcp:3000 between these two hosts, this
+# unit should be deleted and trace_config pointed straight at
+# http://100.109.60.43:3000 — one hop fewer and one thing fewer to restart.
+
+[Unit]
+Description=SSH tunnel from this host to Langfuse on the sandbox VM
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+# ExitOnForwardFailure so a tunnel that cannot bind fails loudly at start
+# instead of running as a connection that forwards nothing. ServerAlive is what
+# notices a dead peer; without it the process survives a network drop and the
+# port stays open onto nothing, which reads as "Langfuse is down" for as long
+# as it takes somebody to check.
+# ControlPath=none and ControlMaster=no: ~/.ssh/config sets ControlMaster auto
+# for this host, so without these the tunnel hands its forward to whatever
+# shared mux another session (docker over ssh, say) happened to open, and then
+# EXITS successfully — leaving the port held by a process systemd does not
+# own and cannot restart. systemd then restarts this unit every RestartSec
+# forever against a port it can never bind. That is what 38,000 restarts of a
+# tunnel that was, confusingly, working looked like. This connection is its
+# own.
+ExecStart=/usr/bin/ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes \
+  -o ControlMaster=no -o ControlPath=none \
+  -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=accept-new \
+  -L 172.17.0.1:3100:100.109.60.43:3000 joule-sandbox-env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
