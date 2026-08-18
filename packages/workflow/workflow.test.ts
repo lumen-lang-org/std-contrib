@@ -7,7 +7,7 @@
 // from the node's id, so ordering and carry-forward can be read off the
 // answer. The clock is a counter, so durations are asserted exactly.
 
-import { MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, outcomeAsk, outcomeFrom, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
+import { MAX_ITEMS, MAX_NODES, StepResult, WalkCtx, WfEdge, WfGraph, WfNode, WfOut, WfStep, aggregated, asJsonList, casesOf, dig, emptyGraph, headerLines, emptyNode, fill, itemsOf, matches, outcomeAsk, outcomeFrom, refuse, startOf, switchBranch, walk, walkFrom } from "./workflow.ts";
 
 // A node with everything empty but what the test is about. Records are
 // immutable, so a fixture is built whole.
@@ -20,10 +20,24 @@ function node(id: string, kind: string): WfNode {
     url: kind == "HTTP" ? "https://example.com" : "",
     method: kind == "HTTP" ? "GET" : "", body: "",
     query: kind == "WEB_SEARCH" || kind == "KNOWLEDGE" ? "what changed" : "",
-    test: kind == "CONDITION" ? "contains" : "",
-    needle: kind == "CONDITION" ? "urgent" : "",
+    test: kind == "CONDITION" || kind == "FILTER" ? "contains" : "",
+    needle: kind == "CONDITION" || kind == "FILTER" ? "urgent" : "",
     subject: "", schedule: "", source: "",
+    amount: kind == "WAIT" || kind == "LOOP" ? "2" : "",
+    workflowId: kind == "SUB_WORKFLOW" ? "w1" : "",
   };
+  if (kind == "SET") {
+    let said: WfNode = {
+      id: n.id, type: n.type, name: n.name, x: n.x, y: n.y,
+      instruction: "the answer is {{prev}}", agentId: n.agentId,
+      serverId: n.serverId, tool: n.tool, args: n.args,
+      url: n.url, method: n.method, body: n.body,
+      query: n.query, test: n.test, needle: n.needle,
+      subject: n.subject, schedule: n.schedule, source: n.source,
+      amount: n.amount, workflowId: n.workflowId,
+    };
+    return said;
+  }
   return n;
 }
 
@@ -685,4 +699,261 @@ test("a mail step names somebody, a subject and a message, or it is refused", ()
     mailNode("m", "a@b.com", "Your report", ""), node("z", "END")],
     [edge("e1", "s", "m", ""), edge("e2", "m", "z", "")]);
   expect(refuse(empty).indexOf("no message") > 0);
+});
+
+// --- working through a list -------------------------------------------------
+
+/** A step that puts its node id in front of what it was given, so a body's
+ *  turns can be told apart by what each one answered. */
+function tag(n: WfNode, ctx: WalkCtx): StepResult {
+  let r: StepResult = { ok: true, output: n.id + ":" + ctx.prev, branch: "", error: "", input: ctx.prev };
+  return r;
+}
+
+/** The same node reading its list from somewhere named. */
+function withQuery(n: WfNode, said: string): WfNode {
+  let out: WfNode = {
+    id: n.id, type: n.type, name: n.name, x: n.x, y: n.y,
+    instruction: n.instruction, agentId: n.agentId,
+    serverId: n.serverId, tool: n.tool, args: n.args,
+    url: n.url, method: n.method, body: n.body,
+    query: said, test: n.test, needle: n.needle,
+    subject: n.subject, schedule: n.schedule, source: n.source,
+    amount: n.amount, workflowId: n.workflowId,
+  };
+  return out;
+}
+
+/** START -> MAP -> body -> MERGE -> (nothing). */
+function mapping(body: WfNode[], edges: WfEdge[]): WfGraph {
+  let nodes: WfNode[] = [node("s", "START"), withQuery(node("m", "MAP"), "{{input}}")];
+  let i: int = 0;
+  while (i < body.length) { nodes.push(body[i]); i = i + 1; }
+  nodes.push(node("g", "MERGE"));
+  let all: WfEdge[] = [edge("e1", "s", "m", "")];
+  let j: int = 0;
+  while (j < edges.length) { all.push(edges[j]); j = j + 1; }
+  return graphOf(nodes, all);
+}
+
+test("a map runs its body once per item and gathers what each turn answered", () => {
+  let g = mapping([node("a", "AGENT")],
+    [edge("e2", "m", "a", ""), edge("e3", "a", "g", "")]);
+  expect(refuse(g) == "");
+
+  let ran = walk(g, "[\"one\",\"two\",\"three\"]", tag, tick, deaf);
+  expect(ran.ok);
+  expect(ran.answer == "[\"a:one\",\"a:two\",\"a:three\"]");
+});
+
+test("a map over nothing runs its body no times and gathers an empty list", () => {
+  let g = mapping([node("a", "AGENT")],
+    [edge("e2", "m", "a", ""), edge("e3", "a", "g", "")]);
+  let ran = walk(g, "[]", tag, tick, deaf);
+  expect(ran.ok);
+  expect(ran.answer == "[]");
+  // The MAP and the MERGE are both visited; the body is not.
+  let seen: string[] = [];
+  let i: int = 0;
+  while (i < ran.steps.length) { seen.push(ran.steps[i].nodeId); i = i + 1; }
+  expect(seen.join(",") == "s,m,g");
+});
+
+test("what a turn produced stays in the turn, and the gathered list carries on", () => {
+  let g = graphOf(
+    [node("s", "START"), withQuery(node("m", "MAP"), "{{input}}"), node("a", "AGENT"),
+     node("g", "MERGE"), node("after", "LLM")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "a", ""), edge("e3", "a", "g", ""),
+     edge("e4", "g", "after", "")]);
+  let ran = walk(g, "[\"x\",\"y\"]", tag, tick, deaf);
+  expect(ran.ok);
+  expect(ran.answer == "after:[\"a:x\",\"a:y\"]");
+});
+
+test("a loop runs its body a fixed number of times", () => {
+  let g = graphOf(
+    [node("s", "START"), node("l", "LOOP"), node("a", "AGENT"), node("g", "MERGE")],
+    [edge("e1", "s", "l", ""), edge("e2", "l", "a", ""), edge("e3", "a", "g", "")]);
+  expect(refuse(g) == "");
+  let ran = walk(g, "go", tag, tick, deaf);
+  expect(ran.ok);
+  expect(ran.answer == "[\"a:1\",\"a:2\"]");
+});
+
+test("a repeat without a merge, and a merge without a repeat, are both refused", () => {
+  let orphanMap = graphOf(
+    [node("s", "START"), node("m", "MAP"), node("a", "AGENT")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "a", "")]);
+  expect(refuse(orphanMap).indexOf("MERGE") >= 0);
+
+  let orphanMerge = graphOf(
+    [node("s", "START"), node("a", "AGENT"), node("g", "MERGE")],
+    [edge("e1", "s", "a", ""), edge("e2", "a", "g", "")]);
+  expect(refuse(orphanMerge).indexOf("list") >= 0);
+});
+
+test("a repeat may not be drawn inside another repeat", () => {
+  let nested = graphOf(
+    [node("s", "START"), node("m", "MAP"), node("m2", "MAP"), node("a", "AGENT"),
+     node("g2", "MERGE"), node("g", "MERGE")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "m2", ""), edge("e3", "m2", "a", ""),
+     edge("e4", "a", "g2", ""), edge("e5", "g2", "g", "")]);
+  expect(refuse(nested).indexOf("repeat") >= 0);
+});
+
+test("a list longer than a step may take stops the run rather than working through it", () => {
+  let g = mapping([node("a", "AGENT")],
+    [edge("e2", "m", "a", ""), edge("e3", "a", "g", "")]);
+  let many = "";
+  let i: int = 0;
+  while (i <= MAX_ITEMS) {
+    if (i > 0) { many = many + "\n"; }
+    many = many + `${i}`;
+    i = i + 1;
+  }
+  let ran = walk(g, many, tag, tick, deaf);
+  expect(!ran.ok);
+  expect(ran.error.indexOf("items") >= 0);
+});
+
+// --- a way out of a failure -------------------------------------------------
+
+/** A step that fails when it is the node called "boom". */
+function brittle(n: WfNode, ctx: WalkCtx): StepResult {
+  if (n.id == "boom") {
+    let no: StepResult = { ok: false, output: "", branch: "", error: "the provider said no", input: ctx.prev };
+    return no;
+  }
+  return tag(n, ctx);
+}
+
+test("a failure with nowhere to go ends the run, and the trail keeps the reason", () => {
+  let g = graphOf(
+    [node("s", "START"), node("boom", "AGENT"), node("after", "LLM")],
+    [edge("e1", "s", "boom", ""), edge("e2", "boom", "after", "")]);
+  let ran = walk(g, "go", brittle, tick, deaf);
+  expect(!ran.ok);
+  expect(ran.error.indexOf("the provider said no") >= 0);
+  expect(ran.steps[ran.steps.length - 1].status == "FAILED");
+});
+
+test("a failure takes the error edge when one is drawn, and the run carries on", () => {
+  let g = graphOf(
+    [node("s", "START"), node("boom", "AGENT"), node("after", "LLM"), node("rescue", "LLM")],
+    [edge("e1", "s", "boom", ""), edge("e2", "boom", "after", ""),
+     edge("e3", "boom", "rescue", "error")]);
+  expect(refuse(g) == "");
+
+  let ran = walk(g, "go", brittle, tick, deaf);
+  expect(ran.ok);
+  // The reason is what the recovery step was handed.
+  expect(ran.answer == "rescue:the provider said no");
+  // And the step that failed is still recorded as having failed.
+  expect(ran.steps[1].status == "FAILED");
+});
+
+test("an error edge may leave any step, but nothing leaves an entry by one", () => {
+  let fromEntry = graphOf(
+    [node("s", "START"), node("a", "AGENT"), node("r", "LLM")],
+    [edge("e1", "s", "a", ""), edge("e2", "s", "r", "error")]);
+  expect(refuse(fromEntry) != "");
+});
+
+// --- the steps a runner performs -------------------------------------------
+
+test("what a filter, an aggregate and a wait are refused for", () => {
+  let noNeedle = node("f", "FILTER");
+  let blank: WfNode = {
+    id: noNeedle.id, type: noNeedle.type, name: "", x: 0.0, y: 0.0,
+    instruction: "", agentId: "", serverId: "", tool: "", args: "",
+    url: "", method: "", body: "", query: "", test: "contains", needle: "",
+    subject: "", schedule: "", source: "",
+  };
+  let g = graphOf([node("s", "START"), blank], [edge("e1", "s", "f", "")]);
+  expect(refuse(g).indexOf("look for") >= 0);
+
+  let badOp: WfNode = {
+    id: "ag", type: "AGGREGATE", name: "", x: 0.0, y: 0.0,
+    instruction: "", agentId: "", serverId: "", tool: "", args: "",
+    url: "", method: "", body: "", query: "", test: "", needle: "",
+    subject: "", schedule: "", source: "", op: "average",
+  };
+  let g2 = graphOf([node("s", "START"), badOp], [edge("e1", "s", "ag", "")]);
+  expect(refuse(g2).indexOf("average") >= 0);
+
+  let longWait: WfNode = {
+    id: "w", type: "WAIT", name: "", x: 0.0, y: 0.0,
+    instruction: "", agentId: "", serverId: "", tool: "", args: "",
+    url: "", method: "", body: "", query: "", test: "", needle: "",
+    subject: "", schedule: "", source: "", amount: "600",
+  };
+  let g3 = graphOf([node("s", "START"), longWait], [edge("e1", "s", "w", "")]);
+  expect(refuse(g3).indexOf("schedule") >= 0);
+});
+
+test("a set step, a sub-workflow and a wait are all a graph may hold", () => {
+  let g = graphOf(
+    [node("s", "START"), node("v", "SET"), node("w", "WAIT"), node("sub", "SUB_WORKFLOW")],
+    [edge("e1", "s", "v", ""), edge("e2", "v", "w", ""), edge("e3", "w", "sub", "")]);
+  expect(refuse(g) == "");
+});
+
+// --- reading and reducing a list -------------------------------------------
+test("a JSON array reads as its elements, a plain list as its lines", () => {
+  expect(itemsOf("[\"a\",\"b\"]").join("|") == "a|b");
+  expect(itemsOf("[{\"n\":1},{\"n\":2}]").join("|") == "{\"n\":1}|{\"n\":2}");
+  expect(itemsOf("one\n\ntwo\n").join("|") == "one|two");
+  expect(itemsOf("  ").length == 0);
+  expect(itemsOf("[]").length == 0);
+  expect(itemsOf("[\"a, b\",\"c\"]").join("|") == "a, b|c");
+});
+
+test("a list goes back out as JSON a later step can read", () => {
+  let one: string[] = ["a", "b"];
+  expect(asJsonList(one) == "[\"a\",\"b\"]");
+  let none: string[] = [];
+  expect(asJsonList(none) == "[]");
+});
+
+test("filtering reads a value the way a condition does", () => {
+  expect(matches("contains", "urgent", "VERY URGENT"));
+  expect(!matches("lacks", "urgent", "very urgent"));
+  expect(matches("equals", " yes ", "yes"));
+  expect(!matches("nonsense", "a", "a"));
+});
+
+test("a list reduces to one value, and joins when nobody said how", () => {
+  let three: string[] = ["2", "3", "4"];
+  expect(aggregated("count", three) == "3");
+  expect(aggregated("sum", three) == "9");
+  expect(aggregated("first", three) == "2");
+  expect(aggregated("last", three) == "4");
+  expect(aggregated("join", three) == "2\n3\n4");
+  expect(aggregated("", three) == "2\n3\n4");
+  let none: string[] = [];
+  expect(aggregated("first", none) == "");
+});
+
+test("a map with nothing named works through what the step before it answered", () => {
+  let g = graphOf(
+    [node("s", "START"), node("m", "MAP"), node("a", "AGENT"), node("g", "MERGE")],
+    [edge("e1", "s", "m", ""), edge("e2", "m", "a", ""), edge("e3", "a", "g", "")]);
+  // The START step answers "s:(...)", and a map with no query reads that.
+  let ran = walk(g, "ignored", echo, tick, deaf);
+  expect(ran.ok);
+  expect(ran.answer == "[\"a(s(ignored))\"]");
+});
+
+test("every turn of a body is written into the trail, in order", () => {
+  let g = mapping([node("a", "AGENT")],
+    [edge("e2", "m", "a", ""), edge("e3", "a", "g", "")]);
+  let ran = walk(g, "[\"one\",\"two\"]", tag, tick, deaf);
+  expect(ran.ok);
+  let seen: string[] = [];
+  let i: int = 0;
+  while (i < ran.steps.length) { seen.push(ran.steps[i].nodeId); i = i + 1; }
+  // START, the map, the body once per item, then the gather.
+  expect(seen.join(",") == "s,m,a,a,g");
+  expect(ran.steps[2].output == "a:one");
+  expect(ran.steps[3].output == "a:two");
 });

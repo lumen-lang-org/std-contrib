@@ -121,6 +121,18 @@ export type WfNode = {
   // graphs saved before the list existed keep their attachment; never
   // written. Optional for the reason `source` is.
   secretId?: string,
+  // WAIT: how many seconds to pause. LOOP: how many times to run the body.
+  // One field for both because a node is one kind at a time, and two spellings
+  // of "how many" would only be two things to keep in step. Optional, for the
+  // reason `source` is.
+  amount?: string,
+  // AGGREGATE: what to do with the list — "join", "count", "sum", "first" or
+  // "last". Optional, for the reason `source` is.
+  op?: string,
+  // SUB_WORKFLOW: which workflow to run. The id of a row, never a graph
+  // inline: a workflow that carried a copy of another would be a second place
+  // to edit it. Optional, for the reason `source` is.
+  workflowId?: string,
 };
 
 // An edge. `when` is "" for the ordinary case; a CONDITION's outgoing edges
@@ -204,6 +216,10 @@ export type Walked = {
   // what a resume needs and the next message from that chat continues from
   // this node's edge, with the reply as {{prev}}.
   waitingAt?: string,
+  // How many nodes this walk visited. A MAP body reports it so the walk that
+  // ran it can spend the run's budget rather than each iteration getting a
+  // fresh one. Optional: nothing outside the walker reads it.
+  visits?: int,
 };
 
 // What the walk carries between nodes. `outputs` is every finished node's
@@ -230,7 +246,186 @@ export const MAX_TEXT: int = 4000;
 // is a process this deployment pays for.
 export const MAX_SOURCE: int = 16384;
 
-const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY", "TELEGRAM_ASK", "EMAIL"];
+const KNOWN = ["START", "END", "AGENT", "LLM", "CONDITION", "WEB_SEARCH", "KNOWLEDGE", "MCP", "HTTP", "SCRIPT", "SWITCH", "TELEGRAM", "TELEGRAM_REPLY", "TELEGRAM_ASK", "EMAIL",
+  "SET", "WAIT", "FILTER", "AGGREGATE", "MAP", "LOOP", "MERGE", "SUB_WORKFLOW"];
+
+/** Whether this kind opens a body that a MERGE closes. */
+export function isRepeat(kind: string): bool {
+  return kind == "MAP" || kind == "LOOP";
+}
+
+// A list step runs a body once per item, and a run is a thing somebody waits
+// for. Both bounds are enforced in the walk, not hoped about.
+export const MAX_ITEMS: int = 50;
+export const MAX_VISITS: int = 240;
+// A pause a person can sit through. Longer than this is a schedule, not a
+// step, and a workflow that wanted one would hold an HTTP request open.
+export const MAX_WAIT_SECONDS: int = 60;
+
+/** Whether a JSON array's element ends here: at depth zero, outside a string. */
+function splitsHere(ch: string, depth: int, inside: bool): bool {
+  return ch == "," && depth == 0 && !inside;
+}
+
+/** The items in a piece of text.
+ *
+ *  A JSON array is read as its elements, each kept as the text it was written
+ *  as — a plain string unquoted, an object or a nested array whole, so a MAP
+ *  body can dig into `{{prev.name}}`. Anything else is read as lines, blanks
+ *  dropped, which is what a model that was asked for a list usually answers.
+ *
+ *  Hand-split rather than `JSON.parse<string[]>`: a list of objects is the
+ *  common case and a typed parse refuses it outright. */
+export function itemsOf(text: string): string[] {
+  let said = text.trim();
+  let out: string[] = [];
+  if (said.startsWith("[") && said.endsWith("]")) {
+    let body = said.slice(1, said.length - 1);
+    let depth: int = 0;
+    let inside = false;
+    let escaped = false;
+    let one = "";
+    let i: int = 0;
+    while (i < body.length) {
+      let ch = body.charAt(i);
+      if (escaped) {
+        escaped = false;
+        one = one + ch;
+      } else if (ch == "\\") {
+        escaped = true;
+        one = one + ch;
+      } else if (ch == "\"") {
+        inside = !inside;
+        one = one + ch;
+      } else if (!inside && (ch == "[" || ch == "{")) {
+        depth = depth + 1;
+        one = one + ch;
+      } else if (!inside && (ch == "]" || ch == "}")) {
+        depth = depth - 1;
+        one = one + ch;
+      } else if (splitsHere(ch, depth, inside)) {
+        if (one.trim() != "") { out.push(unquoted(one.trim())); }
+        one = "";
+      } else {
+        one = one + ch;
+      }
+      i = i + 1;
+    }
+    if (one.trim() != "") { out.push(unquoted(one.trim())); }
+    return out;
+  }
+  let lines = said.split("\n");
+  let n: int = 0;
+  while (n < lines.length) {
+    if (lines[n].trim() != "") { out.push(lines[n].trim()); }
+    n = n + 1;
+  }
+  return out;
+}
+
+/** A JSON string element as the text it holds; anything else untouched. */
+function unquoted(said: string): string {
+  if (!said.startsWith("\"") || !said.endsWith("\"") || said.length < 2) { return said; }
+  let inner = said.slice(1, said.length - 1);
+  let out = "";
+  let i: int = 0;
+  while (i < inner.length) {
+    let ch = inner.charAt(i);
+    if (ch == "\\" && i + 1 < inner.length) {
+      let next = inner.charAt(i + 1);
+      if (next == "n") { out = out + "\n"; } else if (next == "t") { out = out + "\t"; } else { out = out + next; }
+      i = i + 2;
+    } else {
+      out = out + ch;
+      i = i + 1;
+    }
+  }
+  return out;
+}
+
+/** The list, back as the JSON array a later step reads with `{{prev}}`. */
+export function asJsonList(items: string[]): string {
+  let out = "[";
+  let i: int = 0;
+  while (i < items.length) {
+    if (i > 0) { out = out + ","; }
+    out = out + JSON.stringify(items[i]);
+    i = i + 1;
+  }
+  return out + "]";
+}
+
+/** Whether a value passes a "contains", "equals" or "lacks" test.
+ *
+ *  The same reading a CONDITION gives, so a FILTER that keeps what a
+ *  condition would have let through cannot drift from it. */
+export function matches(how: string, needle: string, value: string): bool {
+  // `how`, not `test`: the compiler reads a parameter of that name as the
+  // test keyword. WfNode.test is the field; these are its values.
+  let has = value.toLowerCase().includes(needle.toLowerCase());
+  if (how == "contains") { return has; }
+  if (how == "lacks") { return !has; }
+  if (how == "equals") { return value.trim() == needle.trim(); }
+  return false;
+}
+
+/** A number read off a piece of text, or 0 when it says nothing numeric. */
+function numberIn(said: string): number {
+  // Read by hand rather than with parseFloat: this package is compiled with
+  // everything else, and pinning that function's result here changed what it
+  // answered somewhere across the tree.
+  let text = said.trim();
+  let negative = text.startsWith("-");
+  if (negative || text.startsWith("+")) { text = text.slice(1); }
+  let whole = "";
+  let frac = "";
+  let dotted = false;
+  let done = false;
+  let i: int = 0;
+  while (i < text.length && !done) {
+    let ch = text.charAt(i);
+    if (ch == "." && !dotted) {
+      dotted = true;
+    } else if (ch >= "0" && ch <= "9") {
+      if (dotted) { frac = frac + ch; } else { whole = whole + ch; }
+    } else {
+      done = true;
+    }
+    i = i + 1;
+  }
+  let units: number = whole == "" ? 0.0 : ((parseInt(whole, 10) ?? 0) + 0.0);
+  let value: number = units;
+  if (frac != "") {
+    let scale: number = 1.0;
+    let f: int = 0;
+    while (f < frac.length) { scale = scale * 10.0; f = f + 1; }
+    let below: number = (parseInt(frac, 10) ?? 0) + 0.0;
+    value = value + below / scale;
+  }
+  return negative ? 0.0 - value : value;
+}
+
+/** A list reduced to one value.
+ *
+ *  "join" is the default because it is what somebody means by "put it back
+ *  together"; the rest are the questions a list gets asked. An unknown
+ *  operation joins rather than failing — the graph is checked at write time,
+ *  and a run is a bad place to learn about a typo. */
+export function aggregated(op: string, items: string[]): string {
+  if (op == "count") { return `${items.length}`; }
+  if (op == "first") { return items.length == 0 ? "" : items[0]; }
+  if (op == "last") { return items.length == 0 ? "" : items[items.length - 1]; }
+  if (op == "sum") {
+    let total: number = 0.0;
+    let i: int = 0;
+    while (i < items.length) {
+      total = total + numberIn(items[i]);
+      i = i + 1;
+    }
+    return `${total}`;
+  }
+  return items.join("\n");
+}
 
 /** Whether this is where a walk begins.
  *
@@ -253,6 +448,9 @@ export function isEntry(kind: string): bool {
 // What an unmatched value takes. Not a case somebody writes: it is the way
 // out that exists whether or not they thought about it.
 export const SWITCH_ELSE: string = "else";
+// The label on the edge a failure takes. Named rather than spelled twice:
+// the walk follows it and `refuse` allows it, and they cannot disagree.
+export const ERROR_EDGE: string = "error";
 // A switch with fifty ways out is a table, and a drawing is the wrong place
 // for a table.
 export const MAX_CASES: int = 12;
@@ -620,6 +818,39 @@ function refuseNode(node: WfNode): string {
     }
     if (node.needle == "") { return label + " needs something to look for"; }
   }
+  if (node.type == "FILTER") {
+    if (node.test != "contains" && node.test != "equals" && node.test != "lacks") {
+      return label + ": a filter keeps what \"contains\", \"equals\" or \"lacks\" something";
+    }
+    if (node.needle == "") { return label + " needs something to look for"; }
+  }
+  if (node.type == "SET" && node.instruction.trim() == "") {
+    return label + " has nothing to set — write the value, and {{prev}} for what came before";
+  }
+  if (node.type == "AGGREGATE") {
+    let how = (node.op ?? "").trim();
+    if (how != "" && how != "join" && how != "count" && how != "sum" && how != "first" && how != "last") {
+      return label + ": \"" + how + "\" is not something to do with a list — join, count, sum, first or last";
+    }
+  }
+  if (node.type == "WAIT") {
+    let held = parseInt((node.amount ?? "").trim(), 10) ?? 0;
+    if (held < 1) { return label + " needs to know how many seconds to wait"; }
+    if (held > MAX_WAIT_SECONDS) {
+      return label + " waits " + `${held}` + " seconds — the longest a step may pause is "
+        + `${MAX_WAIT_SECONDS}` + ", and longer than that is a schedule rather than a step";
+    }
+  }
+  if (node.type == "LOOP") {
+    let turns = parseInt((node.amount ?? "").trim(), 10) ?? 0;
+    if (turns < 1) { return label + " needs to know how many times to run"; }
+    if (turns > MAX_ITEMS) {
+      return label + " would run " + `${turns}` + " times — the most a repeat may run is " + `${MAX_ITEMS}`;
+    }
+  }
+  if (node.type == "SUB_WORKFLOW" && (node.workflowId ?? "").trim() == "") {
+    return label + " needs to know which workflow to run";
+  }
   return "";
 }
 
@@ -711,6 +942,26 @@ function refuseRefs(graph: WfGraph, node: WfNode): string {
   return "";
 }
 
+/** Whether a repeat opens somewhere before this MERGE. Walks back along the
+ *  plain edges, which is the only shape a body has. */
+function opensBefore(graph: WfGraph, id: string): bool {
+  let at = id;
+  let hops: int = 0;
+  while (hops <= MAX_NODES) {
+    let back = "";
+    let i: int = 0;
+    while (i < graph.edges.length) {
+      if (graph.edges[i].to == at && graph.edges[i].when == "") { back = graph.edges[i].from; }
+      i = i + 1;
+    }
+    if (back == "") { return false; }
+    if (isRepeat(nodeAt(graph, back).type)) { return true; }
+    at = back;
+    hops = hops + 1;
+  }
+  return false;
+}
+
 /** Everything wrong with a graph somebody just described, or "".
  *
  *  Run where it can still be fixed — on every write — rather than at fire
@@ -771,6 +1022,35 @@ export function refuse(graph: WfGraph): string {
     }
   }
 
+  // A repeat and its MERGE are one construct drawn as two nodes, so each is
+  // refused without the other, and a body may not open a second repeat: the
+  // walk gathers one list at a time and nesting would have no place to put
+  // the inner one.
+  let g: int = 0;
+  while (g < graph.nodes.length) {
+    let one = graph.nodes[g];
+    let named = one.name == "" ? one.id : one.name;
+    if (isRepeat(one.type)) {
+      let closing = mergeAfter(graph, one.id);
+      if (closing == "") {
+        return named + " has no MERGE after it, so what it works through has nowhere to gather";
+      }
+      let inside = nextId(graph, one.id, "");
+      let hops: int = 0;
+      while (inside != "" && inside != closing && hops <= MAX_NODES) {
+        if (isRepeat(nodeAt(graph, inside).type)) {
+          return named + " repeats around another repeat, and one list at a time is all this gathers";
+        }
+        inside = nextId(graph, inside, "");
+        hops = hops + 1;
+      }
+    }
+    if (one.type == "MERGE" && !opensBefore(graph, one.id)) {
+      return named + " gathers results, but nothing before it works through a list";
+    }
+    g = g + 1;
+  }
+
   let e: int = 0;
   while (e < graph.edges.length) {
     let edge = graph.edges[e];
@@ -791,11 +1071,14 @@ export function refuse(graph: WfGraph): string {
     // branches on its cases. Anything else with a labelled edge is a drawing
     // mistake, and the sentence names what may branch.
     let branches = from.type == "CONDITION" || from.type == "SWITCH" || casesOf(from).length > 0;
-    if (edge.when != "" && !branches) {
+    // Any step may be drawn a way out of a failure, so the error edge is not
+    // branching in the sense the rest of this is: it is the road not taken.
+    if (edge.when == ERROR_EDGE && !isEntry(from.type) && from.type != "MERGE") { }
+    else if (edge.when != "" && !branches) {
       return "only a CONDITION, a SWITCH, or a step with outcomes branches — the edge out of "
         + (from.name == "" ? from.id : from.name) + " cannot carry \"" + edge.when + "\"";
     }
-    if (edge.when != "" && from.type != "CONDITION" && from.type != "SWITCH") {
+    if (edge.when != "" && edge.when != ERROR_EDGE && from.type != "CONDITION" && from.type != "SWITCH") {
       // Its outcomes, or else. A label that is neither is an edge left behind
       // by an outcome somebody renamed, and it would never be taken.
       let known = edge.when == SWITCH_ELSE;
@@ -1157,7 +1440,7 @@ export function walk(graph: WfGraph, input: string,
   if (start.id == "") { return failedWalk("this workflow has no START step", steps); }
   let outs: WfOut[] = [];
   let ctx: WalkCtx = { input: input, prev: input, outputs: outs };
-  return walkOn(graph, input, start, ctx, steps, step, clock, watch);
+  return walkOn(graph, input, start, ctx, steps, step, clock, watch, "", MAX_VISITS);
 }
 
 /** The walk, resumed past an ASK step: the person answered, and their reply
@@ -1190,13 +1473,58 @@ export function walkFrom(graph: WfGraph, input: string, askId: string, reply: st
   let at = nodeAt(graph, to);
   if (at.id == "") { return failedWalk("the step after the question is gone — the workflow changed while waiting", steps); }
   let ctx: WalkCtx = { input: input, prev: reply, outputs: outs };
-  return walkOn(graph, input, at, ctx, steps, step, clock, watch);
+  return walkOn(graph, input, at, ctx, steps, step, clock, watch, "", MAX_VISITS);
+}
+
+/** The MERGE that closes a repeat, found by following the plain edges out of
+ *  it. "" when nothing after it merges, which `refuse` already rejected. */
+function mergeAfter(graph: WfGraph, from: string): string {
+  let at = nextId(graph, from, "");
+  let hops: int = 0;
+  while (at != "" && hops <= MAX_NODES) {
+    if (nodeAt(graph, at).type == "MERGE") { return at; }
+    at = nextId(graph, at, "");
+    hops = hops + 1;
+  }
+  return "";
+}
+
+/** What a LOOP iterates: its turns, numbered from one, as a list. A loop is a
+ *  map over a count, so it walks the same body machinery. */
+function turnsOf(node: WfNode): string[] {
+  let want = parseInt((node.amount ?? "").trim(), 10) ?? 0;
+  let out: string[] = [];
+  let i: int = 1;
+  while (i <= want) {
+    out.push(`${i}`);
+    i = i + 1;
+  }
+  return out;
+}
+
+/** One visit, written down. */
+function record(at: WfNode, did: StepResult, prev: string, took: number): WfStep {
+  let one: WfStep = {
+    nodeId: at.id, type: at.type,
+    status: did.ok ? "COMPLETED" : "FAILED",
+    ms: took,
+    input: did.input == "" ? prev : did.input,
+    output: did.output, error: did.error,
+    threadId: did.threadId ?? "",
+  };
+  return one;
+}
+
+function stepDone(output: string): StepResult {
+  let r: StepResult = { ok: true, output: output, branch: "", error: "", input: "" };
+  return r;
 }
 
 function walkOn(graph: WfGraph, input: string, first: WfNode, ctx0: WalkCtx, steps: WfStep[],
                 step: (node: WfNode, ctx: WalkCtx) => StepResult,
                 clock: () => number,
-                watch: (steps: WfStep[], at: WfNode) => void): Walked {
+                watch: (steps: WfStep[], at: WfNode) => void,
+                stopAt: string, budget: int): Walked {
   // A list of our own: WalkCtx is a record and records are immutable, so the
   // walk grows this and rebuilds the record around it each step.
   let outs: WfOut[] = [];
@@ -1205,38 +1533,112 @@ function walkOn(graph: WfGraph, input: string, first: WfNode, ctx0: WalkCtx, ste
   let ctx: WalkCtx = { input: ctx0.input, prev: ctx0.prev, outputs: outs };
   let at = first;
   let visited: int = 0;
-  while (visited <= MAX_NODES) {
+  let last = ctx0.prev;
+  while (visited < budget) {
+    if (at.id == stopAt && stopAt != "") {
+      let upto: Walked = { ok: true, answer: last, error: "", steps: steps, visits: visited };
+      return upto;
+    }
     visited = visited + 1;
+    // A repeat is control flow, not work: the walker runs its body once per
+    // item rather than asking the caller what the node does.
+    if (isRepeat(at.type)) {
+      let listed = at.type == "LOOP" ? turnsOf(at)
+        : itemsOf(at.query.trim() == "" ? ctx.prev : fill(at.query, ctx));
+      let opened = at;
+      watch(steps, opened);
+      let t0 = clock();
+      steps.push(record(opened, stepDone(asJsonList(listed)), ctx.prev, clock() - t0));
+      watch(steps, emptyNode());
+      if (listed.length > MAX_ITEMS) {
+        return failedWalk((opened.name == "" ? opened.id : opened.name) + " has "
+          + `${listed.length}` + " items to work through — the most one step may take is "
+          + `${MAX_ITEMS}`, steps);
+      }
+      let closing = mergeAfter(graph, opened.id);
+      if (closing == "") {
+        return failedWalk((opened.name == "" ? opened.id : opened.name)
+          + " has no MERGE after it, so its results have nowhere to gather", steps);
+      }
+      let bodyStart = nextId(graph, opened.id, "");
+      let collected: string[] = [];
+      let i: int = 0;
+      while (i < listed.length) {
+        if (bodyStart == "" || bodyStart == closing) {
+          collected.push(listed[i]);
+        } else {
+          // Each turn gets the outputs of everything before the repeat and
+          // its own item as {{prev}}. What a turn produced stays in the turn.
+          let turnCtx: WalkCtx = { input: input, prev: listed[i], outputs: outs };
+          // Its own list, copied back afterwards. A list handed to a call does
+          // not carry what the call pushed onto it, and a turn that left no
+          // trail is a run nobody can read.
+          let turnSteps: WfStep[] = [];
+          let ran = walkOn(graph, input, nodeAt(graph, bodyStart), turnCtx, turnSteps, step, clock,
+            watch, closing, budget - visited);
+          let k: int = 0;
+          while (k < ran.steps.length) { steps.push(ran.steps[k]); k = k + 1; }
+          visited = visited + (ran.visits ?? 0);
+          if (!ran.ok) { return failedWalk(ran.error, steps); }
+          if ((ran.waitingAt ?? "") != "") {
+            return failedWalk("a step inside " + (opened.name == "" ? opened.id : opened.name)
+              + " stopped to ask a question, and a repeat cannot wait for an answer", steps);
+          }
+          collected.push(ran.answer);
+        }
+        i = i + 1;
+      }
+      let merged = nodeAt(graph, closing);
+      watch(steps, merged);
+      let m0 = clock();
+      let gathered = asJsonList(collected);
+      steps.push(record(merged, stepDone(gathered), ctx.prev, clock() - m0));
+      watch(steps, emptyNode());
+      let mine: WfOut = { nodeId: merged.id, output: gathered };
+      outs.push(mine);
+      ctx = { input: input, prev: gathered, outputs: outs };
+      last = gathered;
+      let onward = nextId(graph, merged.id, "");
+      if (onward == "") {
+        let done: Walked = { ok: true, answer: gathered, error: "", steps: steps, visits: visited };
+        return done;
+      }
+      at = nodeAt(graph, onward);
+      if (at.id == "") { return failedWalk("an edge points at a step that does not exist: " + onward, steps); }
+      continue;
+    }
     watch(steps, at);
     let t0 = clock();
     let did = step(at, ctx);
     let took = clock() - t0;
-    let one: WfStep = {
-      nodeId: at.id, type: at.type,
-      status: did.ok ? "COMPLETED" : "FAILED",
-      ms: took,
-      // The step's own account of what it was given, or the chain's if it
-      // did not say. See StepResult.
-      input: did.input == "" ? ctx.prev : did.input,
-      output: did.output, error: did.error,
-      threadId: did.threadId ?? "",
-    };
-    steps.push(one);
+    steps.push(record(at, did, ctx.prev, took));
     watch(steps, emptyNode());
     if (!did.ok) {
-      return failedWalk((at.name == "" ? at.type : at.name) + ": " + did.error, steps);
+      // A step somebody drew a way out of does not end the run: the failure
+      // travels down the edge labelled "error" as {{prev}}, which is the only
+      // thing a recovery step has to work with.
+      let rescue = nextId(graph, at.id, ERROR_EDGE);
+      if (rescue == "") {
+        return failedWalk((at.name == "" ? at.type : at.name) + ": " + did.error, steps);
+      }
+      ctx = { input: input, prev: did.error, outputs: outs };
+      last = did.error;
+      at = nodeAt(graph, rescue);
+      if (at.id == "") { return failedWalk("an edge points at a step that does not exist: " + rescue, steps); }
+      continue;
     }
     let out: WfOut = { nodeId: at.id, output: did.output };
     outs.push(out);
     ctx = { input: input, prev: did.output, outputs: outs };
+    last = did.output;
     if (did.suspend ?? false) {
       // Stopped to ask a person. Successful as far as it went; the runner
       // stores the context and the next message resumes past this node.
-      let paused: Walked = { ok: true, answer: did.output, error: "", steps: steps, waitingAt: at.id };
+      let paused: Walked = { ok: true, answer: did.output, error: "", steps: steps, waitingAt: at.id, visits: visited };
       return paused;
     }
     if (at.type == "END") {
-      let done: Walked = { ok: true, answer: did.output, error: "", steps: steps };
+      let done: Walked = { ok: true, answer: did.output, error: "", steps: steps, visits: visited };
       return done;
     }
     let to = nextId(graph, at.id, did.branch);
@@ -1251,11 +1653,11 @@ function walkOn(graph: WfGraph, input: string, first: WfNode, ctx0: WalkCtx, ste
       // done", and it is tested. The fix for the outcome case belongs in the
       // editor, which knows an edge is about to be orphaned and can relabel
       // it, rather than here, where it would break drawings that are correct.
-      let done: Walked = { ok: true, answer: did.output, error: "", steps: steps };
+      let done: Walked = { ok: true, answer: did.output, error: "", steps: steps, visits: visited };
       return done;
     }
     at = nodeAt(graph, to);
     if (at.id == "") { return failedWalk("an edge points at a step that does not exist: " + to, steps); }
   }
-  return failedWalk("the walk did not finish within " + `${MAX_NODES}` + " steps", steps);
+  return failedWalk("the walk did not finish within " + `${budget}` + " steps", steps);
 }

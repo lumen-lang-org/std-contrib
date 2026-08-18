@@ -2,8 +2,8 @@ import { Db } from "../plume/driver.ts";
 import { existsById, findById, persist } from "../plume/plume.ts";
 import { MailAsk } from "../mail/mail.ts";
 import { sendMail } from "./mail-send.ts";
-import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, casesOf, emptyNode, fill, headerLines, outcomeAsk, outcomeFrom, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
-import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping } from "./workflow-store.ts";
+import { StepResult, WalkCtx, WfNode, WfOut, WfStep, Walked, aggregated, asJsonList, casesOf, emptyNode, fill, headerLines, itemsOf, matches, outcomeAsk, outcomeFrom, secretIds, switchBranch, walk, walkFrom } from "../workflow/workflow.ts";
+import { WorkflowRow, WorkflowRunRow, parseGraph, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
 import { AgentRow, McpServerRow, ModelConfigRow, ModelRow, agentsMapping, configAndModel, mcpServersMapping, modelConfigsMapping, modelsMapping } from "./schema.ts";
 import { credentialFor, destinationOf } from "./credentials.ts";
 import { SecretService } from "./routes/identity/secrets/secret.service.ts";
@@ -54,7 +54,18 @@ export type WorkflowAsk = {
   threadId?: string,
   botId?: string,
   chatId?: string,
+  // How many workflows deep this run already is. A sub-workflow raises it, and
+  // MAX_DEPTH is what stops two workflows that call each other. Optional: a
+  // run asked for from outside starts at the top and says nothing.
+  depth?: int,
 };
+
+// A workflow may call a workflow, but not forever. Three is a parent, a child
+// and a grandchild, which is as far as a drawing stays readable.
+const MAX_DEPTH: int = 3;
+// A pause is a step, and a step holds the run open. The graph refuses more
+// than MAX_WAIT_SECONDS; this is the same bound in the place that sleeps.
+const MAX_WAIT_MS: int = 60000;
 
 export type WorkflowDone = {
   ok: bool,
@@ -474,6 +485,53 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
         return inThread(withInput(stepFailed(answered.run.error), said), threadId);
       }
       return inThread(withInput(outcomeStep(node, stepOk(answered.text)), said), threadId);
+    }
+    if (node.type == "SET") {
+      let said = fill(node.instruction, ctx);
+      return withInput(stepOk(said), said);
+    }
+    if (node.type == "WAIT") {
+      let held = parseInt((node.amount ?? "").trim(), 10) ?? 0;
+      if (held < 1) { return stepFailed("this step does not say how long to wait"); }
+      let ms = held * 1000;
+      process.sleep(ms > MAX_WAIT_MS ? MAX_WAIT_MS : ms);
+      return withInput(stepOk(ctx.prev), ctx.prev);
+    }
+    if (node.type == "FILTER") {
+      let listed = node.query.trim() == "" ? ctx.prev : fill(node.query, ctx);
+      let all = itemsOf(listed);
+      let want = fill(node.needle, ctx);
+      let kept: string[] = [];
+      let i: int = 0;
+      while (i < all.length) {
+        if (matches(node.test, want, all[i])) { kept.push(all[i]); }
+        i = i + 1;
+      }
+      return withInput(stepOk(asJsonList(kept)), listed);
+    }
+    if (node.type == "AGGREGATE") {
+      let listed = node.query.trim() == "" ? ctx.prev : fill(node.query, ctx);
+      return withInput(stepOk(aggregated((node.op ?? "").trim(), itemsOf(listed))), listed);
+    }
+    if (node.type == "SUB_WORKFLOW") {
+      let wanted = (node.workflowId ?? "").trim();
+      if (wanted == row.id) { return stepFailed("a workflow cannot run itself"); }
+      let deep = (ask.depth ?? 0) + 1;
+      if (deep > MAX_DEPTH) {
+        return stepFailed("workflows are nested " + `${deep}` + " deep — the most is " + `${MAX_DEPTH}`);
+      }
+      let doc = findById(db, workflowsMapping(), wanted);
+      if (doc == "") { return stepFailed("the workflow this step runs is gone: " + wanted); }
+      let inner: WorkflowRow = JSON.parse<WorkflowRow>(doc);
+      if (inner.owner != row.owner) { return stepFailed("that workflow belongs to somebody else"); }
+      let said = node.instruction.trim() == "" ? ctx.prev : fill(node.instruction, ctx);
+      let below: WorkflowAsk = {
+        owner: ask.owner, input: said, master: ask.master, nowMs: ask.nowMs,
+        threadId: threadId, botId: ask.botId ?? "", chatId: ask.chatId ?? "", depth: deep,
+      };
+      let ran = runWorkflow(db, inner, below);
+      if (!ran.ok) { return withInput(stepFailed(inner.name + ": " + ran.error), said); }
+      return withInput(stepOk(ran.answer), said);
     }
     return stepFailed("\"" + node.type + "\" is not a step this deployment can run");
   };
