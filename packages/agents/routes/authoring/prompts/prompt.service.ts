@@ -1,9 +1,41 @@
 import { Db } from "../../../../plume/driver.ts";
-import { OWNED_PROMPT, ownRow } from "../../../owner.ts";
+import { OWNED_PROMPT, ownRow, ownedRowIds } from "../../../owner.ts";
 import { Outcome, produced, refusing } from "../../../../rest/server.ts";
-import { PromptBody } from "./dtos/prompt-body.dto.ts";
+import { PromptBody, PromptRecord } from "./dtos/prompt-body.dto.ts";
 import { Prompt } from "./entities/prompt.entity.ts";
 import { PromptRepository } from "./prompt.repository.ts";
+
+/** The deployment's prompt text stays the operator's.
+ *
+ *  A deployment prompt is listed to everybody — the name is how an agent
+ *  picker and the canvas name it — but its body is the deployment's own
+ *  writing, and serving it to any signed-in caller published every system
+ *  prompt on the box. Rows the caller wrote come through whole; the
+ *  deployment's come through named and emptied. Filing as the deployment
+ *  (which the console grants operators alone) reads everything in full. */
+function withheldBodies(db: Db, raw: string, owner: string): string {
+  if (owner == "") {
+    return raw;
+  }
+  let rows: PromptRecord[] = JSON.parse<PromptRecord[]>(raw);
+  let held = ownedRowIds(db, OWNED_PROMPT, owner);
+  let out: PromptRecord[] = [];
+  let i: int = 0;
+  while (i < rows.length) {
+    let each = rows[i];
+    if (held.includes(each.id)) {
+      out.push(each);
+    } else {
+      let named: PromptRecord = {
+        id: each.id, promptName: each.promptName, version: each.version,
+        body: "", createdAt: each.createdAt,
+      };
+      out.push(named);
+    }
+    i = i + 1;
+  }
+  return JSON.stringify(out);
+}
 
 export class PromptService {
   repository: PromptRepository;
@@ -14,9 +46,9 @@ export class PromptService {
 
   listing(owner: string, name: string, onlyMine: bool): string {
     if (name == "") {
-      return this.repository.all(owner, onlyMine);
+      return withheldBodies(this.repository.database, this.repository.all(owner, onlyMine), owner);
     }
-    return this.repository.named(owner, name);
+    return withheldBodies(this.repository.database, this.repository.named(owner, name), owner);
   }
 
   create(owner: string, sent: string): Outcome {

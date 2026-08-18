@@ -118,6 +118,24 @@ export function myRowsClause(db: Db, kind: string, at: int): string {
     + " AND owner = " + placeholderAt(db, at) + ")";
 }
 
+/** The ids of this kind's rows this owner holds, in one query — for a listing
+ *  that needs to tell its own rows from the deployment's without asking per
+ *  row. */
+export function ownedRowIds(db: Db, kind: string, owner: string): string[] {
+  let out: string[] = [];
+  let sql = "SELECT row_id FROM row_owners WHERE kind = '" + kind + "'"
+    + " AND owner = " + placeholderAt(db, 1);
+  if (!db.query(sql, [owner])) {
+    return out;
+  }
+  let i: int = 0;
+  while (i < db.rows()) {
+    out.push(db.value(i, 0));
+    i = i + 1;
+  }
+  return out;
+}
+
 export function ownerOfRow(db: Db, kind: string, id: string): string {
   let sql = "SELECT owner FROM row_owners WHERE kind = '" + kind + "'"
     + " AND row_id = " + placeholderAt(db, 1);
