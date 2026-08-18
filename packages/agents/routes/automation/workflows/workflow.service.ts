@@ -4,7 +4,7 @@ import { stamp } from "../../../api-core.ts";
 import { holdsOwner } from "../../../owner.ts";
 import { jsonFlag, jsonRaw, jsonText } from "../../../scan.ts";
 import { ensureBuilt } from "../../../script-wasm.ts";
-import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, nextWorkflowFire, parseGraph, refuseDraftWorkflow, refuseWorkflow, timingOf, withWorkflowNextAt } from "../../../workflow-store.ts";
+import { MAX_RUN_INPUT, MAX_WORKFLOWS_PER_OWNER, WorkflowRow, emptyWorkflow, nextWorkflowFire, parseGraph, refuseDraftWorkflow, refuseWorkflow, setNextInput, timingOf, withWorkflowNextAt } from "../../../workflow-store.ts";
 import { ScriptCheckFailed } from "./dtos/script-check-failed.dto.ts";
 import { ScriptCheckFresh } from "./dtos/script-check-fresh.dto.ts";
 import { WorkflowRepository } from "./workflow.repository.ts";
@@ -219,8 +219,18 @@ export class WorkflowService {
     return produced(this.repository.one(mine.id));
   }
 
-  runNow(id: string, tags: string[]): Outcome {
+  runNow(id: string, tags: string[], body: string): Outcome {
     let mine = this.owned(id, tags);
+    // What the button was pressed with. Empty is what the clock passes, and
+    // what this always passed before there was anywhere to type it.
+    let said = body == "" ? "" : jsonText(body, "input");
+    if (said.length > MAX_RUN_INPUT) {
+      return refusing("that is more than a run may be started with ("
+        + `${MAX_RUN_INPUT}` + " characters)");
+    }
+    if (!setNextInput(this.repository.database, mine.id, said)) {
+      return refusing("what to run it with could not be stored");
+    }
     let written = this.repository.markRunNow(mine.id, stamp());
     if (!written.ok) {
       return refusing(written.error);

@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { DbField, DbOrder, DbRepository, countWhere, createTableSql, field, listOrdered, listWhere, placeholderAt, repository, skipLocked } from "../plume/plume.ts";
+import { DbField, DbOrder, DbRepository, countWhere, createTableSql, executeWith, field, listOrdered, listWhere, placeholderAt, repository, skipLocked } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, refuseDraft as refuseDrawing, startOf } from "../workflow/workflow.ts";
 import { PAUSE_AFTER, RUN_TIMEOUT_MS, Scheduled, compile, isOnce, nextFire, onceInstant, stampMs, TaskRow } from "./tasks.ts";
@@ -8,6 +8,8 @@ import { workflowRepository } from "./routes/automation/workflows/entities/workf
 import { workflowRunRepository } from "./routes/automation/workflows/entities/workflow-run.entity.ts";
 
 export const MAX_WORKFLOWS_PER_OWNER: int = 10;
+// What a run may be started with. A message, not a document.
+export const MAX_RUN_INPUT: int = 4000;
 export const MAX_GRAPH_CHARS: int = 65536;
 
 export type WorkflowRow = {
@@ -179,6 +181,41 @@ export function timingOf(graph: WfGraph, zone: string, nowMs: number): WfTiming 
  *  graph that is a graph. Whether every step is filled in is asked at publish
  *  — see refuseDraft — because a drawing in progress is the normal state of
  *  one being drawn, and refusing to store it loses the work. */
+/** What a run started by hand should be given as {{input}}.
+ *
+ *  Beside the workflow rather than on it: the row is written by persist from
+ *  JSON, and a member missing from one of the places that build a WorkflowRow
+ *  would arrive as NULL in a column that may not be. */
+export function setNextInput(db: Db, id: string, said: string): bool {
+  let cleared = executeWith(db,
+    "DELETE FROM workflow_inputs WHERE workflow_id = " + placeholderAt(db, 1), [id]);
+  if (!cleared.ok) {
+    return false;
+  }
+  if (said == "") {
+    return true;
+  }
+  let written = executeWith(db,
+    "INSERT INTO workflow_inputs (workflow_id, input) VALUES ("
+    + placeholderAt(db, 1) + ", " + placeholderAt(db, 2) + ")", [id, said]);
+  return written.ok;
+}
+
+/** Reads it and forgets it, so the next run on the clock starts empty as it
+ *  always did — an input belongs to the press of the button, not the row. */
+export function takeNextInput(db: Db, id: string): string {
+  let sql = "SELECT input FROM workflow_inputs WHERE workflow_id = " + placeholderAt(db, 1);
+  if (!db.query(sql, [id])) {
+    return "";
+  }
+  if (db.rows() == 0) {
+    return "";
+  }
+  let said = db.value(0, 0);
+  executeWith(db, "DELETE FROM workflow_inputs WHERE workflow_id = " + placeholderAt(db, 1), [id]);
+  return said;
+}
+
 export function refuseDraftWorkflow(row: WorkflowRow): string {
   return refuseRow(row, false);
 }

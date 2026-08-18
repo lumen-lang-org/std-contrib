@@ -65,8 +65,9 @@ export class WorkflowApi {
 
   @Post("/:id/run-now")
   @Guard(theWorkflow)
-  runNow(@PathVariable("id") id: string, @From(callerTags) tags: string[]): Reply {
-    let started = this.workflows.runNow(id, tags);
+  runNow(@PathVariable("id") id: string, @From(callerTags) tags: string[],
+         @RequestBody body: string): Reply {
+    let started = this.workflows.runNow(id, tags, body);
     if (started.fault != "") {
       return BadRequest(started.fault);
     }

@@ -3,7 +3,7 @@ import { postgres } from "../plume/postgres.ts";
 import { connectDatabase, findById, persist } from "../plume/plume.ts";
 import { masterKey } from "./credentials.ts";
 import { claimDue, markFailed, markRan, TaskRow } from "./tasks.ts";
-import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, withGraph, workflowsMapping } from "./workflow-store.ts";
+import { WorkflowRow, claimDueWorkflow, markWorkflowFailed, markWorkflowRan, takeNextInput, withGraph, workflowsMapping } from "./workflow-store.ts";
 import { ResumeAsk, WorkflowAsk, resumeWorkflow, runWorkflow } from "./workflow-run.ts";
 import { openThread, runInThreadWith, inheritedPick, ThreadAsk } from "./threads.ts";
 import { tracerFor } from "./trace.ts";
@@ -302,7 +302,7 @@ function answer(db: Db, msg: TriggerInboxRow, master: string): void {
 
 function fireWorkflow(db: Db, flow: WorkflowRow, master: string): void {
   let ask: WorkflowAsk = {
-    owner: flow.owner, input: "", master: master,
+    owner: flow.owner, input: takeNextInput(db, flow.id), master: master,
     nowMs: Date.now() as number,
   };
   let bytes = flow.kind == "manual" ? flow.graph

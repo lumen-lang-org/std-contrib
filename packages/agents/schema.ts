@@ -750,6 +750,12 @@ export function schemaPlan(db: Db): Migration[] {
       + "owner " + db.textType + " NOT NULL)"),
     migration("133", "an owner is looked up by its row",
       "CREATE UNIQUE INDEX IF NOT EXISTS row_owners_by_row ON row_owners (kind, row_id)"),
+    migration("134", "what a run started by hand was given",
+      "CREATE TABLE IF NOT EXISTS workflow_inputs ("
+      + "workflow_id " + db.textType + " NOT NULL, "
+      + "input " + db.textType + " NOT NULL)"),
+    migration("135", "one waiting input per workflow",
+      "CREATE UNIQUE INDEX IF NOT EXISTS workflow_inputs_by_flow ON workflow_inputs (workflow_id)"),
     migration("80", "template files", createTableSql(db, templateFilesMapping())),
     migration("78", "featured skills order the capability chips",
       "ALTER TABLE skills ADD COLUMN featured_rank " + db.intType + " NOT NULL DEFAULT 0"),
