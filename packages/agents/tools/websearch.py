@@ -19,7 +19,7 @@ def by_http(query, want):
     from bs4 import BeautifulSoup
     url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
     r = requests.post("https://html.duckduckgo.com/html/",
-                      data={"q": query}, headers={"User-Agent": UA}, timeout=20)
+                      data={"q": query}, headers={"User-Agent": UA}, timeout=10)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     out = []
@@ -67,6 +67,14 @@ def by_browser(query, want):
     page with zero results — measured, not assumed). A fallback only earns the
     name if it fails differently from the thing it backs up, so this drives
     Bing and then Brave, both of which render results headless today.
+
+    Both engines' timeouts are tight on purpose: the caller runs this inside a
+    sandbox with a 60-second wall-clock cap, and a script that is killed for
+    running long saves nothing and reports nothing — worse than a search that
+    came back empty. Two engines at 40s each (the timeouts this used to carry)
+    add up to more than the whole budget before Python has even started; a
+    live run measured exactly that and lost 60s to silence. Tight and honest
+    beats generous and silent.
     """
     from playwright.sync_api import sync_playwright
     # &setlang/&cc/&mkt: without them Bing guesses a market from the exit IP,
@@ -86,8 +94,8 @@ def by_browser(query, want):
                 page = b.new_page(user_agent=UA)
                 try:
                     page.goto(base + urllib.parse.quote(query),
-                              wait_until="domcontentloaded", timeout=40000)
-                    page.wait_for_timeout(3000)
+                              wait_until="domcontentloaded", timeout=10000)
+                    page.wait_for_timeout(1000)
                     out = []
                     for res in page.query_selector_all(rowsel)[: want * 2]:
                         t = res.query_selector(titlesel)
