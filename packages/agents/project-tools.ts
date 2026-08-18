@@ -3,7 +3,7 @@ import { findById, persist } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonText } from "./scan.ts";
-import { ProjectRow, assignProject, projectsMapping, projectsOf } from "./projects.ts";
+import { ProjectRow, assignProject, projectOfThread, projectsMapping, projectsOf } from "./projects.ts";
 import { maySchedule } from "./task-tools.ts";
 
 function not(): FileToolResult {
@@ -44,6 +44,12 @@ export function projectTools(): ToolSpec[] {
     "{\"type\":\"object\",\"properties\":{"
     + "\"project\":{\"type\":\"string\",\"description\":\"" + which + "\"}},"
     + "\"required\":[\"project\"]}"));
+
+  out.push(toolSpec("leave_project",
+    "Take THIS conversation out of its project. Its own instructions stop applying from the next "
+    + "message on; the project itself, and every other conversation in it, are untouched. Only the "
+    + "conversation this is said in.",
+    "{\"type\":\"object\",\"properties\":{}}"));
 
   return out;
 }
@@ -95,7 +101,8 @@ function empty(): ProjectRow {
 }
 
 export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
-  if (call.name != "list_projects" && call.name != "create_project" && call.name != "move_to_project") {
+  if (call.name != "list_projects" && call.name != "create_project"
+    && call.name != "move_to_project" && call.name != "leave_project") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -143,6 +150,20 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
   if (call.threadId == "") {
     return no("this run has no conversation to move — say it in the conversation that should move.");
   }
+
+  if (call.name == "leave_project") {
+    let held = projectOfThread(db, call.threadId);
+    if (held.id == "") {
+      return yes("This conversation is not in a project — nothing to leave.");
+    }
+    let fault = assignProject(db, call.threadId, "");
+    if (fault != "") {
+      return no(fault);
+    }
+    return yes("Left \"" + held.name + "\". From the next message on, this conversation carries "
+      + "no project instructions. \"" + held.name + "\" itself, and everything else in it, is unchanged.");
+  }
+
   let said = jsonText(call.args, "project").trim();
   if (said == "") {
     return no("say which project: {\"project\":\"...\"} — list_projects shows them.");

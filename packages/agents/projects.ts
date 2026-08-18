@@ -74,6 +74,25 @@ export function assignProject(db: Db, threadId: string, projectId: string): stri
   return wrote.error;
 }
 
+/** The project this thread currently belongs to, or an empty row if none. */
+export function projectOfThread(db: Db, threadId: string): ProjectRow {
+  if (!db.query("SELECT project_id FROM threads WHERE id = " + placeholderAt(db, 1), [threadId])) {
+    return emptyProject();
+  }
+  if (db.rows() == 0) {
+    return emptyProject();
+  }
+  let projectId = db.value(0, 0);
+  if (projectId == "") {
+    return emptyProject();
+  }
+  let document = findById(db, projectsMapping(), projectId);
+  if (document == "") {
+    return emptyProject();
+  }
+  return JSON.parse<ProjectRow>(document);
+}
+
 export function projectBriefing(db: Db, threadId: string): string {
   if (!db.query("SELECT project_id FROM threads WHERE id = " + placeholderAt(db, 1), [threadId])) {
     return "";

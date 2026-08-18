@@ -38,7 +38,7 @@ export function reservedToolNames(): string[] {
     // agents
     "list_agents", "show_agent", "create_agent", "change_agent", "delete_agent",
     // projects
-    "list_projects", "create_project", "move_to_project",
+    "list_projects", "create_project", "move_to_project", "leave_project",
     // knowledge and skills
     "add_document", "list_documents", "forget_document", "set_banner",
     "list_skills", "create_skill", "change_skill", "use_skill",

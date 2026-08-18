@@ -112,9 +112,18 @@ def by_browser(query, want):
     return []
 
 
-def main():
-    query = " ".join(sys.argv[1:]) or "lumen programming language"
-    want = 5
+def search(query, want=5):
+    """Both ways, cheapest first. What every caller — CLI or import — runs.
+
+    A query is required and never guessed: a caller that forgot to pass one
+    used to get results for "lumen programming language", the example in this
+    file's own docstring once upon a time, which read as a real answer to
+    whatever the caller actually asked. Silence is the honest failure here,
+    not somebody else's search.
+    """
+    query = (query or "").strip()
+    if not query:
+        raise ValueError("search() needs a query — nothing was given to look for")
     report = {"query": query, "how": "", "results": [], "tried": []}
     for how, fn in (("http", by_http), ("browser", by_browser)):
         try:
@@ -126,9 +135,19 @@ def main():
         except Exception as e:
             report["tried"].append({"how": how, "count": 0,
                                     "error": type(e).__name__ + ": " + str(e)[:120]})
+    return report
+
+
+def main():
+    query = " ".join(sys.argv[1:])
+    if not query:
+        print(json.dumps({"error": "usage: websearch.py <query words>"}))
+        return 2
+    report = search(query)
     print(json.dumps(report, indent=1))
     return 0 if report["results"] else 1
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())
 
