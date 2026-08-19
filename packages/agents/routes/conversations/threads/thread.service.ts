@@ -4,9 +4,10 @@ import { Reply, Respond, BadRequest, CreatedJson, NotFound, OkJson } from "../..
 import { traceId, tracing, tracerWithMoreSpans, tracerWithSession } from "../../../../tracing/tracing.ts";
 import { enqueueTrace } from "../../../trace-outbox.ts";
 import { GUEST_DAILY_RUNS, askedChoice, choiceFault, guestQuotaJson, guestTag, stamp } from "../../../api-core.ts";
-import { TURN_SEQ_NONE } from "../../../artifacts.ts";
+import { TURN_SEQ_NONE, binaryKind, listArtifacts } from "../../../artifacts.ts";
 import { wireView, WireRef } from "../../../artifacts-fence.ts";
 import { envEnsure, envList } from "../../../environments.ts";
+import { scriptImageForEnv } from "../../../run-script.ts";
 import { envMaterialise } from "../../../env-sync.ts";
 import { holdsOwner, owningTag } from "../../../owner.ts";
 import { assignProject, projectsMapping } from "../../../projects.ts";
@@ -17,7 +18,7 @@ import { modelChoiceRepository } from "../../inference/models/entities/model-cho
 import { ModelChoiceBody } from "../../inference/model-choices/dtos/model-choice-body.dto.ts";
 import { jsonRaw, jsonText } from "../../../scan.ts";
 import { LiveStep, Thought, latestRound, partialOf, roundRunning, stepsOfRound, stepsOfThread, thoughtsOfRound, thoughtsOfThread } from "../../../steps.ts";
-import { ThreadTurnRow, titleThread, firstAsked, appendTurns, listReplayable, listThreads, markReplayable, nameThread, openThread, ownedThread, rememberChoice, remixThread, runInThreadWith, threadChoice, threadMessageRows, threadOwner, threadTitle } from "../../../threads.ts";
+import { ThreadTurnRow, threadsMapping, titleThread, firstAsked, appendTurns, listReplayable, listThreads, markReplayable, nameThread, openThread, ownedThread, rememberChoice, remixThread, runInThreadWith, threadChoice, threadMessageRows, threadOwner, threadTitle } from "../../../threads.ts";
 import { tracerFor } from "../../../trace.ts";
 import { nextUtcMidnightIso, runsSince, secondsToUtcMidnight, utcDayStartText } from "../../../usage.ts";
 import { agentRepository } from "../../authoring/agents/entities/agent.entity.ts";
@@ -26,6 +27,7 @@ import { CancelAskedView } from "./dtos/cancel-asked-view.dto.ts";
 import { GuestAnsweredView } from "./dtos/guest-answered-view.dto.ts";
 import { MessageView } from "./dtos/message-view.dto.ts";
 import { RemixedView } from "./dtos/remixed-view.dto.ts";
+import { WarmedView } from "./dtos/warmed-view.dto.ts";
 import { ReplayableSetView } from "./dtos/replayable-set-view.dto.ts";
 import { ReplayableThreadView } from "./dtos/replayable-thread-view.dto.ts";
 import { RoundView } from "./dtos/round-view.dto.ts";
@@ -73,6 +75,41 @@ export class ThreadService {
       return BadRequest(wrong);
     }
     let v: ReplayableSetView = { id: id, replayable: on };
+    return OkJson(v);
+  }
+
+  /* The first office run in a conversation pays the container's whole cold
+   * start, which a person meets as half a minute on a one-word edit. Called
+   * after forking a document template, so the container starts while they
+   * are still typing. Idempotent: an existing container is simply reused. */
+  warmOffice(id: string, owner: string): Reply {
+    let row = findById(this.database, threadsMapping(), id);
+    if (row == "" || row == "{}") {
+      return NotFound("no conversation has that id");
+    }
+    let held = jsonText(row, "owner");
+    if (held != "" && held != owner) {
+      return NotFound("no conversation has that id");
+    }
+    let hasDocument = false;
+    let files = listArtifacts(this.database, id);
+    let i: int = 0;
+    while (i < files.length) {
+      if (binaryKind(files[i].kind) && files[i].kind != "image") {
+        hasDocument = true;
+      }
+      i = i + 1;
+    }
+    let image = hasDocument ? scriptImageForEnv(this.database, "", "office") : "";
+    if (image == "") {
+      let cold: WarmedView = { warming: false };
+      return OkJson(cold);
+    }
+    let up = envEnsure(this.database, {
+      threadId: id, name: "office", image: image,
+      network: true, serve: false, command: "", start: true, now: stamp(),
+    });
+    let v: WarmedView = { warming: up.ok };
     return OkJson(v);
   }
 

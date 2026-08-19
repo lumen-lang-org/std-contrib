@@ -33,6 +33,11 @@ export class ThreadApi {
     return this.threads.offer(id, document);
   }
 
+  @Post("/:id/warm")
+  warm(@PathVariable("id") id: string, @From(owningCaller) owner: string): Reply {
+    return this.threads.warmOffice(id, owner);
+  }
+
   @Post("/:id/remix")
   remix(@PathVariable("id") id: string, @From(owningCaller) owner: string): Reply {
     return this.threads.remix(id, owner);
