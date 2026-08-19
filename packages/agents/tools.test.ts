@@ -389,6 +389,25 @@ test("the briefing overflow line points at search_artifacts, not a listing that 
   expect(briefing.indexOf("list with read_artifact") < 0);
 });
 
+test("a conversation holding a document is told up front how documents are edited", () => {
+  artifactFresh();
+  putArtifact(database, {
+    threadId: "t1", path: "/notes.md", title: "", content: "text\n",
+    note: "", origin: "generated", mustCreate: false, turnSeq: 3, now: "1000",
+  });
+  let plain = artifactBriefing(database, "t1");
+  expect(plain.indexOf("office environment") < 0);
+
+  putArtifact(database, {
+    threadId: "t1", path: "/report.docx", title: "", content: "UEsDBA==",
+    note: "", origin: "uploaded", mustCreate: false, turnSeq: 3, now: "1000",
+  });
+  let told = artifactBriefing(database, "t1");
+  expect(told.indexOf("office environment") >= 0);
+  expect(told.indexOf("fill-doc") >= 0);
+  expect(told.indexOf("edit_artifact do not work") >= 0);
+});
+
 function scriptFresh(): void {
   let file = "/tmp/agents_tools_test.db";
   // Rebuilt from an empty file: the plan ALTERs tables this fixture does

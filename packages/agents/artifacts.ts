@@ -553,6 +553,20 @@ export function artifactBriefing(db: Db, threadId: string): string {
     + "character for character including capitalization — a near-miss path creates a duplicate file, not a new version.";
   out = out + "\nRead one with read_artifact before changing it. Updating an existing path appends a new version, "
     + "and only the write_artifact tool can do that; a new path always creates a new file.";
+  let hasDocument = false;
+  let d: int = 0;
+  while (d < rows.length) {
+    if (binaryKind(rows[d].kind)) {
+      hasDocument = true;
+    }
+    d = d + 1;
+  }
+  if (hasDocument) {
+    out = out + "\nThe documents above (.docx, .xlsx, .pptx, .pdf) are binary: read_file and "
+      + "edit_artifact do not work on them. Read one with read_artifact; to change one, load the "
+      + "skill for its kind (fill-doc or make-doc for .docx, make-sheet for .xlsx, make-deck for "
+      + ".pptx) and follow it — the edit happens through run_script in the office environment.";
+  }
   return out;
 }
 
