@@ -4,6 +4,20 @@ import { ArtifactRow, imageMediaType } from "../../../artifacts.ts";
 
 const PREVIEW_CSP_CLOSED: string = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
 
+/* A preview exists to sit in the console's panel, and the consoles live on
+ * other origins. Spelled as frame-ancestors because a browser that sees it
+ * ignores X-Frame-Options entirely - which is the point: the gateway in
+ * front stamps SAMEORIGIN on everything, and this is the one place where
+ * being framed from elsewhere is the feature. */
+export function previewFramers(): string {
+  let out = "frame-ancestors 'self'";
+  let console = (process.env("AGENTS_PUBLIC_ORIGIN") ?? "").trim();
+  if (console != "") {
+    out = out + " " + console;
+  }
+  return out;
+}
+
 export function previewHost(): string {
   let configured = process.env("AGENTS_PREVIEW_HOST") ?? "";
   let text = configured.trim().toLowerCase();
@@ -48,7 +62,7 @@ export function previewOrigin(): string {
 
 export function previewCsp(facing: bool): string {
   if (!facing) {
-    return PREVIEW_CSP_CLOSED;
+    return PREVIEW_CSP_CLOSED + "; " + previewFramers();
   }
   let origin = previewOrigin();
   return "default-src 'none'"
@@ -57,7 +71,8 @@ export function previewCsp(facing: bool): string {
     + "; img-src data: blob: https: http: " + origin
     + "; font-src data: " + origin
     + "; connect-src " + origin
-    + "; form-action 'none'; base-uri 'none'; sandbox allow-scripts";
+    + "; form-action 'none'; base-uri 'none'; sandbox allow-scripts"
+    + "; " + previewFramers();
 }
 
 export function previewType(facing: bool, mime: string): string {
