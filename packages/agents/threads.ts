@@ -616,8 +616,17 @@ export function listReplayable(db: Db, limit: int): ThreadListing[] {
   let i: int = 0;
   while (i < rows.length) {
     let title = rows[i].title;
+    let said = threadMessages(db, rows[i].id);
+    /* A conversation nobody has said anything in is not a starting point,
+     * whatever its replayable flag says. Offers outlive their owners - a
+     * guest's conversation is offered and the guest is gone - and nobody
+     * but the owner may retire one, so this listing is the only place the
+     * empty ones can be kept off a public page. */
+    if (said.length == 0) {
+      i = i + 1;
+      continue;
+    }
     if (title == "") {
-      let said = threadMessages(db, rows[i].id);
       let m: int = 0;
       while (m < said.length) {
         if (said[m].role == "user") {

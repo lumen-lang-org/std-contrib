@@ -903,6 +903,9 @@ test("a long title is cut on a character boundary, not in the middle of one", ()
 test("a conversation is private until it is offered, and offering it is one field", () => {
   freshThreads();
   let id = openThread(database, { agentId: "a1", owner: "alice", now: "1000000000000" });
+  let none: ToolCall[] = [];
+  let round: Turn[] = [userTurn("how many?"), assistantTurn("twelve", none)];
+  expect(appendTurns(database, id, round, 0) == "");
   expect(!isReplayable(database, id));
   expect(listReplayable(database, 20).length == 0);
 
@@ -912,6 +915,16 @@ test("a conversation is private until it is offered, and offering it is one fiel
 
   expect(markReplayable(database, id, false) == "");
   expect(!isReplayable(database, id));
+  expect(listReplayable(database, 20).length == 0);
+});
+
+test("an offered conversation nobody has spoken in is not listed as a starting point", () => {
+  freshThreads();
+  let id = openThread(database, { agentId: "a1", owner: "alice", now: "1000000000000" });
+  expect(markReplayable(database, id, true) == "");
+  // The flag is honoured; the empty conversation behind it is not offered,
+  // because nobody but its owner can ever retire one.
+  expect(isReplayable(database, id));
   expect(listReplayable(database, 20).length == 0);
 });
 
