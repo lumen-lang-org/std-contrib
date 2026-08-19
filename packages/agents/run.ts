@@ -672,7 +672,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
       let posted = callMailTool(db, master, {
         name: calls[i].name, args: calls[i].args, owner: where.owner,
       });
-      let searched = callWebToolRanked(db, master, { name: calls[i].name, args: calls[i].args });
+      let searched = callWebTool({ name: calls[i].name, args: calls[i].args });
       if (calls[i].name == "find_tools") {
         let query = jsonText(calls[i].args, "query");
         if (query == "") {
