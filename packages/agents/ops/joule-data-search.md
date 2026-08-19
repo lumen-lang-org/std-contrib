@@ -56,3 +56,16 @@ The sqlite file is still opened at boot and still carries WAL and SHM. Nothing
 reads anything from it. Removing it is a real change — `Store` is constructed
 for the corpus and frontier paths and five crawl processes share the file — and
 it wants doing when somebody can watch the crawl afterwards.
+
+## 2026-08-19 — the sqlite fallback is retired
+
+`aggGet` in `src/server.ts` now throws when `pgReadPool()` is non-null:
+every table in the sqlite copy has been empty since the Postgres cutover,
+so the fallback lanes could only answer zeros at the exact moment Postgres
+was down. Dashboards now see an error instead of an empty index. The file
+`/data/joule/store/joule.db` (184K) is still opened by `openStore` at boot;
+removing that handle is docs/22 stage B. `/data/joule/crawl3/data/joule.db`
+(13G) is the crawl shard's own working store and is NOT part of this.
+Backup of the edit: `src/server.ts.bak-sqlite-retire`.
+Also deleted the six `docflow-expert` prompt rows from the engine's
+Postgres (no agent pointed at them; prompts have no DELETE route).
