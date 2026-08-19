@@ -12,6 +12,7 @@ import { userTurn } from "./provider.ts";
 import { runLogPlan, recordRun } from "./runlog.ts";
 import { tracePlan, tracerFor } from "./trace.ts";
 import { shipTraces, traceOutboxPlan } from "./trace-outbox.ts";
+import { feedbackPlan } from "./feedback.ts";
 import { jsonId, createFault } from "./payload.ts";
 import { jsonList, jsonText, jsonFind, jsonRaw } from "./scan.ts";
 import { stamp, callerTags, GUEST_DAILY_RUNS, guestTag, guestQuotaJson, bodyText, bodyJson, bodyBool, bodyInt, bodyNumber, bodyRank, askedChoice, choiceFault } from "./api-core.ts";
@@ -62,6 +63,7 @@ import { LibraryApi } from "./routes/conversations/library/library.controller.ts
 import { RunApi } from "./routes/conversations/runs/run.controller.ts";
 import { UsageApi } from "./routes/identity/usage/usage.controller.ts";
 import { BannerApi } from "./routes/ops/banner/banner.controller.ts";
+import { FeedbackApi } from "./routes/ops/feedback/feedback.controller.ts";
 import { HealthApi } from "./routes/ops/healthz/health.controller.ts";
 import { mcpRosterPlan } from "./mcp-roster.ts";
 import { ModelPick, ThreadTurnRow, threadsMapping, listThreads, openThread, ownedThread, threadOwner, threadChoice, threadTitle, rememberChoice, sweepEmptyThreads, sweepIdleMs, threadMessageRows, runInThreadWith, threadPlan, listReplayable, markReplayable, remixThread, readableThread, appendTurns, nameThread } from "./threads.ts";
@@ -328,6 +330,12 @@ export function wholePlan(db: Db): Migration[] {
   while (t < traces.length) {
     plan.push(traces[t]);
     t = t + 1;
+  }
+  let saidPlan = feedbackPlan(db);
+  let sp: int = 0;
+  while (sp < saidPlan.length) {
+    plan.push(saidPlan[sp]);
+    sp = sp + 1;
   }
   let outbox = traceOutboxPlan(db);
   let ob: int = 0;
@@ -769,6 +777,7 @@ function main(): void {
     new ToolCardApi(db),
     new CardPluginApi(db),
     new BannerApi(db),
+    new FeedbackApi(db),
     new SandboxLimitsApi(db),
     new CaptchaApi(db, master),
     new HealthApi(db),
