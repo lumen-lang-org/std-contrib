@@ -1,4 +1,5 @@
 import { MAX_SOURCE } from "../workflow/workflow.ts";
+import { excerptOf } from "./artifacts.ts";
 
 export function lumenBin(): string {
   return process.env("AGENTS_LUMEN_BIN") ?? "lumen";
@@ -122,7 +123,7 @@ export function compilerSaid(stderr: string, stdout: string): string {
     }
     if (line.includes("error:")) {
       let said = withoutPath(line);
-      return said.length > 300 ? said.slice(0, 297) + "..." : said;
+      return said.length > 300 ? excerptOf(said, 297) + "..." : said;
     }
     i = j + 1;
   }

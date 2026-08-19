@@ -150,7 +150,7 @@ function filesBriefing(db: Db, filesThreadId: string): string {
       let room = FILES_TOTAL_MAX - inlined;
       let cap = room < FILE_INLINE_MAX ? room : FILE_INLINE_MAX;
       let cut = body.length > cap;
-      let shown = cut ? body.slice(0, cap) : body;
+      let shown = cut ? excerptOf(body, cap) : body;
       inlined = inlined + shown.length;
       out = out + "\n\n--- " + each.path + named + " ---\n" + shown;
       if (cut) {

@@ -240,7 +240,7 @@ export function listThreads(db: Db, page: ThreadPage): ThreadListing[] {
       }
     }
     if (title.length > 80) {
-      title = title.slice(0, 77) + "...";
+      title = excerptOf(title, 77) + "...";
     }
     let listing: ThreadListing = {
       id: rows[i].id,
@@ -628,7 +628,7 @@ export function listReplayable(db: Db, limit: int): ThreadListing[] {
       }
     }
     if (title.length > 80) {
-      title = title.slice(0, 77) + "...";
+      title = excerptOf(title, 77) + "...";
     }
     let listing: ThreadListing = { id: rows[i].id, agentId: rows[i].agentId,
       createdAt: rows[i].createdAt, title: title, replayable: true, projectId: "" };
@@ -871,7 +871,7 @@ function titleClip(text: string, max: int): string {
   if (text.length <= max) {
     return text;
   }
-  return text.slice(0, max) + "...";
+  return excerptOf(text, max) + "...";
 }
 
 function noName(why: string): Naming {
@@ -971,7 +971,7 @@ export function cleanTitle(said: string): string {
       }
       cut = cut - 1;
     }
-    text = text.slice(0, cut) + "...";
+    text = excerptOf(text, cut) + "...";
   }
   return text;
 }
@@ -1127,9 +1127,9 @@ function writeSummary(db: Db, ask: CompactAsk, cut: int, have: ThreadSummaryRow)
     return "the summariser answered nothing";
   }
   if (text.length > SUMMARY_MAX_CHARS) {
-    let cut = text.slice(0, SUMMARY_MAX_CHARS);
+    let cut = excerptOf(text, SUMMARY_MAX_CHARS);
     let stop = cut.lastIndexOf(". ");
-    text = stop > 400 ? cut.slice(0, stop + 1) : cut;
+    text = stop > 400 ? excerptOf(cut, stop + 1) : cut;
   }
 
   let row: ThreadSummaryRow = {

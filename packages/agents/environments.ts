@@ -1,4 +1,5 @@
 import { Db } from "../plume/driver.ts";
+import { excerptOf } from "./artifacts.ts";
 import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, listOrdered, deleteWhere, countWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { environmentRepository } from "./routes/sandbox/environments/entities/environment.entity.ts";
@@ -177,7 +178,7 @@ function envFirstLine(text: string): string {
   while (cut > 0 && envContinuation(line.charCodeAt(cut))) {
     cut = cut - 1;
   }
-  return line.slice(0, cut) + "...";
+  return excerptOf(line, cut) + "...";
 }
 
 function envContinuation(b: int): bool {

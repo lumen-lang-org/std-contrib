@@ -1,4 +1,5 @@
 import { ModelRow, ModelConfigRow, ModelRouterRow, ROUTER_MAX_TOKENS } from "./schema.ts";
+import { excerptOf } from "./artifacts.ts";
 import { Turn, complete, assistantText, stopReasonOf, wasTruncated } from "./provider.ts";
 import { jsonList, jsonText } from "./scan.ts";
 
@@ -54,7 +55,7 @@ function clip(text: string, max: int): string {
   if (text.length <= max) {
     return text;
   }
-  return text.slice(0, max) + "...";
+  return excerptOf(text, max) + "...";
 }
 
 function oneLine(text: string): string {

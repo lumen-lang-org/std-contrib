@@ -486,6 +486,7 @@ function ask(threadId: string, choiceId: string): ThreadReply {
     tracer: noTracer(),
     pick: said,
     think: false,
+    mustSearch: false,
     scope: "",
     titledElsewhere: false,
   });
@@ -498,6 +499,7 @@ function asks(threadId: string): ThreadReply {
     tracer: noTracer(),
     pick: inheritedPick(),
     think: false,
+    mustSearch: false,
     scope: "",
     titledElsewhere: false,
   });
@@ -1058,6 +1060,7 @@ test("a caller naming the conversation itself is not made to wait for the naming
     tracer: noTracer(),
     pick: inheritedPick(),
     think: false,
+    mustSearch: false,
     scope: "",
     titledElsewhere: true,
   });

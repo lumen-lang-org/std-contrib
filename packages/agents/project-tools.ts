@@ -1,4 +1,5 @@
 import { Db } from "../plume/driver.ts";
+import { excerptOf } from "./artifacts.ts";
 import { findById, persist } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
@@ -183,5 +184,5 @@ export function callProjectTool(db: Db, call: ProjectToolCall): FileToolResult {
 function firstLine(said: string): string {
   let cut = said.indexOf("\n");
   let one = cut < 0 ? said : said.slice(0, cut);
-  return one.length > 90 ? one.slice(0, 87) + "…" : one;
+  return one.length > 90 ? excerptOf(one, 87) + "…" : one;
 }

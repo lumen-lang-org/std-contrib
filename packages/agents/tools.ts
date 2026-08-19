@@ -11,7 +11,7 @@ import { FileToolResult } from "./workspace.ts";
 import { envEnsure, envNamed, envServePort } from "./environments.ts";
 import { envMaterialise } from "./env-sync.ts";
 import { EnvGranted, envGrantMint, envHostFor, envThreadOwner, envZone } from "./env-grants.ts";
-import { putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
+import { excerptOf, putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
 import { officeText } from "./office-render.ts";
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
@@ -507,7 +507,7 @@ function readDocument(db: Db, artifactId: string, version: int, path: string,
   if (text.length > READ_TEXT_MAX) {
     cut = "\n\n[Cut off at " + `${READ_TEXT_MAX}` + " characters of " + `${text.length}` + "."
       + " The rest of the document is not here, so do not answer from its absence.]";
-    text = text.slice(0, READ_TEXT_MAX);
+    text = excerptOf(text, READ_TEXT_MAX);
   }
   let read: FileToolResult = {
     handled: true, ok: true,
