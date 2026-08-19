@@ -430,15 +430,6 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let calledAgents: string[] = [];
   let answer = "";
   let system = prompt.body;
-  if (where.mustSearch) {
-    // The Search switch, said in words the model acts on. It used to be a
-    // chip the console lit and sent nowhere, so a turn with Search on
-    // answered from memory and looked broken to the person who switched it.
-    system = system + "\n\nThe person has switched Search ON for this message."
-      + " Search the web before you answer, even if you believe you know the"
-      + " answer, and answer from what comes back rather than from memory."
-      + " Cite the urls you used.";
-  }
   let skillLines = skillBriefing(db, agent.id);
   if (skillLines != "") {
     system = system + "\n\n" + skillLines;
@@ -479,6 +470,22 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   // model is told once what it means.
   let tag = fenceTag();
   system = system + "\n\n" + fenceBriefing(tag);
+
+  /* The Search switch, last so it is the final thing read.
+   *
+   * It was a chip the console lit and sent nowhere, so a turn with Search on
+   * could answer from memory — "what is a mutex" did, twice, while the switch
+   * was lit. Said mid-prompt it was still ignored; a model that is sure of an
+   * answer needs telling at the end, in the imperative, that being sure is
+   * not the point. */
+  if (where.mustSearch) {
+    system = system + "\n\nSEARCH IS SWITCHED ON for this message. Call"
+      + " search_web BEFORE you write anything, whatever the question is and"
+      + " however certain you are of the answer — the person asked for the"
+      + " web, not for your memory. Answer from what comes back and cite the"
+      + " urls. If the search finds nothing, say so plainly; do not quietly"
+      + " answer from memory instead.";
+  }
 
   let last: Completion = {
     ok: false,

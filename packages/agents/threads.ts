@@ -1363,7 +1363,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
       owner: "",
       think: ask.think,
       scope: ask.scope,
-      mustSearch: false,
+      mustSearch: ask.mustSearch,
     });
     let noNotes: string[] = [];
     let bare: ThreadReply = {
@@ -1425,7 +1425,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
     owner: threadOwner(db, threadId),
     think: ask.think,
     scope: ask.scope,
-    mustSearch: false,
+    mustSearch: ask.mustSearch,
   });
 
   let added: Turn[] = [];
