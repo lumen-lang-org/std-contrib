@@ -20,6 +20,10 @@ export class FeedbackService {
       return "{\"maySend\":false,\"left\":0}";
     }
     let allowed = feedbackPerOwnerDay();
+    if (allowed <= 0) {
+      // No limit: -1 rather than a number, so the console shows no count.
+      return "{\"maySend\":true,\"left\":-1}";
+    }
     let used = feedbackToday(this.database, owner, Date.now() as number);
     let left = used < 0 ? 0 : allowed - used;
     if (left < 0) {

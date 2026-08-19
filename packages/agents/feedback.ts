@@ -49,18 +49,16 @@ export function feedbackPlan(db: Db): Migration[] {
   ];
 }
 
-/** The most one account may send in a day.
- *
- *  Low on purpose. Feedback is a person typing, not a program looping, and
- *  five is more than anybody sends in a day meaning well — so a number far
- *  above that only ever protects somebody flooding the operator's screen. */
+/** The most one account may send in a day, or 0 for no limit — which is the
+ *  default: somebody with something to say should not be counting. Set
+ *  AGENTS_FEEDBACK_PER_OWNER_DAY if a deployment ever needs the brake. */
 export function feedbackPerOwnerDay(): int {
   let said = (process.env("AGENTS_FEEDBACK_PER_OWNER_DAY") ?? "").trim();
   if (said == "") {
-    return 5;
+    return 0;
   }
-  let n = parseInt(said, 10) ?? 5;
-  return n < 1 ? 5 : n;
+  let n = parseInt(said, 10) ?? 0;
+  return n < 0 ? 0 : n;
 }
 
 /** The most of a screenshot this will store. A PNG data URI of a viewport is
@@ -123,13 +121,16 @@ export function sendFeedback(db: Db, ask: FeedbackAsk): FeedbackSent {
   let shot = ask.shot.length > SHOT_MAX ? "" : ask.shot;
 
   let allowed = feedbackPerOwnerDay();
-  let already = feedbackToday(db, ask.owner, ask.nowMs);
-  if (already < 0) {
-    return refused("today's count could not be read, so this was not sent", 0);
-  }
-  if (already >= allowed) {
-    return refused("that is " + `${already}` + " reports today, and " + `${allowed}`
-      + " is the most one account may send. It starts again at midnight UTC", 0);
+  let already: int = 0;
+  if (allowed > 0) {
+    already = feedbackToday(db, ask.owner, ask.nowMs);
+    if (already < 0) {
+      return refused("today's count could not be read, so this was not sent", 0);
+    }
+    if (already >= allowed) {
+      return refused("that is " + `${already}` + " reports today, and " + `${allowed}`
+        + " is the most one account may send. It starts again at midnight UTC", 0);
+    }
   }
 
   let row: FeedbackRow = {
@@ -140,7 +141,10 @@ export function sendFeedback(db: Db, ask: FeedbackAsk): FeedbackSent {
   if (!wrote.ok) {
     return refused(wrote.error, allowed - already);
   }
-  let done: FeedbackSent = { ok: true, fault: "", left: allowed - already - 1 };
+  // -1 is "no limit", which the console reads as nothing to show.
+  let done: FeedbackSent = {
+    ok: true, fault: "", left: allowed > 0 ? allowed - already - 1 : -1,
+  };
   return done;
 }
 

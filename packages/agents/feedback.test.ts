@@ -52,20 +52,17 @@ test("what was said is kept with where it was said from", () => {
   expect(rows[0].shot == "");
 });
 
-test("five a day, counted per person, and the sixth is refused with the number in it", () => {
+test("no limit by default — somebody with something to say is not counting", () => {
   let db = fresh();
+  expect(feedbackPerOwnerDay() == 0);
   let n: int = 0;
-  while (n < feedbackPerOwnerDay()) {
+  while (n < 12) {
     expect(sendFeedback(db, ask("u-ann", "report " + `${n}`)).ok);
     n = n + 1;
   }
-  let sixth = sendFeedback(db, ask("u-ann", "one more"));
-  expect(!sixth.ok);
-  expect(sixth.fault.indexOf("most one account may send") > 0);
-  // Somebody else's day is their own.
-  expect(sendFeedback(db, ask("u-bob", "mine still works")).ok);
-  expect(feedbackToday(db, "u-ann", NOW) == feedbackPerOwnerDay());
-  expect(feedbackToday(db, "u-bob", NOW) == 1);
+  expect(feedbackToday(db, "u-ann", NOW) == 12);
+  // and nothing to count down
+  expect(sendFeedback(db, ask("u-ann", "another")).left == -1);
 });
 
 test("yesterday's reports do not spend today's allowance", () => {
@@ -79,10 +76,12 @@ test("yesterday's reports do not spend today's allowance", () => {
   expect(sendFeedback(db, ask("u-ann", "new")).ok);
 });
 
-test("what is left is counted down, so a button can say so", () => {
+test("yesterday and today are still counted, for whoever wants to look", () => {
   let db = fresh();
-  expect(sendFeedback(db, ask("u-ann", "one")).left == feedbackPerOwnerDay() - 1);
-  expect(sendFeedback(db, ask("u-ann", "two")).left == feedbackPerOwnerDay() - 2);
+  expect(sendFeedback(db, ask("u-ann", "one")).ok);
+  expect(sendFeedback(db, ask("u-bob", "theirs")).ok);
+  expect(feedbackToday(db, "u-ann", NOW) == 1);
+  expect(feedbackToday(db, "u-bob", NOW) == 1);
 });
 
 test("an operator can forget one", () => {
