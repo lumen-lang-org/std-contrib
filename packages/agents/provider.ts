@@ -494,9 +494,12 @@ export function streamFault(model: ModelRow, status: int, body: string): string 
     // first-message refusal into advice to shorten the conversation. Their
     // words ride along, addresses stripped, so the person and the log both
     // see the actual reason.
-    let said = scrubbedFault(body);
-    let cut = said.length > 220 ? said.slice(0, 220) + "…" : said;
-    console.log("provider 400 from " + who + ": " + (body.length > 400 ? body.slice(0, 400) : body));
+    // error.message out of the envelope when there is one: a person should
+    // read the provider's sentence, not its JSON braces.
+    let inner = jsonText(jsonRaw(body, "error"), "message");
+    let said = scrubbedFault(inner == "" ? body : inner);
+    let cut = said.length > 220 ? excerptOf(said, 220) + "…" : said;
+    console.log("provider 400 from " + who + ": " + (body.length > 400 ? excerptOf(body, 400) : body));
     return who + " would not take this request"
       + (cut.trim() == "" ? "." : ": " + cut);
   }
