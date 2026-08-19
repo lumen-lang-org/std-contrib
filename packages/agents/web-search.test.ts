@@ -151,3 +151,21 @@ test("the index's char budget is asked for per passage, not for the whole answer
   // and it is bounded, so a wide search cannot ask for the whole crawl
   expect(searchBudget(10000) == searchBudget(100000));
 });
+
+test("a clipped passage never ends mid-character, whatever byte the cap lands on", () => {
+  // 1499 ascii bytes then a three-byte arrow: a 1500-byte slice would cut it
+  // in half, and the invalid string leaves the process as a byte array in
+  // the next model request — DeepSeek's intermittent 400 on searches.
+  let head = "";
+  let i: int = 0;
+  while (i < 1499) {
+    head = head + "a";
+    i = i + 1;
+  }
+  let doc = "{\"passages\":[{\"url\":\"https://x.example\",\"title\":\"T\",\"text\":"
+    + JSON.stringify(head + "→ tail that is cut") + "}]}";
+  let out = searchPassages(doc, 1);
+  expect(out.ok);
+  expect(out.text.indexOf("the rest was not read") > 0);
+  expect(out.text.indexOf("�") < 0);
+});

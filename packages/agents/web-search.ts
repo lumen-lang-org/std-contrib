@@ -24,6 +24,7 @@
  */
 
 import { jsonList, jsonRaw, jsonText } from "./scan.ts";
+import { excerptOf } from "./artifacts.ts";
 
 /** How many passages one call may ask for. Ten pages of prose is already more
  *  than an answer needs, and the cost of a bad query is paid in context. */
@@ -134,7 +135,13 @@ function searchClipped(text: string, cap: int): string {
   if (text.length <= cap) {
     return text;
   }
-  return text.slice(0, cap) + "\n[…this passage is longer; the rest was not read]";
+  // excerptOf, not slice: strings here are UTF-8 bytes, and a cut that lands
+  // inside a character makes a string that is not UTF-8 — which leaves this
+  // process as an ARRAY OF BYTES when the tool turn is serialized into the
+  // next completion request. DeepSeek answered that with a 400 naming
+  // messages[5], intermittently, on whichever passages put a multibyte
+  // character under the cap.
+  return excerptOf(text, cap) + "\n[…this passage is longer; the rest was not read]";
 }
 
 /** The index's answer, as the model reads it: one block per page, the url on

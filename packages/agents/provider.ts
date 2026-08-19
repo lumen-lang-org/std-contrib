@@ -448,6 +448,41 @@ export function vectorFrom(body: string): Embedding {
   return out;
 }
 
+/* Addresses out of a provider's error text, locally: router.ts has the full
+ * version but imports from here, and a cycle is worse than a copy. */
+function scrubbedFault(text: string): string {
+  let out = "";
+  let i: int = 0;
+  while (i < text.length) {
+    let at = text.indexOf("://", i);
+    if (at < 0) {
+      out = out + text.slice(i);
+      break;
+    }
+    let start = at;
+    while (start > i && isLetterAt(text, start - 1)) {
+      start = start - 1;
+    }
+    let end = at + 3;
+    while (end < text.length) {
+      let c = text.charCodeAt(end);
+      let keep = c > 32 && c != 34 && c != 39 && c != 44 && c != 41 && c != 93 && c != 125;
+      if (!keep) {
+        break;
+      }
+      end = end + 1;
+    }
+    out = out + text.slice(i, start) + "[address]";
+    i = end;
+  }
+  return out;
+}
+
+function isLetterAt(text: string, at: int): bool {
+  let c = text.charCodeAt(at);
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
 export function streamFault(model: ModelRow, status: int, body: string): string {
   let who = model.label == "" ? "This model" : model.label;
   if (status < 100) {
@@ -455,9 +490,15 @@ export function streamFault(model: ModelRow, status: int, body: string): string 
       + " still up; otherwise pick another model from the menu beside the composer.";
   }
   if (status == 400) {
-    return who + " would not take this request. The usual cause is a conversation"
-      + " that has grown longer than the model can hold — start a new one, or pick"
-      + " a model with more room.";
+    // The provider said WHY, and guessing instead of repeating it turned a
+    // first-message refusal into advice to shorten the conversation. Their
+    // words ride along, addresses stripped, so the person and the log both
+    // see the actual reason.
+    let said = scrubbedFault(body);
+    let cut = said.length > 220 ? said.slice(0, 220) + "…" : said;
+    console.log("provider 400 from " + who + ": " + (body.length > 400 ? body.slice(0, 400) : body));
+    return who + " would not take this request"
+      + (cut.trim() == "" ? "." : ": " + cut);
   }
   if (status == 401 || status == 403) {
     return who + " is not configured correctly: its credential was rejected."
