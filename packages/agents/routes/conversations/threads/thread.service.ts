@@ -355,6 +355,7 @@ export class ThreadService {
       think: jsonText(body, "think") == "true",
       scope: jsonText(body, "scope"),
       titledElsewhere: jsonText(body, "titledElsewhere") == "true",
+      mustSearch: jsonText(body, "searchOn") == "true",
     });
     let run = answered.run;
     let runId = recordRun(this.database, {

@@ -1317,6 +1317,8 @@ export type ThreadAsk = {
   pick: ModelPick,
   think: bool,
   scope: string,
+  /** Search was switched on for this message. */
+  mustSearch: bool,
   /** The caller is naming this conversation itself, alongside this call, so
    *  do not stop to name it here. Titling only needs the user's first
    *  message, so it can run beside the answer rather than after it — but only
@@ -1333,6 +1335,7 @@ export function runInThread(db: Db, threadId: string, userText: string, master: 
     pick: inheritedPick(),
     think: false,
     scope: "",
+    mustSearch: false,
     titledElsewhere: false,
   };
   return runInThreadWith(db, threadId, plain);
@@ -1360,6 +1363,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
       owner: "",
       think: ask.think,
       scope: ask.scope,
+      mustSearch: false,
     });
     let noNotes: string[] = [];
     let bare: ThreadReply = {
@@ -1421,6 +1425,7 @@ export function runInThreadWith(db: Db, threadId: string, ask: ThreadAsk): Threa
     owner: threadOwner(db, threadId),
     think: ask.think,
     scope: ask.scope,
+    mustSearch: false,
   });
 
   let added: Turn[] = [];

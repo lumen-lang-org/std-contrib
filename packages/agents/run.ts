@@ -115,6 +115,10 @@ export type RunContext = {
   owner: string,
   think: bool,
   scope: string,
+  /** The person switched Search on for this message. Not a scope: every other
+   *  tool stays available, this only says the web is where the answer is
+   *  expected to come from. */
+  mustSearch: bool,
 };
 
 export function runAgent(db: Db, agentId: string, userText: string, master: string): AgentRun {
@@ -133,6 +137,7 @@ export function runAgent(db: Db, agentId: string, userText: string, master: stri
     baseSeq: TURN_SEQ_NONE,
     owner: "",
     think: false,
+    mustSearch: false,
     scope: "",
   };
   return runAgentAt(db, agentId, userText, master, top);
@@ -164,6 +169,7 @@ export function runAgentFor(db: Db, agentId: string, userText: string, master: s
     baseSeq: TURN_SEQ_NONE,
     owner: owner,
     think: false,
+    mustSearch: false,
     scope: "",
   };
   return runAgentAt(db, agentId, userText, master, top);
@@ -424,6 +430,15 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
   let calledAgents: string[] = [];
   let answer = "";
   let system = prompt.body;
+  if (where.mustSearch) {
+    // The Search switch, said in words the model acts on. It used to be a
+    // chip the console lit and sent nowhere, so a turn with Search on
+    // answered from memory and looked broken to the person who switched it.
+    system = system + "\n\nThe person has switched Search ON for this message."
+      + " Search the web before you answer, even if you believe you know the"
+      + " answer, and answer from what comes back rather than from memory."
+      + " Cite the urls you used.";
+  }
   let skillLines = skillBriefing(db, agent.id);
   if (skillLines != "") {
     system = system + "\n\n" + skillLines;
@@ -782,6 +797,7 @@ export function runAgentAt(db: Db, agentId: string, userText: string, master: st
             owner: where.owner,
             think: where.think,
             scope: where.scope,
+            mustSearch: false,
           };
           let asked = runAgentAt(db, child.id, question, master, below2);
           if (on) {
