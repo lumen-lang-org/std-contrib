@@ -1,6 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, executeWith, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../../plume/plume.ts";
 import { WfGraph } from "../../../../workflow/workflow.ts";
+import { RUN_TIMEOUT_MS } from "../../../tasks.ts";
 import { agentRepository } from "../../authoring/agents/entities/agent.entity.ts";
 import { SecretRepository } from "../../identity/secrets/secret.repository.ts";
 import { workflowRunRepository } from "./entities/workflow-run.entity.ts";
@@ -70,15 +71,14 @@ export class WorkflowRepository {
   }
 
   markRunNow(id: string, at: string): DbResult {
-    return setOn(this.database, this.workflows, {
-      id: id,
-      values: [
-        { column: "next_at", value: at },
-        { column: "running_since", value: "" },
-        { column: "enabled", value: "true" },
-        { column: "updated_at", value: at },
-      ],
-    });
+    let atMs = parseFloat(at) ?? 0.0;
+    let stale = `${(atMs as i64) - (RUN_TIMEOUT_MS as i64)}`;
+    let sql = "UPDATE workflows SET next_at = " + this.database.placeholder
+      + ", running_since = '', enabled = true, updated_at = " + placeholderAt(this.database, 2)
+      + " WHERE id = " + placeholderAt(this.database, 3)
+      + " AND (running_since = '' OR running_since < " + placeholderAt(this.database, 4) + ")"
+      + " RETURNING id";
+    return executeWith(this.database, sql, [at, at, id, stale]);
   }
 
   runs(workflowId: string, owner: string): string {
