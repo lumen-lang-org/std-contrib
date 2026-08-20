@@ -9,7 +9,7 @@ import { WfEdge, WfGraph, WfNode, WfView, casesOf, emptyNode, refuse as refuseGr
 import { MAX_WORKFLOWS_PER_OWNER, WorkflowRow, WorkflowRunRow, emptyWorkflow, enabledWorkflowCount, nextWorkflowFire, parseGraph, refuseWorkflow, timingOf, withWorkflowNextAt, workflowRunsMapping, workflowsMapping } from "./workflow-store.ts";
 import { SecretRepository } from "./routes/identity/secrets/secret.repository.ts";
 import { SecretRow } from "./routes/identity/secrets/secret.utils.ts";
-import { stampMs } from "./tasks.ts";
+import { RUN_TIMEOUT_MS, stampMs } from "./tasks.ts";
 
 const SAID_KINDS = "\\\"agent\\\" (a full agent turn with its tools), \\\"model\\\" (one model call, no tools), "
   + "\\\"web_search\\\" (the deployment's web index), \\\"knowledge\\\" (the agent's documents), "
@@ -860,13 +860,19 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       }
     }
     let now = `${call.nowMs}`;
+    let stale = `${(call.nowMs as i64) - (RUN_TIMEOUT_MS as i64)}`;
     let written = executeWith(db,
       "UPDATE workflows SET next_at = " + db.placeholder
       + ", running_since = '', enabled = true, updated_at = " + placeholderAt(db, 2)
-      + " WHERE id = " + placeholderAt(db, 3),
-      [now, now, row.id]);
+      + " WHERE id = " + placeholderAt(db, 3)
+      + " AND (running_since = '' OR running_since < " + placeholderAt(db, 4) + ")"
+      + " RETURNING id",
+      [now, now, row.id, stale]);
     if (!written.ok) {
       return no(written.error);
+    }
+    if (written.rows == 0) {
+      return no("\"" + row.name + "\" is already running — it will pick up the next change on its own once this run finishes.");
     }
     return yes("\"" + row.name + "\" will run within about a minute, in a conversation of its own — it does not answer here. "
       + "Its own schedule is unchanged.");

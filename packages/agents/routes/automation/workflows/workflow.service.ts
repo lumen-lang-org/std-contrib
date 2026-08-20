@@ -235,6 +235,9 @@ export class WorkflowService {
     if (!written.ok) {
       return refusing(written.error);
     }
+    if (written.rows == 0) {
+      return refusing("this workflow is already running");
+    }
     return produced(this.repository.one(mine.id));
   }
 
