@@ -1,6 +1,7 @@
 import { Db } from "../../../../plume/driver.ts";
 import { OWNED_AGENT, ownRow } from "../../../owner.ts";
-import { flush, traceId, tracerWithMoreSpans, tracing } from "../../../../tracing/tracing.ts";
+import { traceId, tracerWithMoreSpans, tracing } from "../../../../tracing/tracing.ts";
+import { enqueueTrace } from "../../../trace-outbox.ts";
 import { AgentRetrievalRow } from "../../../knowledge.ts";
 import { runAgentFor } from "../../../run.ts";
 import { recordRun } from "../../../runlog.ts";
@@ -213,11 +214,19 @@ export class AgentService {
       question: text, run: answered, modelChoiceId: "", routeNote: "",
     });
 
+    /* Queued, never flushed here — the same trade thread.service.ts makes, for
+     * the same measured reason: the upload sat between the finished answer and
+     * the reply carrying it. Measured on staging, an identical 3-round run took
+     * 53s with the flush inline and 16s with it queued, while the collector
+     * itself answers in 13ms. The wait was never the network. */
     let traced = "";
     if (tracing(tracer) && answered.spans.length > 0) {
-      let sent = flush(tracerWithMoreSpans(tracer, answered.spans));
-      if (sent.ok) {
+      let queued = enqueueTrace(this.repository.database,
+        tracerWithMoreSpans(tracer, answered.spans));
+      if (queued == "") {
         traced = traceId(tracer);
+      } else {
+        console.error("trace outbox: a trace could not be queued — " + queued);
       }
     }
     return runResultOf(runId, answered, traced);
