@@ -51,6 +51,7 @@ them — so nothing here locks the project into a single source monorepo.
 | [`socketio`](packages/socketio) | A socket.io server the official browser client connects to |
 | [`sse`](packages/sse) | Server-sent events — one-way push over a response that never ends, with resumption |
 | [`mail`](packages/mail) | Sending mail — one `Mailer` interface, Resend and SendGrid behind it, one HTML shell |
+| [`tty`](packages/tty) | Raw-mode terminal input, key decoding, terminal size, ANSI cursor/screen control via a C shim (community) |
 | [`agents`](packages/agents) | Agents, prompts, models, MCP links and sub-agents as database rows — run and reconfigured over HTTP without a restart |
 
 ## Using a package

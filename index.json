@@ -173,6 +173,12 @@
       "version": "0.1.0",
       "summary": "Sending mail: one Mailer interface, Resend and SendGrid implementations, one HTML shell.",
       "path": "packages/mail"
+    },
+    {
+      "name": "tty",
+      "version": "0.1.0",
+      "summary": "Raw-mode terminal input, key decoding, terminal size, and ANSI cursor/screen control via a C shim (community).",
+      "path": "packages/tty"
     }
   ]
 }
