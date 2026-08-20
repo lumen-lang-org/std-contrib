@@ -1,3 +1,4 @@
+import { excerptOf } from "./scan.ts";
 import { Db } from "../plume/driver.ts";
 import { DbOrder, DbRepository, persist, findById, listOrdered, listWhere, executeWith, placeholderAt, createTableSql, countWhere, beginTransaction, commitTransaction, rollbackTransaction } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
@@ -598,21 +599,6 @@ export type ArtifactCard = {
 };
 
 const EXCERPT = 400;
-
-/** A cut that never splits a character. Strings here are UTF-8 bytes, so
- *  slice(0, n) can land inside a multibyte character — and a string that is
- *  not valid UTF-8 leaves this process as a byte array, which a browser then
- *  chokes on. Backing off past any continuation bytes lands on a boundary. */
-export function excerptOf(body: string, at: int): string {
-  if (body.length <= at) {
-    return body;
-  }
-  let cut = at;
-  while (cut > 0 && (body.charCodeAt(cut) & 0xC0) == 0x80) {
-    cut = cut - 1;
-  }
-  return body.slice(0, cut);
-}
 
 export function libraryFor(db: Db, tags: string[], cap: int): ArtifactCard[] {
   let none: ArtifactCard[] = [];

@@ -1,5 +1,5 @@
 import { ModelRow, ModelConfigRow } from "./schema.ts";
-import { JsonText, jsonFind, jsonRaw, jsonText, jsonList, jsonStringMember, jsonComplete } from "./scan.ts";
+import { JsonText, jsonFind, jsonRaw, jsonText, jsonList, jsonStringMember, jsonComplete, excerptOf } from "./scan.ts";
 import { vertexBearer } from "./vertex.ts";
 
 export type Completion = {

@@ -283,7 +283,6 @@ export function jsonUnescape(body: string): string {
   return out;
 }
 
-
 export function jsonComplete(text: string): bool {
   let i: int = 0;
   while (i < text.length && jsonBlank(text.charAt(i))) {
@@ -348,4 +347,15 @@ export function jsonComplete(text: string): bool {
     after = after + 1;
   }
   return true;
+}
+
+export function excerptOf(body: string, at: int): string {
+  if (body.length <= at) {
+    return body;
+  }
+  let cut = at;
+  while (cut > 0 && (body.charCodeAt(cut) & 0xC0) == 0x80) {
+    cut = cut - 1;
+  }
+  return body.slice(0, cut);
 }

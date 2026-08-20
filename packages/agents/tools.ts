@@ -5,13 +5,13 @@ import { AgentRow, McpServerRow, SkillRow, SkillFileRow, agentsMapping, mcpServe
 import { McpCall, McpTool, listTools, callTool } from "./mcp.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { reservedHere } from "./reserved.ts";
-import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape } from "./scan.ts";
+import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape, excerptOf } from "./scan.ts";
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
 import { envEnsure, envNamed, envServePort } from "./environments.ts";
 import { envMaterialise } from "./env-sync.ts";
 import { EnvGranted, envGrantMint, envHostFor, envThreadOwner, envZone } from "./env-grants.ts";
-import { excerptOf, putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
+import { putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
 import { officeText } from "./office-render.ts";
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";

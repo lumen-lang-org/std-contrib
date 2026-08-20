@@ -23,8 +23,7 @@
  * the oldest trick there is, and this is the tool that fetches pages.
  */
 
-import { jsonList, jsonRaw, jsonText } from "./scan.ts";
-import { excerptOf } from "./artifacts.ts";
+import { jsonList, jsonRaw, jsonText, excerptOf } from "./scan.ts";
 
 /** How many passages one call may ask for. Ten pages of prose is already more
  *  than an answer needs, and the cost of a bad query is paid in context. */

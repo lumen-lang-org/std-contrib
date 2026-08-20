@@ -13,6 +13,15 @@ jobs:
       - name: Install Lumen
         run: curl -fsSL https://raw.githubusercontent.com/lumen-lang-org/lumen/main/install.sh | sh
 
+      - name: Build C shims
+        run: |
+          for f in packages/*/*_shim.c packages/*/*_host.c; do
+            [ -f "$f" ] || continue
+            o="${f%.c}.o"
+            echo "cc -c $f -o $o"
+            cc -c "$f" -o "$o" || echo "  (failed, package needing this shim will fail below, pre-existing gap or missing system dep)"
+          done
+
       - name: Test every package
         run: |
           export PATH="$HOME/.lumen/bin:$PATH"

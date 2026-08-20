@@ -1,9 +1,8 @@
 import { Db } from "../plume/driver.ts";
-import { excerptOf } from "./artifacts.ts";
+import { excerptOf, jsonText } from "./scan.ts";
 import { findById, persist } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
-import { jsonText } from "./scan.ts";
 import { ProjectRow, assignProject, projectOfThread, projectsMapping, projectsOf } from "./projects.ts";
 import { maySchedule } from "./task-tools.ts";
 
