@@ -5,6 +5,12 @@ import { complete, embedText, replyText } from "../../../provider.ts";
 import { ChatProbe } from "./dtos/chat-probe.dto.ts";
 import { EmbeddingProbe } from "./dtos/embedding-probe.dto.ts";
 import { ModelAsk } from "./dtos/model-ask.dto.ts";
+import { ModelRegistered } from "./dtos/model-registered.dto.ts";
+import { ModelRegistration } from "./dtos/model-registration.dto.ts";
+import { ModelConfigBody } from "../model-configs/dtos/model-config-body.dto.ts";
+import { ModelConfigService } from "../model-configs/model-config.service.ts";
+import { ModelChoiceBody } from "../model-choices/dtos/model-choice-body.dto.ts";
+import { ModelChoiceService } from "../model-choices/model-choice.service.ts";
 import { ModelTestFailed } from "./dtos/model-test-failed.dto.ts";
 import { StoredModel } from "./dtos/stored-model.dto.ts";
 import { ModelRepository } from "./model.repository.ts";
@@ -35,11 +41,41 @@ export class ModelService {
     return this.repository.exists(id);
   }
 
+  /** An address another model of the same provider already sends to is one the
+   *  stored key has been trusted with already, so pointing a new model at it is
+   *  not a move and there is nothing to warn about.
+   *
+   *  Without this, the first model registered with its own baseUrl under a
+   *  provider that holds a key is refused outright — and that is every local
+   *  endpoint, since a baseUrl is exactly what those need. The refusal named
+   *  the address it was already using. */
+  alreadyAuthorised(row: StoredModel): bool {
+    let listed = this.repository.listing();
+    if (listed == "" || listed == "[]") {
+      return false;
+    }
+    let want = modelDestination(row);
+    let models = JSON.parse<StoredModel[]>(listed);
+    let i = 0;
+    while (i < models.length) {
+      let other = models[i];
+      if (other.id != row.id && other.provider == row.provider
+          && modelDestination(other) == want) {
+        return true;
+      }
+      i = i + 1;
+    }
+    return false;
+  }
+
   movedFault(row: StoredModel): string {
     let held = this.repository.one(row.id);
     let authorised = authorisedModel(row);
     if (held != "") {
       authorised = JSON.parse<StoredModel>(held);
+    }
+    if (held == "" && this.alreadyAuthorised(row)) {
+      return "";
     }
     let move: DestinationMove = {
       subject: "model " + row.id,
@@ -147,6 +183,74 @@ export class ModelService {
     return produced(JSON.stringify(probe));
   }
 
+  /** One call, every row a model needs to be usable.
+   *
+   *  The choice is the whole point. A workflow binds `modelChoiceId`, and
+   *  `selectable` on the config does not create one — so a registration that
+   *  stops at the config leaves a model that answers over /completions and is
+   *  offered in no picker, with nothing anywhere reporting a problem.
+   *
+   *  Partial work is undone rather than left behind: a half-registered model is
+   *  the exact state this call exists to make impossible. */
+  register(ask: ModelRegistration): Outcome {
+    let stem = crypto.randomUUID().slice(0, 8);
+    let modelId = "m-" + stem;
+
+    let model = new ModelAsk(modelId, ask.label, ask.apiName, ask.provider,
+      ask.kind, ask.dimensions, ask.baseUrl, true, ask.contextTokens);
+    let made = this.create(model);
+    if (made.fault != "") {
+      return refusing(made.fault);
+    }
+
+    /* An embedding model is picked by being the enabled one, never from the
+       menu, so it has no config and no choice to make. */
+    if (ask.kind == "embedding") {
+      return produced(registrationOf(modelId, "", ""));
+    }
+
+    let temperature = ask.temperature;
+    if (temperature <= 0.0) {
+      temperature = 0.3;
+    }
+    let maxTokens = ask.maxTokens;
+    if (maxTokens <= 0) {
+      maxTokens = 4096;
+    }
+    let topP = ask.topP;
+    if (topP <= 0.0) {
+      topP = 0.95;
+    }
+
+    let configId = "c-" + stem;
+    let config: ModelConfigBody = {
+      id: configId, modelId: modelId, temperature: temperature,
+      maxTokens: maxTokens, topP: topP, extra: "{}", thinking: ask.thinking,
+      label: ask.label, selectable: true, rank: 0,
+    };
+    let configs = new ModelConfigService(this.repository.database);
+    let gotConfig = configs.create(JSON.stringify(config));
+    if (gotConfig.fault != "") {
+      this.repository.forget(modelId);
+      return refusing(gotConfig.fault);
+    }
+
+    let choiceId = "ch-" + stem;
+    let choice: ModelChoiceBody = {
+      id: choiceId, label: ask.label, description: ask.apiName, kind: "config",
+      configId: configId, routerId: "", tier: "", enabled: true, rank: 0,
+    };
+    let choices = new ModelChoiceService(this.repository.database);
+    let gotChoice = choices.create(JSON.stringify(choice));
+    if (gotChoice.fault != "") {
+      configs.forget(configId);
+      this.repository.forget(modelId);
+      return refusing(gotChoice.fault);
+    }
+
+    return produced(registrationOf(modelId, configId, choiceId));
+  }
+
   forget(id: string): Outcome {
     let using = this.repository.configsUsing(id);
     if (using < 0) {
@@ -165,4 +269,12 @@ export class ModelService {
 
 export function modelDestinationFault(database: Db, row: StoredModel): string {
   return new ModelService(database, "").movedFault(row);
+}
+
+export function registrationOf(modelId: string, configId: string,
+                               choiceId: string): string {
+  let out: ModelRegistered = {
+    modelId: modelId, modelConfigId: configId, modelChoiceId: choiceId,
+  };
+  return JSON.stringify(out);
 }

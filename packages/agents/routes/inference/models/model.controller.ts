@@ -2,6 +2,7 @@ import { Db } from "../../../../plume/driver.ts";
 import { bindings, controller } from "../../../../rest/controller.ts";
 import { Guarded, Reply, Request, answered, BadRequest, Created, NoContent, Ok } from "../../../../rest/server.ts";
 import { ModelAsk } from "./dtos/model-ask.dto.ts";
+import { ModelRegistration } from "./dtos/model-registration.dto.ts";
 import { modelExists } from "./model.guard.ts";
 import { ModelService } from "./model.service.ts";
 
@@ -31,6 +32,17 @@ export class ModelApi {
   @Post("/")
   create(@Valid @RequestBody ask: ModelAsk): Reply {
     let made = this.models.create(ask);
+    if (made.fault != "") {
+      return BadRequest(made.fault);
+    }
+    return Created(made.document);
+  }
+
+  /* Ahead of /:id/test on purpose: "register" is a literal segment and must
+     not be read as an id. */
+  @Post("/register")
+  register(@Valid @RequestBody ask: ModelRegistration): Reply {
+    let made = this.models.register(ask);
     if (made.fault != "") {
       return BadRequest(made.fault);
     }
