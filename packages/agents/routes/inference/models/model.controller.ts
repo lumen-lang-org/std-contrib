@@ -38,8 +38,6 @@ export class ModelApi {
     return Created(made.document);
   }
 
-  /* Ahead of /:id/test on purpose: "register" is a literal segment and must
-     not be read as an id. */
   @Post("/register")
   register(@Valid @RequestBody ask: ModelRegistration): Reply {
     let made = this.models.register(ask);

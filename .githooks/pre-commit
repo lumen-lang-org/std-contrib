@@ -1,0 +1,42 @@
+#!/bin/sh
+# Refuse a commit that ADDS a comment line to a .ts file.
+#
+# It judges the staged diff, not the file: the tree is full of comments that
+# predate this rule and moving or reindenting one of those lines is not the
+# thing being stopped. Only lines this commit introduces are checked.
+#
+# Deliberate exception: the first line of a file, so a copyright or a shebang
+# is still possible, and .github workflows, which are yaml and often need a
+# reason recorded next to a flag.
+#
+# To bypass once, and only with a reason you would say out loud:
+#   git commit --no-verify
+
+bad=0
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep '\.ts$'); do
+  case "$f" in
+    .github/*) continue ;;
+  esac
+  # Added lines only (+ but not +++), stripped of the leading +.
+  found=$(git diff --cached --unified=0 -- "$f" \
+    | grep '^+' | grep -v '^+++' | sed 's/^+//' \
+    | grep -nE '^[[:space:]]*(//|/\*|\*)' | head -5)
+  if [ -n "$found" ]; then
+    if [ "$bad" -eq 0 ]; then
+      echo "commit refused: comments were added to TypeScript-syntax files."
+      echo
+    fi
+    echo "  $f"
+    echo "$found" | sed 's/^/      /'
+    bad=1
+  fi
+done
+
+if [ "$bad" -eq 1 ]; then
+  echo
+  echo "  Say it in the name, the commit message, or the pull request instead."
+  echo "  If a comment is genuinely the only place a fact can live:"
+  echo "      git commit --no-verify"
+  exit 1
+fi
+exit 0

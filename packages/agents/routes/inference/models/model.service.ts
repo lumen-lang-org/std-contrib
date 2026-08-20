@@ -41,14 +41,6 @@ export class ModelService {
     return this.repository.exists(id);
   }
 
-  /** An address another model of the same provider already sends to is one the
-   *  stored key has been trusted with already, so pointing a new model at it is
-   *  not a move and there is nothing to warn about.
-   *
-   *  Without this, the first model registered with its own baseUrl under a
-   *  provider that holds a key is refused outright — and that is every local
-   *  endpoint, since a baseUrl is exactly what those need. The refusal named
-   *  the address it was already using. */
   alreadyAuthorised(row: StoredModel): bool {
     let listed = this.repository.listing();
     if (listed == "" || listed == "[]") {
@@ -183,15 +175,6 @@ export class ModelService {
     return produced(JSON.stringify(probe));
   }
 
-  /** One call, every row a model needs to be usable.
-   *
-   *  The choice is the whole point. A workflow binds `modelChoiceId`, and
-   *  `selectable` on the config does not create one — so a registration that
-   *  stops at the config leaves a model that answers over /completions and is
-   *  offered in no picker, with nothing anywhere reporting a problem.
-   *
-   *  Partial work is undone rather than left behind: a half-registered model is
-   *  the exact state this call exists to make impossible. */
   register(ask: ModelRegistration): Outcome {
     let stem = crypto.randomUUID().slice(0, 8);
     let modelId = "m-" + stem;
@@ -203,8 +186,6 @@ export class ModelService {
       return refusing(made.fault);
     }
 
-    /* An embedding model is picked by being the enabled one, never from the
-       menu, so it has no config and no choice to make. */
     if (ask.kind == "embedding") {
       return produced(registrationOf(modelId, "", ""));
     }
