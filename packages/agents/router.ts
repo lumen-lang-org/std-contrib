@@ -1,7 +1,6 @@
 import { ModelRow, ModelConfigRow, ModelRouterRow, ROUTER_MAX_TOKENS } from "./schema.ts";
-import { excerptOf } from "./artifacts.ts";
+import { excerptOf, jsonList, jsonText } from "./scan.ts";
 import { Turn, complete, assistantText, stopReasonOf, wasTruncated } from "./provider.ts";
-import { jsonList, jsonText } from "./scan.ts";
 
 export type Candidate = {
   key: string,

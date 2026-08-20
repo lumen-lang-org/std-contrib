@@ -1,8 +1,9 @@
+import { excerptOf } from "./scan.ts";
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute, executeWith, placeholderAt } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { ARTIFACT_MAX, THREAD_BYTES_MAX, TURN_SEQ_NONE, artifactPlan, putArtifact, getArtifact, getVersion, excerptOf } from "./artifacts.ts";
+import { ARTIFACT_MAX, THREAD_BYTES_MAX, TURN_SEQ_NONE, artifactPlan, putArtifact, getArtifact, getVersion } from "./artifacts.ts";
 import { ArtifactEdit, editArtifact } from "./artifacts-edit.ts";
 
 let database: Db = sqlite();

@@ -1,5 +1,5 @@
 import { MAX_SOURCE } from "../workflow/workflow.ts";
-import { excerptOf } from "./artifacts.ts";
+import { excerptOf } from "./scan.ts";
 
 export function lumenBin(): string {
   return process.env("AGENTS_LUMEN_BIN") ?? "lumen";

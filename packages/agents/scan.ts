@@ -349,3 +349,21 @@ export function jsonComplete(text: string): bool {
   }
   return true;
 }
+
+/** A cut that never splits a character. Strings here are UTF-8 bytes, so
+ *  slice(0, n) can land inside a multibyte character — and a string that is
+ *  not valid UTF-8 leaves this process as a byte array, which a browser then
+ *  chokes on. Backing off past any continuation bytes lands on a boundary.
+ *
+ *  It lives here, in a module that imports nothing, because provider.ts needs
+ *  it too and reaching artifacts.ts from there is an import cycle. */
+export function excerptOf(body: string, at: int): string {
+  if (body.length <= at) {
+    return body;
+  }
+  let cut = at;
+  while (cut > 0 && (body.charCodeAt(cut) & 0xC0) == 0x80) {
+    cut = cut - 1;
+  }
+  return body.slice(0, cut);
+}

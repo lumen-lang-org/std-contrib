@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { excerptOf } from "./artifacts.ts";
+import { excerptOf } from "./scan.ts";
 import { DbField, DbOrder, DbRepository, field, repository, dialectType, persist, findById, listOrdered, deleteWhere, countWhere, placeholderAt, createTableSql } from "../plume/plume.ts";
 import { Migration, migration } from "../plume/migrate.ts";
 import { environmentRepository } from "./routes/sandbox/environments/entities/environment.entity.ts";
