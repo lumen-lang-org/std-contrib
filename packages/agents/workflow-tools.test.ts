@@ -1,6 +1,6 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { connectDatabase, createTableSql, dropTable, listWhere, persist } from "../plume/plume.ts";
+import { connectDatabase, createTableSql, dropTable, executeWith, listWhere, persist } from "../plume/plume.ts";
 import { migrate, forgetMigrations, migration } from "../plume/migrate.ts";
 import { WfGraph, refuse as refuseGraph, startOf } from "../workflow/workflow.ts";
 import { WorkflowRow, parseGraph, workflowRunsMapping, workflowsMapping, workflowsPlan } from "./workflow-store.ts";
@@ -257,6 +257,21 @@ test("run_workflow moves the next firing to now and fires nothing itself", () =>
   let runs = listWhere(database, workflowRunsMapping(),
     "workflow_id = " + database.placeholder, [after.id]);
   expect(runs == "[]");
+});
+
+test("run_workflow refuses a workflow that is already running, and leaves it untouched", () => {
+  seeded();
+  expect(call("o1", "draft_workflow", DRAFT).ok);
+  let id = flowsFor("o1")[0].id;
+  executeWith(database, "UPDATE workflows SET running_since = " + database.placeholder + " WHERE id = " + database.placeholder,
+    [`${NOW}`, id]);
+  let before = flowsFor("o1")[0];
+  let asked = call("o1", "run_workflow", "{\"workflow\":\"Morning brief\"}");
+  expect(!asked.ok);
+  expect(asked.text.indexOf("already running") >= 0);
+  let after = flowsFor("o1")[0];
+  expect(after.nextAt == before.nextAt);
+  expect(after.runningSince == `${NOW}`);
 });
 
 test("pause and resume through change_workflow, and failures clear on resume", () => {
