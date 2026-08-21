@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { deleteById, executeWith, findById, listWhere, persist, placeholderAt } from "../plume/plume.ts";
+import { deleteById, executeWith, findById, listWhere, persist, persistIfBelowCount, placeholderAt } from "../plume/plume.ts";
 import { ToolSpec, toolSpec } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonFlag, jsonList, jsonRaw, jsonText } from "./scan.ts";
@@ -593,7 +593,7 @@ type Stored = {
   error: string,
 };
 
-function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowMs: number): Stored {
+function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowMs: number, guardCap: bool): Stored {
   let timing = timingOf(graph, zone, nowMs);
   if (!timing.ok) {
     let bad: Stored = { ok: false, row: row, error: timing.error };
@@ -633,9 +633,18 @@ function storeGraph(db: Db, row: WorkflowRow, graph: WfGraph, zone: string, nowM
     }
     ready = withWorkflowNextAt(edited, first.at);
   }
-  let written = persist(db, workflowsMapping(), JSON.stringify(ready));
+  let written = guardCap
+    ? persistIfBelowCount(db, workflowsMapping(), JSON.stringify(ready),
+        "SELECT COUNT(*) FROM workflows WHERE owner = " + placeholderAt(db, 2) + " AND enabled = true",
+        [row.owner], MAX_WORKFLOWS_PER_OWNER)
+    : persist(db, workflowsMapping(), JSON.stringify(ready));
   if (!written.ok) {
     let bad: Stored = { ok: false, row: row, error: written.error };
+    return bad;
+  }
+  if (guardCap && written.rows == 0) {
+    let bad: Stored = { ok: false, row: row,
+      error: "that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — one has to be paused or deleted first. list_workflows shows them." };
     return bad;
   }
   let good: Stored = { ok: true, row: ready, error: "" };
@@ -810,7 +819,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       lastRunAt: "", lastRunId: "", lastStatus: "", lastError: "",
       runCount: 0, publishedGraph: "", publishedAt: "", createdAt: now, updatedAt: now,
     };
-    let stored = storeGraph(db, row, graph, zone, call.nowMs);
+    let stored = storeGraph(db, row, graph, zone, call.nowMs, true);
     if (!stored.ok) {
       return no(stored.error);
     }
@@ -959,7 +968,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       i = i + 1;
     }
     let graph: WfGraph = { nodes: nodes, edges: parsed.graph.edges, view: parsed.graph.view };
-    let stored = storeGraph(db, row, graph, zone, call.nowMs);
+    let stored = storeGraph(db, row, graph, zone, call.nowMs, false);
     if (!stored.ok) {
       return no(stored.error);
     }
@@ -1066,7 +1075,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       edges.push(edgeOf(fromId, id));
     }
     let grown: WfGraph = { nodes: nodes, edges: edges, view: graph.view };
-    let stored = storeGraph(db, row, grown, row.tz, call.nowMs);
+    let stored = storeGraph(db, row, grown, row.tz, call.nowMs, false);
     if (!stored.ok) {
       return no(stored.error);
     }
@@ -1110,7 +1119,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       edges2.push(fresh2);
     }
     let rewired: WfGraph = { nodes: graph.nodes, edges: edges2, view: graph.view };
-    let stored = storeGraph(db, row, rewired, row.tz, call.nowMs);
+    let stored = storeGraph(db, row, rewired, row.tz, call.nowMs, false);
     if (!stored.ok) {
       return no(stored.error);
     }
@@ -1164,7 +1173,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
       n = n + 1;
     }
     let changed: WfGraph = { nodes: nodes, edges: graph.edges, view: graph.view };
-    let stored = storeGraph(db, row, changed, row.tz, call.nowMs);
+    let stored = storeGraph(db, row, changed, row.tz, call.nowMs, false);
     if (!stored.ok) {
       return no(stored.error);
     }
@@ -1218,7 +1227,7 @@ export function callWorkflowTool(db: Db, call: WorkflowToolCall): FileToolResult
     edges.push(edgeOf(inFrom, outTo));
   }
   let shrunk: WfGraph = { nodes: nodes, edges: edges, view: graph.view };
-  let stored = storeGraph(db, row, shrunk, row.tz, call.nowMs);
+  let stored = storeGraph(db, row, shrunk, row.tz, call.nowMs, false);
   if (!stored.ok) {
     return no(stored.error);
   }
