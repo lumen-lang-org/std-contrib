@@ -107,9 +107,12 @@ export class WorkflowService {
       }
       ready = withWorkflowNextAt(row, first.at);
     }
-    let written = this.repository.save(JSON.stringify(ready));
+    let written = this.repository.saveIfUnderCap(JSON.stringify(ready), owner, MAX_WORKFLOWS_PER_OWNER);
     if (!written.ok) {
       return refusing(written.error);
+    }
+    if (written.rows == 0) {
+      return refusing("that is " + `${MAX_WORKFLOWS_PER_OWNER}` + " workflows already — pause one before adding another");
     }
     return produced(this.repository.one(ready.id));
   }
