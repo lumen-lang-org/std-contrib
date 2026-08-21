@@ -2,6 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { AgentRun, runAgentFor, runAgentTraced, hasName } from "./run.ts";
 import { TraceBackend, hasDatasets } from "../tracing/backend.ts";
 import { Tracer, traceId, tracerForCallee, tracerBackend, flush, tracerWithMoreSpans, tracing, noTracer, resetTracer } from "../tracing/tracing.ts";
+import { enqueueTrace } from "./trace-outbox.ts";
 import { jsonRaw, jsonText, jsonList, jsonStringMember, jsonUnescape } from "./scan.ts";
 import { openThread, rememberRouteKey, runInThread, EVAL_CASE_KEY } from "./threads.ts";
 import { ArtifactRow, listArtifacts, getVersion } from "./artifacts.ts";
@@ -807,7 +808,10 @@ export function runEvals(db: Db, request: EvalRequest, tracer: Tracer): EvalRun 
 
     let caseTrace = traceId(caseTracer);
 
-    flush(tracerWithMoreSpans(caseTracer, answered.spans));
+    /* Queued, not flushed: this runs once per case, so an inline upload is
+     * paid for every question in the set. The id is handed out before the
+     * row ships, exactly as the thread path does. */
+    enqueueTrace(db, tracerWithMoreSpans(caseTracer, answered.spans));
     linkRunItem(base, auth, runName, items[i].id, caseTrace);
 
     let score: number = 0.0;
