@@ -4,18 +4,24 @@ import { BadRequest, OkJson, Refused, Reply } from "../../../../rest/server.ts";
 import { ModelChoiceRow, ModelConfigRow, configAndModel, modelChoicesMapping } from "../../../schema.ts";
 import { choiceFault } from "../../../api-core.ts";
 import { credentialFor, masterKey, masterKeyFault } from "../../../credentials.ts";
-import { Completion, ToolSpec, Turn, completeTurns, replyText, userTurn } from "../../../provider.ts";
+import { Completion, Turn, ToolCall, completeTurns, replyText, toolCallsFrom } from "../../../provider.ts";
 import { RunRecord, recordRun } from "../../../runlog.ts";
 import { AgentRun } from "../../../run.ts";
-import { CompletionAsk } from "./dtos/completion-ask.dto.ts";
+import { CompletionAsk, turnsOf } from "./dtos/completion-ask.dto.ts";
 import { CompletionView } from "./dtos/completion-view.dto.ts";
 
 /* Headless inference: one prompt in, one answer out, against a model the
  * operator already configured. The first caller is Discover once it moves
  * out of this process; the shape is provider.complete()'s, reached the way
- * threads reach it — a model CHOICE from the operator's menu, or a config
+ * threads reach it - a model CHOICE from the operator's menu, or a config
  * named directly. No router on purpose: a router costs a second completion
- * per call to pick a model the caller here has already picked. */
+ * per call to pick a model the caller here has already picked.
+ *
+ * A second caller, the Platform's OpenAI-compatible /chat/completions, sends
+ * turns[] and tools[] instead of a single input - a client running its own
+ * tool-calling loop, one exchange at a time. Nothing here runs a tool: the
+ * caller does that on its own machine and comes back with the result as the
+ * next turn, same shape completeTurns already speaks for threads. */
 export class CompletionService {
   database: Db;
 
@@ -24,8 +30,8 @@ export class CompletionService {
   }
 
   answer(owner: string, ask: CompletionAsk): Reply {
-    if (ask.input.trim() == "") {
-      return BadRequest("an input is required: {\"modelChoiceId\":\"...\",\"input\":\"...\"}");
+    if (ask.input.trim() == "" && ask.turns.length == 0) {
+      return BadRequest("an input is required: {\"modelChoiceId\":\"...\",\"input\":\"...\"} (or a turns[] array)");
     }
     if (ask.modelChoiceId == "" && ask.modelConfigId == "") {
       return BadRequest("name a model: modelChoiceId (from /model-choices) or modelConfigId");
@@ -47,7 +53,7 @@ export class CompletionService {
       let choice: ModelChoiceRow = JSON.parse<ModelChoiceRow>(held);
       if (choice.configId == "") {
         return BadRequest("model choice " + ask.modelChoiceId
-          + " routes between models; completions take a fixed model — name its modelConfigId directly");
+          + " routes between models; completions take a fixed model - name its modelConfigId directly");
       }
       configId = choice.configId;
     }
@@ -80,14 +86,15 @@ export class CompletionService {
       config = overridden;
     }
 
-    let turns: Turn[] = [userTurn(ask.input)];
-    let noTools: ToolSpec[] = [];
-    let answered: Completion = completeTurns(got.model, config, ask.system, turns, noTools, key);
+    let turns: Turn[] = turnsOf(ask);
+    let answered: Completion = completeTurns(got.model, config, ask.system, turns, ask.tools, key);
 
-    /* Completion.text is the provider's raw wire body; the reply is inside
-     * it, per provider. Extract before anything records or returns it —
-     * discover and threads both learned this the same way. */
+    /* Completion.text is the provider's raw wire body; the reply and any
+     * tool calls are inside it, per provider. Extract before anything
+     * records or returns it - discover and threads both learned this the
+     * same way. */
     let said = answered.ok ? replyText(got.model.provider, answered.text) : "";
+    let calls: ToolCall[] = answered.ok ? toolCallsFrom(got.model.provider, answered.text) : [];
 
     /* Both outcomes are recorded: a failed call spends the caller's time and
      * often the provider's tokens, and an unrecorded failure is exactly the
@@ -104,6 +111,7 @@ export class CompletionService {
       inputTokens: answered.inputTokens,
       outputTokens: answered.outputTokens,
       runId: runId,
+      calls: calls,
     };
     return OkJson<CompletionView>(view);
   }
