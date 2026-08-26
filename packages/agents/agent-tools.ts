@@ -6,6 +6,8 @@ import { jsonRaw, jsonText } from "./scan.ts";
 import { AgentRow, ModelConfigRow, PromptRow, agentsMapping, configAndModel, modelConfigRows, promptsMapping } from "./schema.ts";
 import { maySchedule } from "./task-tools.ts";
 import { credentialFor, masterKey, masterKeyFault } from "./credentials.ts";
+import { normalScope } from "./knowledge.ts";
+import { ArtifactVersionRow, ArtifactWrite, TURN_SEQ_NONE, artifactVersionsMapping, getArtifact, listArtifacts, putArtifact } from "./artifacts.ts";
 import { agentRepository } from "./routes/authoring/agents/entities/agent.entity.ts";
 import { agentRetrievalRepository } from "./routes/authoring/agents/entities/agent-retrieval.entity.ts";
 
@@ -106,10 +108,42 @@ export function agentTools(): ToolSpec[] {
     + "kept: send whatever history the reply needs as part of the message itself.",
     "{\"type\":\"object\",\"properties\":{"
     + "\"agent\":{\"type\":\"string\",\"description\":\"" + which + "\"},"
-    + "\"message\":{\"type\":\"string\",\"description\":\"What to send it.\"}},"
+    + "\"message\":{\"type\":\"string\",\"description\":\"What to send it.\"},"
+    + "\"artifact\":{\"description\":\"Optional. A JSON value to give it as context "
+    + "— a document, a config, anything meant to be edited rather than discussed. Sent "
+    + "alongside message rather than embedded in it; say in message what to do with it, "
+    + "such as \\\"edit this\\\" or \\\"return it with X changed\\\".\"}},"
     + "\"required\":[\"agent\",\"message\"]}"));
 
+  out.push(toolSpec("upload_artifact",
+    "Store something under a path so it can be read back or handed to ask_agent later, "
+    + "without resending the whole thing each time. Uploading again at the same path saves a "
+    + "new version rather than a new artifact.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"path\":{\"type\":\"string\",\"description\":\"Where to file it, such as \\\"/draft.json\\\". "
+    + "The handle read_artifact and list_artifacts use.\"},"
+    + "\"title\":{\"type\":\"string\",\"description\":\"A short label for it.\"},"
+    + "\"content\":{\"type\":\"string\",\"description\":\"The whole content, whole — not a diff. "
+    + "JSON goes in as text, same as any other content.\"},"
+    + "\"note\":{\"type\":\"string\",\"description\":\"Optional. What changed, for this version.\"}},"
+    + "\"required\":[\"path\",\"title\",\"content\"]}"));
+
+  out.push(toolSpec("list_artifacts",
+    "What has been uploaded: each one's path, title and version. Call before read_artifact "
+    + "or before uploading again, to see what is already there.",
+    "{\"type\":\"object\",\"properties\":{}}"));
+
+  out.push(toolSpec("read_artifact",
+    "Read back an uploaded artifact's current content, whole.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"path\":{\"type\":\"string\",\"description\":\"Its path, from list_artifacts.\"}},"
+    + "\"required\":[\"path\"]}"));
+
   return out;
+}
+
+function artifactSpace(owner: string): string {
+  return "mcp:" + owner;
 }
 
 export type AgentToolCall = {
@@ -288,7 +322,9 @@ function describeAgent(db: Db, agent: AgentRow, withPrompt: bool): string {
 export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   if (call.name != "list_agents" && call.name != "show_agent"
     && call.name != "create_agent" && call.name != "change_agent"
-    && call.name != "delete_agent" && call.name != "ask_agent") {
+    && call.name != "delete_agent" && call.name != "ask_agent"
+    && call.name != "upload_artifact" && call.name != "list_artifacts"
+    && call.name != "read_artifact") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -353,6 +389,65 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
       + "\n\nA workflow step or a bot can name it now.");
   }
 
+  if (call.name == "upload_artifact") {
+    let path = jsonText(call.args, "path").trim();
+    if (path == "") {
+      return no("say where to put it: {\"path\":\"/draft.json\",\"title\":\"...\",\"content\":\"...\"}");
+    }
+    let title = jsonText(call.args, "title").trim();
+    if (title == "") {
+      return no("give it a title.");
+    }
+    let content = jsonText(call.args, "content");
+    if (content == "") {
+      return no("say what to put in it — content is the whole body, not a diff.");
+    }
+    let note = jsonText(call.args, "note").trim();
+    let write: ArtifactWrite = {
+      threadId: artifactSpace(call.owner), path: path, title: title, content: content,
+      note: note, origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE,
+      now: `${call.nowMs}`,
+    };
+    let written = putArtifact(db, write);
+    if (!written.ok) {
+      return no(written.fault);
+    }
+    return yes("Uploaded \"" + title + "\" at " + normalScope(path) + ", version "
+      + `${written.version}` + ". read_artifact and list_artifacts both use the path.");
+  }
+
+  if (call.name == "list_artifacts") {
+    let rows = listArtifacts(db, artifactSpace(call.owner));
+    if (rows.length == 0) {
+      return yes("Nothing uploaded yet — upload_artifact files the first.");
+    }
+    let out = `${rows.length}` + " artifact(s):\n";
+    let i: int = 0;
+    while (i < rows.length) {
+      out = out + "\n" + rows[i].path + "  " + rows[i].title
+        + " (v" + `${rows[i].currentVersion}` + ", " + rows[i].mime + ")";
+      i = i + 1;
+    }
+    return yes(out);
+  }
+
+  if (call.name == "read_artifact") {
+    let path = jsonText(call.args, "path").trim();
+    if (path == "") {
+      return no("say which one: {\"path\":\"...\"} — list_artifacts shows them.");
+    }
+    let row = getArtifact(db, artifactSpace(call.owner), path);
+    if (row.id == "") {
+      return no("no artifact at \"" + normalScope(path) + "\" — list_artifacts shows what is there.");
+    }
+    let versionDoc = findById(db, artifactVersionsMapping(), row.id + ":" + `${row.currentVersion}`);
+    if (versionDoc == "") {
+      return no("\"" + normalScope(path) + "\" has no readable version.");
+    }
+    let version = JSON.parse<ArtifactVersionRow>(versionDoc);
+    return yes(row.title + " (" + normalScope(path) + ", v" + `${row.currentVersion}` + "):\n\n" + version.body);
+  }
+
   let said = jsonText(call.args, "agent").trim();
   if (said == "") {
     return no("say which agent: {\"agent\":\"...\"} — list_agents shows them.");
@@ -388,7 +483,9 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
       return no("no stored credential for provider \"" + got.model.provider + "\".");
     }
     let prompt = promptOf(db, agent.promptId);
-    let turns: Turn[] = [userTurn(message)];
+    let artifactRaw = jsonRaw(call.args, "artifact");
+    let sent = artifactRaw == "" ? message : message + "\n\nArtifact (JSON):\n" + artifactRaw;
+    let turns: Turn[] = [userTurn(sent)];
     let noTools: ToolSpec[] = [];
     let answered = completeTurns(got.model, got.config, prompt.body, turns, noTools, key);
     if (!answered.ok) {

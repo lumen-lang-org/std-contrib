@@ -4,6 +4,7 @@ import { connectDatabase, dropTable, execute, persist } from "../plume/plume.ts"
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
 import { AgentRow, ModelConfigRow, ModelRow, PromptRow, agentsMapping, modelConfigsMapping, modelsMapping, promptsMapping, schemaPlan, skillsMapping, skillFilesMapping } from "./schema.ts";
 import { agentRetrievalMapping, knowledgePlan } from "./knowledge.ts";
+import { artifactPlan, artifactsMapping, artifactVersionsMapping } from "./artifacts.ts";
 import { AgentToolCall, agentTools, callAgentTool } from "./agent-tools.ts";
 
 let database: Db = sqlite();
@@ -32,6 +33,8 @@ function db(): Db {
     dropTable(database, skillFilesMapping());
     dropTable(database, skillsMapping());
     dropTable(database, agentRetrievalMapping());
+    dropTable(database, artifactVersionsMapping());
+    dropTable(database, artifactsMapping());
     dropTable(database, agentsMapping());
     dropTable(database, promptsMapping());
     dropTable(database, modelConfigsMapping(database));
@@ -42,6 +45,12 @@ function db(): Db {
     while (e < extra.length) {
       plan.push(extra[e]);
       e = e + 1;
+    }
+    let artifacts = artifactPlan(database);
+    let f: int = 0;
+    while (f < artifacts.length) {
+      plan.push(artifacts[f]);
+      f = f + 1;
     }
     migrate(database, plan);
     seed();
@@ -80,8 +89,8 @@ function call(owner: string, name: string, args: string): Said {
   return out;
 }
 
-test("six names answer, and show carries the whole prompt", () => {
-  expect(agentTools().length == 6);
+test("nine names answer, and show carries the whole prompt", () => {
+  expect(agentTools().length == 9);
   expect(!call("o1", "schedule_task", "{}").handled);
   let shown = call("o1", "show_agent", "{\"agent\":\"helper\"}");
   expect(shown.ok);
@@ -165,4 +174,59 @@ test("ask_agent reaches the provider boundary: agent, prompt and model config bo
   let asked = call("o1", "ask_agent", "{\"agent\":\"helper\",\"message\":\"hi there\"}");
   expect(!asked.ok);
   expect(asked.text.includes("credential") || asked.text.includes("LUMEN_MASTER_KEY"));
+});
+
+test("ask_agent with an artifact still reaches the same provider boundary", () => {
+  let asked = call("o1", "ask_agent",
+    "{\"agent\":\"helper\",\"message\":\"edit this\",\"artifact\":{\"title\":\"draft\",\"body\":\"v1\"}}");
+  expect(!asked.ok);
+  expect(asked.text.includes("credential") || asked.text.includes("LUMEN_MASTER_KEY"));
+});
+
+test("upload_artifact refuses without a path, a title, or content", () => {
+  expect(!call("o1", "upload_artifact", "{\"title\":\"T\",\"content\":\"c\"}").ok);
+  expect(!call("o1", "upload_artifact", "{\"path\":\"/p\",\"content\":\"c\"}").ok);
+  expect(!call("o1", "upload_artifact", "{\"path\":\"/p\",\"title\":\"T\"}").ok);
+});
+
+test("upload_artifact stores content and says where to find it", () => {
+  let up = call("o2", "upload_artifact",
+    "{\"path\":\"/draft.json\",\"title\":\"Draft\",\"content\":\"{\\\"a\\\":1}\"}");
+  expect(up.ok);
+  expect(up.text.includes("Draft"));
+  expect(up.text.includes("/draft.json"));
+});
+
+test("list_artifacts shows one owner's uploads and not another's", () => {
+  call("o3", "upload_artifact", "{\"path\":\"/notes.txt\",\"title\":\"Notes\",\"content\":\"hello\"}");
+  let mine = call("o3", "list_artifacts", "{}");
+  expect(mine.ok);
+  expect(mine.text.includes("/notes.txt"));
+  let elsewhere = call("o4", "list_artifacts", "{}");
+  expect(elsewhere.ok);
+  expect(elsewhere.text.includes("Nothing uploaded"));
+});
+
+test("read_artifact returns the content whole", () => {
+  call("o5", "upload_artifact", "{\"path\":\"/x.json\",\"title\":\"X\",\"content\":\"{\\\"n\\\":2}\"}");
+  let got = call("o5", "read_artifact", "{\"path\":\"/x.json\"}");
+  expect(got.ok);
+  expect(got.text.includes("{\"n\":2}"));
+});
+
+test("read_artifact refuses when nothing is at that path", () => {
+  let missing = call("o5", "read_artifact", "{\"path\":\"/nope.json\"}");
+  expect(!missing.ok);
+  expect(missing.text.includes("no artifact"));
+});
+
+test("uploading again at the same path saves a new version, not a new artifact", () => {
+  call("o6", "upload_artifact", "{\"path\":\"/v.txt\",\"title\":\"V\",\"content\":\"one\"}");
+  call("o6", "upload_artifact", "{\"path\":\"/v.txt\",\"title\":\"V\",\"content\":\"two\"}");
+  let got = call("o6", "read_artifact", "{\"path\":\"/v.txt\"}");
+  expect(got.ok);
+  expect(got.text.includes("two"));
+  expect(!got.text.includes("one"));
+  let listed = call("o6", "list_artifacts", "{}");
+  expect(listed.text.includes("1 artifact"));
 });
