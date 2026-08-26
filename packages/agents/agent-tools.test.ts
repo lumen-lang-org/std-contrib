@@ -71,8 +71,8 @@ function call(owner: string, name: string, args: string): Said {
   return out;
 }
 
-test("five names answer, and show carries the whole prompt", () => {
-  expect(agentTools().length == 5);
+test("six names answer, and show carries the whole prompt", () => {
+  expect(agentTools().length == 6);
   expect(!call("o1", "schedule_task", "{}").handled);
   let shown = call("o1", "show_agent", "{\"agent\":\"helper\"}");
   expect(shown.ok);
@@ -138,4 +138,22 @@ test("rollback repoints, delete refuses the default and takes the rest", () => {
   expect(database.value(0, 0) == "0");
   database.query("SELECT COUNT(*) FROM agent_sub_agents WHERE child_id = '" + tutorId + "'", []);
   expect(database.value(0, 0) == "0");
+});
+
+test("ask_agent refuses an empty message before it reaches the agent lookup", () => {
+  let asked = call("o1", "ask_agent", "{\"agent\":\"helper\",\"message\":\"\"}");
+  expect(!asked.ok);
+  expect(asked.text.includes("what to ask"));
+});
+
+test("ask_agent refuses same as show_agent when nothing by that name exists", () => {
+  let missing = call("o1", "ask_agent", "{\"agent\":\"nobody\",\"message\":\"hi\"}");
+  expect(!missing.ok);
+  expect(missing.text.includes("no agent"));
+});
+
+test("ask_agent reaches the provider boundary: agent, prompt and model config both resolve", () => {
+  let asked = call("o1", "ask_agent", "{\"agent\":\"helper\",\"message\":\"hi there\"}");
+  expect(!asked.ok);
+  expect(asked.text.includes("credential") || asked.text.includes("LUMEN_MASTER_KEY"));
 });
