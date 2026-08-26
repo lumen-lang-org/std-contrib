@@ -1,10 +1,11 @@
 import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
-import { connectDatabase, dropTable, execute, persist } from "../plume/plume.ts";
-import { migrate, forgetMigrations } from "../plume/migrate.ts";
+import { connectDatabase, createTableSql, dropTable, execute, persist } from "../plume/plume.ts";
+import { migrate, migration, forgetMigrations } from "../plume/migrate.ts";
 import { AgentRow, ModelConfigRow, ModelRow, PromptRow, agentsMapping, modelConfigsMapping, modelsMapping, promptsMapping, schemaPlan, skillsMapping, skillFilesMapping } from "./schema.ts";
 import { agentRetrievalMapping, knowledgePlan } from "./knowledge.ts";
 import { artifactPlan, artifactsMapping, artifactVersionsMapping } from "./artifacts.ts";
+import { threadRepository } from "./routes/conversations/threads/entities/thread.entity.ts";
 import { AgentToolCall, agentTools, callAgentTool } from "./agent-tools.ts";
 
 let database: Db = sqlite();
@@ -35,6 +36,7 @@ function db(): Db {
     dropTable(database, agentRetrievalMapping());
     dropTable(database, artifactVersionsMapping());
     dropTable(database, artifactsMapping());
+    dropTable(database, threadRepository());
     dropTable(database, agentsMapping());
     dropTable(database, promptsMapping());
     dropTable(database, modelConfigsMapping(database));
@@ -52,6 +54,7 @@ function db(): Db {
       plan.push(artifacts[f]);
       f = f + 1;
     }
+    plan.push(migration("900", "test threads", createTableSql(database, threadRepository())));
     migrate(database, plan);
     seed();
     ready = true;
@@ -87,6 +90,19 @@ function call(owner: string, name: string, args: string): Said {
   let got = callAgentTool(db(), asked);
   let out: Said = { handled: got.handled, ok: got.ok, text: got.text };
   return out;
+}
+
+type ThreadSeed = {
+  id: string, agentId: string, owner: string, modelChoiceId: string,
+  routeKey: string, title: string, replayable: bool, projectId: string, createdAt: string,
+};
+
+function seedThread(id: string, owner: string): void {
+  let t: ThreadSeed = {
+    id: id, agentId: "a1", owner: owner, modelChoiceId: "", routeKey: "",
+    title: "Chat", replayable: false, projectId: "", createdAt: "1",
+  };
+  persist(database, threadRepository(), JSON.stringify(t));
 }
 
 test("nine names answer, and show carries the whole prompt", () => {
@@ -229,4 +245,47 @@ test("uploading again at the same path saves a new version, not a new artifact",
   expect(!got.text.includes("one"));
   let listed = call("o6", "list_artifacts", "{}");
   expect(listed.text.includes("1 artifact"));
+});
+
+test("a thread param files the artifact under a real conversation this key owns", () => {
+  seedThread("th-mine", "o7");
+
+  let up = call("o7", "upload_artifact",
+    "{\"path\":\"/plan.md\",\"title\":\"Plan\",\"content\":\"draft one\",\"thread\":\"th-mine\"}");
+  expect(up.ok);
+
+  let got = call("o7", "read_artifact", "{\"path\":\"/plan.md\",\"thread\":\"th-mine\"}");
+  expect(got.ok);
+  expect(got.text.includes("draft one"));
+
+  let listed = call("o7", "list_artifacts", "{\"thread\":\"th-mine\"}");
+  expect(listed.ok);
+  expect(listed.text.includes("/plan.md"));
+
+  let ownSpace = call("o7", "list_artifacts", "{}");
+  expect(ownSpace.text.includes("Nothing uploaded"));
+});
+
+test("a thread this key does not own refuses, for all three artifact tools", () => {
+  seedThread("th-not-mine", "somebody-else");
+
+  let up = call("o7", "upload_artifact",
+    "{\"path\":\"/x.md\",\"title\":\"X\",\"content\":\"c\",\"thread\":\"th-not-mine\"}");
+  expect(!up.ok);
+  expect(up.text.includes("no conversation"));
+
+  let listed = call("o7", "list_artifacts", "{\"thread\":\"th-not-mine\"}");
+  expect(!listed.ok);
+  expect(listed.text.includes("no conversation"));
+
+  let got = call("o7", "read_artifact", "{\"path\":\"/x.md\",\"thread\":\"th-not-mine\"}");
+  expect(!got.ok);
+  expect(got.text.includes("no conversation"));
+});
+
+test("a thread id that does not exist at all refuses the same way", () => {
+  let up = call("o7", "upload_artifact",
+    "{\"path\":\"/x.md\",\"title\":\"X\",\"content\":\"c\",\"thread\":\"th-nope\"}");
+  expect(!up.ok);
+  expect(up.text.includes("no conversation"));
 });

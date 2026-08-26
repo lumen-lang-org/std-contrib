@@ -8,6 +8,8 @@ import { maySchedule } from "./task-tools.ts";
 import { credentialFor, masterKey, masterKeyFault } from "./credentials.ts";
 import { normalScope } from "./knowledge.ts";
 import { ArtifactVersionRow, ArtifactWrite, TURN_SEQ_NONE, artifactVersionsMapping, getArtifact, listArtifacts, putArtifact } from "./artifacts.ts";
+import { documentIsOwned } from "./owner.ts";
+import { threadRepository } from "./routes/conversations/threads/entities/thread.entity.ts";
 import { agentRepository } from "./routes/authoring/agents/entities/agent.entity.ts";
 import { agentRetrievalRepository } from "./routes/authoring/agents/entities/agent-retrieval.entity.ts";
 
@@ -125,18 +127,25 @@ export function agentTools(): ToolSpec[] {
     + "\"title\":{\"type\":\"string\",\"description\":\"A short label for it.\"},"
     + "\"content\":{\"type\":\"string\",\"description\":\"The whole content, whole — not a diff. "
     + "JSON goes in as text, same as any other content.\"},"
-    + "\"note\":{\"type\":\"string\",\"description\":\"Optional. What changed, for this version.\"}},"
+    + "\"note\":{\"type\":\"string\",\"description\":\"Optional. What changed, for this version.\"},"
+    + "\"thread\":{\"type\":\"string\",\"description\":\"Optional. An existing conversation's id to "
+    + "file this under, so it shows up there rather than in a space of its own. Refused if this "
+    + "key does not own that conversation.\"}},"
     + "\"required\":[\"path\",\"title\",\"content\"]}"));
 
   out.push(toolSpec("list_artifacts",
     "What has been uploaded: each one's path, title and version. Call before read_artifact "
     + "or before uploading again, to see what is already there.",
-    "{\"type\":\"object\",\"properties\":{}}"));
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"thread\":{\"type\":\"string\",\"description\":\"Optional. List a conversation's artifacts "
+    + "instead of this key's own. Refused if this key does not own it.\"}}}"));
 
   out.push(toolSpec("read_artifact",
     "Read back an uploaded artifact's current content, whole.",
     "{\"type\":\"object\",\"properties\":{"
-    + "\"path\":{\"type\":\"string\",\"description\":\"Its path, from list_artifacts.\"}},"
+    + "\"path\":{\"type\":\"string\",\"description\":\"Its path, from list_artifacts.\"},"
+    + "\"thread\":{\"type\":\"string\",\"description\":\"Optional. Read from a conversation instead "
+    + "of this key's own space. Refused if this key does not own it.\"}},"
     + "\"required\":[\"path\"]}"));
 
   return out;
@@ -152,6 +161,32 @@ export type AgentToolCall = {
   args: string,
   nowMs: number,
 };
+
+function ownedConversation(db: Db, threadId: string, owner: string): bool {
+  let document = findById(db, threadRepository(), threadId);
+  if (document == "") {
+    return false;
+  }
+  return documentIsOwned(document, [owner]);
+}
+
+export type ArtifactScope = { space: string, fault: string };
+
+function artifactScope(db: Db, call: AgentToolCall): ArtifactScope {
+  let explicitThread = jsonText(call.args, "thread").trim();
+  if (explicitThread == "") {
+    let own: ArtifactScope = { space: artifactSpace(call.owner), fault: "" };
+    return own;
+  }
+  if (!ownedConversation(db, explicitThread, call.owner)) {
+    let refused: ArtifactScope = {
+      space: "", fault: "no conversation \"" + explicitThread + "\" that this key owns.",
+    };
+    return refused;
+  }
+  let shared: ArtifactScope = { space: explicitThread, fault: "" };
+  return shared;
+}
 
 function agentSaid(db: Db, said: string): AgentRow {
   let doc = findById(db, agentsMapping(), said);
@@ -403,8 +438,12 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
       return no("say what to put in it — content is the whole body, not a diff.");
     }
     let note = jsonText(call.args, "note").trim();
+    let scoped = artifactScope(db, call);
+    if (scoped.fault != "") {
+      return no(scoped.fault);
+    }
     let write: ArtifactWrite = {
-      threadId: artifactSpace(call.owner), path: path, title: title, content: content,
+      threadId: scoped.space, path: path, title: title, content: content,
       note: note, origin: "uploaded", mustCreate: false, turnSeq: TURN_SEQ_NONE,
       now: `${call.nowMs}`,
     };
@@ -417,7 +456,11 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   }
 
   if (call.name == "list_artifacts") {
-    let rows = listArtifacts(db, artifactSpace(call.owner));
+    let scoped = artifactScope(db, call);
+    if (scoped.fault != "") {
+      return no(scoped.fault);
+    }
+    let rows = listArtifacts(db, scoped.space);
     if (rows.length == 0) {
       return yes("Nothing uploaded yet — upload_artifact files the first.");
     }
@@ -436,7 +479,11 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
     if (path == "") {
       return no("say which one: {\"path\":\"...\"} — list_artifacts shows them.");
     }
-    let row = getArtifact(db, artifactSpace(call.owner), path);
+    let scoped = artifactScope(db, call);
+    if (scoped.fault != "") {
+      return no(scoped.fault);
+    }
+    let row = getArtifact(db, scoped.space, path);
     if (row.id == "") {
       return no("no artifact at \"" + normalScope(path) + "\" — list_artifacts shows what is there.");
     }
