@@ -1,10 +1,11 @@
 import { Db } from "../plume/driver.ts";
 import { DbOrder, DbResult, deleteById, executeWith, existsById, findById, linkOf, listOrdered, pageOrdered, persist, placeholderAt, unlinkAllOwnedBy, unlinkAllPointingAt } from "../plume/plume.ts";
-import { ToolSpec, toolSpec } from "./provider.ts";
+import { ToolSpec, Turn, completeTurns, replyText, toolSpec, userTurn } from "./provider.ts";
 import { FileToolResult } from "./workspace.ts";
 import { jsonRaw, jsonText } from "./scan.ts";
-import { AgentRow, ModelConfigRow, PromptRow, agentsMapping, modelConfigRows, promptsMapping } from "./schema.ts";
+import { AgentRow, ModelConfigRow, PromptRow, agentsMapping, configAndModel, modelConfigRows, promptsMapping } from "./schema.ts";
 import { maySchedule } from "./task-tools.ts";
+import { credentialFor, masterKey, masterKeyFault } from "./credentials.ts";
 import { agentRepository } from "./routes/authoring/agents/entities/agent.entity.ts";
 import { agentRetrievalRepository } from "./routes/authoring/agents/entities/agent-retrieval.entity.ts";
 
@@ -98,6 +99,15 @@ export function agentTools(): ToolSpec[] {
     "{\"type\":\"object\",\"properties\":{"
     + "\"agent\":{\"type\":\"string\",\"description\":\"" + which + "\"}},"
     + "\"required\":[\"agent\"]}"));
+
+  out.push(toolSpec("ask_agent",
+    "Send one message to an agent and get its reply, run through its own model config and "
+    + "system prompt — the same path a conversation with it takes. One completion, no thread "
+    + "kept: send whatever history the reply needs as part of the message itself.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"agent\":{\"type\":\"string\",\"description\":\"" + which + "\"},"
+    + "\"message\":{\"type\":\"string\",\"description\":\"What to send it.\"}},"
+    + "\"required\":[\"agent\",\"message\"]}"));
 
   return out;
 }
@@ -278,7 +288,7 @@ function describeAgent(db: Db, agent: AgentRow, withPrompt: bool): string {
 export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
   if (call.name != "list_agents" && call.name != "show_agent"
     && call.name != "create_agent" && call.name != "change_agent"
-    && call.name != "delete_agent") {
+    && call.name != "delete_agent" && call.name != "ask_agent") {
     return not();
   }
   if (!maySchedule(call.owner)) {
@@ -354,6 +364,37 @@ export function callAgentTool(db: Db, call: AgentToolCall): FileToolResult {
 
   if (call.name == "show_agent") {
     return yes(describeAgent(db, agent, true));
+  }
+
+  if (call.name == "ask_agent") {
+    let message = jsonText(call.args, "message").trim();
+    if (message == "") {
+      return no("say what to ask it: {\"agent\":\"...\",\"message\":\"...\"}");
+    }
+    if (agent.modelConfigId == "") {
+      return no("\"" + agent.agentName + "\" has no model config to run on.");
+    }
+    let got = configAndModel(db, agent.modelConfigId);
+    if (got.fault != "") {
+      return no(got.fault);
+    }
+    let master = masterKey();
+    let unusable = masterKeyFault(master);
+    if (unusable != "") {
+      return no(unusable);
+    }
+    let key = credentialFor(db, got.model.provider, master);
+    if (key == "") {
+      return no("no stored credential for provider \"" + got.model.provider + "\".");
+    }
+    let prompt = promptOf(db, agent.promptId);
+    let turns: Turn[] = [userTurn(message)];
+    let noTools: ToolSpec[] = [];
+    let answered = completeTurns(got.model, got.config, prompt.body, turns, noTools, key);
+    if (!answered.ok) {
+      return no(answered.error != "" ? answered.error : "the model did not answer");
+    }
+    return yes(replyText(got.model.provider, answered.text));
   }
 
   if (call.name == "delete_agent") {
