@@ -8,7 +8,7 @@
 //
 // Override the connection with PLUME_TEST_CONNINFO.
 
-import { DbField, DbRepository, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistMany, persistViolation, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember, projectionValid, floatSqlType, boolSqlType } from "./plume.ts";
+import { DbField, DbRepository, DbResult, connectDatabase, databaseConnected, closeDatabase, field, repository, repositoryValid, safeIdentifier, safeSqlType, placeholderAt, selectList, createTable, dropTable, persist, persistIfBelowCount, persistMany, persistViolation, findById, findProjected, listWhere, listProjected, pageWhere, countWhere, existsById, deleteById, deleteWhere, beginTransaction, commitTransaction, rollbackTransaction, execute, pickFields, jsonMember, projectionValid, floatSqlType, boolSqlType } from "./plume.ts";
 import { Db, DbConfig } from "./driver.ts";
 import { postgres, postgresConnection, postgresVersion } from "./postgres.ts";
 
@@ -238,6 +238,117 @@ test("what is wrong with a document is a sentence, or nothing", () => {
   expect(persistViolation("[]") != "");
   expect(persistViolation("[{\"id\":\"a1\"}]") != "");
   expect(persistViolation("null") != "");
+});
+
+// --- an insert guarded by a count -------------------------------------------------
+
+// persistIfBelowCount is the write whose precondition is a count. A caller
+// that reads the count first and inserts afterwards has a window between the
+// two; this puts both in one statement, so there is none. The window itself is
+// not what a test can hold — a single connection cannot open one — but the two
+// ends of the statement are, and so is the wiring the guard needs to be right
+// about: which values the count is filtered by, and which answers mean what.
+//
+// The cap here is per agent_name, standing in for the per-owner cap the
+// callers use.
+function belowNameCap(repo: DbRepository, json: string, name: string, cap: int): DbResult {
+  // The document is the first bound value, so the count's own first value is
+  // the second — the same numbering the callers write by hand.
+  let countSql = "SELECT COUNT(*) FROM plume_test_agents WHERE agent_name = "
+    + placeholderAt(database, 2);
+  return persistIfBelowCount(database, repo, json, countSql, [name], cap);
+}
+
+test("an insert below the cap goes in and at the cap does not", () => {
+  let repo = fresh();
+  let first = belowNameCap(repo, agentJson("c1", "crew", 1, 0.1), "crew", 2);
+  expect(first.ok);
+  expect(first.rows == 1);
+  let second = belowNameCap(repo, agentJson("c2", "crew", 2, 0.2), "crew", 2);
+  expect(second.ok);
+  expect(second.rows == 1);
+  // Two is the cap, and the comparison is strict: at it, nothing more goes in.
+  let third = belowNameCap(repo, agentJson("c3", "crew", 3, 0.3), "crew", 2);
+  expect(third.rows == 0);
+  expect(countWhere(database, repo, "", []) == 2);
+  expect(findById(database, repo, "c3") == "");
+  // What did go in went in whole, through the mapping, not as a row of nulls.
+  let back: Agent = JSON.parse<Agent>(findById(database, repo, "c2"));
+  expect(back.agentName == "crew");
+  expect(back.maxSteps == 2);
+  expect(back.temperature == 0.2);
+});
+
+test("being at the cap is a refusal, not a failure", () => {
+  // The two answers a caller has to tell apart. A full owner is ok with
+  // nothing written; a database that could not be asked is not ok at all, and
+  // carries a sentence. Reading the first as the second turns a routine limit
+  // into an error page, and reading the second as the first tells someone they
+  // are at a limit they are nowhere near.
+  let repo = fresh();
+  expect(belowNameCap(repo, agentJson("c1", "crew", 1, 0.1), "crew", 1).ok);
+  let full = belowNameCap(repo, agentJson("c2", "crew", 2, 0.2), "crew", 1);
+  expect(full.ok);
+  expect(full.rows == 0);
+  expect(full.error == "");
+  // A cap of nothing admits nothing, by the same route.
+  let never = belowNameCap(repo, agentJson("c3", "crew", 3, 0.3), "crew", 0);
+  expect(never.ok);
+  expect(never.rows == 0);
+  expect(countWhere(database, repo, "", []) == 1);
+});
+
+test("the cap counts what the subquery is filtered by, not the table", () => {
+  // The values run [document, then the count's own, then the cap]. A
+  // placeholder number off by one either filters the count by the document or
+  // compares it against the wrong value, and both spend one owner's cap on
+  // every other owner. Two groups, each entitled to its own room, is what
+  // catches that — a single-group test passes either way.
+  let repo = fresh();
+  expect(belowNameCap(repo, agentJson("c1", "crew", 1, 0.1), "crew", 1).rows == 1);
+  expect(belowNameCap(repo, agentJson("c2", "crew", 2, 0.2), "crew", 1).rows == 0);
+  // "deck" has none of its own yet, and the row "crew" already has is not its.
+  expect(belowNameCap(repo, agentJson("d1", "deck", 1, 0.3), "deck", 1).rows == 1);
+  expect(belowNameCap(repo, agentJson("d2", "deck", 2, 0.4), "deck", 1).rows == 0);
+  expect(countWhere(database, repo, "", []) == 2);
+  expect(countWhere(database, repo, "agent_name = " + database.placeholder, ["crew"]) == 1);
+  expect(countWhere(database, repo, "agent_name = " + database.placeholder, ["deck"]) == 1);
+});
+
+test("a document the plain insert would refuse is refused here too", () => {
+  let repo = fresh();
+  let none = belowNameCap(repo, "{}", "crew", 5);
+  expect(!none.ok);
+  expect(none.error.indexOf("no fields") >= 0);
+  expect(!belowNameCap(repo, "[" + agentJson("c1", "crew", 1, 0.1) + "]", "crew", 5).ok);
+  expect(!belowNameCap(repo, "", "crew", 5).ok);
+  expect(countWhere(database, repo, "", []) == 0);
+  // An unusable mapping is refused on the same terms, and names its table.
+  let broken: DbField[] = [field("id", "id", "text"), field("n", "n", "text")];
+  let bad = repository({ table: "plume_test_agents", idField: "missing", idColumn: "id", fields: broken });
+  let unusable = persistIfBelowCount(database, bad, agentJson("c1", "crew", 1, 0.1), "SELECT 0", [], 5);
+  expect(!unusable.ok);
+  expect(unusable.error.indexOf("plume_test_agents") >= 0);
+  expect(countWhere(database, repo, "", []) == 0);
+});
+
+test("a key already there is left as it is, where persist would have replaced it", () => {
+  // Unlike persist, this one does not upsert: it is an insert with a
+  // precondition, and a row that is already there stays as it was. Worth
+  // pinning because the answer is the same rows == 0 a full owner gets, so a
+  // caller reusing an id would be told it is at its limit. Both callers mint a
+  // fresh id for every create, so nothing reaches this today — but the two
+  // cases are indistinguishable from outside, which is the shape of the
+  // function and not an accident of this test.
+  let repo = fresh();
+  expect(belowNameCap(repo, agentJson("c1", "crew", 1, 0.1), "crew", 5).rows == 1);
+  let again = belowNameCap(repo, agentJson("c1", "renamed", 9, 0.9), "crew", 5);
+  expect(again.ok);
+  expect(again.rows == 0);
+  let back: Agent = JSON.parse<Agent>(findById(database, repo, "c1"));
+  expect(back.agentName == "crew");
+  expect(back.maxSteps == 1);
+  expect(countWhere(database, repo, "", []) == 1);
 });
 
 test("text containing a quote is data, not syntax", () => {
