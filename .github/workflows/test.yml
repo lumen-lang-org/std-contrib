@@ -21,7 +21,7 @@ jobs:
           # to link against. A hosted runner has none of them, which is where
           # about forty of the failures came from. The runner is ephemeral, so
           # this installs on every run.
-          need="libsqlite3-dev libpq-dev libmariadb-dev libpoppler-cpp-dev poppler-utils"
+          need="libsqlite3-dev libpq-dev libmariadb-dev libpoppler-cpp-dev poppler-utils libgc-dev"
           missing=""
           for p in $need; do
             dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"
