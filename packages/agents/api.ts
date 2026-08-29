@@ -75,6 +75,7 @@ import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepM
 import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envNetworkReap, envMarkSynced, envReforward, envServing } from "./environments.ts";
 import { envGrantsPlan, envGrantSweep } from "./env-grants.ts";
 import { envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
+import { JOULE_PROGRESS_MS, jouleProgress } from "./joule-progress.ts";
 
 // How often a serving environment's workspace is read back. Its own cadence,
 // far shorter than the idle sweep: a person editing a file wants it recorded in
@@ -178,19 +179,38 @@ function sweepLoop(idleMs: int): int {
       catch (e) {
         console.error("environment sweep: " + e.message);
       }
-      // Its own cadence, and much shorter: the idle sweep decides what to stop
-      // every fifteen minutes, while a person editing a file wants it recorded
-      // in seconds rather than at the end of a session.
+      // Three cadences, nested, and the innermost one is the tick. The idle
+      // sweep decides what to stop every fifteen minutes; a person editing a
+      // file wants it recorded in seconds rather than at the end of a session;
+      // a delegated turn's tool calls want to appear in the thread while it is
+      // running, which is faster still.
+      //
+      // In one loop body rather than in a worker of its own, deliberately.
+      // Both of these harvest a workspace, and envServing's comment is why
+      // that has to be one reader: the stamp is taken, the find is run, the
+      // stamp is written, and a second pass overlapping the first would move
+      // the stamp it is comparing against. Sequential calls cannot overlap.
       let waited: int = 0;
+      let sinceSweep: int = WORKSPACE_SWEEP_MS;
       while (waited < every) {
+        if (sinceSweep >= WORKSPACE_SWEEP_MS) {
+          try {
+            sweepWorkspaces(db);
+          }
+          catch (e) {
+            console.error("workspace sweep: " + e.message);
+          }
+          sinceSweep = 0;
+        }
         try {
-          sweepWorkspaces(db);
+          jouleProgress(db, `${Date.now()}`);
         }
         catch (e) {
-          console.error("workspace sweep: " + e.message);
+          console.error("delegated progress: " + e.message);
         }
-        process.sleep(WORKSPACE_SWEEP_MS);
-        waited = waited + WORKSPACE_SWEEP_MS;
+        process.sleep(JOULE_PROGRESS_MS);
+        waited = waited + JOULE_PROGRESS_MS;
+        sinceSweep = sinceSweep + JOULE_PROGRESS_MS;
       }
     }
   } catch (e) {
