@@ -52,6 +52,19 @@ export class Environment {
   @Column("sync_at", "text")
   syncAt: string;
 
+  /** The connection id a joule daemon inside this environment is addressed
+   *  under, or "" when none is running. A row that has one is an environment
+   *  doing work, which is why the sweep collects it and the idle sweep leaves
+   *  it alone. */
+  @Column("agent_conn", "text")
+  agentConn: string;
+
+  /** How many bytes of that daemon's broadcast.log have been read. Back to 0
+   *  whenever the connection id is cleared: the next daemon truncates the log
+   *  before writing to it. */
+  @Column("agent_read", "int")
+  agentRead: int;
+
   @Column("created_at", "text")
   createdAt: string;
 
@@ -60,7 +73,8 @@ export class Environment {
 
   constructor(id: string, threadId: string, name: string, image: string, network: int,
               status: string, slug: string, hostPort: int, servePort: int, serveCmd: string,
-              syncAt: string, createdAt: string, lastUsedAt: string) {
+              syncAt: string, agentConn: string, agentRead: int,
+              createdAt: string, lastUsedAt: string) {
     this.id = id;
     this.threadId = threadId;
     this.name = name;
@@ -72,6 +86,8 @@ export class Environment {
     this.servePort = servePort;
     this.serveCmd = serveCmd;
     this.syncAt = syncAt;
+    this.agentConn = agentConn;
+    this.agentRead = agentRead;
     this.createdAt = createdAt;
     this.lastUsedAt = lastUsedAt;
   }

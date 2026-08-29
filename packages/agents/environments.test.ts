@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envNetworkReap, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, EnvOwnedRow } from "./environments.ts";
+import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envNetworkReap, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, envServing, envMarkAgent, envMarkSynced, EnvOwnedRow } from "./environments.ts";
 
 let database: Db = sqlite();
 
@@ -1103,4 +1103,134 @@ test("a network nobody is on is released, and a live one is left alone", () => {
   }
   expect(removed.length == 1);
   expect(removed[0] == "network rm agents-net-t7-orphan");
+});
+
+// An environment with a joule daemon in it. It publishes no port — the engine
+// reaches the daemon through docker exec and a file inbox — so everything
+// below is about the two things a port used to stand in for: that the sweep
+// should collect this row, and that it is busy.
+
+test("an environment starts with no agent in it, and the columns say so", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+
+  let row = onlyEnv("t1");
+  expect(row.agentConn == "");
+  expect(row.agentRead == 0);
+});
+
+test("a daemon is written down, and cleared with its cursor when it goes", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 4096) == "");
+  expect(onlyEnv("t1").agentConn == "c17");
+  expect(onlyEnv("t1").agentRead == 4096);
+
+  // The cursor goes with the id whatever the caller passes: the next daemon
+  // truncates broadcast.log, so an offset kept across that points past the end.
+  expect(envMarkAgent(database, onlyEnv("t1"), "", 4096) == "");
+  expect(onlyEnv("t1").agentConn == "");
+  expect(onlyEnv("t1").agentRead == 0);
+});
+
+test("the sweep collects an environment with an agent in it, port or no port", () => {
+  fresh();
+  dockerFine();
+  // Two script sandboxes, neither publishing anything.
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+  ensure("t2", "main", "python:3.12-slim", "1700000000000");
+
+  // Neither qualifies while nothing is happening in them.
+  expect(envServing(database).length == 0);
+
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 0) == "");
+  let swept = envServing(database);
+  expect(swept.length == 1);
+  expect(swept[0].threadId == "t1");
+  expect(swept[0].servePort == 0);
+  expect(swept[0].agentConn == "c17");
+
+  // And stops qualifying when the daemon goes, because then nothing inside is
+  // writing files.
+  expect(envMarkAgent(database, onlyEnv("t1"), "", 0) == "");
+  expect(envServing(database).length == 0);
+});
+
+test("a published port still qualifies, and qualifies once", () => {
+  fresh();
+  envBindOverride("127.0.0.1");
+  dockerServing("49154");
+  expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
+    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+
+  expect(envServing(database).length == 1);
+  // Serving AND delegated is one row in one sweep: two selectors would sweep it
+  // twice at once, each pass moving the stamp the other compares against.
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 0) == "");
+  expect(envServing(database).length == 1);
+  envBindOverride("");
+});
+
+test("the idle sweep steps over an environment with a turn running in it", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+  ensure("t2", "main", "python:3.12-slim", "1700000000000");
+  // A delegated turn is one ensure and then however long the work takes, so
+  // lastUsedAt on t1 is as stale as t2's.
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 512) == "");
+  clearLog();
+
+  expect(sweep("1700000900001", ENV_IDLE_MS) == 1);
+
+  let asked = argvLines();
+  expect(asked.length == 1);
+  expect(asked[0] == "stop agents-env-t2-main");
+  expect(onlyEnv("t1").status == "running");
+  expect(onlyEnv("t1").agentConn == "c17");
+  expect(onlyEnv("t2").status == "stopped");
+});
+
+test("a container that came back has neither the daemon nor the log it had", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 512) == "");
+
+  // Stopped from outside, then asked for again. joule clears its inbox and
+  // truncates broadcast.log on startup, so both columns go back to nothing.
+  dockerStoppedBehindOurBack();
+  let back = ensure("t1", "main", "python:3.12-slim", "1700001000000");
+  expect(back.warmed);
+  expect(onlyEnv("t1").agentConn == "");
+  expect(onlyEnv("t1").agentRead == 0);
+});
+
+test("an ensure that only warms a running container leaves its daemon alone", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 512) == "");
+
+  let again = ensure("t1", "main", "python:3.12-slim", "1700000005000");
+  expect(again.ok);
+  expect(!again.created);
+  expect(!again.warmed);
+  expect(onlyEnv("t1").agentConn == "c17");
+  expect(onlyEnv("t1").agentRead == 512);
+});
+
+test("the sync mark carries the agent columns across", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000000000");
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 512) == "");
+
+  expect(envMarkSynced(database, onlyEnv("t1"), "1700000900") == "");
+  expect(onlyEnv("t1").syncAt == "1700000900");
+  expect(onlyEnv("t1").agentConn == "c17");
+  expect(onlyEnv("t1").agentRead == 512);
 });
