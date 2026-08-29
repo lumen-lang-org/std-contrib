@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: [self-hosted, diff]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -18,10 +18,10 @@ jobs:
           # The shims built below are C against system libraries, and a header
           # that is not here does not fail one package: every target that
           # imports plume, which is most of packages/agents, then has no object
-          # to link against. This runner had none of them, which is where about
-          # forty of the failures came from. It is long-lived, so this is a
-          # no-op after the first run.
-          need="libsqlite3-dev libpq-dev libmariadb-dev libpoppler-cpp-dev poppler-utils"
+          # to link against. A hosted runner has none of them, which is where
+          # about forty of the failures came from. The runner is ephemeral, so
+          # this installs on every run.
+          need="libsqlite3-dev libpq-dev libmariadb-dev libpoppler-cpp-dev poppler-utils libgc-dev"
           missing=""
           for p in $need; do
             dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"
