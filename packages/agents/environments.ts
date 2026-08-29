@@ -79,6 +79,25 @@ export type EnvRow = {
   /** The container's own clock at the last sync, in epoch seconds. Its clock
    *  and not this one's: the comparison happens over there. */
   syncAt: string,
+  /** The connection id the engine writes frames under when a joule daemon is
+   *  running inside this environment, and "" when none is.
+   *
+   *  It is the environment's answer to "is an agent living in here": the
+   *  daemon reads `<runtimeDir>/inbox/<agentConn>.in`, so the engine needs the
+   *  id to address it at all, and a row that has one is an environment doing
+   *  work whether or not it publishes a port. Set when the daemon is started,
+   *  cleared when it is stopped — see envMarkAgent, and mind that whoever sets
+   *  it owns clearing it, because the idle sweep steps over a row that has
+   *  one. */
+  agentConn: string,
+  /** How many bytes of `<runtimeDir>/broadcast.log` the engine has already
+   *  read. The daemon appends one line per outbound frame and never rewrites
+   *  what is behind it, so a byte count is the whole cursor.
+   *
+   *  Reset to 0 whenever the container is recreated: the daemon truncates
+   *  broadcast.log at startup, and a cursor kept across that points past the
+   *  end of a shorter file. */
+  agentRead: int,
   createdAt: string,
   lastUsedAt: string,
 };
@@ -123,6 +142,10 @@ export function envPlan(db: Db): Migration[] {
       "ALTER TABLE environments ADD COLUMN serve_cmd " + db.textType + " NOT NULL DEFAULT ''"),
     migration("123", "and when its workspace was last brought back",
       "ALTER TABLE environments ADD COLUMN sync_at " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("142", "an environment may have an agent living in it",
+      "ALTER TABLE environments ADD COLUMN agent_conn " + db.textType + " NOT NULL DEFAULT ''"),
+    migration("143", "and the engine remembers how much of its log it has read",
+      "ALTER TABLE environments ADD COLUMN agent_read " + dialectType(db, "int") + " NOT NULL DEFAULT 0"),
   ];
   return plan;
 }
@@ -250,6 +273,8 @@ type EnvKeep = {
   servePort: int,
   serveCmd: string,
   syncAt: string,
+  agentConn: string,
+  agentRead: int,
   createdAt: string,
   lastUsedAt: string,
 };
@@ -345,6 +370,8 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
       status: "running", slug: slug,
       hostPort: opened, servePort: e.serve ? envServePort() : 0,
       serveCmd: e.command, syncAt: "",
+      // A container just made has no daemon in it and no log to have read.
+      agentConn: "", agentRead: 0,
       createdAt: e.now, lastUsedAt: e.now,
     });
     if (kept != "") {
@@ -437,11 +464,18 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
   // Rows made before environments had names of their own get one here, rather
   // than in a migration that would have to invent randomness in SQL.
   let slug = row.slug == "" ? envSlugNew() : row.slug;
+  // A container that was made again, or started again, has neither the daemon
+  // that was running in it nor the log it was writing: joule truncates
+  // broadcast.log at startup and clears its inbox, so a connection id and a
+  // byte cursor carried across either of those describe a file that is gone.
+  let fromScratch = created || warmed;
   let kept = envSave(db, {
     threadId: row.threadId, name: row.name, image: row.image,
     network: row.network != 0 || serves, status: "running", slug: slug,
     hostPort: opened, servePort: serves ? envServePort() : 0,
     serveCmd: command, syncAt: row.syncAt,
+    agentConn: fromScratch ? "" : row.agentConn,
+    agentRead: fromScratch ? 0 : row.agentRead,
     createdAt: row.createdAt, lastUsedAt: e.now,
   });
   if (kept != "") {
@@ -535,6 +569,7 @@ export function envBySlug(db: Db, slug: string): EnvRow {
   let none: EnvRow = {
     id: "", threadId: "", name: "", image: "", network: 0, status: "",
     slug: "", hostPort: 0, servePort: 0, serveCmd: "", syncAt: "",
+    agentConn: "", agentRead: 0,
     createdAt: "", lastUsedAt: "",
   };
   if (slug == "") {
@@ -565,7 +600,7 @@ function envSave(db: Db, k: EnvKeep): string {
     id: k.threadId + ":" + k.name, threadId: k.threadId, name: k.name, image: k.image,
     network: k.network ? 1 : 0, status: k.status, slug: k.slug,
     hostPort: k.hostPort, servePort: k.servePort, serveCmd: k.serveCmd,
-    syncAt: k.syncAt,
+    syncAt: k.syncAt, agentConn: k.agentConn, agentRead: k.agentRead,
     createdAt: k.createdAt, lastUsedAt: k.lastUsedAt,
   };
   let written = persist(db, envMapping(), JSON.stringify(row));
@@ -1129,6 +1164,21 @@ export function envIdle(db: Db, s: EnvSweep): int {
   let i: int = 0;
   while (i < rows.length) {
     let row = rows[i];
+    // An environment with an agent in it is busy, whatever its last ensure
+    // says. lastUsedAt only moves when somebody calls envEnsure, and a
+    // delegated turn is one ensure followed by however long the work takes:
+    // past fifteen minutes of it the sweep would stop the container out from
+    // under a daemon that is still writing files. Reading agentConn is the
+    // honest test, because it asks whether anything is running rather than
+    // whether anybody has been by lately.
+    //
+    // The cost is that a leaked agentConn is an environment that never idles,
+    // so whoever sets the column owns clearing it — envEnsure clears it on any
+    // start or rebuild, which bounds the leak to the life of one container.
+    if (row.agentConn != "") {
+      i = i + 1;
+      continue;
+    }
     if (!envStampLess(deadline, row.lastUsedAt)) {
       envDocker(["stop", envContainerName(row.threadId, row.name)]);
       // And the network with it. A bridge takes a subnet whether anything is
@@ -1146,6 +1196,8 @@ export function envIdle(db: Db, s: EnvSweep): int {
         network: row.network != 0, status: "stopped", slug: row.slug,
         hostPort: 0, servePort: row.servePort, serveCmd: row.serveCmd,
         syncAt: row.syncAt,
+        // Only rows with no agent reach here, so there is nothing to clear.
+        agentConn: "", agentRead: 0,
         createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
       });
       if (noted != "") {
@@ -1194,6 +1246,12 @@ export function envReforward(db: Db, now: string): int {
         network: row.network != 0, status: opened == 0 ? "stopped" : "running",
         slug: row.slug, hostPort: opened, servePort: row.servePort,
         serveCmd: row.serveCmd, syncAt: row.syncAt,
+        // This process restarted, not the container: a container still running
+        // still has its daemon and its log, so both are carried across. One
+        // that is not running has neither, and is about to be written down as
+        // stopped.
+        agentConn: opened == 0 ? "" : row.agentConn,
+        agentRead: opened == 0 ? 0 : row.agentRead,
         createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
       });
       if (noted != "") {
@@ -1229,15 +1287,27 @@ export function envForget(db: Db, threadId: string): void {
   }
 }
 
-/** Record how far a sync got, taking the stamp from the container's own clock.
- *  Written after the copy, never before: a sync-in touches every file it writes
- *  and the next sweep would read its own work back as changes. */
-/** Every environment that is running and publishes a port, whoever owns it.
- *  The workspace sweep runs for the deployment, not for a reader. */
+/** Every running environment whose workspace somebody is writing in, whoever
+ *  owns it. The workspace sweep runs for the deployment, not for a reader.
+ *
+ *  Two ways to qualify, because there are two ways for work to be happening
+ *  inside a container: a published port, which is a person editing through a
+ *  dev server, and an agent connection, which is a daemon editing on its own.
+ *  A joule environment publishes nothing — the engine reaches its daemon
+ *  through `docker exec` and a file inbox — so on the port alone its files
+ *  would never come back.
+ *
+ *  Widened rather than given a sibling selector on purpose. The sweep's
+ *  correctness rests on one reader per row: it takes the container's clock,
+ *  finds what is newer, and writes the stamp back. Two selectors feeding two
+ *  loops would let a row that qualifies both ways be swept twice at once, each
+ *  pass moving the stamp the other is comparing against, and the losing pass
+ *  would carry files back that were already versions or skip files that were
+ *  not. One predicate cannot race itself. */
 export function envServing(db: Db): EnvRow[] {
   let keys: DbOrder[] = [{ column: "id" }];
   let listed = listOrdered(db, envMapping(), {
-    where: "status = " + placeholderAt(db, 1) + " AND serve_port > 0",
+    where: "status = " + placeholderAt(db, 1) + " AND (serve_port > 0 OR agent_conn <> '')",
     args: ["running"],
     order: keys,
   });
@@ -1248,7 +1318,11 @@ export function envServing(db: Db): EnvRow[] {
   return JSON.parse<EnvRow[]>(listed);
 }
 
-/** Returns why the sync mark could not be written, if it could not: unwritten,
+/** Record how far a sync got, taking the stamp from the container's own clock.
+ *  Written after the copy, never before: a sync-in touches every file it writes
+ *  and the next sweep would read its own work back as changes.
+ *
+ *  Returns why the sync mark could not be written, if it could not: unwritten,
  *  the next sync compares against the older stamp and copies back files it has
  *  already seen. */
 export function envMarkSynced(db: Db, row: EnvRow, stamp: string): string {
@@ -1259,7 +1333,34 @@ export function envMarkSynced(db: Db, row: EnvRow, stamp: string): string {
     threadId: row.threadId, name: row.name, image: row.image,
     network: row.network != 0, status: row.status, slug: row.slug,
     hostPort: row.hostPort, servePort: row.servePort, serveCmd: row.serveCmd,
-    syncAt: stamp, createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
+    syncAt: stamp, agentConn: row.agentConn, agentRead: row.agentRead,
+    createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
+  });
+}
+
+/** Write down which daemon is running in this environment and how far its log
+ *  has been read. Returns why it could not be written, if it could not.
+ *
+ *  The one way in for the two agent columns, so the rules that hang off them
+ *  are stated once. `conn` is the connection id frames are addressed to, or ""
+ *  to say the daemon is gone; `read` is a byte offset into broadcast.log, and
+ *  goes back to 0 with the id, because the next daemon truncates that file
+ *  before it writes a line to it.
+ *
+ *  Setting a connection id takes the environment out of the idle sweep's
+ *  reach, so clearing it is not tidiness: an id left behind is a container
+ *  that runs until its thread is forgotten. */
+export function envMarkAgent(db: Db, row: EnvRow, conn: string, read: int): string {
+  if (row.id == "") {
+    return "";
+  }
+  return envSave(db, {
+    threadId: row.threadId, name: row.name, image: row.image,
+    network: row.network != 0, status: row.status, slug: row.slug,
+    hostPort: row.hostPort, servePort: row.servePort, serveCmd: row.serveCmd,
+    syncAt: row.syncAt,
+    agentConn: conn, agentRead: conn == "" ? 0 : read,
+    createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
   });
 }
 
@@ -1294,6 +1395,7 @@ export function envNamed(db: Db, threadId: string, name: string): EnvRow {
   let none: EnvRow = {
     id: "", threadId: "", name: "", image: "", network: 0, status: "",
     slug: "", hostPort: 0, servePort: 0, serveCmd: "", syncAt: "",
+    agentConn: "", agentRead: 0,
     createdAt: "", lastUsedAt: "",
   };
   return none;

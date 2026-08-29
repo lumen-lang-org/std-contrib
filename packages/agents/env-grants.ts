@@ -196,7 +196,8 @@ export function envTouch(db: Db, slug: string, now: string): bool {
     id: row.id, threadId: row.threadId, name: row.name, image: row.image,
     network: row.network, status: row.status, slug: row.slug,
     hostPort: row.hostPort, servePort: row.servePort, serveCmd: row.serveCmd,
-    syncAt: row.syncAt, createdAt: row.createdAt, lastUsedAt: now,
+    syncAt: row.syncAt, agentConn: row.agentConn, agentRead: row.agentRead,
+    createdAt: row.createdAt, lastUsedAt: now,
   };
   let noted = persist(db, envMapping(), JSON.stringify(seen));
   if (!noted.ok) {
