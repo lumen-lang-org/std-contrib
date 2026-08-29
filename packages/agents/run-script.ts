@@ -3,6 +3,7 @@ import { executeWith, findById, listWhere, placeholderAt, beginTransaction, comm
 import { ARTIFACT_MAX, ARTIFACT_NOTE_MAX, THREAD_BYTES_MAX, binaryKind, getArtifact, getVersion, kindOf, labelFault, nextVersion, putArtifact, threadBytes, utf8Length } from "./artifacts.ts";
 import { ENV_RUN_DIR, ENV_SKILLS_DIR, EnvDockerReply, EnvEnsure, envContainerName, envDockerBin, envEnsure, envList } from "./environments.ts";
 import { masterKey } from "./credentials.ts";
+import { JOULE_ENV_NAME } from "./joule-bridge.ts";
 import { envKeyFileBody, touchEnvKeys } from "./env-keys.ts";
 import { userEnvByName } from "./user-environments.ts";
 import { normalScope } from "./knowledge.ts";
@@ -910,6 +911,11 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
     serve: false,
     command: "",
     start: true,
+    // A script may be the first thing to ask for the delegated environment,
+    // and the container it makes is the container the daemon will later have
+    // to start in. Built any other way, delegation fails on a container that
+    // already exists and is never rebuilt.
+    agent: foldName(envName) == JOULE_ENV_NAME,
     now: run.now,
   };
   let ensured = envEnsure(db, ensure);

@@ -26,7 +26,7 @@ export function reservedToolNames(): string[] {
     // artifacts
     "write_artifact", "read_artifact", "search_artifacts", "edit_artifact",
     // scripts and environments
-    "run_script", "serve_env",
+    "run_script", "serve_env", "delegate_to_env",
     // tasks
     "list_tasks", "schedule_task", "change_task", "run_task_now", "delete_task",
     // workflows

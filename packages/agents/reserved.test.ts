@@ -1,6 +1,6 @@
 import { reservedToolNames, reservedHere } from "./reserved.ts";
 import { ToolSpec } from "./provider.ts";
-import { artifactTools, findToolsSpec, Mounted } from "./tools.ts";
+import { artifactTools, delegateEnvTool, findToolsSpec, Mounted } from "./tools.ts";
 import { workspaceTools } from "./workspace.ts";
 import { taskTools } from "./task-tools.ts";
 import { workflowTools } from "./workflow-tools.ts";
@@ -32,6 +32,7 @@ test("every name a family defines is reserved, so the list cannot drift", () => 
     mine.push(ws[w].name);
     w = w + 1;
   }
+  mine.push(delegateEnvTool().name);
   // run_script, serve_env and use_skill need a database to build their specs,
   // so they are named here rather than gathered.
   mine.push("run_script");

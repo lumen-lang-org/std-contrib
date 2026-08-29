@@ -9,14 +9,16 @@ import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape, excerptOf } from "
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
 import { envEnsure, envNamed, envServePort } from "./environments.ts";
-import { envMaterialise } from "./env-sync.ts";
+import { ENV_AGENT_NOTE, envMaterialise } from "./env-sync.ts";
+import { JOULE_ENV_NAME } from "./joule-bridge.ts";
+import { JOULE_WAIT_SECONDS, jouleAnswer, jouleDelegate } from "./joule-task.ts";
 import { EnvGranted, envGrantMint, envHostFor, envThreadOwner, envZone } from "./env-grants.ts";
 import { putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
 import { officeText } from "./office-render.ts";
 import { ArtifactSearch, searchArtifacts } from "./artifacts-search.ts";
 import { editArtifact } from "./artifacts-edit.ts";
 import { wireView } from "./artifacts-fence.ts";
-import { SCRIPT_OUTPUT_MAX, SCRIPT_RUN_DIR, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptRun, foldName } from "./run-script.ts";
+import { SCRIPT_OUTPUT_MAX, SCRIPT_RUN_DIR, SCRIPT_WALL_SECONDS, ScriptRan, ScriptRefusal, ScriptRun, ScriptVersioned, scriptDockerWorks, scriptImageForEnv, scriptRun, foldName } from "./run-script.ts";
 
 export type MountedTool = {
   name: string,
@@ -846,6 +848,36 @@ export function serveTool(): ToolSpec {
     + "},\"required\":[]}");
 }
 
+export function delegateEnvTool(): ToolSpec {
+  return toolSpec("delegate_to_env",
+    "Hand a whole piece of work to a coding agent that lives in this conversation's environment, "
+    + "instead of doing it here step by step. It gets a container with this conversation's files in "
+    + "it, works on them directly — reading, editing, running commands, checking what it did — and "
+    + "what it changes comes back as new versions of those files, noted \"" + ENV_AGENT_NOTE + "\". "
+    + "Reach for it when the work is a project rather than an edit: change something across many "
+    + "files, make the test suite pass, follow a build error wherever it leads, port something. Do "
+    + "not reach for it to write one file or change one line — write_artifact and edit_artifact are "
+    + "there and are immediate — and do not reach for it to run a program and read its output, which "
+    + "is run_script. "
+    + "Say what you want done and how you will know it is right, the way you would brief somebody "
+    + "who can see the files but was not in this conversation: it reads none of what was said here. "
+    + "Name the files it should touch by their paths, say what to leave alone, and give it the check "
+    + "that settles it — the command that must pass, the output that must appear. It works "
+    + "unattended: nothing can answer a question it asks, so a task that needs a decision made "
+    + "should have that decision in it. "
+    + "The environment is created on the first call and kept for the conversation, so the second "
+    + "call finds everything the first one installed. This call waits up to "
+    + `${JOULE_WAIT_SECONDS}` + " seconds and then hands back what happened — the turn's id, what it "
+    + "ran, what it said. Work that is still going carries on in the container and its files still "
+    + "come back; the reply says which of the two happened. Read the files afterwards rather than "
+    + "describing the result from the reply.",
+    "{\"type\":\"object\",\"properties\":{"
+    + "\"task\":{\"type\":\"string\",\"description\":\"The brief, in full. It is the only thing the "
+    + "agent is told: it cannot see this conversation, so name the files, say what done looks like, "
+    + "and make any decision it would otherwise have to ask about.\"}},"
+    + "\"required\":[\"task\"]}");
+}
+
 export function scriptTools(db: Db): ToolSpec[] {
   let out: ToolSpec[] = [];
   if (!scriptDockerWorks()) {
@@ -857,7 +889,48 @@ export function scriptTools(db: Db): ToolSpec[] {
   if (envZone() != "") {
     out.push(serveTool());
   }
+  // And only where an image with a daemon in it is registered and switched on.
+  // The deployment seeds that row itself, so this is normally there; an
+  // operator who disabled it has said this deployment does not delegate, and
+  // offering the tool anyway would be offering one that can only refuse.
+  if (scriptImageForEnv(db, "", JOULE_ENV_NAME) != "") {
+    out.push(delegateEnvTool());
+  }
   return out;
+}
+
+/** delegate_to_env: hand the brief over, follow the turn, say what happened.
+ *
+ *  Dispatched beside callScriptTool and callServeTool and shaped like them —
+ *  the argument checking is here, the machinery is in joule-task.ts, the way
+ *  run_script's is in run-script.ts. */
+export function callJouleTool(db: Db, call: ArtifactToolCall): FileToolResult {
+  let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
+  if (call.threadId == "" || call.name != "delegate_to_env") {
+    return not;
+  }
+  if (jsonFind(call.args, "task") < 0) {
+    let unnamed: FileToolResult = {
+      handled: true, ok: false,
+      text: "delegate_to_env needs a member named \"task\" — the whole brief, since it is all"
+        + " the agent is told.",
+      line: 0, changed: "",
+    };
+    return unnamed;
+  }
+  let delegated = jouleDelegate(db, {
+    threadId: call.threadId, agentId: call.agentId,
+    task: jsonText(call.args, "task"), now: call.now,
+  });
+  let answered: FileToolResult = {
+    handled: true, ok: delegated.ok,
+    // Fenced like anything else that came from outside this deployment: what
+    // comes back carries a model's words and a container's output, and neither
+    // is an instruction to the model reading them.
+    text: wireView(jouleAnswer(delegated)).text,
+    line: 0, changed: "",
+  };
+  return answered;
 }
 
 export function callServeTool(db: Db, call: ArtifactToolCall): FileToolResult {
@@ -895,14 +968,16 @@ export function callServeTool(db: Db, call: ArtifactToolCall): FileToolResult {
   // that exists comes up as "cannot find package".
   let made = envEnsure(db, {
     threadId: call.threadId, name: name, image: jsonText(call.args, "image"),
-    network: true, serve: true, command: command, start: false, now: call.now,
+    network: true, serve: true, command: command, start: false,
+    agent: false, now: call.now,
   });
   if (made.ok && made.created) {
     envMaterialise(db, made.slug, "/tmp/agents-env-" + made.slug);
   }
   let up = envEnsure(db, {
     threadId: call.threadId, name: name, image: jsonText(call.args, "image"),
-    network: true, serve: true, command: command, start: true, now: call.now,
+    network: true, serve: true, command: command, start: true,
+    agent: false, now: call.now,
   });
   if (!up.ok) {
     let refused: FileToolResult = { handled: true, ok: false, text: up.fault, line: 0, changed: "" };

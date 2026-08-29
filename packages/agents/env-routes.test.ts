@@ -52,7 +52,7 @@ function fresh(): void {
 
 function serving(): EnvEnsured {
   let e: EnvEnsure = {
-    threadId: "t1", name: "web", image: "node:22", network: true, serve: true, command: "", start: true,
+    threadId: "t1", name: "web", image: "node:22", network: true, serve: true, command: "", start: true, agent: false,
     now: `${Date.now()}`,
   };
   return envEnsure(database, e);

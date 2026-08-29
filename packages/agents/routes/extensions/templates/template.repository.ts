@@ -118,7 +118,7 @@ export class TemplateRepository {
   serveProject(threadId: string, image: string, command: string, now: string): EnvEnsured {
     let e: EnvEnsure = {
       threadId: threadId, name: "web", image: image,
-      network: true, serve: true, command: command, start: true, now: now,
+      network: true, serve: true, command: command, start: true, agent: false, now: now,
     };
     return envEnsure(this.database, e);
   }

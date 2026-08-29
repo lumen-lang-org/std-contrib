@@ -24,6 +24,12 @@ const ENV_SYNC_SKIP: string[] = [
   "node_modules", ".git", ".next", ".nuxt", ".svelte-kit", ".vite", ".cache",
   ".turbo", ".parcel-cache", "dist", "build", "out", "coverage", "target",
   "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache", "tmp",
+  // The daemon's own bookkeeping, and it lives inside the workspace it works
+  // in: ensureScratchDir makes /workspace/.joule/scratch/<sessionKey>/ before
+  // the first turn. Without this line every delegated turn harvests the
+  // delegate's scratch files as artifact versions of the conversation that
+  // asked for the work.
+  ".joule",
 ];
 
 /** Names that are noise whatever directory they sit in. */
@@ -33,6 +39,22 @@ const ENV_SYNC_SKIP_FILE: string[] = [
 
 export function envSyncSkips(): string[] {
   return ENV_SYNC_SKIP;
+}
+
+/** What a version carried back out of a workspace says about where it came
+ *  from. It is the only thing a reader has: a harvested version has no turn
+ *  and no tool call behind it, so the note is the whole provenance.
+ *
+ *  Read off the row rather than passed in, because the sweep has one call site
+ *  and the answer is a property of the environment, not of who asked. An
+ *  environment with a daemon in it wrote its files through that daemon —
+ *  agentConn is set for as long as one is running — and saying "written in
+ *  joule" would name the container rather than the fact that something else
+ *  did the work. */
+export const ENV_AGENT_NOTE: string = "edited by joule code";
+
+export function envSyncNote(row: EnvRow): string {
+  return row.agentConn != "" ? ENV_AGENT_NOTE : "written in " + row.name;
 }
 
 /** Whether a path under the workspace is one this sync ignores. Written apart
@@ -248,7 +270,7 @@ export function envSyncOut(db: Db, row: EnvRow, sinceEpochSeconds: string, now: 
       path: at,
       title: "",
       content: body,
-      note: "written in " + row.name,
+      note: envSyncNote(row),
       origin: "generated",
       mustCreate: false,
       turnSeq: TURN_SEQ_NONE,
