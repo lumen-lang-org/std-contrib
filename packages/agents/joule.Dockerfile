@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `latest`: a delegated turn's behaviour is the daemon's behaviour, and an
 # image that quietly picked up a new release would change what a conversation
 # does with nothing in this repository having moved.
-ARG JOULE_VERSION=v0.23.19
+ARG JOULE_VERSION=v0.23.20
 
 # Installed the way install.sh does — same asset, unpacked whole and kept
 # whole. `joule` resolves `joule-daemon` beside its own real path, so an
@@ -57,7 +57,7 @@ ENV PATH=/opt/joule-code:$PATH
 # seccomp=unconfined — and joule is one of them; whoever teaches
 # environments.ts to launch this image has to decide what that means for
 # --security-opt on a joule environment. Measured here: with
-# `--security-opt seccomp=unconfined` the daemon answers `joule-daemon 0.23.19`,
+# `--security-opt seccomp=unconfined` the daemon answers `joule-daemon 0.23.20`,
 # and with docker's default it aborts before printing anything.
 #
 # So what is checkable at build time is checked, which is that the archive
