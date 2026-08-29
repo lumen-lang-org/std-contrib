@@ -1,5 +1,5 @@
 import { Db } from "../../../../plume/driver.ts";
-import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, executeWith, existsById, findById, listOrdered, persist, placeholderAt, setOn } from "../../../../plume/plume.ts";
+import { DbOrder, DbRepository, DbResult, deleteById, deleteWhere, executeWith, existsById, findById, listOrdered, persist, persistIfBelowCount, placeholderAt, setOn } from "../../../../plume/plume.ts";
 import { WfGraph } from "../../../../workflow/workflow.ts";
 import { RUN_TIMEOUT_MS } from "../../../tasks.ts";
 import { agentRepository } from "../../authoring/agents/entities/agent.entity.ts";
@@ -57,6 +57,12 @@ export class WorkflowRepository {
 
   save(document: string): DbResult {
     return persist(this.database, this.workflows, document);
+  }
+
+  saveIfUnderCap(document: string, owner: string, cap: int): DbResult {
+    let countSql = "SELECT COUNT(*) FROM workflows WHERE owner = "
+      + placeholderAt(this.database, 2) + " AND enabled = true";
+    return persistIfBelowCount(this.database, this.workflows, document, countSql, [owner], cap);
   }
 
   publish(id: string, graph: string, at: string): DbResult {

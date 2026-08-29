@@ -1427,6 +1427,36 @@ export function persistMany(db: Db, repo: DbRepository, jsonArray: string): DbRe
   return dbOk(1);
 }
 
+export function persistIfBelowCount(
+  db: Db, repo: DbRepository, json: string,
+  countSql: string, countArgs: string[], cap: int,
+): DbResult {
+  if (!repositoryValid(repo)) {
+    return dbErr("invalid mapping for " + repo.table);
+  }
+  let violation = persistViolation(json);
+  if (violation != "") {
+    return dbErr(violation);
+  }
+  let guard = "(" + countSql + ") < " + placeholderAt(db, 1 + countArgs.length + 1);
+  let conflict = db.upsertStyle == "on-duplicate-key"
+    ? " ON DUPLICATE KEY UPDATE " + repo.idColumn + " = " + repo.idColumn
+    : " ON CONFLICT (" + repo.idColumn + ") DO NOTHING RETURNING " + repo.idColumn;
+  let sql = "INSERT INTO " + repo.table + " (" + columnList(repo) + ") "
+    + readOne(db, repo) + " WHERE " + guard + conflict;
+  let args: string[] = [json];
+  let i: int = 0;
+  while (i < countArgs.length) {
+    args.push(countArgs[i]);
+    i = i + 1;
+  }
+  args.push(`${cap}`);
+  if (!db.query(sql, args)) {
+    return dbErr(lastError(db, "could not persist into " + repo.table));
+  }
+  return dbOk(db.rows());
+}
+
 export function deleteById(db: Db, repo: DbRepository, id: string): DbResult {
   if (!repositoryValid(repo)) {
     return dbErr("invalid mapping for " + repo.table);
