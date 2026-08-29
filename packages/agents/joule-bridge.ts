@@ -541,29 +541,38 @@ export type JouleTasked = {
   /** Where the turn's frames begin. Taken before the input frame is written,
    *  so no turn.start can be missed between the two. */
   from: int,
+  /** What the log already held, which the cursor has now moved past.
+   *
+   *  Handed back rather than dropped. Taking that cursor means reading, and
+   *  frames a background task emitted between the last poll and this call
+   *  would otherwise be read here and never seen by whatever is polling. */
+  seen: JouleFrame[],
   prompt: string,
   fault: string,
 };
 
 export function jouleTask(db: Db, row: EnvRow, text: string): JouleTasked {
+  let nothing: JouleFrame[] = [];
   if (row.agentConn == "") {
-    let none: JouleTasked = { ok: false, from: row.agentRead, prompt: text,
+    let none: JouleTasked = { ok: false, from: row.agentRead, seen: nothing, prompt: text,
       fault: "no daemon is running in this environment" };
     return none;
   }
   if (text.trim() == "") {
-    let empty: JouleTasked = { ok: false, from: row.agentRead, prompt: text,
+    let empty: JouleTasked = { ok: false, from: row.agentRead, seen: nothing, prompt: text,
       fault: "a task with nothing in it" };
     return empty;
   }
   let before = jouleTail(row, row.agentRead);
   if (!before.ok) {
-    let blind: JouleTasked = { ok: false, from: row.agentRead, prompt: text, fault: before.fault };
+    let blind: JouleTasked = { ok: false, from: row.agentRead, seen: nothing, prompt: text,
+      fault: before.fault };
     return blind;
   }
   let sent = jouleSend(row, row.agentConn, jouleInputFrame(text));
   if (sent != "") {
-    let no: JouleTasked = { ok: false, from: before.read, prompt: text, fault: sent };
+    let no: JouleTasked = { ok: false, from: before.read, seen: before.frames, prompt: text,
+      fault: sent };
     return no;
   }
   // Whatever the log already held is behind the task now, and reading it again
@@ -573,7 +582,8 @@ export function jouleTask(db: Db, row: EnvRow, text: string): JouleTasked {
     console.error("joule-bridge: " + row.id + " was handed a task but its cursor was not "
       + "written, so the frames before it will be read again: " + marked);
   }
-  let gone: JouleTasked = { ok: true, from: before.read, prompt: text, fault: "" };
+  let gone: JouleTasked = { ok: true, from: before.read, seen: before.frames, prompt: text,
+    fault: "" };
   return gone;
 }
 
