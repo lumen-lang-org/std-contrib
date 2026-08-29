@@ -14,7 +14,7 @@ const ENV_LIVE_MAX: int = 200;
 /** Who a serving environment runs as, and where its HOME lives. 65534 is
  *  nobody: it owns nothing on the host and nothing in the image. */
 const ENV_UID: int = 65534;
-const ENV_HOME: string = "/home/sandbox";
+export const ENV_HOME: string = "/home/sandbox";
 
 /** The two paths a script sandbox is handed on every run. Named here because
  *  they are mounted here and cleared in run-script.ts, and a path spelled
