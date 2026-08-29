@@ -1,4 +1,4 @@
-import { JOULE_MIN_VERSION, JOULE_MODE, JouleFrame, jouleAppendCmd, jouleBroadcastPath, jouleFrameLine, jouleFrameOf, jouleFramesFor, jouleFramesFrom, jouleInboxPath, jouleInputFrame, jouleIsTaskTurn, jouleJsonString, jouleMailboxPayload, jouleReadyCmd, jouleResumeFrame, jouleRuntimeDir, jouleSafeConnId, jouleShellQuote, jouleStartCmd, jouleTailCmd, jouleTailRead, jouleTurnEndReason, jouleTurnFor } from "./joule-bridge.ts";
+import { JOULE_MIN_VERSION, JOULE_MODE, JouleFrame, jouleAppendCmd, jouleFrameBool, jouleMailboxAt, jouleBroadcastPath, jouleFrameLine, jouleFrameOf, jouleFramesFor, jouleFramesFrom, jouleInboxPath, jouleInputFrame, jouleIsTaskTurn, jouleJsonString, jouleMailboxPayload, jouleReadyCmd, jouleResumeFrame, jouleRuntimeDir, jouleSafeConnId, jouleShellQuote, jouleStartCmd, jouleTailCmd, jouleTailRead, jouleTurnEndReason, jouleTurnFor } from "./joule-bridge.ts";
 
 // The transport without docker: what goes into the inbox, what comes out of
 // the broadcast log, and where the cursor lands afterwards. Those are the
@@ -273,4 +273,42 @@ test("a connection id is a path component, so it is checked before it is one", (
   expect(!jouleSafeConnId("has space"));
   expect(!jouleSafeConnId("under_score"));
   expect(!jouleSafeConnId("dot.dot"));
+});
+
+test("a frame carries the clock of the line it came off", () => {
+  // The only clock that can time anything inside the container. A tail hands
+  // back whatever accumulated since the last one, so a call and its result
+  // routinely arrive together, and timing them from this side would report
+  // every delegated call as instant.
+  let frames = jouleTestFrames([
+    "1770000000000|F|{\"v\":1,\"seq\":2,\"type\":\"tool.call\",\"turnId\":\"t1\"}",
+    "1770000000450|F|{\"v\":1,\"seq\":3,\"type\":\"tool.result\",\"turnId\":\"t1\"}",
+  ]);
+  expect(frames.length == 2);
+  let apart: number = 450.0;
+  expect(frames[1].at - frames[0].at == apart);
+
+  let stamp: number = 1770000000000.0;
+  let none: number = 0.0;
+  expect(jouleMailboxAt("1770000000000|F|{}") == stamp);
+  // Anything that is not a plain run of digits answers 0 rather than a guess:
+  // the value is subtracted from another one, and a partly-read stamp is a
+  // duration that is wrong rather than one that is absent.
+  expect(jouleMailboxAt("17x0|F|{}") == none);
+  expect(jouleMailboxAt("|F|{}") == none);
+  expect(jouleMailboxAt("no bars here") == none);
+  expect(jouleMailboxAt("") == none);
+});
+
+test("a frame's flag is true only when it says true", () => {
+  // `ok` on a tool.result, and a missing one read as true would draw a failed
+  // call in the thread as a good one.
+  let good = "{\"type\":\"tool.result\",\"callId\":\"c1\",\"ok\":true,\"truncated\":false}";
+  expect(jouleFrameBool(good, "ok"));
+  expect(!jouleFrameBool(good, "truncated"));
+  expect(!jouleFrameBool(good, "nothing"));
+  expect(!jouleFrameBool("{\"ok\":null}", "ok"));
+  expect(!jouleFrameBool("{\"ok\":\"true\"}", "ok"));
+  expect(!jouleFrameBool("{\"ok\":1}", "ok"));
+  expect(!jouleFrameBool("", "ok"));
 });

@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { jsonStringMemberAt, jsonIntMemberAt } from "../ai/core/jsonscan.ts";
+import { jsonStringMemberAt, jsonIntMemberAt, jsonMemberStart } from "../ai/core/jsonscan.ts";
 import { EnvRow, ENV_HOME, envContainerName, envDockerBin, envMarkAgent } from "./environments.ts";
 
 // Driving a joule daemon that lives inside a hardened container, over
@@ -181,6 +181,19 @@ export type JouleFrame = {
    *  mode.changed, daemon.stopping. */
   turnId: string,
   json: string,
+  /** The container's clock when the mailbox line was written, in milliseconds,
+   *  or 0 for a frame that did not come off a line.
+   *
+   *  Carried because it is the only clock that can time anything over there.
+   *  A tail returns whatever accumulated since the last one, so a call and its
+   *  result routinely arrive together and two readings of the engine's clock
+   *  would report every delegated call as instant. Two of these are a
+   *  duration, taken on one machine, which is the same reason envSyncClock
+   *  asks the container what time it is instead of assuming.
+   *
+   *  A number and not an int, because an int here is 32 bits and an epoch in
+   *  milliseconds is not: the first line ever read overflowed it. */
+  at: number,
 };
 
 /** Read the fields worth routing on, and leave the rest in the text.
@@ -191,13 +204,62 @@ export type JouleFrame = {
  *  frame set that gains a field is a frame set this would stop reading
  *  altogether. The daemon reads its own inbound frames the same way. */
 export function jouleFrameOf(json: string): JouleFrame {
+  return jouleFrameAt(json, 0.0);
+}
+
+/** The same, carrying the time its mailbox line was written. */
+export function jouleFrameAt(json: string, at: number): JouleFrame {
   let one: JouleFrame = {
     seq: jsonIntMemberAt(json, 0, "seq"),
     type: jsonStringMemberAt(json, 0, "type"),
     turnId: jsonStringMemberAt(json, 0, "turnId"),
     json: json,
+    at: at,
   };
   return one;
+}
+
+/** Whether `key` in a frame is the literal true.
+ *
+ *  Its own reader because there is no bool one to reach for, and because the
+ *  fallback matters: absent, null, a string, a number and false all have to
+ *  answer false. `ok` on a tool.result is the field this exists for, and
+ *  reading a missing one as true would draw a failed call as a good one. */
+export function jouleFrameBool(json: string, key: string): bool {
+  let at = jsonMemberStart(json, 0, key);
+  if (at < 0) {
+    return false;
+  }
+  return json.slice(at, at + 4) == "true";
+}
+
+/** When a mailbox line was written, in milliseconds, or 0.
+ *
+ *  The first field of the line and the one jouleMailboxPayload steps over.
+ *  Anything that is not a plain run of digits answers 0 rather than a guess:
+ *  the value is subtracted from another one, and a partly-parsed stamp is a
+ *  duration that is wrong rather than absent. */
+export function jouleMailboxAt(line: string): number {
+  let none: number = 0.0;
+  let first = line.indexOf("|");
+  if (first <= 0) {
+    return none;
+  }
+  let stamp = line.slice(0, first);
+  let out: number = 0.0;
+  let i: int = 0;
+  while (i < stamp.length) {
+    let c = stamp.charCodeAt(i);
+    if (c < 48 || c > 57) {
+      return none;
+    }
+    // Digit by digit as a number rather than through parseInt, which reads
+    // into an int and answers null for anything past 2147483647 — which every
+    // epoch stamp in milliseconds is.
+    out = out * 10.0 + ((c - 48) as number);
+    i = i + 1;
+  }
+  return out;
 }
 
 /** The frames in a chunk of broadcast log, and nothing else.
@@ -223,7 +285,7 @@ export function jouleFramesFrom(chunk: string): JouleFrame[] {
     if (payload == "") {
       continue;
     }
-    out.push(jouleFrameOf(payload));
+    out.push(jouleFrameAt(payload, jouleMailboxAt(line)));
   }
   return out;
 }
