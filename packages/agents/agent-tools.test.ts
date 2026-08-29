@@ -12,7 +12,16 @@ const NOW: number = 1786124262180.0;
 
 function db(): Db {
   if (!ready) {
-    let cfg: DbConfig = { filename: "/tmp/agents_agent_tools_test.db" };
+    // From an empty file, not from whatever the last run left: the plan
+    // ALTERs tables this fixture does not drop, so re-running it over a
+    // leftover database stops partway and the suite then tests a schema
+    // production never has. /tmp survives between jobs on a self-hosted
+    // runner, which is where that turned up.
+    let file = "/tmp/agents_agent_tools_test.db";
+    if (fs.existsSync(file)) {
+      fs.rmSync(file, false);
+    }
+    let cfg: DbConfig = { filename: file };
     connectDatabase(database, cfg);
     forgetMigrations(database);
     execute(database, "DROP TABLE IF EXISTS agent_sub_agents");

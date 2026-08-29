@@ -4,40 +4,47 @@
 # and every example adds another. Two of these (rag, run-agent) were committed
 # before this list existed -- 8 MB each, in the history for good now, which is
 # the reason the list is worth keeping current.
-api
-mount-mcp
-call-model
-run-agent
-rag
-run-with-tools
-delegate
-delegate-traced
-prompt-ab
-evals
-stored-credential
-zz*
-.lumen-*
-api
-api.backup-*
+#
+# Every one of them is anchored with a leading slash, because a bare name here
+# matches at any depth, not just beside this file. `evals` used to be bare, and
+# it swallowed routes/ops/evals/ along with the binary: three source files were
+# written there and never added, api.ts imported a controller that was not in
+# the repository, and the test job has been red ever since. The binaries all
+# sit in this directory, so the slash says so.
+/api
+/mount-mcp
+/call-model
+/run-agent
+/rag
+/run-with-tools
+/delegate
+/delegate-traced
+/prompt-ab
+/evals
+/stored-credential
+/zz*
+/.lumen-*
+/api.backup-*
 
 # The other binaries this package compiles, and the copies kept beside them
 # while a deployment is being replaced. `api` was already named; these were
 # not, which is how a 57 MB `api.prev` came to be sitting in `git status`
 # looking like source. A binary that reaches a commit is in the history for
-# good — the note at the top of this file is about exactly that.
-scheduler
-indexer
+# good -- the note at the top of this file is about exactly that.
+/scheduler
+/indexer
 # One poller per bot, built the same way and just as unwelcome in a diff.
-trigger-poller
-api.prev*
-api.pre-*
+/trigger-poller
+/api.prev*
+/api.pre-*
+# Python bytecode, wherever the tools directory grows one.
 __pycache__/
 *.pyc
-probe*
+/probe*
 # The copies kept beside `indexer` while a deployment is replaced, and the
 # build-time duplicate of api.ts. Same reasoning as api.prev* above: a binary
 # that reaches a commit is in the history for good, and api-build.ts is a copy
 # of a file that is already tracked.
-indexer.prev*
-indexer.running-*
-api-build.ts
+/indexer.prev*
+/indexer.running-*
+/api-build.ts

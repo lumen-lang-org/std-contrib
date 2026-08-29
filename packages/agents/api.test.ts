@@ -747,7 +747,7 @@ function seedMenu(): void {
   persist(database, modelChoicesMapping(), JSON.stringify(fast));
 }
 
-test("the menu is the enabled rows in rank order, and never names the config behind one", () => {
+test("the menu is the enabled rows in rank order, and names the config but not the router", () => {
   expect(fresh() == "");
   seedMenu();
   let menu = new ModelService(database, "");
@@ -762,8 +762,12 @@ test("the menu is the enabled rows in rank order, and never names the config beh
   expect(wire.indexOf("\"description\":\"decides for each message\"") >= 0);
   expect(wire.indexOf("\"kind\":\"router\"") >= 0);
   expect(wire.indexOf("\"kind\":\"config\"") >= 0);
-  expect(wire.indexOf("configId") < 0);
-  expect(wire.indexOf("cfg-quick") < 0);
+  // The configuration a choice names is on the wire: a form that offers this
+  // menu has to store what the choice points at, and a config is a model, a
+  // temperature and a token budget rather than a secret. The router behind a
+  // choice is still the operator's own business.
+  expect(wire.indexOf("configId") >= 0);
+  expect(wire.indexOf("cfg-quick") >= 0);
   expect(wire.indexOf("routerId") < 0);
   expect(wire.indexOf("rt-1") < 0);
   expect(wire.indexOf("\"enabled\"") < 0);

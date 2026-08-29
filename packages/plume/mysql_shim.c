@@ -22,9 +22,21 @@
 
 #include <mysql.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// MySQL 8 dropped the my_bool typedef in favour of C99 bool; MariaDB Connector/C
+// still ships it. The indicator arrays in bind_out below are the only place this
+// shim names that type, and mysql_stmt_bind_result reads whatever the headers on
+// this machine declare, so the alias is made to match them here rather than the
+// call sites being written twice.
+#if !defined(MARIADB_BASE_VERSION) && !defined(MARIADB_VERSION_ID) && defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 80000
+typedef bool shim_bool;
+#else
+typedef my_bool shim_bool;
+#endif
 
 #define MY_MAX_CONNECTIONS 64
 #define MY_MAX_PARAMS 32
@@ -447,8 +459,8 @@ static int store(my_slot *s, MYSQL_STMT *stmt) {
 
     MYSQL_BIND *out = calloc((size_t)s->cols, sizeof(MYSQL_BIND));
     unsigned long *lengths = calloc((size_t)s->cols, sizeof(unsigned long));
-    my_bool *is_null = calloc((size_t)s->cols, sizeof(my_bool));
-    my_bool *error = calloc((size_t)s->cols, sizeof(my_bool));
+    shim_bool *is_null = calloc((size_t)s->cols, sizeof(shim_bool));
+    shim_bool *error = calloc((size_t)s->cols, sizeof(shim_bool));
     // A zero-length buffer makes the fetch report the true length in
     // `lengths` without copying, and the column is then re-fetched into a
     // buffer of exactly that size.

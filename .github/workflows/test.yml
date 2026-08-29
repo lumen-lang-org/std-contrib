@@ -13,21 +13,110 @@ jobs:
       - name: Install Lumen
         run: curl -fsSL https://raw.githubusercontent.com/lumen-lang-org/lumen/main/install.sh | sh
 
-      - name: Build C shims
+      - name: System dependencies
         run: |
-          for f in packages/*/*_shim.c packages/*/*_host.c; do
-            [ -f "$f" ] || continue
-            o="${f%.c}.o"
-            echo "cc -c $f -o $o"
-            cc -c "$f" -o "$o" || echo "  (failed, package needing this shim will fail below, pre-existing gap or missing system dep)"
+          # The shims built below are C against system libraries, and a header
+          # that is not here does not fail one package: every target that
+          # imports plume, which is most of packages/agents, then has no object
+          # to link against. This runner had none of them, which is where about
+          # forty of the failures came from. It is long-lived, so this is a
+          # no-op after the first run.
+          need="libsqlite3-dev libpq-dev libmariadb-dev libpoppler-cpp-dev poppler-utils"
+          missing=""
+          for p in $need; do
+            dpkg -s "$p" >/dev/null 2>&1 || missing="$missing $p"
           done
+          if [ -z "$missing" ]; then
+            echo "already installed:$need"
+          elif sudo -n true 2>/dev/null; then
+            echo "installing:$missing"
+            sudo -n DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y -q $missing
+          else
+            echo "MISSING, and this runner has no unattended sudo:$missing"
+            echo "An operator has to install them on this machine."
+            exit 1
+          fi
+
+      - name: Databases under test
+        run: |
+          # packages/plume and packages/pgvector test against real servers on
+          # purpose -- the database is half of the mapper, as plume.test.ts puts
+          # it -- and there were none here, so twelve files failed on a
+          # connection that was never going to open.
+          #
+          # The addresses are not configurable from this file. lumen test does
+          # not pass the environment through to the binary it builds, so
+          # PLUME_TEST_CONNINFO and its two siblings never reach a test, and the
+          # host, port, database and password compiled into the fixtures are the
+          # ones that have to answer: 127.0.0.1:5432 lumenvec/lumen/lumen for
+          # PostgreSQL, 127.0.0.1:13306 lumentest/root/lumen for MySQL.
+          docker rm -f lumen-ci-pg lumen-ci-mysql >/dev/null 2>&1 || true
+          docker run -d --name lumen-ci-pg -p 127.0.0.1:5432:5432 -e POSTGRES_USER=lumen -e POSTGRES_PASSWORD=lumen -e POSTGRES_DB=lumenvec pgvector/pgvector:pg17
+          docker run -d --name lumen-ci-mysql -p 127.0.0.1:13306:3306 -e MARIADB_ROOT_PASSWORD=lumen -e MARIADB_DATABASE=lumentest mariadb:11
+          up=0
+          for _ in $(seq 1 90); do
+            docker exec lumen-ci-pg pg_isready -q -U lumen -d lumenvec >/dev/null 2>&1 && up=1 && break
+            sleep 2
+          done
+          [ "$up" = 1 ] || { echo "postgres did not come up"; docker logs --tail 40 lumen-ci-pg; exit 1; }
+          # pgvector.test.ts needs the extension, the way its header says to
+          # create it by hand.
+          docker exec lumen-ci-pg psql -q -U lumen -d lumenvec -c "CREATE EXTENSION IF NOT EXISTS vector"
+          up=0
+          for _ in $(seq 1 90); do
+            docker exec lumen-ci-mysql mariadb -uroot -plumen -e "SELECT 1" >/dev/null 2>&1 && up=1 && break
+            sleep 2
+          done
+          [ "$up" = 1 ] || { echo "mariadb did not come up"; docker logs --tail 40 lumen-ci-mysql; exit 1; }
+          echo "postgres on 5432 and mariadb on 13306 are answering"
+
+      - name: Build native shims
+        run: |
+          # Every package that links a native object ships a build.sh, and each
+          # one knows something a glob here cannot: where libpq keeps its headers
+          # on this machine, that poppler_shim is C++ and not C, and that cron
+          # needs -DCRON_USE_LOCAL_TIME or every task fires at the right UTC time
+          # and the wrong local one. What this replaced globbed *_shim.c and
+          # *_host.c and compiled them with a bare cc, which missed
+          # packages/cron/ccronexpr.c and packages/pdf/poppler_shim.cpp outright
+          # and built the rest without their include paths. Running the scripts a
+          # developer runs keeps the two the same build.
+          for s in packages/*/build.sh; do
+            echo "== $s"
+            sh "$s" || echo "!! $s failed"
+          done
+          # sqlite/ and tty/ have no build.sh: their objects are a plain compile.
+          echo "== packages/sqlite/sqlite_shim.c"
+          cc -c packages/sqlite/sqlite_shim.c -o packages/sqlite/sqlite_shim.o || echo "!! sqlite shim failed"
+          echo "== packages/tty/tty_shim.c"
+          cc -c packages/tty/tty_shim.c -o packages/tty/tty_shim.o || echo "!! tty shim failed"
+          echo "-- objects built:"
+          ls -1 packages/*/*.o 2>/dev/null || echo "   (none)"
 
       - name: Test every package
         run: |
           export PATH="$HOME/.lumen/bin:$PATH"
+          # packages/quickjs/quickjs.ts names a Homebrew dylib by absolute path,
+          # so its native build is macOS only; on Linux the package is reached
+          # through the wasm archive it also names. Skipped here by name so the
+          # reason is written down rather than rediscovered.
+          skip="packages/quickjs/quickjs.ts"
           fail=0
+          failed=""
           for f in packages/*/*.ts; do
+            case " $skip " in *" $f "*) echo "== $f == (skipped: macOS-only native link)"; continue ;; esac
             echo "== $f =="
-            lumen test "$f" || fail=1
+            if ! lumen test "$f"; then
+              fail=1
+              failed="$failed $f"
+            fi
           done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::failed:$failed"
+          fi
           exit $fail
+
+      - name: Stop the databases
+        if: always()
+        run: docker rm -f lumen-ci-pg lumen-ci-mysql >/dev/null 2>&1 || true
