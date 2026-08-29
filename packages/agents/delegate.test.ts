@@ -80,11 +80,19 @@ function seeded(): void {
   dropTable(database, modelsMapping());
   migrate(database, schemaPlan(database));
 
+  // A provider no build of this package knows about. Every test below is
+  // about which children an agent is offered, and what it is told about the
+  // ones it is not; none of them reads an answer from a model. Naming a real
+  // provider sent the run to that address with a fixture key, and the 401
+  // that came back is written to stderr, which lumen test counts as a failed
+  // test. An unknown provider is refused where the decision is made instead:
+  // the run still gets far enough to collect its notes, and nothing leaves
+  // the machine.
   let m: ModelRow = {
     id: "m1",
-    label: "Mistral Small",
-    apiName: "mistral-small-latest",
-    provider: "mistral",
+    label: "Offline",
+    apiName: "nowhere-1",
+    provider: "nowhere",
     kind: "chat",
     dimensions: 0,
     baseUrl: "",
@@ -187,7 +195,7 @@ test("an agent with no children has none", () => {
 test("a cycle is named, not descended into", () => {
   seeded();
   storeCredential(database, {
-    provider: "mistral",
+    provider: "nowhere",
     apiKey: "sk-fake-0001",
     masterKey: testKey(),
     now: "t",
@@ -211,6 +219,7 @@ test("a cycle is named, not descended into", () => {
     owner: "",
     think: false,
     scope: "",
+    mustSearch: false,
   });
   expect(child.notes.length == 1);
   expect(child.notes[0].indexOf("lead") >= 0);
@@ -223,7 +232,7 @@ test("a cycle is named, not descended into", () => {
 test("an agent that would delegate to itself is refused", () => {
   seeded();
   storeCredential(database, {
-    provider: "mistral",
+    provider: "nowhere",
     apiKey: "sk-fake-0001",
     masterKey: testKey(),
     now: "t",
@@ -238,7 +247,7 @@ test("an agent that would delegate to itself is refused", () => {
 test("past the depth limit an agent runs alone rather than not at all", () => {
   seeded();
   storeCredential(database, {
-    provider: "mistral",
+    provider: "nowhere",
     apiKey: "sk-fake-0001",
     masterKey: testKey(),
     now: "t",
@@ -261,6 +270,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
     owner: "",
     think: false,
     scope: "",
+    mustSearch: false,
   });
   expect(deep.notes.length == 1);
   expect(deep.notes[0].indexOf("delegation limit") >= 0);
@@ -270,7 +280,7 @@ test("past the depth limit an agent runs alone rather than not at all", () => {
 test("a disabled child is not offered, and the run says why", () => {
   seeded();
   storeCredential(database, {
-    provider: "mistral",
+    provider: "nowhere",
     apiKey: "sk-fake-0001",
     masterKey: testKey(),
     now: "t",
@@ -299,7 +309,7 @@ test("a disabled child is not offered, and the run says why", () => {
 test("a child that does not exist is simply not there", () => {
   seeded();
   storeCredential(database, {
-    provider: "mistral",
+    provider: "nowhere",
     apiKey: "sk-fake-0001",
     masterKey: testKey(),
     now: "t",

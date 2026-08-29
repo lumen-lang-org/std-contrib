@@ -498,6 +498,7 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
           owner: ask.owner,
           think: false,
           scope: "",
+          mustSearch: false,
         };
         let asked = runAgentAt(db, node.agentId, said, ask.master, below);
         if (!asked.ok) {
@@ -511,8 +512,10 @@ function stepFnFor(db: Db, row: WorkflowRow, agent: AgentRow, ask: WorkflowAsk, 
         tracer: tracerFor(db, ask.master),
         pick: inheritedPick(),
         think: false,
-    scope: "",
-};
+        scope: "",
+        mustSearch: false,
+        titledElsewhere: false,
+      };
       let answered = runInThreadWith(db, threadId, turn);
       if (!answered.run.ok) {
         return inThread(withInput(stepFailed(answered.run.error), said), threadId);

@@ -144,9 +144,17 @@ test("a refusal tells the reader what to do and leaks nothing about the deployme
   expect(dead.indexOf("10.0.0.9") < 0);
   expect(dead.indexOf("qwen2.5-7b") < 0);
 
+  // A 400 repeats what the provider said rather than guessing at it: the
+  // guess it replaced ("the conversation has grown longer than the model can
+  // hold") sent a first-message refusal to the wrong cause for a week. The
+  // words come through; anything that looks like an address does not.
   let long = streamFault(m, 400, "context length exceeded");
-  expect(long.indexOf("longer than the model can hold") >= 0);
-  expect(long.indexOf("context length exceeded") < 0);
+  expect(long.indexOf("would not take this request") >= 0);
+  expect(long.indexOf("context length exceeded") >= 0);
+
+  let addressed = streamFault(m, 400, "no route to http://10.0.0.9:8000/v1 for qwen2.5-7b");
+  expect(addressed.indexOf("10.0.0.9") < 0);
+  expect(addressed.indexOf("[address]") >= 0);
 
   let auth = streamFault(m, 401, "");
   expect(auth.indexOf("not configured correctly") >= 0);

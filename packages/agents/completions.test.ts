@@ -6,7 +6,7 @@ import { ModelChoiceRow, ModelConfigRow, ModelRow, modelChoicesMapping, modelCon
 import { runLogPlan, runsMapping } from "./runlog.ts";
 import { CompletionService } from "./routes/inference/completions/completion.service.ts";
 import { CompletionAsk, completionAskOf } from "./routes/inference/completions/dtos/completion-ask.dto.ts";
-import { Completion } from "./provider.ts";
+import { Completion, ToolSpec, Turn } from "./provider.ts";
 
 let database: Db = sqlite();
 
@@ -30,11 +30,15 @@ function fresh(): CompletionService {
 }
 
 function askOf(choiceId: string, configId: string, input: string): CompletionAsk {
+  let noTurns: Turn[] = [];
+  let noTools: ToolSpec[] = [];
   let ask: CompletionAsk = {
     modelChoiceId: choiceId,
     modelConfigId: configId,
     system: "",
     input: input,
+    turns: noTurns,
+    tools: noTools,
     maxTokens: 0,
   };
   return ask;
