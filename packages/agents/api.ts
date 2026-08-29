@@ -5,7 +5,7 @@ import { sqlite } from "../plume/sqlite.ts";
 import { postgres } from "../plume/postgres.ts";
 import { DbOrder, placeholderAt, connectDatabase, databaseConnected, persist, findById, listOrdered, existsById, deleteById, execute, countWhere, jsonMember } from "../plume/plume.ts";
 import { migrate } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel } from "./schema.ts";
+import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, PromptRow, McpServerRow, AgentRow, ScriptImageRow, scriptImagesMapping, modelsMapping, modelConfigsMapping, modelConfigRows, configAndModel, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, schemaPlan, derivedMenuStatements, askCancel, clearCancel } from "./schema.ts";
 import { masterKey, masterKeyFault } from "./credentials.ts";
 import { AgentRun } from "./run.ts";
 import { userTurn } from "./provider.ts";
@@ -472,6 +472,7 @@ export function migrationFault(db: Db): string {
   if (ran.ok) {
     applySandboxLimits(db);
     seedEnvTemplates(db);
+    seedJouleImage(db);
     return "";
   }
   if (ran.failedVersion != "") {
@@ -480,6 +481,46 @@ export function migrationFault(db: Db): string {
   return "the schema is not up to date: " + ran.error;
 }
 
+
+/** The image a delegated joule agent runs in, and the name it answers to.
+ *
+ *  packages/agents/joule.Dockerfile builds it. The tag is the contract
+ *  between the two: change one and change the other.
+ */
+export const JOULE_IMAGE: string = "agents-joule:1";
+export const JOULE_IMAGE_ID: string = "img-joule";
+
+/** Register that image the way office and search are registered.
+ *
+ *  A curated script image row is the whole mechanism: scriptImageForEnv folds
+ *  an environment's name and looks for the enabled row whose label folds the
+ *  same way, which is how "office" resolves to the office image and refuses
+ *  rather than falling back when no row matches. Office and search got their
+ *  rows from an operator through POST /script-images. This one is seeded,
+ *  because the engine reaches for it by name itself rather than waiting to be
+ *  told it exists — an operator step nobody performed would look like
+ *  delegation being broken, and it would look that way on a fresh deployment
+ *  every time.
+ *
+ *  Seeded by id and not, like seedEnvTemplates, by the table being empty: a
+ *  deployment that already has office and search rows has a table that is not
+ *  empty and still has no joule row. Going by id also leaves an operator's own
+ *  decision alone — a row disabled or repointed here still exists, so nothing
+ *  puts the original back on the next boot.
+ */
+function seedJouleImage(db: Db): void {
+  if (findById(db, scriptImagesMapping(), JOULE_IMAGE_ID) != "") {
+    return;
+  }
+  let row: ScriptImageRow = {
+    id: JOULE_IMAGE_ID,
+    label: "joule",
+    image: JOULE_IMAGE,
+    enabled: true,
+    summary: "joule and joule-daemon on python 3.12, with node, npm and git",
+  };
+  persist(db, scriptImagesMapping(), JSON.stringify(row));
+}
 
 function seedEnvTemplates(db: Db): void {
   if (countWhere(db, envTemplatesMapping(), "", []) > 0) {
@@ -524,6 +565,16 @@ function seedEnvTemplates(db: Db): void {
       tags: "python,web,scraping",
       image: "",
       dockerfile: "FROM python:3.12-slim\nRUN pip install --no-cache-dir requests beautifulsoup4 lxml",
+      featuredRank: 0,
+      now: now,
+    },
+    {
+      id: "",
+      name: "Joule",
+      summary: "joule and joule-daemon, for handing a task to an agent working inside the environment",
+      tags: "joule,agent,delegation",
+      image: JOULE_IMAGE,
+      dockerfile: "",
       featuredRank: 0,
       now: now,
     },

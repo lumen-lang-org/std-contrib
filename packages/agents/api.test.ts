@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, persist, execute, executeWith, findById, deleteById, countWhere, dropTable } from "../plume/plume.ts";
 import { migrate, migration, forgetMigrations } from "../plume/migrate.ts";
-import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, McpServerRow, AgentRow, SkillRow, SkillFileRow, modelsMapping, modelConfigsMapping, modelConfigRows, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, enabledChoices, configForChoice } from "./schema.ts";
+import { ModelRow, ModelConfigRow, ModelChoiceRow, ModelRouterRow, McpServerRow, AgentRow, SkillRow, SkillFileRow, ScriptImageRow, scriptImagesMapping, modelsMapping, modelConfigsMapping, modelConfigRows, modelChoicesMapping, modelRoutersMapping, promptsMapping, mcpServersMapping, agentsMapping, credentialsMapping, enabledChoices, configForChoice } from "./schema.ts";
 import { traceConfigMapping } from "./trace.ts";
 import { TraceConfigRow } from "./routes/ops/tracing/entities/trace-config.entity.ts";
 import { AgentRetrievalRow, Retrieved, agentRetrievalMapping, grantScope, agentScopes } from "./knowledge.ts";
@@ -19,7 +19,9 @@ import { TURN_SEQ_NONE, putArtifact, listArtifacts } from "./artifacts.ts";
 import { beginStep, stepsOfThread } from "./steps.ts";
 import { documentFilesMapping } from "./document-files.ts";
 import { DocumentRepository } from "./routes/knowledge/documents/document.repository.ts";
-import { migrationFault, wholePlan, bearerRefused, publishMenu } from "./api.ts";
+import { JOULE_IMAGE, JOULE_IMAGE_ID, migrationFault, wholePlan, bearerRefused, publishMenu } from "./api.ts";
+import { EnvTemplateRow, envTemplatesAll } from "./env-templates.ts";
+import { scriptImageForEnv } from "./run-script.ts";
 import { askedPick } from "./routes/conversations/threads/thread.utils.ts";
 import { blankRouter, candidatesFault, mergedRouter, preEncodedCandidates, routerJson, routerRowFault, withCanonicalCandidates } from "./routes/inference/model-routers/model-router.utils.ts";
 import { ModelRouterService } from "./routes/inference/model-routers/model-router.service.ts";
@@ -1174,4 +1176,46 @@ test("a thread id alone is not authorisation, and refusal is a 404", () => {
   expect(ownedThread(database, hers, ["u-bob"]) == "");
   expect(ownedThread(database, "a-thread-that-never-existed", ["u-bob"]) == "");
   database.close();
+});
+
+test("an environment named joule resolves to the joule image", () => {
+  fresh();
+  let held = findById(database, scriptImagesMapping(), JOULE_IMAGE_ID);
+  expect(held != "");
+  let row: ScriptImageRow = JSON.parse<ScriptImageRow>(held);
+  expect(row.image == JOULE_IMAGE);
+  expect(row.enabled);
+  // Folded on both sides, so the name the model types decides nothing.
+  expect(scriptImageForEnv(database, "", "joule") == JOULE_IMAGE);
+  expect(scriptImageForEnv(database, "", "Joule") == JOULE_IMAGE);
+  // And an unknown name still refuses rather than falling back to it.
+  expect(scriptImageForEnv(database, "", "nowhere") == "");
+});
+
+test("a joule row an operator changed is left alone on the next boot", () => {
+  fresh();
+  let moved: ScriptImageRow = {
+    id: JOULE_IMAGE_ID, label: "joule", image: "agents-joule:next", enabled: false, summary: "",
+  };
+  persist(database, scriptImagesMapping(), JSON.stringify(moved));
+  expect(migrationFault(database) == "");
+  let back: ScriptImageRow = JSON.parse<ScriptImageRow>(findById(database, scriptImagesMapping(), JOULE_IMAGE_ID));
+  expect(back.image == "agents-joule:next");
+  expect(!back.enabled);
+});
+
+test("joule is one of the starting points the catalog offers", () => {
+  fresh();
+  let all: EnvTemplateRow[] = envTemplatesAll(database);
+  let found = false;
+  let i: int = 0;
+  while (i < all.length) {
+    if (all[i].name == "Joule") {
+      found = true;
+      expect(all[i].image == JOULE_IMAGE);
+      expect(all[i].source == "image");
+    }
+    i = i + 1;
+  }
+  expect(found);
 });
