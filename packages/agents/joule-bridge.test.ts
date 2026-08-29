@@ -1,4 +1,4 @@
-import { JOULE_MODE, JouleFrame, jouleAppendCmd, jouleBroadcastPath, jouleFrameLine, jouleFrameOf, jouleFramesFor, jouleFramesFrom, jouleInboxPath, jouleInputFrame, jouleIsTaskTurn, jouleJsonString, jouleMailboxPayload, jouleReadyCmd, jouleResumeFrame, jouleRuntimeDir, jouleSafeConnId, jouleShellQuote, jouleStartCmd, jouleTailCmd, jouleTailRead, jouleTurnEndReason, jouleTurnFor } from "./joule-bridge.ts";
+import { JOULE_MIN_VERSION, JOULE_MODE, JouleFrame, jouleAppendCmd, jouleBroadcastPath, jouleFrameLine, jouleFrameOf, jouleFramesFor, jouleFramesFrom, jouleInboxPath, jouleInputFrame, jouleIsTaskTurn, jouleJsonString, jouleMailboxPayload, jouleReadyCmd, jouleResumeFrame, jouleRuntimeDir, jouleSafeConnId, jouleShellQuote, jouleStartCmd, jouleTailCmd, jouleTailRead, jouleTurnEndReason, jouleTurnFor } from "./joule-bridge.ts";
 
 // The transport without docker: what goes into the inbox, what comes out of
 // the broadcast log, and where the cursor lands afterwards. Those are the
@@ -243,6 +243,11 @@ test("the daemon is told where its runtime directory is, and comes up unattended
   expect(cmd.indexOf("--mode " + JOULE_MODE) > 0);
   expect(JOULE_MODE == "full-auto");
   expect(cmd.indexOf("joule-daemon") > 0);
+
+  // Both of those arrived in v0.23.20. Against an earlier release the runtime
+  // directory is a hash this side cannot name and the mode flag is not read,
+  // so the floor is part of the transport rather than a note about the image.
+  expect(JOULE_MIN_VERSION == "0.23.20");
 });
 
 test("the wait for a daemon happens inside the container", () => {
