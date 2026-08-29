@@ -56,7 +56,7 @@ jobs:
           docker run -d --name lumen-ci-mysql -p 127.0.0.1:13306:3306 -e MARIADB_ROOT_PASSWORD=lumen -e MARIADB_DATABASE=lumentest mariadb:11
           up=0
           for _ in $(seq 1 90); do
-            docker exec lumen-ci-pg pg_isready -q -U lumen -d lumenvec >/dev/null 2>&1 && up=1 && break
+            docker exec lumen-ci-pg psql -q -U lumen -d lumenvec -c "SELECT 1" >/dev/null 2>&1 && up=1 && break
             sleep 2
           done
           [ "$up" = 1 ] || { echo "postgres did not come up"; docker logs --tail 40 lumen-ci-pg; exit 1; }
@@ -65,7 +65,7 @@ jobs:
           docker exec lumen-ci-pg psql -q -U lumen -d lumenvec -c "CREATE EXTENSION IF NOT EXISTS vector"
           up=0
           for _ in $(seq 1 90); do
-            docker exec lumen-ci-mysql mariadb -uroot -plumen -e "SELECT 1" >/dev/null 2>&1 && up=1 && break
+            docker exec lumen-ci-mysql mariadb -uroot -plumen -D lumentest -e "SELECT 1" >/dev/null 2>&1 && up=1 && break
             sleep 2
           done
           [ "$up" = 1 ] || { echo "mariadb did not come up"; docker logs --tail 40 lumen-ci-mysql; exit 1; }
