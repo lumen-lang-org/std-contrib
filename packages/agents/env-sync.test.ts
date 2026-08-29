@@ -1,4 +1,5 @@
-import { envSyncIgnored, envSyncIgnoredBy, envSyncRulesFrom, envSyncFindCmd, envSyncSkips } from "./env-sync.ts";
+import { EnvRow } from "./environments.ts";
+import { ENV_AGENT_NOTE, envSyncIgnored, envSyncIgnoredBy, envSyncRulesFrom, envSyncFindCmd, envSyncNote, envSyncSkips } from "./env-sync.ts";
 
 // The two pure halves of the sync, which are the halves worth being sure of:
 // what is a record and what is regenerable, and a find that does not descend
@@ -84,4 +85,43 @@ test("a project's rules sit on top of the floor, never under it", () => {
   expect(envSyncIgnoredBy("./node_modules/react/index.js", none));
   expect(!envSyncIgnoredBy("./src/Commercial.tsx", rules));
   expect(!envSyncIgnoredBy("./src/tmp.ts", rules));
+});
+
+// A delegated environment, where the thing writing in the workspace is another
+// agent rather than a person at a dev server.
+
+function envRowFor(name: string, conn: string): EnvRow {
+  let row: EnvRow = {
+    id: "t1:" + name, threadId: "t1", name: name, image: "agents-joule:1",
+    network: 1, status: "running", slug: "abc", hostPort: 0, servePort: 0,
+    serveCmd: "", syncAt: "", agentConn: conn, agentRead: 0,
+    createdAt: "1700000000000", lastUsedAt: "1700000000000",
+  };
+  return row;
+}
+
+test("the daemon's own scratch is not the conversation's work", () => {
+  // ensureScratchDir makes this inside the workspace before the first turn, so
+  // without the skip every delegated turn stores the delegate's bookkeeping as
+  // versions of the conversation's files.
+  expect(envSyncIgnored("./.joule/scratch/ws-abc123/note.md"));
+  expect(envSyncIgnored(".joule/sessions/x.json"));
+  expect(envSyncSkips().indexOf(".joule") >= 0);
+  // Pruned before find descends, not filtered after: a scratch directory can
+  // be large and none of its bytes should cross the wire.
+  expect(envSyncFindCmd("0").indexOf("-name '.joule'") > 0);
+  // And a file somebody wrote that merely starts the same way is not it.
+  expect(!envSyncIgnored("./joule-notes.md"));
+  expect(!envSyncIgnored("./src/.joulerc.ts"));
+});
+
+test("a version says which kind of hand wrote it", () => {
+  // A harvested version has no turn and no tool call behind it, so the note is
+  // the whole provenance a reader gets.
+  expect(envSyncNote(envRowFor("joule", "engine-abc")) == ENV_AGENT_NOTE);
+  expect(envSyncNote(envRowFor("joule", "engine-abc")) == "edited by joule code");
+  // No daemon in it: the same environment, before one was started, is somebody
+  // working in a container, and that is what it says.
+  expect(envSyncNote(envRowFor("joule", "")) == "written in joule");
+  expect(envSyncNote(envRowFor("web", "")) == "written in web");
 });

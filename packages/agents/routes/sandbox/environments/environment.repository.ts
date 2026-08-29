@@ -106,7 +106,10 @@ export class EnvironmentRepository {
   serve(threadId: string, name: string, image: string, command: string, start: bool, now: string): EnvEnsured {
     let e: EnvEnsure = {
       threadId: threadId, name: name, image: image,
-      network: true, serve: true, command: command, start: start, now: now,
+      network: true, serve: true, command: command, start: start,
+      // This route serves a port; a delegated environment does not go
+      // through it.
+      agent: false, now: now,
     };
     return envEnsure(this.database, e);
   }

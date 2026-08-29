@@ -60,7 +60,7 @@ function fresh(): void {
 
 function serving(threadId: string, now: string): EnvEnsured {
   let e: EnvEnsure = {
-    threadId: threadId, name: "web", image: "node:22", network: true, serve: true, command: "", start: true, now: now,
+    threadId: threadId, name: "web", image: "node:22", network: true, serve: true, command: "", start: true, agent: false, now: now,
   };
   return envEnsure(database, e);
 }

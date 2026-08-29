@@ -2,7 +2,7 @@ import { Db, DbConfig } from "../plume/driver.ts";
 import { sqlite } from "../plume/sqlite.ts";
 import { connectDatabase, execute } from "../plume/plume.ts";
 import { migrate, forgetMigrations } from "../plume/migrate.ts";
-import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envNetworkReap, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, envServing, envMarkAgent, envMarkSynced, EnvOwnedRow } from "./environments.ts";
+import { EnvRow, EnvEnsure, EnvEnsured, EnvSweep, ENV_IDLE_MS, envPlan, envEnsure, envIdle, envNetworkReap, envForget, envList, envContainerName, envDockerOverride, envDockerUp, envDockerForget, envOwned, envDrop, envImagePresent, envBySlug, envBindOverride, envBindAddr, envServePort, envForwardArgs, envForwardPid, envProbeOverride, envReforward, envServing, envMarkAgent, envMarkSynced, envSeccompOverride, EnvOwnedRow } from "./environments.ts";
 
 let database: Db = sqlite();
 
@@ -79,7 +79,7 @@ function clearLog(): void {
 }
 
 function ensure(threadId: string, name: string, image: string, now: string): EnvEnsured {
-  let e: EnvEnsure = { threadId: threadId, name: name, image: image, network: false, serve: false, command: "", start: true, now: now };
+  let e: EnvEnsure = { threadId: threadId, name: name, image: image, network: false, serve: false, command: "", start: true, agent: false, now: now };
   return envEnsure(database, e);
 }
 
@@ -385,7 +385,7 @@ test("envOwned lists a person's containers with their conversations' titles, and
   fresh();
   withThreads();
   dockerFine();
-  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, now: "1000" });
+  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, agent: false, now: "1000" });
   envEnsure(database, {
     threadId: "t2",
     name: "office",
@@ -393,10 +393,10 @@ test("envOwned lists a person's containers with their conversations' titles, and
     network: true,
     serve: false,
     command: "",
-    start: true,
+    start: true, agent: false,
     now: "2000",
   });
-  envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, now: "3000" });
+  envEnsure(database, { threadId: "t9", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, agent: false, now: "3000" });
   let mine = envOwned(database, "o1");
   expect(mine.length == 2);
   expect(mine[0].threadTitle == "Weather digest" || mine[1].threadTitle == "Weather digest");
@@ -412,7 +412,7 @@ test("envDrop takes the container and row, and the workspace volume with the las
   fresh();
   withThreads();
   dockerFine();
-  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, now: "1000" });
+  envEnsure(database, { threadId: "t1", name: "main", image: "img:1", network: true, serve: false, command: "", start: true, agent: false, now: "1000" });
   envEnsure(database, {
     threadId: "t1",
     name: "office",
@@ -420,7 +420,7 @@ test("envDrop takes the container and row, and the workspace volume with the las
     network: true,
     serve: false,
     command: "",
-    start: true,
+    start: true, agent: false,
     now: "1000",
   });
   fs.writeFileSync(FAKE_LOG, "");
@@ -457,7 +457,7 @@ function dockerServing(atPort: string): void {
 
 function serve(threadId: string, now: string): EnvEnsured {
   let e: EnvEnsure = {
-    threadId: threadId, name: "web", image: "node:22", network: true, serve: true, command: "", start: true, now: now,
+    threadId: threadId, name: "web", image: "node:22", network: true, serve: true, command: "", start: true, agent: false, now: now,
   };
   return envEnsure(database, e);
 }
@@ -572,7 +572,7 @@ test("an environment that serves a port is refused one with no network", () => {
   envBindOverride(GATEWAY_SIDE);
   dockerServing("49154");
   let e: EnvEnsure = {
-    threadId: "t1", name: "web", image: "node:22", network: false, serve: true, command: "", start: true, now: "1700000000000",
+    threadId: "t1", name: "web", image: "node:22", network: false, serve: true, command: "", start: true, agent: false, now: "1700000000000",
   };
   let up = envEnsure(database, e);
 
@@ -619,7 +619,7 @@ test("an environment built without a port is rebuilt to gain one, and keeps its 
   envBindOverride(GATEWAY_SIDE);
   dockerServing("49154");
   let plain: EnvEnsure = {
-    threadId: "t1", name: "web", image: "node:22", network: true, serve: false, command: "", start: true, now: "1700000000000",
+    threadId: "t1", name: "web", image: "node:22", network: true, serve: false, command: "", start: true, agent: false, now: "1700000000000",
   };
   expect(envEnsure(database, plain).hostPort == 0);
   // [0] is the network, [1] the container: an environment that serves nothing
@@ -715,7 +715,7 @@ test("a published port is carried across by a forward that binds one address onl
 function servingWith(command: string, now: string): EnvEnsured {
   let e: EnvEnsure = {
     threadId: "t1", name: "web", image: "node:22", network: true, serve: true,
-    command: command, start: true, now: now,
+    command: command, start: true, agent: false, now: now,
   };
   return envEnsure(database, e);
 }
@@ -810,7 +810,7 @@ test("the list a person sees says which of their environments can be opened", ()
   envBindOverride("127.0.0.1");
   dockerServing("49154");
   expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
-    network: true, serve: true, command: "", start: true, now: "1000" }).ok);
+    network: true, serve: true, command: "", start: true, agent: false, now: "1000" }).ok);
   expect(ensure("t2", "main", "python:3.12-slim", "2000").ok);
 
   let mine = envOwned(database, "o1");
@@ -870,7 +870,7 @@ test("an environment asleep is still one with a server in it", () => {
   envBindOverride("127.0.0.1");
   dockerServing("49154");
   expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
-    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+    network: true, serve: true, command: "npm run dev", start: true, agent: false, now: "1000" }).ok);
 
   // Fifteen minutes later nobody has touched it, so the sweep stops it and the
   // published port goes with the container.
@@ -891,7 +891,7 @@ test("a restart carries the live environments back, and leaves the rest alone", 
   envBindOverride("127.0.0.1");
   dockerServing("49154");
   expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
-    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+    network: true, serve: true, command: "npm run dev", start: true, agent: false, now: "1000" }).ok);
   // A script sandbox: running, serving nothing, and no forward to carry.
   expect(ensure("t2", "main", "python:3.12-slim", "2000").ok);
   clearLog();
@@ -992,7 +992,7 @@ test("the sweep gives the network back, and waking the environment makes it agai
   envBindOverride("127.0.0.1");
   dockerServing("49154");
   expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
-    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+    network: true, serve: true, command: "npm run dev", start: true, agent: false, now: "1000" }).ok);
 
   clearLog();
   let s: EnvSweep = { now: `${1000 + ENV_IDLE_MS + 1}`, idleMs: ENV_IDLE_MS };
@@ -1012,7 +1012,7 @@ test("the sweep gives the network back, and waking the environment makes it agai
   dockerStoppedBehindOurBack();
   clearLog();
   envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
-    network: true, serve: true, command: "npm run dev", start: true, now: "2000000" });
+    network: true, serve: true, command: "npm run dev", start: true, agent: false, now: "2000000" });
   let again = argvLines();
   let made: int = -1;
   let started: int = -1;
@@ -1042,7 +1042,7 @@ test("a host with no address range left says so, rather than passing on a missin
     + "exit 0\n");
 
   let refused = envEnsure(database, { threadId: "t9", name: "python", image: "python:3.12-slim",
-    network: true, serve: false, command: "", start: true, now: "1000" });
+    network: true, serve: false, command: "", start: true, agent: false, now: "1000" });
   expect(!refused.ok);
   expect(refused.fault.indexOf("no room for another environment") >= 0);
   expect(refused.fault.indexOf("not found") < 0);
@@ -1072,7 +1072,7 @@ test("a network that is already there is not a failure", () => {
     + "exit 0\n");
 
   let made = envEnsure(database, { threadId: "t8", name: "python", image: "python:3.12-slim",
-    network: true, serve: false, command: "", start: true, now: "1000" });
+    network: true, serve: false, command: "", start: true, agent: false, now: "1000" });
   expect(made.ok);
   expect(made.fault == "");
 });
@@ -1090,7 +1090,7 @@ test("a network nobody is on is released, and a live one is left alone", () => {
     + "if [ \"$1\" = \"inspect\" ]; then echo true; fi\n"
     + "exit 0\n");
   expect(envEnsure(database, { threadId: "t1", name: "main", image: "python:3.12-slim",
-    network: true, serve: false, command: "", start: true, now: "1000" }).ok);
+    network: true, serve: false, command: "", start: true, agent: false, now: "1000" }).ok);
 
   clearLog();
   expect(envNetworkReap(database) == 1);
@@ -1164,7 +1164,7 @@ test("a published port still qualifies, and qualifies once", () => {
   envBindOverride("127.0.0.1");
   dockerServing("49154");
   expect(envEnsure(database, { threadId: "t1", name: "web", image: "node:22",
-    network: true, serve: true, command: "npm run dev", start: true, now: "1000" }).ok);
+    network: true, serve: true, command: "npm run dev", start: true, agent: false, now: "1000" }).ok);
 
   expect(envServing(database).length == 1);
   // Serving AND delegated is one row in one sweep: two selectors would sweep it
@@ -1233,4 +1233,84 @@ test("the sync mark carries the agent columns across", () => {
   expect(onlyEnv("t1").syncAt == "1700000900");
   expect(onlyEnv("t1").agentConn == "c17");
   expect(onlyEnv("t1").agentRead == 512);
+});
+
+// The seccomp deviation, and its blast radius. It is temporary — see the
+// comment in envRunArgs and
+// https://github.com/joule-sh/code/issues/348#issuecomment-5463608927 — so
+// these read as much as they assert: they say exactly what an agent
+// environment gets that nothing else does, and that everything else about it
+// is unchanged.
+
+function agentEnsure(threadId: string, now: string): EnvEnsured {
+  let e: EnvEnsure = { threadId: threadId, name: "joule", image: "agents-joule:1",
+    network: true, serve: false, command: "", start: true, agent: true, now: now };
+  return envEnsure(database, e);
+}
+
+test("only an environment running a daemon is launched unconfined", () => {
+  fresh();
+  envSeccompOverride("/etc/agents/seccomp.json");
+  dockerFine();
+  agentEnsure("t1", "1700000000000");
+  let agent = argvLines()[1];
+
+  // No async Lumen binary starts under the profile: the runtime brings up an
+  // io_uring event loop and io_uring_setup is not on the allowlist, so the
+  // daemon aborts before it writes a frame.
+  expect(agent.indexOf("--security-opt seccomp=unconfined") > 0);
+  expect(agent.indexOf("seccomp=/etc/agents/seccomp.json") < 0);
+
+  // And nothing else is: the profile is a property of the host, not of this
+  // decision, and widening it would widen every sandbox on the machine.
+  fresh();
+  dockerFine();
+  ensure("t2", "main", "python:3.12-slim", "1700000000000");
+  let plain = argvLines()[0];
+  expect(plain.indexOf("seccomp=/etc/agents/seccomp.json") > 0);
+  expect(plain.indexOf("unconfined") < 0);
+  envSeccompOverride("");
+});
+
+test("an unconfined environment is hardened in every other way", () => {
+  fresh();
+  dockerFine();
+  agentEnsure("t1", "1700000000000");
+  let made = argvLines()[1];
+
+  expect(made.indexOf("--read-only") > 0);
+  expect(made.indexOf("--cap-drop ALL") > 0);
+  expect(made.indexOf("--security-opt no-new-privileges") > 0);
+  expect(made.indexOf("--tmpfs /tmp:rw,nosuid,size=64m") > 0);
+  // Its own network and no published port: the engine reaches the daemon
+  // through docker exec and a file, so there is nothing to publish.
+  expect(made.indexOf("--network agents-net-t1-joule") > 0);
+  expect(made.indexOf(" -p ") < 0);
+});
+
+test("a daemon's container keeps its posture when something else rebuilds it", () => {
+  fresh();
+  dockerFine();
+  agentEnsure("t1", "1700000000000");
+  expect(envMarkAgent(database, onlyEnv("t1"), "engine-abc", 0) == "");
+
+  // A caller that knows nothing about daemons — the idle sweep's restart, a
+  // script asked to run in this environment — finds the container gone and
+  // makes it again. The row is what says an agent lives here.
+  dockerPruned();
+  clearLog();
+  let e: EnvEnsure = { threadId: "t1", name: "joule", image: "agents-joule:1",
+    network: true, serve: false, command: "", start: true, agent: false, now: "1700001000000" };
+  expect(envEnsure(database, e).ok);
+  let remade = "";
+  let lines = argvLines();
+  let i: int = 0;
+  while (i < lines.length) {
+    if (lines[i].indexOf("run -d --name agents-env-t1-joule") == 0) {
+      remade = lines[i];
+    }
+    i = i + 1;
+  }
+  expect(remade != "");
+  expect(remade.indexOf("seccomp=unconfined") > 0);
 });

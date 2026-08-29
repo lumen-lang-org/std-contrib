@@ -107,7 +107,7 @@ export class ThreadService {
     }
     let up = envEnsure(this.database, {
       threadId: id, name: "office", image: image,
-      network: true, serve: false, command: "", start: true, now: stamp(),
+      network: true, serve: false, command: "", start: true, agent: false, now: stamp(),
     });
     let v: WarmedView = { warming: up.ok };
     return OkJson(v);
@@ -131,7 +131,7 @@ export class ThreadService {
       }
       let up = envEnsure(this.database, {
         threadId: made.threadId, name: was.name, image: was.image,
-        network: true, serve: true, command: was.serveCmd, start: false,
+        network: true, serve: true, command: was.serveCmd, start: false, agent: false,
         now: stamp(),
       });
       if (!up.ok) {

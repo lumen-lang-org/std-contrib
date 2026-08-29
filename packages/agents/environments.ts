@@ -24,8 +24,17 @@ export const ENV_HOME: string = "/home/sandbox";
  *  Read from the environment because the docker CLI resolves this path on the
  *  side it runs on — here, not on the machine the container lands on. That is
  *  the opposite of every other path in this file and cost a puzzled minute. */
+let envSeccompChosen: string = "";
+
+/** For a test, which cannot set the deployment's environment and would
+ *  otherwise be asserting against whatever the machine running it has
+ *  configured. */
+export function envSeccompOverride(profile: string): void {
+  envSeccompChosen = profile;
+}
+
 export function envSeccompProfile(): string {
-  return (process.env("AGENTS_ENV_SECCOMP") ?? "").trim();
+  return envSeccompChosen != "" ? envSeccompChosen : (process.env("AGENTS_ENV_SECCOMP") ?? "").trim();
 }
 
 /** An AppArmor profile for sandboxes, or "" for docker-default.
@@ -260,6 +269,9 @@ type EnvRun = {
   image: string,
   network: bool,
   serve: bool,
+  /** Whether a joule daemon will run in this container. It changes one
+   *  security option and nothing else — see envRunArgs. */
+  agent: bool,
 };
 
 type EnvKeep = {
@@ -296,6 +308,17 @@ export type EnvEnsure = {
    *  otherwise the command runs against an empty directory, fails, and its
    *  death races the start that would have worked. */
   start: bool,
+  /** Whether this environment is being made to run a joule daemon.
+   *
+   *  Said by the caller rather than read off the row, because the row's answer
+   *  — agentConn — only exists once a daemon is already running, and this is
+   *  read while the container is being created. A caller that reaches an
+   *  existing agent environment for something else still gets the posture,
+   *  because envEnsure takes the row's word alongside this one.
+   *
+   *  It changes exactly one thing, and only until the image catches up: see
+   *  envRunArgs. */
+  agent: bool,
   now: string,
 };
 
@@ -351,7 +374,7 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
     }
     let make: EnvRun = {
       container: container, threadId: e.threadId, name: name, image: e.image,
-      network: e.network, serve: e.serve,
+      network: e.network, serve: e.serve, agent: e.agent,
     };
     let made = envMake(make);
     if (made.status != 0) {
@@ -398,9 +421,13 @@ export function envEnsure(db: Db, e: EnvEnsure): EnvEnsured {
 
   let row = JSON.parse<EnvRow>(held);
   let serves = e.serve || row.servePort != 0;
+  // Or the row's word: an environment with a daemon in it is an agent
+  // environment however this call describes itself, and a rebuild that
+  // forgot that is a container the daemon cannot start in.
   let make: EnvRun = {
     container: container, threadId: e.threadId, name: row.name, image: row.image,
     network: row.network != 0 || serves, serve: serves,
+    agent: e.agent || row.agentConn != "",
   };
   let created = false;
   let warmed = false;
@@ -1023,8 +1050,35 @@ function envRunArgs(r: EnvRun): string[] {
   // making taken out of it — mount, ptrace, unshare, setns, bpf and the
   // module and kexec families. Measured against the real workload first: a
   // vite install and dev server come up unchanged under it.
+  //
+  // TEMPORARY, and only for an environment that runs a joule daemon. The
+  // Lumen runtime brings up an io_uring event loop as the first statement of
+  // main and unwraps the result; io_uring_setup is in neither ops/seccomp.json
+  // nor docker's own default, so it comes back EPERM and the daemon aborts
+  // before it writes a line — an empty broadcast log indistinguishable from a
+  // daemon still starting. Allowing io_uring_setup instead is worse rather
+  // than narrower: seccomp filters syscalls and io_uring operations are not
+  // syscalls, so io_uring_enter makes the rest of the allowlist advisory, and
+  // setup without enter gets past startup and dies mid-turn on a raw
+  // `unexpected errno: 1`. The evidence is at
+  // https://github.com/joule-sh/code/issues/348#issuecomment-5463608927
+  //
+  // The condition that removes these four lines, exactly: an image built from
+  // a joule release compiled against a Lumen that includes
+  // lumen-lang-org/lumen#53, which selects epoll at run time when io_uring is
+  // unavailable. An epoll-backed async binary needs epoll_create1, epoll_ctl,
+  // epoll_pwait and eventfd2, all four of which ops/seccomp.json already
+  // allows — so when the image moves, this branch goes and nothing else does.
+  //
+  // Every other environment keeps the profile, and the profile itself is not
+  // touched: widening ops/seccomp.json would widen every sandbox on the host,
+  // and it is set host-wide by AGENTS_ENV_SECCOMP. Nothing else about a joule
+  // container is relaxed — read-only rootfs, --cap-drop ALL,
+  // no-new-privileges, uid 65534 and the network model are as they are below.
   let seccomp = envSeccompProfile();
-  if (seccomp != "") {
+  if (r.agent) {
+    out.push("--security-opt"); out.push("seccomp=unconfined");
+  } else if (seccomp != "") {
     out.push("--security-opt"); out.push("seccomp=" + seccomp);
   }
   // Path-based, so a fence rather than a wall: it refuses curl, wget and ssh,

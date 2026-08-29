@@ -53,6 +53,17 @@ export function jouleRuntimeDir(): string {
   return ENV_HOME + "/.config/joule-code/daemon/agents-env";
 }
 
+/** The one name a delegated environment answers to, and the label of the image
+ *  row that resolves it.
+ *
+ *  Here rather than beside the tool that uses it because two other files have
+ *  to recognise the name without importing that tool: run-script.ts, so a
+ *  script asked to run in this environment builds the container the same way
+ *  the daemon needs it built, and whatever else comes to ask whether an
+ *  environment is the delegated one. A second spelling of it is a container
+ *  made one way and used another. */
+export const JOULE_ENV_NAME: string = "joule";
+
 export function jouleInboxPath(connId: string): string {
   return jouleRuntimeDir() + "/inbox/" + connId + ".in";
 }
@@ -400,6 +411,23 @@ export function jouleStartCmd(): string {
     + " joule-daemon --mode " + JOULE_MODE;
 }
 
+/** The whole `docker exec` that starts a daemon, detached, carrying whatever
+ *  credentials it was given.
+ *
+ *  Detached the way envStart runs a serve command: it runs for the life of the
+ *  environment, and an exec that waited for it would never return. Built apart
+ *  from the running of it so the argument list can be asserted — an --env-file
+ *  that lands after the container name is a file the daemon never sees, and
+ *  the failure is a daemon that exits saying it has no credentials. */
+export function jouleStartArgs(container: string, envFile: string): string[] {
+  let out: string[] = ["exec", "-d"];
+  if (envFile != "") {
+    out.push("--env-file"); out.push(envFile);
+  }
+  out.push(container); out.push("sh"); out.push("-c"); out.push(jouleStartCmd());
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // docker
 // ---------------------------------------------------------------------------
@@ -473,6 +501,22 @@ export type JouleStarted = {
   fault: string,
 };
 
+export type JouleLaunch = {
+  /** What frames are addressed to. Chosen here rather than by the daemon, and
+   *  checked against the daemon's own alphabet before it becomes a path. */
+  connId: string,
+  /** A file on THIS host of NAME=value lines the daemon is started with, or ""
+   *  for none.
+   *
+   *  The daemon reads JOULE_CODE_API_KEY, JOULE_CODE_BASE_URL and
+   *  JOULE_CODE_MODEL from its environment (`loadConfig`), and exits at once
+   *  when it ends up with no key. Handed to `docker exec` as --env-file rather
+   *  than as -e arguments so the secret is never a word in a command line
+   *  anything on the host can list, which is what run-script.ts already does
+   *  with an environment's keys. */
+  envFile: string,
+};
+
 /** Bring a daemon up inside an environment and get it talking.
  *
  *  Three steps and all three are load-bearing. It is started detached, the
@@ -485,8 +529,12 @@ export type JouleStarted = {
  *
  *  The connection id goes on the row last, once there is something to address.
  *  Writing it earlier would take the environment out of the idle sweep's reach
- *  on the strength of a daemon that might not have started. */
-export function jouleStart(db: Db, row: EnvRow, connId: string): JouleStarted {
+ *  on the strength of a daemon that might not have started.
+ *
+ *  What the daemon runs as is left alone: no --user, so it is the container's
+ *  own user, which is what every other exec into an environment gets. */
+export function jouleStart(db: Db, row: EnvRow, launch: JouleLaunch): JouleStarted {
+  let connId = launch.connId;
   if (row.id == "") {
     let gone: JouleStarted = { ok: false, connId: "", fault: "no such environment" };
     return gone;
@@ -497,7 +545,7 @@ export function jouleStart(db: Db, row: EnvRow, connId: string): JouleStarted {
     return bad;
   }
   let container = envContainerName(row.threadId, row.name);
-  let spawned = jouleDocker(["exec", "-d", container, "sh", "-c", jouleStartCmd()]);
+  let spawned = jouleDocker(jouleStartArgs(container, launch.envFile));
   if (spawned.status != 0) {
     let no: JouleStarted = { ok: false, connId: "",
       fault: "the daemon could not be started: " + jouleFirstLine(spawned.stderr) };
@@ -510,8 +558,17 @@ export function jouleStart(db: Db, row: EnvRow, connId: string): JouleStarted {
     // broadcast log it could not clear. That message is in `docker logs` only
     // if it were the container's main process, which it is not, so what is
     // said here is the shape of the failure and not its reason.
+    //
+    // The commonest reason is named anyway, because it is the one an operator
+    // can act on and the one that looks like nothing at all: the credential
+    // check runs before the runtime directory is made, so a daemon with no key
+    // is a daemon that leaves exactly this evidence behind.
     let never: JouleStarted = { ok: false, connId: "",
-      fault: "the daemon did not create its runtime directory, so it is not running" };
+      fault: "the daemon did not create its runtime directory, so it is not running"
+        + (launch.envFile == ""
+          ? " — and it was started with no credentials, which is enough on its own:"
+            + " it needs JOULE_CODE_API_KEY, as an environment key on the joule image"
+          : "") };
     return never;
   }
   let sent = jouleSend(row, connId, jouleResumeFrame(-1));
