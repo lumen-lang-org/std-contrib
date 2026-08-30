@@ -3,7 +3,10 @@ import { askedChoice } from "../../../api-core.ts";
 import { jsonFind } from "../../../scan.ts";
 import { envList } from "../../../environments.ts";
 import { AgentRun } from "../../../run.ts";
-import { LiveStep, Thought, stepMillis } from "../../../steps.ts";
+import { LiveStep, Thought, latestRound, partialOf, roundRunning, stepMillis, stepsOfRound, stepsOfThread, thoughtsOfRound, thoughtsOfThread } from "../../../steps.ts";
+import { TURN_SEQ_NONE } from "../../../artifacts.ts";
+import { TURN_RUNNING, latestTurnOf, runningRoundOf, turnStateOf } from "../../../feed.ts";
+import { RoundView } from "./dtos/round-view.dto.ts";
 import { ModelPick, threadMessageRows } from "../../../threads.ts";
 import { WireRef } from "../../../artifacts-fence.ts";
 import { RefView } from "./dtos/ref-view.dto.ts";
@@ -136,4 +139,46 @@ export function stepViews(live: LiveStep[]): StepView[] {
     i = i + 1;
   }
   return out;
+}
+
+export function roundOf(db: Db, id: string, asked: string): RoundView {
+  let round = latestRound(db, id);
+  let live: LiveStep[] = [];
+  let thoughts: Thought[] = [];
+  if (asked == "all") {
+    round = TURN_SEQ_NONE;
+    live = stepsOfThread(db, id);
+    thoughts = thoughtsOfThread(db, id);
+  } else {
+    if (asked != "") {
+      round = parseInt(asked, 10) ?? -1;
+    } else {
+      let accepted = runningRoundOf(db, id);
+      if (accepted > round) {
+        round = accepted;
+      }
+      let known = latestTurnOf(db, id);
+      if (known > round) {
+        round = known;
+      }
+    }
+    if (round >= 0) {
+      live = stepsOfRound(db, id, round);
+      thoughts = thoughtsOfRound(db, id, round);
+    }
+  }
+  let partialText = "";
+  if (asked != "all") {
+    partialText = partialOf(db, id, round);
+  }
+  let state = asked == "all" ? "" : turnStateOf(db, id, round).state;
+  let v: RoundView = {
+    seq: round,
+    running: roundRunning(live) || state == TURN_RUNNING,
+    state: state,
+    partial: partialText,
+    thoughts: thoughtViews(thoughts),
+    steps: stepViews(live),
+  };
+  return v;
 }

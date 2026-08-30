@@ -67,6 +67,13 @@ export class ThreadApi {
     return OkJson(this.threads.steps(id, asked));
   }
 
+  @Get("/:id/answer")
+  @Guard(theThread)
+  answer(@PathVariable("id") id: string, @RequestParam("seq", "") asked: string,
+         @From(callerTags) tags: string[]): Reply {
+    return this.threads.answer(id, asked, tags);
+  }
+
   @Post("/:id/cancel")
   @Guard(theThread)
   cancel(@PathVariable("id") id: string): Reply {

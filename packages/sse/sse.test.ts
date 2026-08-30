@@ -121,3 +121,11 @@ test("half a request waits, and a POST is refused by name", () => {
   expect(readEventRequest("GET /ev").error == "");
   expect(readEventRequest("POST / HTTP/1.1\r\n\r\n").error.indexOf("is a GET") >= 0);
 });
+
+test("a subscriber that has to prove who it is is read as well as resumed", () => {
+  let req = readEventRequest("GET /feed HTTP/1.1\r\nAuthorization: Bearer s3cret\r\n"
+    + "Last-Event-ID: 42\r\n\r\n");
+  expect(req.ok);
+  expect(req.authorization == "Bearer s3cret");
+  expect(req.lastEventId == "42");
+});

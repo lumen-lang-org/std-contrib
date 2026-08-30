@@ -76,6 +76,9 @@ import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envNetwork
 import { envGrantsPlan, envGrantSweep } from "./env-grants.ts";
 import { envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
 import { JOULE_PROGRESS_MS, jouleProgress } from "./joule-progress.ts";
+import { FEED_PORT, feedPlan } from "./feed.ts";
+import { feedLoop } from "./feed-server.ts";
+import { openDatabase } from "./database.ts";
 
 // How often a serving environment's workspace is read back. Its own cadence,
 // far shorter than the idle sweep: a person editing a file wants it recorded in
@@ -302,35 +305,6 @@ function traceShipLoop(): int {
   return 0;
 }
 
-function openDatabase(): Db {
-  let pgHost = process.env("AGENTS_PG_HOST") ?? "";
-  if (pgHost != "") {
-    let pg = postgres();
-    let named = process.env("AGENTS_PG_DATABASE") ?? "agents";
-    let asUser = process.env("AGENTS_PG_USER") ?? "agents";
-    let server: DbConfig = {
-      host: pgHost,
-      database: named,
-      user: asUser,
-      password: process.env("AGENTS_PG_PASSWORD") ?? "",
-    };
-    let reached = connectDatabase(pg, server);
-    if (!reached.ok) {
-      console.error("the database did not open: postgres " + named + " at "
-        + pgHost + " as " + asUser + " — " + reached.error);
-    }
-    return pg;
-  }
-  let db = sqlite();
-  let file = process.env("AGENTS_DB_FILE") ?? "/tmp/agents_api.db";
-  let cfg: DbConfig = { filename: file };
-  let opened = connectDatabase(db, cfg);
-  if (!opened.ok) {
-    console.error("the database did not open: sqlite at " + file + " — " + opened.error);
-  }
-  return db;
-}
-
 /** Every plan this deployment runs, composed into one.
  *
  *  Its own function so a test can ask how far the schema should get without
@@ -410,6 +384,12 @@ export function wholePlan(db: Db): Migration[] {
   while (lv < live.length) {
     plan.push(live[lv]);
     lv = lv + 1;
+  }
+  let pushed = feedPlan(db);
+  let pu: int = 0;
+  while (pu < pushed.length) {
+    plan.push(pushed[pu]);
+    pu = pu + 1;
   }
   let envs = envPlan(db);
   let ev: int = 0;
@@ -793,6 +773,9 @@ function main(): void {
   console.log(`stopping environments idle for ${ENV_IDLE_MS}ms`);
   Worker.run(() => sweepLoop(sweepIdle));
   Worker.run(() => traceShipLoop());
+  let feedPort = parseInt(process.env("AGENTS_EVENTS_PORT") ?? "", 10) ?? FEED_PORT;
+  let feedToken = apiToken();
+  Worker.run(() => feedLoop(feedPort, feedToken));
 
   // Built from the same @openapi/@schema decorators AgentApi's own routes
   // and DTOs already carry — a second AgentApi instance, alongside the one

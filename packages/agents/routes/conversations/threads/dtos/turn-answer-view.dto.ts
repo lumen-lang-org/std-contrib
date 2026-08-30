@@ -2,12 +2,13 @@ import { RefView } from "./ref-view.dto.ts";
 import { StepView } from "./step-view.dto.ts";
 import { ThoughtView } from "./thought-view.dto.ts";
 
-export type GuestAnsweredView = {
+export type TurnAnswerView = {
+  state: string,
+  seq: int,
   runId: string,
   ok: bool,
   text: string,
   refs: RefView[],
-  seq: int,
   modelChoiceId: string,
   routeNote: string,
   toolCalls: int,

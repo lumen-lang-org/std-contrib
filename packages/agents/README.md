@@ -673,6 +673,61 @@ The query vector is bound, not interpolated: it came from a provider's reply
 and is data like any other. `distance` is returned so a caller can decide what
 is too far, rather than trusting the ranking blindly.
 
+## A turn is accepted, then streamed
+
+`POST /threads/:id/messages` used to run the whole turn on the request that
+started it. A turn that delegates to a container outlives any proxy deadline,
+so a request held open for one is a request that gets abandoned while the work
+carries on — the caller is told it failed, the engine finished it, and both are
+looking at the same turn.
+
+It answers `202` now, naming the round the turn will appear under:
+
+```json
+{ "accepted": true, "threadId": "...", "seq": 0, "state": "running" }
+```
+
+The turn runs on a worker of its own with its own connection, and three routes
+carry the rest:
+
+| route | what it gives |
+|-------|---------------|
+| `GET /threads/:id/steps` | the round as it stands, now with `state` |
+| `GET /threads/:id/answer?seq=` | what the turn produced, once it has |
+| `GET :8101/feed` | every change, pushed, as server-sent events |
+
+`state` is `running` from the moment the turn is accepted — before a step
+exists, which `running` alone could never say — and `done` once it settles.
+
+### The feed
+
+`thread_feed` holds one row per thread and kind, carrying the millisecond it
+last changed. `beginStep`, `endStepAt`, `recordPartial`, `recordThought` and the
+artifact write path bump it; the row is overwritten rather than appended to, so
+a hundred token writes in a second coalesce into one notice and a subscriber
+that has been away sees one row per thread that changed rather than a backlog.
+
+`feed-server.ts` serves that on its own port (`AGENTS_EVENTS_PORT`, 8101), over
+`packages/sse`. It tails the table once for every subscriber, so the cost of
+watching is no longer per watcher: a console that polled a running round seven
+times a second, per browser, now reads it once when a browser starts watching
+and is pushed everything after that.
+
+A `round` event carries the whole round view; an `artifacts` event carries the
+thread id alone, so a reader with its own credentials does the reading.
+
+**Resuming.** The event id is the stamp, and a subscriber reconnects with
+`Last-Event-ID`. The tail resumes at `>= cursor` rather than `> cursor`, which
+delivers what shares that millisecond twice rather than never — a notice is a
+statement about the current state, so delivering one twice costs a reread and
+losing one costs the turn. Because the rows are overwritten rather than
+appended, there is no window to fall out of: any cursor, however old, replays
+exactly the threads that have changed since.
+
+A stream closes itself after ten minutes and the subscriber reconnects with its
+cursor. `Socket.write` cannot report a peer that has gone, so a bounded life is
+what stops a vanished subscriber holding a thread and a connection forever.
+
 <!-- website:skip -->
 ## Testing
 
@@ -694,6 +749,7 @@ lumen test provider.test.ts   # 5, provider selection and refusals
 lumen test credentials.test.ts # 13, encryption at rest
 lumen test run.test.ts        # 11, every refusal on the run path
 lumen test knowledge.test.ts  # 11, what retrieval refuses before embedding
+lumen test feed.test.ts       # 17, the change notices and a turn's state
 ```
 
 The live halves are `examples/mount-mcp.ts`, `examples/call-model.ts` and
