@@ -184,7 +184,7 @@ function jouleSecret(db: Db, threadId: string, agentId: string, slug: string, no
   let none: JouleSecret = { dir: "", file: "", fault: "" };
   let owner = envThreadOwner(db, threadId);
   let imageId = scriptImageIdForEnv(db, agentId, JOULE_ENV_NAME);
-  if (owner == "" || imageId == "") {
+  if (imageId == "") {
     return none;
   }
   let body = envKeyFileBody(db, owner, imageId, masterKey());
