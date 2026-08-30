@@ -24,6 +24,7 @@ const ENV_SYNC_SKIP: string[] = [
   "node_modules", ".git", ".next", ".nuxt", ".svelte-kit", ".vite", ".cache",
   ".turbo", ".parcel-cache", "dist", "build", "out", "coverage", "target",
   "__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache", "tmp",
+  ".local", ".npm", ".cargo",
   // The daemon's own bookkeeping, and it lives inside the workspace it works
   // in: ensureScratchDir makes /workspace/.joule/scratch/<sessionKey>/ before
   // the first turn. Without this line every delegated turn harvests the
