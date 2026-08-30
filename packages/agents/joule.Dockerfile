@@ -16,6 +16,7 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs npm \
     curl ca-certificates git \
+    fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 
 # The pin, and the one line to change when bumping it. A tag rather than
