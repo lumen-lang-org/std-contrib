@@ -33,6 +33,17 @@ What it cannot do is carry anything upstream — the page talks back with an
 ordinary request, which it can already do. If you need the *browser* pushing
 into an open channel, you want the websocket package.
 
+## What the handler is given
+
+`serveEvents` hands the handler an `EventStream` carrying the two request
+headers a server has to act on:
+
+- `lastEventId` — what the subscriber last saw. Server-side resume is the whole
+  reason `Last-Event-ID` exists, and until this was passed through the package
+  read the header and dropped it, so nothing built on it could resume.
+- `authorization` — because a stream on its own port is not covered by whatever
+  guards the ordinary routes, and a feed of everything is worth a token.
+
 ## The mistakes this format invites
 
 **The blank line is the frame.** Without it the event is never delivered, and
@@ -76,7 +87,7 @@ stops the next person looking.
 
 ```sh
 cd packages/sse
-lumen test sse.test.ts     # 17
+lumen test sse.test.ts     # 18
 
 lumen run events-demo.ts &
 curl -sN http://127.0.0.1:9010/events    # the raw frames

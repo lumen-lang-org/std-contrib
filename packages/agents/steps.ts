@@ -6,6 +6,7 @@ import { Migration, migration } from "../plume/migrate.ts";
 import { threadStepRepository } from "./routes/conversations/threads/entities/thread-step.entity.ts";
 import { threadThoughtRepository } from "./routes/conversations/threads/entities/thread-thought.entity.ts";
 import { threadPartialRepository } from "./routes/conversations/threads/entities/thread-partial.entity.ts";
+import { FEED_ROUND, noteFeed } from "./feed.ts";
 
 export type LiveStep = {
   id: string,
@@ -105,6 +106,7 @@ export function recordThought(db: Db, threadId: string, seq: int, depth: int, ro
     threadId: threadId, seq: seq, depth: depth, rotation: rotation, text: text, createdAt: now,
   };
   persist(db, thoughtsMapping(), JSON.stringify(row));
+  noteFeed(db, threadId, FEED_ROUND, seq, now);
 }
 
 export function thoughtsOfRound(db: Db, threadId: string, seq: int): Thought[] {
@@ -269,6 +271,7 @@ export function beginStep(db: Db, s: StepStart): string {
     result: "",
   };
   persist(db, stepsMapping(), JSON.stringify(row));
+  noteFeed(db, s.threadId, FEED_ROUND, s.seq, s.now);
   return id;
 }
 
@@ -305,6 +308,7 @@ export function endStepAt(db: Db, s: StepStart, close: StepClose): void {
       : resultPreview(close.result),
   };
   persist(db, stepsMapping(), JSON.stringify(row));
+  noteFeed(db, s.threadId, FEED_ROUND, s.seq, close.endedAt);
 }
 
 export function rotations(steps: LiveStep[]): int {
@@ -419,6 +423,7 @@ export function clearPartial(db: Db, threadId: string, now: string): void {
   }
   let row: PartialRow = { id: threadId, seq: -1, text: "", updatedAt: now };
   persist(db, partialsMapping(), JSON.stringify(row));
+  noteFeed(db, threadId, FEED_ROUND, -1, now);
 }
 
 export function recordPartial(db: Db, threadId: string, seq: int, text: string, now: string): void {
@@ -427,6 +432,7 @@ export function recordPartial(db: Db, threadId: string, seq: int, text: string, 
   }
   let row: PartialRow = { id: threadId, seq: seq, text: text, updatedAt: now };
   persist(db, partialsMapping(), JSON.stringify(row));
+  noteFeed(db, threadId, FEED_ROUND, seq, now);
 }
 
 export function partialOf(db: Db, threadId: string, seq: int): string {

@@ -25,6 +25,8 @@ export type EventStream = {
   socket: Socket,
   path: string,
   open: bool,
+  lastEventId: string,
+  authorization: string,
 };
 
 // --- writing ------------------------------------------------------------------------
@@ -124,35 +126,44 @@ export type EventRequest = {
   // What the browser last saw, when it is reconnecting. Empty on a first
   // connection.
   lastEventId: string,
+  authorization: string,
   error: string,
 };
 
 // Read the request that opens a stream. An ordinary GET — the only header
 // worth reading is Last-Event-ID, which is how resumption works.
 export function readEventRequest(buffer: string): EventRequest {
-  let waiting: EventRequest = { ok: false, path: "", lastEventId: "", error: "" };
+  let waiting: EventRequest = { ok: false, path: "", lastEventId: "", authorization: "", error: "" };
   let end = buffer.indexOf("\r\n\r\n");
   if (end < 0) { return waiting; }
 
   let lines = buffer.slice(0, end).split("\r\n");
   let parts = lines[0].split(" ");
   if (parts.length < 3 || parts[0] != "GET") {
-    let notGet: EventRequest = { ok: false, path: "", lastEventId: "",
+    let notGet: EventRequest = { ok: false, path: "", lastEventId: "", authorization: "",
       error: "an event stream is a GET, not " + parts[0] };
     return notGet;
   }
 
   let lastId = "";
+  let bearer = "";
   let i: int = 1;
   while (i < lines.length) {
     let at = lines[i].indexOf(":");
-    if (at > 0 && lines[i].slice(0, at).trim().toLowerCase() == "last-event-id") {
-      lastId = lines[i].slice(at + 1, lines[i].length).trim();
+    if (at > 0) {
+      let name = lines[i].slice(0, at).trim().toLowerCase();
+      if (name == "last-event-id") {
+        lastId = lines[i].slice(at + 1, lines[i].length).trim();
+      }
+      if (name == "authorization") {
+        bearer = lines[i].slice(at + 1, lines[i].length).trim();
+      }
     }
     i = i + 1;
   }
 
-  let out: EventRequest = { ok: true, path: parts[1], lastEventId: lastId, error: "" };
+  let out: EventRequest = { ok: true, path: parts[1], lastEventId: lastId,
+    authorization: bearer, error: "" };
   return out;
 }
 
@@ -185,7 +196,7 @@ export function serveEvents(port: int, onStream: (stream: EventStream) => void):
 
 function handleStream(socket: Socket, onStream: (stream: EventStream) => void): void {
     let buffer = "";
-    let request: EventRequest = { ok: false, path: "", lastEventId: "", error: "" };
+    let request: EventRequest = { ok: false, path: "", lastEventId: "", authorization: "", error: "" };
     while (!request.ok) {
       let chunk = socket.read();
       if (chunk == "") { socket.close(); return; }
@@ -199,7 +210,8 @@ function handleStream(socket: Socket, onStream: (stream: EventStream) => void): 
     }
 
     socket.write(eventHeaders());
-    let stream: EventStream = { socket: socket, path: request.path, open: true };
+    let stream: EventStream = { socket: socket, path: request.path, open: true,
+      lastEventId: request.lastEventId, authorization: request.authorization };
     onStream(stream);
     socket.close();
 }

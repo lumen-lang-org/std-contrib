@@ -7,6 +7,7 @@ import { normalScope } from "./knowledge.ts";
 import { ownerClause } from "./owner.ts";
 import { artifactRepository } from "./routes/conversations/threads-artifacts/entities/artifact.entity.ts";
 import { artifactVersionRepository } from "./routes/conversations/threads-artifacts/entities/artifact-version.entity.ts";
+import { FEED_ARTIFACTS, noteFeed } from "./feed.ts";
 
 export const ARTIFACT_MAX: int = artifactBytesMax();
 
@@ -451,6 +452,7 @@ function putAttempt(db: Db, write: ArtifactWrite, attempt: int): ArtifactWritten
     }
     return refusal("the artifact could not be saved; try again");
   }
+  noteFeed(db, write.threadId, FEED_ARTIFACTS, write.turnSeq, write.now);
   let out: ArtifactWritten = {
     ok: true, id: id, slot: slot, version: version, previewToken: token, fault: "",
   };
@@ -770,5 +772,6 @@ export function deleteArtifact(db: Db, threadId: string, path: string): string {
     rollbackTransaction(db);
     return done.error;
   }
+  noteFeed(db, threadId, FEED_ARTIFACTS, TURN_SEQ_NONE, `${Date.now()}`);
   return "";
 }

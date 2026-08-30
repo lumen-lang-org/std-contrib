@@ -18,7 +18,11 @@ import { modelChoiceRepository } from "../../inference/models/entities/model-cho
 import { ModelChoiceBody } from "../../inference/model-choices/dtos/model-choice-body.dto.ts";
 import { jsonRaw, jsonText } from "../../../scan.ts";
 import { LiveStep, Thought, latestRound, partialOf, roundRunning, stepsOfRound, stepsOfThread, thoughtsOfRound, thoughtsOfThread } from "../../../steps.ts";
-import { ThreadTurnRow, threadsMapping, titleThread, firstAsked, appendTurns, listReplayable, listThreads, markReplayable, nameThread, openThread, ownedThread, rememberChoice, remixThread, runInThreadWith, threadChoice, threadMessageRows, threadOwner, threadTitle } from "../../../threads.ts";
+import { TURN_DONE, TURN_RUNNING, acceptTurn, runningRoundOf, turnStateOf } from "../../../feed.ts";
+import { DetachedTurn, TurnAnswer, runTurnDetached } from "../../../turn-run.ts";
+import { TurnAcceptedView } from "./dtos/turn-accepted-view.dto.ts";
+import { TurnAnswerView } from "./dtos/turn-answer-view.dto.ts";
+import { ThreadTurnRow, threadsMapping, titleThread, firstAsked, appendTurns, listReplayable, listThreads, markReplayable, nameThread, openThread, ownedThread, rememberChoice, remixThread, runInThreadWith, threadChoice, threadMessageRows, threadOwner, threadTitle, threadTurns } from "../../../threads.ts";
 import { tracerFor } from "../../../trace.ts";
 import { nextUtcMidnightIso, runsSince, secondsToUtcMidnight, utcDayStartText } from "../../../usage.ts";
 import { agentRepository } from "../../authoring/agents/entities/agent.entity.ts";
@@ -37,7 +41,7 @@ import { ThreadFromStoryView } from "./dtos/thread-from-story-view.dto.ts";
 import { ThreadOpenedView } from "./dtos/thread-opened-view.dto.ts";
 import { ThreadRowView } from "./dtos/thread-row-view.dto.ts";
 import { TranscriptView } from "./dtos/transcript-view.dto.ts";
-import { askedPick, refViews, stepViews, threadBlurb, threadServes, thoughtViews, withNotes } from "./thread.utils.ts";
+import { askedPick, refViews, roundOf, stepViews, threadBlurb, threadServes, thoughtViews, withNotes } from "./thread.utils.ts";
 
 export class ThreadService {
   database: Db;
@@ -275,31 +279,50 @@ export class ThreadService {
   }
 
   steps(id: string, asked: string): RoundView {
-    let round = latestRound(this.database, id);
-    let live: LiveStep[] = [];
-    let thoughts: Thought[] = [];
-    if (asked == "all") {
-      round = TURN_SEQ_NONE;
-      live = stepsOfThread(this.database, id);
-      thoughts = thoughtsOfThread(this.database, id);
-    } else {
-      if (asked != "") {
-        round = parseInt(asked, 10) ?? -1;
-      }
-      if (round >= 0) {
-        live = stepsOfRound(this.database, id, round);
-        thoughts = thoughtsOfRound(this.database, id, round);
-      }
+    return roundOf(this.database, id, asked);
+  }
+
+  answer(id: string, asked: string, tags: string[]): Reply {
+    let seq = asked == "" ? runningRoundOf(this.database, id) : (parseInt(asked, 10) ?? -1);
+    if (seq < 0) {
+      seq = latestRound(this.database, id);
     }
-    let partialText = "";
-    if (asked != "all") {
-      partialText = partialOf(this.database, id, round);
-    }
-    let v: RoundView = {
-      seq: round, running: roundRunning(live), partial: partialText,
-      thoughts: thoughtViews(thoughts), steps: stepViews(live),
+    let held = turnStateOf(this.database, id, seq);
+    let none: RefView[] = [];
+    let v: TurnAnswerView = {
+      state: held.state, seq: seq, runId: "", ok: false, text: "", refs: none,
+      modelChoiceId: "", routeNote: "", toolCalls: 0,
+      steps: stepViews(stepsOfRound(this.database, id, seq)),
+      thoughts: thoughtViews(thoughtsOfRound(this.database, id, seq)),
+      inputTokens: 0, outputTokens: 0, traceId: "", error: "",
+      guestRemaining: this.guestLeft(tags),
     };
-    return v;
+    if (held.state != TURN_DONE || held.body == "") {
+      return OkJson(v);
+    }
+    let said: TurnAnswer = JSON.parse<TurnAnswer>(held.body);
+    let done: TurnAnswerView = {
+      state: held.state, seq: seq, runId: said.runId, ok: said.ok, text: said.text,
+      refs: said.refs, modelChoiceId: said.modelChoiceId, routeNote: said.routeNote,
+      toolCalls: said.toolCalls, steps: v.steps, thoughts: v.thoughts,
+      inputTokens: said.inputTokens, outputTokens: said.outputTokens,
+      traceId: said.traceId, error: said.error,
+      guestRemaining: v.guestRemaining,
+    };
+    return OkJson(done);
+  }
+
+  guestLeft(tags: string[]): int {
+    let guest = guestTag(tags);
+    if (guest == "") {
+      return -1;
+    }
+    let spent = runsSince(this.database, guest, utcDayStartText(Date.now()));
+    let left = GUEST_DAILY_RUNS - (spent < 0 ? GUEST_DAILY_RUNS : spent);
+    if (left < 0) {
+      return 0;
+    }
+    return left;
   }
 
   cancel(id: string): Reply {
@@ -385,83 +408,28 @@ export class ThreadService {
       }
     }
 
-    let tracer = tracerWithSession(
-      tracerFor(this.database, this.master), id, owningTag(tags));
-    let answered = runInThreadWith(this.database, id, {
-      userText: text, master: this.master, tracer: tracer, pick: pick,
+    let seq = threadTurns(this.database, id).length;
+    let now = stamp();
+    acceptTurn(this.database, id, seq, now);
+    let detached: DetachedTurn = {
+      threadId: id,
+      seq: seq,
+      agentId: agentId,
+      owner: owningTag(tags),
+      text: text,
+      choiceId: pick.choiceId,
+      choiceSent: pick.sent,
       think: jsonText(body, "think") == "true",
       scope: jsonText(body, "scope"),
       titledElsewhere: jsonText(body, "titledElsewhere") == "true",
       mustSearch: jsonText(body, "searchOn") == "true",
-    });
-    let run = answered.run;
-    let runId = recordRun(this.database, {
-      agentId: agentId, threadId: id,
-      owner: threadOwner(this.database, id),
-      question: text, run: withNotes(run, answered.notes),
-      modelChoiceId: answered.modelChoiceId, routeNote: answered.routeNote,
-    });
-
-    /* Queued, never flushed here: the collector upload took up to 27.9s on
-     * prod against ~3s of generation, and it sat between the finished answer
-     * and the reply carrying it. trace-outbox.ts says the rest. The id is
-     * handed out on faith — the shipper retries until it lands or gives up
-     * loudly, and a trace link that 404s for a minute is a better trade than
-     * every reply waiting on telemetry. */
-    let traced = "";
-    if (tracing(tracer) && run.spans.length > 0) {
-      let queued = enqueueTrace(this.database, tracerWithMoreSpans(tracer, run.spans));
-      if (queued == "") {
-        traced = traceId(tracer);
-      } else {
-        console.error("trace outbox: a trace could not be queued — " + queued);
-      }
-    }
-    let view = wireView(answered.text);
-    let said: AnsweredView = {
-      runId: runId,
-      ok: run.ok,
-      text: view.text,
-      refs: refViews(view.refs),
-      seq: answered.baseSeq,
-      modelChoiceId: answered.modelChoiceId,
-      routeNote: answered.routeNote,
-      toolCalls: run.steps.length,
-      steps: stepViews(stepsOfRound(this.database, id, answered.baseSeq)),
-      thoughts: thoughtViews(thoughtsOfRound(this.database, id, answered.baseSeq)),
-      inputTokens: run.inputTokens,
-      outputTokens: run.outputTokens,
-      traceId: traced,
-      error: run.error,
     };
-    if (guest == "") {
-      return OkJson(said);
-    }
-    let spent = runsSince(this.database, guest, utcDayStartText(Date.now()));
-    // Reported, not gated: the run has already happened by here, and a count
-    // that cannot be read should not turn a good answer into an error.
-    let left = GUEST_DAILY_RUNS - (spent < 0 ? GUEST_DAILY_RUNS : spent);
-    if (left < 0) {
-      left = 0;
-    }
-    let counted: GuestAnsweredView = {
-      runId: said.runId,
-      ok: said.ok,
-      text: said.text,
-      refs: said.refs,
-      seq: said.seq,
-      modelChoiceId: said.modelChoiceId,
-      routeNote: said.routeNote,
-      toolCalls: said.toolCalls,
-      steps: said.steps,
-      thoughts: said.thoughts,
-      inputTokens: said.inputTokens,
-      outputTokens: said.outputTokens,
-      traceId: said.traceId,
-      error: said.error,
-      guestRemaining: left,
+    let askJson = JSON.stringify(detached);
+    Worker.run(() => runTurnDetached(askJson));
+    let accepted: TurnAcceptedView = {
+      accepted: true, threadId: id, seq: seq, state: TURN_RUNNING,
     };
-    return OkJson(counted);
+    return Respond(202, JSON.stringify(accepted), "application/json");
   }
 
   transcript(id: string, tags: string[]): TranscriptView {
