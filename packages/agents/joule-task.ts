@@ -84,10 +84,14 @@ const JOULE_STAGE: string = "/tmp/agents-joule-";
  *  against it, so the two must be the same string. */
 export function joulePrompt(task: string): string {
   return task.trim()
-    + "\n\nYou are working in " + ENV_WORKSPACE + ", which holds the files of the"
-    + " conversation that asked for this. Edit them in place — what you write"
-    + " there is what comes back, and a patch printed instead of applied is"
-    + " lost. Nobody is attached to answer a question, so finish the work"
+    + "\n\nThe files of the conversation that asked for this are in your"
+    + " current working directory, which is where you already are. Refer to a"
+    + " file by the path it has in the conversation with the leading slash"
+    + " dropped: the conversation's /logo.png is logo.png here. Do not prefix"
+    + " an absolute path and do not write outside this directory, since the"
+    + " rest of the filesystem is read-only. Edit files in place; what you"
+    + " write here is what comes back, and a patch printed instead of applied"
+    + " is lost. Nobody is attached to answer a question, so finish the work"
     + " rather than asking about it.";
 }
 
