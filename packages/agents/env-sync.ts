@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { EnvRow, envBySlug, envContainerName, envDockerBin, envMarkSynced, envOwnVolumes } from "./environments.ts";
+import { ENV_RUN_DIR, EnvRow, envBySlug, envContainerName, envDockerBin, envMarkSynced, envOwnVolumes } from "./environments.ts";
 import { ArtifactWrite, TURN_SEQ_NONE, binaryKind, getVersion, kindOf, listArtifacts, putArtifact } from "./artifacts.ts";
 
 // The container is a cache; the artifacts are the record.
@@ -287,6 +287,62 @@ export function envSyncOut(db: Db, row: EnvRow, sinceEpochSeconds: string, now: 
       console.error("workspace refused " + at + ": " + put.fault);
       skipped = skipped + 1;
     }
+  }
+  let done: EnvSynced = { ok: true, changed: changed, skipped: skipped, fault: "" };
+  return done;
+}
+
+export function envSyncRunDir(db: Db, row: EnvRow, now: string): EnvSynced {
+  let none: string[] = [];
+  let container = envContainerName(row.threadId, row.name);
+  let found = envSyncDocker(["exec", container, "sh", "-c",
+    "cd " + ENV_RUN_DIR + " 2>/dev/null && find . -type f -print; true"]);
+  if (found.status != 0) {
+    let bad: EnvSynced = { ok: false, changed: none, skipped: 0, fault: "the run directory could not be read" };
+    return bad;
+  }
+  let lines = found.stdout.split("\n");
+  let changed: string[] = [];
+  let skipped: int = 0;
+  let i: int = 0;
+  while (i < lines.length) {
+    let line = lines[i].trim();
+    i = i + 1;
+    if (line == "" || line == ".") {
+      continue;
+    }
+    let at = line.startsWith("./") ? line.slice(1) : line;
+    let binary = binaryKind(kindOf(at));
+    let read = binary
+      ? envSyncDocker(["exec", container, "base64", "-w0", ENV_RUN_DIR + at])
+      : envSyncDocker(["exec", container, "cat", ENV_RUN_DIR + at]);
+    if (read.status != 0) {
+      skipped = skipped + 1;
+      continue;
+    }
+    let body = binary ? read.stdout.trim() : read.stdout;
+    let write: ArtifactWrite = {
+      threadId: row.threadId,
+      path: at,
+      title: "",
+      content: body,
+      note: envSyncNote(row),
+      origin: "generated",
+      mustCreate: false,
+      turnSeq: TURN_SEQ_NONE,
+      now: now,
+    };
+    let put = putArtifact(db, write);
+    if (put.ok) {
+      changed.push(at);
+    } else {
+      console.error("run dir refused " + at + ": " + put.fault);
+      skipped = skipped + 1;
+    }
+  }
+  if (skipped == 0) {
+    envSyncDocker(["exec", container, "sh", "-c",
+      "rm -rf " + ENV_RUN_DIR + "/* " + ENV_RUN_DIR + "/.[!.]* 2>/dev/null; true"]);
   }
   let done: EnvSynced = { ok: true, changed: changed, skipped: skipped, fault: "" };
   return done;
