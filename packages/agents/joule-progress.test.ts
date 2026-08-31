@@ -374,7 +374,7 @@ test("a moved cursor rides on the row both writers carry", () => {
     syncAt: "1700000000", agentConn: "engine-abc", agentRead: 40,
     createdAt: "1", lastUsedAt: "2",
   };
-  let moved = jouleMoved(row, 512);
+  let moved = jouleMoved(row, 512, "");
   expect(moved.agentRead == 512);
   expect(moved.agentConn == "engine-abc");
   expect(moved.syncAt == "1700000000");
@@ -383,6 +383,11 @@ test("a moved cursor rides on the row both writers carry", () => {
   expect(moved.createdAt == "1" && moved.lastUsedAt == "2");
   // The one it was built from is untouched.
   expect(row.agentRead == 40);
+
+  let touched = jouleMoved(row, 512, "1700000900000");
+  expect(touched.lastUsedAt == "1700000900000");
+  expect(touched.agentRead == 512 && touched.agentConn == "engine-abc");
+  expect(row.lastUsedAt == "2");
 });
 
 test("a duration is the container's clock at both ends, or nothing", () => {
