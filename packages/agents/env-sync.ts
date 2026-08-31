@@ -292,6 +292,81 @@ export function envSyncOut(db: Db, row: EnvRow, sinceEpochSeconds: string, now: 
   return done;
 }
 
+const ENV_MADE_KINDS: string[] = [
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".svg",
+  ".pdf", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".mp4", ".webm",
+  ".wav", ".mp3", ".zip",
+];
+
+export function envMadeKind(path: string): bool {
+  let lower = path.toLowerCase();
+  let i: int = 0;
+  while (i < ENV_MADE_KINDS.length) {
+    if (lower.endsWith(ENV_MADE_KINDS[i])) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
+export function envBaseName(path: string): string {
+  let cut = path.lastIndexOf("/");
+  return cut < 0 ? path : path.slice(cut + 1, path.length);
+}
+
+export function envSyncScratch(db: Db, row: EnvRow, now: string): EnvSynced {
+  let none: string[] = [];
+  let container = envContainerName(row.threadId, row.name);
+  let found = envSyncDocker(["exec", container, "sh", "-c",
+    "find " + ENV_WORKSPACE + "/.joule/scratch -type f -print 2>/dev/null; true"]);
+  if (found.status != 0) {
+    let bad: EnvSynced = { ok: false, changed: none, skipped: 0, fault: "the scratch directory could not be read" };
+    return bad;
+  }
+  let lines = found.stdout.split("\n");
+  let changed: string[] = [];
+  let skipped: int = 0;
+  let i: int = 0;
+  while (i < lines.length) {
+    let line = lines[i].trim();
+    i = i + 1;
+    if (line == "" || !envMadeKind(line)) {
+      continue;
+    }
+    let at = "/" + envBaseName(line);
+    let binary = binaryKind(kindOf(at));
+    let read = binary
+      ? envSyncDocker(["exec", container, "base64", "-w0", line])
+      : envSyncDocker(["exec", container, "cat", line]);
+    if (read.status != 0) {
+      skipped = skipped + 1;
+      continue;
+    }
+    let body = binary ? read.stdout.trim() : read.stdout;
+    let write: ArtifactWrite = {
+      threadId: row.threadId,
+      path: at,
+      title: "",
+      content: body,
+      note: envSyncNote(row),
+      origin: "generated",
+      mustCreate: false,
+      turnSeq: TURN_SEQ_NONE,
+      now: now,
+    };
+    let put = putArtifact(db, write);
+    if (put.ok) {
+      changed.push(at);
+    } else {
+      console.error("scratch refused " + at + ": " + put.fault);
+      skipped = skipped + 1;
+    }
+  }
+  let done: EnvSynced = { ok: true, changed: changed, skipped: skipped, fault: "" };
+  return done;
+}
+
 export function envHarvestNow(db: Db, row: EnvRow, now: string): int {
   let stamp = envSyncClock(row);
   if (stamp == "") {
@@ -299,8 +374,9 @@ export function envHarvestNow(db: Db, row: EnvRow, now: string): int {
   }
   let carried = envSyncOut(db, row, row.syncAt, now);
   let ran = envSyncRunDir(db, row, now);
+  let made = envSyncScratch(db, row, now);
   envMarkSynced(db, row, stamp);
-  return carried.changed.length + ran.changed.length;
+  return carried.changed.length + ran.changed.length + made.changed.length;
 }
 
 export function envSyncRunDir(db: Db, row: EnvRow, now: string): EnvSynced {
