@@ -892,18 +892,18 @@ export function scriptTools(db: Db): ToolSpec[] {
   if (!scriptDockerWorks()) {
     return out;
   }
-  out.push(scriptTool(scriptEnvNames(db)));
-  // Only where there is a zone to answer on: without one there is no address to
-  // give back, and a tool that cannot succeed is worse than one that is absent.
-  if (envZone() != "") {
-    out.push(serveTool());
-  }
-  // And only where an image with a daemon in it is registered and switched on.
+  // Only where an image with a daemon in it is registered and switched on.
   // The deployment seeds that row itself, so this is normally there; an
   // operator who disabled it has said this deployment does not delegate, and
   // offering the tool anyway would be offering one that can only refuse.
   if (scriptImageForEnv(db, "", JOULE_ENV_NAME) != "") {
     out.push(delegateEnvTool());
+  }
+  out.push(scriptTool(scriptEnvNames(db)));
+  // Only where there is a zone to answer on: without one there is no address to
+  // give back, and a tool that cannot succeed is worse than one that is absent.
+  if (envZone() != "") {
+    out.push(serveTool());
   }
   return out;
 }
