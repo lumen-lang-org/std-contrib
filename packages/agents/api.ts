@@ -37,6 +37,7 @@ import { RouterApi } from "./routes/inference/model-routers/model-router.control
 import { ThreadApi } from "./routes/conversations/threads/thread.controller.ts";
 import { chatConfigFault } from "./routes/inference/model-configs/model-config.utils.ts";
 import { SkillApi } from "./routes/authoring/skills/skill.controller.ts";
+import { seedOfficeSkills } from "./office-skills.ts";
 import { ScriptImageApi } from "./routes/authoring/script-images/script-image.controller.ts";
 import { TraceApi } from "./routes/ops/tracing/trace.controller.ts";
 import { EvalApi } from "./routes/ops/evals/eval.controller.ts";
@@ -473,6 +474,7 @@ export function migrationFault(db: Db): string {
     applySandboxLimits(db);
     seedEnvTemplates(db);
     seedJouleImage(db);
+    seedOfficeSkills(db);
     return "";
   }
   if (ran.failedVersion != "") {
@@ -487,7 +489,7 @@ export function migrationFault(db: Db): string {
  *  packages/agents/joule.Dockerfile builds it. The tag is the contract
  *  between the two: change one and change the other.
  */
-export const JOULE_IMAGE: string = "agents-joule:1";
+export const JOULE_IMAGE: string = "agents-all:1";
 export const JOULE_IMAGE_ID: string = "img-joule";
 
 /** Register that image the way office and search are registered.
@@ -517,7 +519,7 @@ function seedJouleImage(db: Db): void {
     label: "joule",
     image: JOULE_IMAGE,
     enabled: true,
-    summary: "joule and joule-daemon on python 3.12, with node, npm and git",
+    summary: "the one image a conversation runs in: browsers, python, the document stack, LibreOffice, the office skills and the joule release",
   };
   persist(db, scriptImagesMapping(), JSON.stringify(row));
 }

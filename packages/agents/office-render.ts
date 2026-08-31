@@ -3,7 +3,7 @@ import { findById, persist } from "../plume/plume.ts";
 import { EnvDockerReply, envDockerBin } from "./environments.ts";
 import { OfficeRenderRow, officeRendersMapping } from "./schema.ts";
 
-export const OFFICE_RENDER_IMAGE: string = "agents-office-render:2";
+export const OFFICE_RENDER_IMAGE: string = "agents-all:1";
 
 const OFFICE_RENDER_SECONDS: int = 120;
 
