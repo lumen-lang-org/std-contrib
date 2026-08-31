@@ -92,7 +92,11 @@ export function joulePrompt(task: string): string {
     + " rest of the filesystem is read-only. Edit files in place; what you"
     + " write here is what comes back, and a patch printed instead of applied"
     + " is lost. Nobody is attached to answer a question, so finish the work"
-    + " rather than asking about it.";
+    + " rather than asking about it."
+    + " Your steps are limited and a turn that runs out is a turn that failed, so spend them"
+    + " on the work: take the first approach that will do, run it, and stop when the task is"
+    + " met. Do not tune what already works, weigh alternatives you were not asked for, or"
+    + " polish past the brief.";
 }
 
 // ---------------------------------------------------------------------------
