@@ -421,7 +421,7 @@ export function artifactTools(): ToolSpec[] {
     + "A path-carrying code fence in your Respond (```html path=/index.html) can create a new inert file the same way, but only this tool can update an existing path or write a script or stylesheet; when a reply names one path through both, this tool wins. "
     + SELF_CONTAINED,
     "{\"type\":\"object\",\"properties\":{"
-    + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot and dash; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt, .mmd (a Mermaid diagram, drawn from its source), .puml (a PlantUML diagram, same), .dot (a Graphviz graph), .vl.json (a Vega-Lite chart, for showing data rather than describing it) or a source suffix.\"},"
+    + "\"path\":{\"type\":\"string\",\"description\":\"Where it lives in this conversation, such as /report.html. Segments are letters, digits, dot, dash and underscore; the extension decides how it renders and must be one of .html, .svg, .md, .json, .txt, .mmd (a Mermaid diagram, drawn from its source), .puml (a PlantUML diagram, same), .dot (a Graphviz graph), .vl.json (a Vega-Lite chart, for showing data rather than describing it) or a source suffix.\"},"
     + "\"title\":{\"type\":\"string\",\"description\":\"What to call it where artifacts are listed.\"},"
     + "\"content\":{\"type\":\"string\",\"description\":\"The whole body. This is not a patch: what you send is the new version, entire.\"},"
     + "\"note\":{\"type\":\"string\",\"description\":\"Why this version exists, in a few words. Empty is fine for a first draft.\"}},"

@@ -100,7 +100,7 @@ function pathFault(path: string): string {
       return "an artifact path segment cannot be \"" + seg + "\"";
     }
     if (!segmentCharsOk(seg)) {
-      return "an artifact path segment is letters, digits, dot and dash — not \"" + seg + "\"";
+      return "an artifact path segment is letters, digits, dot, dash and underscore — not \"" + seg + "\"";
     }
     i = i + 1;
   }
@@ -112,7 +112,7 @@ function segmentCharsOk(seg: string): bool {
   while (i < seg.length) {
     let c = seg.charCodeAt(i);
     let ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
-      || c == 46 || c == 45;
+      || c == 46 || c == 45 || c == 95;
     if (!ok) {
       return false;
     }
