@@ -3,7 +3,9 @@ import { jsonStringMemberAt } from "../ai/core/jsonscan.ts";
 import { EnvRow, envEnsure, envNamed } from "./environments.ts";
 import { ENV_AGENT_NOTE, ENV_WORKSPACE, envMaterialise } from "./env-sync.ts";
 import { envThreadOwner } from "./env-grants.ts";
-import { masterKey } from "./credentials.ts";
+import { credentialFor, masterKey } from "./credentials.ts";
+import { findById } from "../plume/plume.ts";
+import { AgentRow, agentsMapping, configAndModel } from "./schema.ts";
 import { envKeyFileBody, touchEnvKeys } from "./env-keys.ts";
 import { JOULE_ENV_NAME, JouleFrame, JouleLaunch, jouleSafeConnId, jouleStart, jouleTail, jouleTask, jouleTurnEndReason, jouleTurnFor } from "./joule-bridge.ts";
 import { scriptImageForEnv, scriptImageIdForEnv } from "./run-script.ts";
@@ -173,6 +175,30 @@ type JouleSecret = {
   fault: string,
 };
 
+function mainChatKeys(db: Db, agentId: string): string {
+  let doc = findById(db, agentsMapping(), agentId);
+  if (doc == "") {
+    return "";
+  }
+  let agent = JSON.parse<AgentRow>(doc);
+  let held = configAndModel(db, agent.modelConfigId);
+  if (held.fault != "") {
+    return "";
+  }
+  let key = credentialFor(db, held.model.provider, masterKey());
+  if (key == "") {
+    return "";
+  }
+  let out = "JOULE_CODE_API_KEY=" + key + "\n";
+  if (held.model.baseUrl != "") {
+    out = out + "JOULE_CODE_BASE_URL=" + held.model.baseUrl + "\n";
+  }
+  if (held.model.apiName != "") {
+    out = out + "JOULE_CODE_MODEL=" + held.model.apiName + "\n";
+  }
+  return out;
+}
+
 /** The daemon's credentials, staged as a file for one `docker exec`.
  *
  *  A daemon with no key exits before it makes its runtime directory, so this
@@ -196,6 +222,9 @@ function jouleSecret(db: Db, threadId: string, agentId: string, slug: string, no
     return none;
   }
   let body = envKeyFileBody(db, owner, imageId, masterKey());
+  if (!body.includes("JOULE_CODE_API_KEY=")) {
+    body = body + mainChatKeys(db, agentId);
+  }
   if (body == "") {
     return none;
   }
