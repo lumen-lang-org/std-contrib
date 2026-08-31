@@ -44,7 +44,7 @@ function runDir(): string {
 
 function landing(dir: string, snapshot: ScriptFile[], mayCreate: bool): ScriptReconcile {
   let out: ScriptReconcile = {
-    threadId: "t1", dir: dir, snapshot: snapshot, mayCreate: mayCreate,
+    threadId: "t1", agentId: "", dir: dir, snapshot: snapshot, mayCreate: mayCreate,
     note: "from a script run", turnSeq: 7, now: "2000",
   };
   return out;

@@ -292,6 +292,17 @@ export function envSyncOut(db: Db, row: EnvRow, sinceEpochSeconds: string, now: 
   return done;
 }
 
+export function envHarvestNow(db: Db, row: EnvRow, now: string): int {
+  let stamp = envSyncClock(row);
+  if (stamp == "") {
+    return -1;
+  }
+  let carried = envSyncOut(db, row, row.syncAt, now);
+  let ran = envSyncRunDir(db, row, now);
+  envMarkSynced(db, row, stamp);
+  return carried.changed.length + ran.changed.length;
+}
+
 export function envSyncRunDir(db: Db, row: EnvRow, now: string): EnvSynced {
   let none: string[] = [];
   let container = envContainerName(row.threadId, row.name);

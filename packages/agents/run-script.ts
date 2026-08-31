@@ -18,6 +18,7 @@ export type ScriptFile = {
 
 export type ScriptReconcile = {
   threadId: string,
+  agentId: string,
   dir: string,
   snapshot: ScriptFile[],
   mayCreate: bool,
@@ -210,6 +211,19 @@ function reconcileFault(why: string): ScriptReconciled {
   return out;
 }
 
+export function scriptRasterKind(path: string): string {
+  let lower = path.toLowerCase();
+  let kinds = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff"];
+  let i: int = 0;
+  while (i < kinds.length) {
+    if (lower.endsWith(kinds[i])) {
+      return kinds[i].slice(1, kinds[i].length);
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
 export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled {
   if (run.threadId == "") {
     return reconcileFault("an artifact belongs to a thread");
@@ -234,10 +248,24 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
   let unchanged: ScriptVersioned[] = [];
   let missing: string[] = [];
   let refused: ScriptRefusal[] = [];
+  let delegates = scriptImageIdForEnv(db, run.agentId, JOULE_ENV_NAME) != "";
 
   let i: int = 0;
   while (i < files.length) {
     let path = files[i];
+    let raster = scriptRasterKind(path);
+    if (raster != "" && delegates) {
+      let sendIt: ScriptRefusal = {
+        path: path,
+        fault: path + " is a " + raster + ", and a picture is not a by-product of a script"
+          + " here: hand the whole task to delegate_to_joule_code, which writes the code,"
+          + " looks at what came out and fixes it before it answers. Ask it for the file and"
+          + " let the file it produces come back as the artifact.",
+      };
+      refused.push(sendIt);
+      i = i + 1;
+      continue;
+    }
     let at = snapshotAt(run.snapshot, path);
     let outcome = at >= 0
       ? reconcileKnown(db, run, run.snapshot[at])
@@ -1031,7 +1059,7 @@ export function scriptRun(db: Db, run: ScriptRun): ScriptRan {
       scriptRanFlat(false, sout, serr, "", recreated, scriptDockerFailed("read the run directory back", back)));
   }
   let landed = scriptReconcile(db, {
-    threadId: run.threadId, dir: stage + "/back", snapshot: snapshot,
+    threadId: run.threadId, agentId: run.agentId, dir: stage + "/back", snapshot: snapshot,
     mayCreate: run.mayCreate, note: SCRIPT_NOTE, turnSeq: run.turnSeq, now: run.now,
   });
   let out: ScriptRan = {

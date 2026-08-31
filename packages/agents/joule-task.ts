@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { jsonStringMemberAt } from "../ai/core/jsonscan.ts";
 import { EnvRow, envEnsure, envNamed } from "./environments.ts";
-import { ENV_AGENT_NOTE, ENV_WORKSPACE, envMaterialise } from "./env-sync.ts";
+import { ENV_AGENT_NOTE, ENV_WORKSPACE, envHarvestNow, envMaterialise } from "./env-sync.ts";
 import { envThreadOwner } from "./env-grants.ts";
 import { credentialFor, masterKey } from "./credentials.ts";
 import { findById } from "../plume/plume.ts";
@@ -303,6 +303,7 @@ export type JouleDelegated = {
   created: bool,
   /** Whether this call is what started the daemon. */
   started: bool,
+  harvested: int,
   fault: string,
 };
 
@@ -315,6 +316,7 @@ function jouleNothing(): JouleRead {
 
 function jouleFailed(fault: string, created: bool, started: bool): JouleDelegated {
   let bad: JouleDelegated = {
+    harvested: -1,
     ok: false, turnId: "", reason: "", read: jouleNothing(),
     created: created, started: started, fault: fault,
   };
@@ -407,7 +409,7 @@ export function jouleDelegate(db: Db, ask: JouleAsk): JouleDelegated {
   if (!handed.ok) {
     return jouleFailed(handed.fault, made.created, started);
   }
-  return jouleFollow(row, prompt, handed.from, made.created, started);
+  return jouleFollow(db, row, prompt, handed.from, made.created, started);
 }
 
 /** Read forward from the cursor the task was sent behind, until the turn ends
@@ -422,7 +424,7 @@ export function jouleDelegate(db: Db, ask: JouleAsk): JouleDelegated {
  *  reads the turn to answer the call that asked for it; whatever follows the
  *  frames to put progress in the thread has not run yet, and advancing the
  *  stored cursor here would take those frames away from it. */
-function jouleFollow(row: EnvRow, prompt: string, from: int, created: bool, started: bool): JouleDelegated {
+function jouleFollow(db: Db, row: EnvRow, prompt: string, from: int, created: bool, started: bool): JouleDelegated {
   let frames: JouleFrame[] = [];
   let cursor = from;
   let turnId = "";
@@ -458,12 +460,13 @@ function jouleFollow(row: EnvRow, prompt: string, from: int, created: bool, star
     process.sleep(JOULE_POLL_MS);
   }
   let read = jouleReadTurn(frames, turnId);
+  let harvested = reason == "" ? -1 : envHarvestNow(db, envNamed(db, row.threadId, row.name), `${Date.now()}`);
   let done: JouleDelegated = {
     // A turn that has not finished is not a failure: it is work in progress in
     // a container that is still running, and its files still come back.
     ok: fault == "" && (reason != "error" || read.tools.length > 0),
     turnId: turnId, reason: reason, read: read,
-    created: created, started: started, fault: fault,
+    created: created, started: started, harvested: harvested, fault: fault,
   };
   return done;
 }
@@ -530,10 +533,16 @@ export function jouleAnswer(d: JouleDelegated): string {
       + " not have to: the daemon is meant to run unattended, and nothing here can answer."
       + " Report this rather than waiting on it.";
   }
-  out = out + "\nWhatever it changed in the workspace comes back as new versions of this"
-    + " conversation's files, noted \"" + ENV_AGENT_NOTE + "\", within a few seconds of the"
-    + " turn ending — read the file to see what it did rather than describing it from this"
-    + " message.";
+  if (d.harvested > 0) {
+    out = out + "\nIt left " + `${d.harvested}` + " file(s) in this conversation, noted \""
+      + ENV_AGENT_NOTE + "\" — they are here now, so read one to see what it did rather than"
+      + " describing it from this message. Do not make the file again yourself.";
+  } else {
+    out = out + "\nWhatever it changed in the workspace comes back as new versions of this"
+      + " conversation's files, noted \"" + ENV_AGENT_NOTE + "\", within a few seconds of the"
+      + " turn ending — read the file to see what it did rather than describing it from this"
+      + " message.";
+  }
   return out;
 }
 

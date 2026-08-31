@@ -34,7 +34,7 @@ function readOf(tools: string[], said: string, cut: bool, approvals: int, errors
 function delegatedOf(turnId: string, reason: string, read: JouleRead, fault: string): JouleDelegated {
   let one: JouleDelegated = {
     ok: fault == "" && reason != "error", turnId: turnId, reason: reason, read: read,
-    created: false, started: false, fault: fault,
+    created: false, started: false, harvested: -1, fault: fault,
   };
   return one;
 }
