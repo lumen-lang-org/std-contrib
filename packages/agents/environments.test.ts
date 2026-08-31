@@ -1174,24 +1174,39 @@ test("a published port still qualifies, and qualifies once", () => {
   envBindOverride("");
 });
 
-test("the idle sweep steps over an environment with a turn running in it", () => {
+test("the idle sweep reaps a genuinely-idle daemon and clears its cursor", () => {
   fresh();
   dockerFine();
   ensure("t1", "main", "python:3.12-slim", "1700000000000");
   ensure("t2", "main", "python:3.12-slim", "1700000000000");
-  // A delegated turn is one ensure and then however long the work takes, so
-  // lastUsedAt on t1 is as stale as t2's.
   expect(envMarkAgent(database, onlyEnv("t1"), "c17", 512) == "");
   clearLog();
 
-  expect(sweep("1700000900001", ENV_IDLE_MS) == 1);
+  expect(sweep("1700000900001", ENV_IDLE_MS) == 2);
 
   let asked = argvLines();
-  expect(asked.length == 1);
-  expect(asked[0] == "stop agents-env-t2-main");
+  expect(asked.length == 2);
+  expect(asked[0] == "stop agents-env-t1-main");
+  expect(asked[1] == "stop agents-env-t2-main");
+  expect(onlyEnv("t1").status == "stopped");
+  expect(onlyEnv("t1").agentConn == "");
+  expect(onlyEnv("t1").agentRead == 0);
+  expect(onlyEnv("t2").status == "stopped");
+});
+
+test("the idle sweep keeps a daemon whose turn kept its stamp fresh", () => {
+  fresh();
+  dockerFine();
+  ensure("t1", "main", "python:3.12-slim", "1700000890000");
+  expect(envMarkAgent(database, onlyEnv("t1"), "c17", 512) == "");
+  clearLog();
+
+  expect(sweep("1700000900000", ENV_IDLE_MS) == 0);
+
+  expect(argvLines().length == 0);
   expect(onlyEnv("t1").status == "running");
   expect(onlyEnv("t1").agentConn == "c17");
-  expect(onlyEnv("t2").status == "stopped");
+  expect(onlyEnv("t1").agentRead == 512);
 });
 
 test("a container that came back has neither the daemon nor the log it had", () => {

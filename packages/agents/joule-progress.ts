@@ -21,20 +21,13 @@ import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordPartial,
 // route that serves it. Inventing a parallel table would have meant a second
 // renderer for the same fact.
 //
-// Three things about this loop are not obvious and all three are load-bearing.
+// Two things about this loop are not obvious and both are load-bearing.
 //
 // It runs in the worker that already runs sweepWorkspaces, and it must. Both
 // harvest, and envServing's comment is explicit that the sweep's correctness
 // rests on one reader per row: a stamp taken, a find run, a stamp written. Two
 // loops would let one pass move the stamp the other is comparing against.
 // Here they are two calls in one loop body and cannot overlap.
-//
-// It never touches lastUsedAt. The plan asked for that, and slice 4 answered
-// the same question the other way: envIdle steps over any row with a live
-// agentConn, so a turn that runs past ENV_IDLE_MS is already safe. Touching
-// lastUsedAt as well would be a second mechanism for one problem, and the one
-// that is there is the honest one — it asks whether anything is running rather
-// than whether anybody has been by lately.
 //
 // Its state is in this process and not in the database. A watch is which turn
 // is open, which round its steps belong to and which calls have not reported
@@ -492,13 +485,13 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
  *  envMarkAgent would put the old sync stamp back, and envMarkSynced would put
  *  the old cursor back. One row with both new values, saved once, is the only
  *  arrangement where neither undoes the other. */
-export function jouleMoved(row: EnvRow, read: int): EnvRow {
+export function jouleMoved(row: EnvRow, read: int, used: string): EnvRow {
   let moved: EnvRow = {
     id: row.id, threadId: row.threadId, name: row.name, image: row.image,
     network: row.network, status: row.status, slug: row.slug, hostPort: row.hostPort,
     servePort: row.servePort, serveCmd: row.serveCmd, syncAt: row.syncAt,
     agentConn: row.agentConn, agentRead: read,
-    createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
+    createdAt: row.createdAt, lastUsedAt: used != "" ? used : row.lastUsedAt,
   };
   return moved;
 }
@@ -559,7 +552,8 @@ function joulePoll(db: Db, row: EnvRow, watch: JouleWatch, now: string): JouleWa
       + " full-auto: its daemon did not take the mode, and its turns will stall rather"
       + " than fail");
   }
-  let moved = jouleMoved(row, tailed.read);
+  let used = (after.turnId != "" || after.ended != "") ? now : "";
+  let moved = jouleMoved(row, tailed.read, used);
   if (after.ended == "") {
     let marked = envMarkAgent(db, moved, moved.agentConn, moved.agentRead);
     if (marked != "") {

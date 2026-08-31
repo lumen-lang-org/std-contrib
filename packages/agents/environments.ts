@@ -95,9 +95,7 @@ export type EnvRow = {
    *  daemon reads `<runtimeDir>/inbox/<agentConn>.in`, so the engine needs the
    *  id to address it at all, and a row that has one is an environment doing
    *  work whether or not it publishes a port. Set when the daemon is started,
-   *  cleared when it is stopped — see envMarkAgent, and mind that whoever sets
-   *  it owns clearing it, because the idle sweep steps over a row that has
-   *  one. */
+   *  cleared when it is stopped — see envMarkAgent. */
   agentConn: string,
   /** How many bytes of `<runtimeDir>/broadcast.log` the engine has already
    *  read. The daemon appends one line per outbound frame and never rewrites
@@ -1218,21 +1216,6 @@ export function envIdle(db: Db, s: EnvSweep): int {
   let i: int = 0;
   while (i < rows.length) {
     let row = rows[i];
-    // An environment with an agent in it is busy, whatever its last ensure
-    // says. lastUsedAt only moves when somebody calls envEnsure, and a
-    // delegated turn is one ensure followed by however long the work takes:
-    // past fifteen minutes of it the sweep would stop the container out from
-    // under a daemon that is still writing files. Reading agentConn is the
-    // honest test, because it asks whether anything is running rather than
-    // whether anybody has been by lately.
-    //
-    // The cost is that a leaked agentConn is an environment that never idles,
-    // so whoever sets the column owns clearing it — envEnsure clears it on any
-    // start or rebuild, which bounds the leak to the life of one container.
-    if (row.agentConn != "") {
-      i = i + 1;
-      continue;
-    }
     if (!envStampLess(deadline, row.lastUsedAt)) {
       envDocker(["stop", envContainerName(row.threadId, row.name)]);
       // And the network with it. A bridge takes a subnet whether anything is
@@ -1250,7 +1233,6 @@ export function envIdle(db: Db, s: EnvSweep): int {
         network: row.network != 0, status: "stopped", slug: row.slug,
         hostPort: 0, servePort: row.servePort, serveCmd: row.serveCmd,
         syncAt: row.syncAt,
-        // Only rows with no agent reach here, so there is nothing to clear.
         agentConn: "", agentRead: 0,
         createdAt: row.createdAt, lastUsedAt: row.lastUsedAt,
       });
@@ -1399,11 +1381,7 @@ export function envMarkSynced(db: Db, row: EnvRow, stamp: string): string {
  *  are stated once. `conn` is the connection id frames are addressed to, or ""
  *  to say the daemon is gone; `read` is a byte offset into broadcast.log, and
  *  goes back to 0 with the id, because the next daemon truncates that file
- *  before it writes a line to it.
- *
- *  Setting a connection id takes the environment out of the idle sweep's
- *  reach, so clearing it is not tidiness: an id left behind is a container
- *  that runs until its thread is forgotten. */
+ *  before it writes a line to it. */
 export function envMarkAgent(db: Db, row: EnvRow, conn: string, read: int): string {
   if (row.id == "") {
     return "";
