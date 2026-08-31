@@ -190,8 +190,15 @@ function mainChatKeys(db: Db, agentId: string): string {
     return "";
   }
   let out = "JOULE_CODE_API_KEY=" + key + "\n";
-  if (held.model.baseUrl != "") {
-    out = out + "JOULE_CODE_BASE_URL=" + held.model.baseUrl + "\n";
+  let base = held.model.baseUrl;
+  if (base.endsWith("/")) {
+    base = base.slice(0, base.length - 1);
+  }
+  if (base.endsWith("/v1")) {
+    base = base.slice(0, base.length - 3);
+  }
+  if (base != "") {
+    out = out + "JOULE_CODE_BASE_URL=" + base + "\n";
   }
   if (held.model.apiName != "") {
     out = out + "JOULE_CODE_MODEL=" + held.model.apiName + "\n";
