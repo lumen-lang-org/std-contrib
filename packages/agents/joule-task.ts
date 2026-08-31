@@ -425,7 +425,7 @@ function jouleFollow(row: EnvRow, prompt: string, from: int, created: bool, star
   let done: JouleDelegated = {
     // A turn that has not finished is not a failure: it is work in progress in
     // a container that is still running, and its files still come back.
-    ok: fault == "" && reason != "error",
+    ok: fault == "" && (reason != "error" || read.tools.length > 0),
     turnId: turnId, reason: reason, read: read,
     created: created, started: started, fault: fault,
   };
@@ -470,7 +470,9 @@ export function jouleAnswer(d: JouleDelegated): string {
   } else if (d.reason == "cancelled") {
     out = out + "Turn " + d.turnId + " was cancelled before it finished.";
   } else {
-    out = out + "Turn " + d.turnId + " ended in an error.";
+    out = out + "Turn " + d.turnId + (d.read.tools.length > 0
+      ? " stopped before it said it was finished. It had already been working, and whatever it wrote comes back on the same harvest as a finished turn would — read the files below before deciding anything is missing, and do not do the work again by another route on the strength of this line alone."
+      : " ended in an error without running anything.");
   }
   if (d.read.tools.length > 0) {
     out = out + "\nIt ran: " + jouleToolList(d.read.tools) + ".";
