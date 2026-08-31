@@ -529,6 +529,31 @@ export type ArtifactToolCall = {
   now: string,
 };
 
+function rasterKind(path: string): string {
+  let lower = path.toLowerCase();
+  let kinds = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"];
+  let i: int = 0;
+  while (i < kinds.length) {
+    if (lower.endsWith(kinds[i])) {
+      return kinds[i].slice(1, kinds[i].length);
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
+function looksLikeImageBase64(content: string): bool {
+  if (content.length < 64) {
+    return false;
+  }
+  let head = content.slice(0, 24);
+  if (head.startsWith("iVBORw0KGgo") || head.startsWith("/9j/") || head.startsWith("R0lGOD")
+    || head.startsWith("UklGR") || head.startsWith("Qk")) {
+    return true;
+  }
+  return false;
+}
+
 export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
   if (call.threadId == "") {
@@ -538,6 +563,18 @@ export function callArtifactTool(db: Db, call: ArtifactToolCall): FileToolResult
   if (call.name == "write_artifact") {
     let path = normalScope(jsonText(call.args, "path"));
     let content = jsonText(call.args, "content");
+    let rasterAt = rasterKind(path);
+    if (rasterAt != "" && !looksLikeImageBase64(content)) {
+      let notImage: FileToolResult = {
+        handled: true, ok: false,
+        text: "Refused: " + path + " names a " + rasterAt + " image, and this content is not"
+          + " one — an image typed out by hand is a broken file, not a picture. Make it by"
+          + " running code: hand the task to delegate_to_joule_code (or run_script) and let"
+          + " the produced file come back as the artifact.",
+        line: 0, changed: "",
+      };
+      return notImage;
+    }
     let written = putArtifact(db, {
       threadId: call.threadId,
       path: path,
