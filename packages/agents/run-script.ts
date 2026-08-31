@@ -500,7 +500,7 @@ function reconcileNew(db: Db, run: ScriptReconcile, path: string): ScriptOutcome
 }
 
 export function scriptImage(): string {
-  return process.env("AGENTS_SCRIPT_IMAGE") ?? "agents-runtime:1";
+  return process.env("AGENTS_SCRIPT_IMAGE") ?? "agents-all:1";
 }
 
 export function foldName(n: string): string {
