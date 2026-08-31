@@ -738,7 +738,7 @@ export function scriptTool(envs: string[]): ToolSpec {
   return toolSpec("run_script",
     "Run a program and read what it printed, when the output is the point: check a value, validate against a "
     + "real library, compute something before deciding what to write. To produce or change a file — an image, a "
-    + "document, a data file — use delegate_to_env instead: it can install what it needs, look at what it made "
+    + "document, a data file — use delegate_to_joule_code instead: it can install what it needs, look at what it made "
     + "and correct it, where this runs once and reports what happened. "
     + "Run a program against this conversation's artifacts when tool calls alone would take too many steps — "
     + "transform hundreds of entries at once, validate with a real library, compute before deciding what to write. "
@@ -757,7 +757,7 @@ export function scriptTool(envs: string[]): ToolSpec {
     + "mayCreate keep it. Launch chromium with --no-sandbox — the container is the sandbox. "
     + "A raster image a script writes — .png, .jpg, .gif, .webp — is stored base64 and shown as a picture in the "
     + "preview, so an image that falls out of a run is kept. Making an image is not on its own a reason to come "
-    + "here though: a logo, a chart or a diagram asked for as such is delegate_to_env's work, because getting one "
+    + "here though: a logo, a chart or a diagram asked for as such is delegate_to_joule_code's work, because getting one "
     + "right means looking at what came out and going again. Never copy image base64 back through write_artifact "
     + "yourself: retyping it corrupts it, and the run "
     + "already saved the exact bytes. An image from the web may be hot-linked in a page — img is the one thing a "
@@ -855,7 +855,7 @@ export function serveTool(): ToolSpec {
 }
 
 export function delegateEnvTool(): ToolSpec {
-  return toolSpec("delegate_to_env",
+  return toolSpec("delegate_to_joule_code",
     "Hand a whole piece of work to a coding agent that lives in this conversation's environment, "
     + "instead of doing it here step by step. It gets a container with this conversation's files in "
     + "it, works on them directly — reading, editing, running commands, checking what it did — and "
@@ -908,20 +908,20 @@ export function scriptTools(db: Db): ToolSpec[] {
   return out;
 }
 
-/** delegate_to_env: hand the brief over, follow the turn, say what happened.
+/** delegate_to_joule_code: hand the brief over, follow the turn, say what happened.
  *
  *  Dispatched beside callScriptTool and callServeTool and shaped like them —
  *  the argument checking is here, the machinery is in joule-task.ts, the way
  *  run_script's is in run-script.ts. */
 export function callJouleTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (call.threadId == "" || call.name != "delegate_to_env") {
+  if (call.threadId == "" || call.name != "delegate_to_joule_code") {
     return not;
   }
   if (jsonFind(call.args, "task") < 0) {
     let unnamed: FileToolResult = {
       handled: true, ok: false,
-      text: "delegate_to_env needs a member named \"task\" — the whole brief, since it is all"
+      text: "delegate_to_joule_code needs a member named \"task\" — the whole brief, since it is all"
         + " the agent is told.",
       line: 0, changed: "",
     };

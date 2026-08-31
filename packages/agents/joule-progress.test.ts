@@ -34,7 +34,7 @@ function fresh(): void {
   // before the daemon saw a frame.
   let asked: StepStart = {
     threadId: "t-prog", seq: 7, depth: 0, rotation: 0, idx: 0, kind: "tool",
-    name: "delegate_to_env", target: "", args: "{}", now: "1000",
+    name: "delegate_to_joule_code", target: "", args: "{}", now: "1000",
   };
   beginStep(database, asked);
 }
