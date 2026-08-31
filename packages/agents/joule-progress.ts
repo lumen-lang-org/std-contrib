@@ -1,7 +1,7 @@
 import { Db } from "../plume/driver.ts";
 import { jsonStringMemberAt } from "../ai/core/jsonscan.ts";
 import { EnvRow, envMarkAgent, envMarkSynced, envServing } from "./environments.ts";
-import { envSyncClock, envSyncOut } from "./env-sync.ts";
+import { envSyncClock, envSyncOut, envSyncRunDir } from "./env-sync.ts";
 import { JOULE_ENV_NAME, JouleFrame, jouleFrameBool, jouleIsTaskTurn, jouleTail } from "./joule-bridge.ts";
 import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordPartial, stepsOfRound } from "./steps.ts";
 
@@ -517,6 +517,8 @@ function jouleHarvest(db: Db, row: EnvRow, w: JouleWatch, now: string): void {
     return;
   }
   let carried = envSyncOut(db, row, row.syncAt, now);
+  let ran = envSyncRunDir(db, row, now);
+  let brought = carried.changed.length + ran.changed.length;
   // Carries the cursor with it: envMarkSynced writes the whole row, and the
   // row it is given is the one jouleMoved built.
   let marked = envMarkSynced(db, row, stamp);
@@ -524,7 +526,7 @@ function jouleHarvest(db: Db, row: EnvRow, w: JouleWatch, now: string): void {
     console.error("delegated harvest: " + row.id + " — the sync mark was not written, so"
       + " the next sweep reads these files back again: " + marked);
   }
-  console.log("brought " + `${carried.changed.length}` + " file(s) back from "
+  console.log("brought " + `${brought}` + " file(s) back from "
     + row.threadId + ":" + row.name + " on turn.end of " + w.endedTurn + " (" + w.ended + ")");
 }
 
