@@ -430,8 +430,7 @@ function jouleFollow(db: Db, row: EnvRow, prompt: string, from: int, created: bo
   let turnId = "";
   let reason = "";
   let fault = "";
-  let polls = (jouleWaitSeconds() * 1000) / JOULE_POLL_MS;
-  let n: int = 0;
+  let deadline = Date.now() + jouleWaitSeconds() * 1000;
   while (true) {
     let tailed = jouleTail(row, cursor);
     if (!tailed.ok) {
@@ -453,8 +452,7 @@ function jouleFollow(db: Db, row: EnvRow, prompt: string, from: int, created: bo
         break;
       }
     }
-    n = n + 1;
-    if (n >= polls) {
+    if (Date.now() >= deadline) {
       break;
     }
     process.sleep(JOULE_POLL_MS);
@@ -503,7 +501,10 @@ export function jouleAnswer(d: JouleDelegated): string {
   if (d.reason == "") {
     out = out + "Turn " + d.turnId + " is still running after " + `${jouleWaitSeconds()}`
       + " seconds. It carries on inside the environment: this call stopped waiting, the"
-      + " work did not stop.";
+      + " work did not stop, and its files arrive on their own when it ends. End your turn"
+      + " here and say that it is still working — do not wait for it. Sleeping in a script,"
+      + " listing the files again, or calling this tool a second time all cost the person a"
+      + " turn and none of them make the work arrive sooner.";
   } else if (d.reason == "done") {
     out = out + "Turn " + d.turnId + " finished.";
   } else if (d.reason == "cancelled") {
