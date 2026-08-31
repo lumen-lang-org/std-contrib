@@ -84,11 +84,19 @@ const JOULE_STAGE: string = "/tmp/agents-joule-";
  *  against it, so the two must be the same string. */
 export function joulePrompt(task: string): string {
   return task.trim()
-    + "\n\nYou are working in " + ENV_WORKSPACE + ", which holds the files of the"
-    + " conversation that asked for this. Edit them in place — what you write"
-    + " there is what comes back, and a patch printed instead of applied is"
-    + " lost. Nobody is attached to answer a question, so finish the work"
-    + " rather than asking about it.";
+    + "\n\nThe files of the conversation that asked for this are in your"
+    + " current working directory, which is where you already are. Refer to a"
+    + " file by the path it has in the conversation with the leading slash"
+    + " dropped: the conversation's /logo.png is logo.png here. Do not prefix"
+    + " an absolute path and do not write outside this directory, since the"
+    + " rest of the filesystem is read-only. Edit files in place; what you"
+    + " write here is what comes back, and a patch printed instead of applied"
+    + " is lost. Nobody is attached to answer a question, so finish the work"
+    + " rather than asking about it."
+    + " Your steps are limited and a turn that runs out is a turn that failed, so spend them"
+    + " on the work: take the first approach that will do, run it, and stop when the task is"
+    + " met. Do not tune what already works, weigh alternatives you were not asked for, or"
+    + " polish past the brief.";
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +425,7 @@ function jouleFollow(row: EnvRow, prompt: string, from: int, created: bool, star
   let done: JouleDelegated = {
     // A turn that has not finished is not a failure: it is work in progress in
     // a container that is still running, and its files still come back.
-    ok: fault == "" && reason != "error",
+    ok: fault == "" && (reason != "error" || read.tools.length > 0),
     turnId: turnId, reason: reason, read: read,
     created: created, started: started, fault: fault,
   };
@@ -462,7 +470,9 @@ export function jouleAnswer(d: JouleDelegated): string {
   } else if (d.reason == "cancelled") {
     out = out + "Turn " + d.turnId + " was cancelled before it finished.";
   } else {
-    out = out + "Turn " + d.turnId + " ended in an error.";
+    out = out + "Turn " + d.turnId + (d.read.tools.length > 0
+      ? " stopped before it said it was finished. It had already been working, and whatever it wrote comes back on the same harvest as a finished turn would — read the files below before deciding anything is missing, and do not do the work again by another route on the strength of this line alone."
+      : " ended in an error without running anything.");
   }
   if (d.read.tools.length > 0) {
     out = out + "\nIt ran: " + jouleToolList(d.read.tools) + ".";

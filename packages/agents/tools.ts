@@ -736,7 +736,11 @@ export function scriptEnvNames(db: Db): string[] {
 
 export function scriptTool(envs: string[]): ToolSpec {
   return toolSpec("run_script",
-    "Run a program against this conversation's artifacts when tool calls alone would take too many steps — "
+    "Run a program and read what it printed, when the output is the point: check a value, validate against a "
+    + "real library, compute something before deciding what to write. To produce or change a file — an image, a "
+    + "document, a data file — use delegate_to_joule_code instead: it can install what it needs, look at what it made "
+    + "and correct it, where this runs once and reports what happened. "
+    + "Run a program against this conversation's artifacts when tool calls alone would take too many steps — "
     + "transform hundreds of entries at once, validate with a real library, compute before deciding what to write. "
     + "The script runs inside this conversation's environment, a container that persists between runs: what it leaves "
     + "outside its run directory — installed packages, caches, scratch files — is still there on the next call. That "
@@ -751,9 +755,11 @@ export function scriptTool(envs: string[]): ToolSpec {
     + "nothing is ever deleted — a file the script removed is reported and every stored version stays. "
     + "Where the environment has a browser, a screenshot is an ordinary script: drive the page, save the .png, let "
     + "mayCreate keep it. Launch chromium with --no-sandbox — the container is the sandbox. "
-    + "A raster image the script writes — .png, .jpg, .gif, .webp — is stored base64 and shown as a picture in the "
-    + "preview; generate images with the standard library or installed packages, write the file, and let mayCreate "
-    + "save it. Never copy image base64 back through write_artifact yourself: retyping it corrupts it, and the run "
+    + "A raster image a script writes — .png, .jpg, .gif, .webp — is stored base64 and shown as a picture in the "
+    + "preview, so an image that falls out of a run is kept. Making an image is not on its own a reason to come "
+    + "here though: a logo, a chart or a diagram asked for as such is delegate_to_joule_code's work, because getting one "
+    + "right means looking at what came out and going again. Never copy image base64 back through write_artifact "
+    + "yourself: retyping it corrupts it, and the run "
     + "already saved the exact bytes. An image from the web may be hot-linked in a page — img is the one thing a "
     + "preview may load from another host — but fetching it in a script and saving it with mayCreate is better: the "
     + "page then keeps working when that host does not, and tells no third party who is reading it. "
@@ -849,16 +855,19 @@ export function serveTool(): ToolSpec {
 }
 
 export function delegateEnvTool(): ToolSpec {
-  return toolSpec("delegate_to_env",
+  return toolSpec("delegate_to_joule_code",
     "Hand a whole piece of work to a coding agent that lives in this conversation's environment, "
     + "instead of doing it here step by step. It gets a container with this conversation's files in "
     + "it, works on them directly — reading, editing, running commands, checking what it did — and "
     + "what it changes comes back as new versions of those files, noted \"" + ENV_AGENT_NOTE + "\". "
-    + "Reach for it when the work is a project rather than an edit: change something across many "
-    + "files, make the test suite pass, follow a build error wherever it leads, port something. Do "
-    + "not reach for it to write one file or change one line — write_artifact and edit_artifact are "
-    + "there and are immediate — and do not reach for it to run a program and read its output, which "
-    + "is run_script. "
+    + "This is how work gets done here whenever doing it means running code against this "
+    + "conversation's files: generating an image or a document, transforming data, building "
+    + "something, making a test suite pass, following a build error wherever it leads, porting "
+    + "something. One file is reason enough — a logo, a chart, a report — because the agent can "
+    + "install what it needs, look at what it produced and fix it, which a single script cannot. "
+    + "The exceptions are narrow: text you can simply write goes straight into write_artifact or "
+    + "edit_artifact, and a program you are running only to read its output back into this "
+    + "conversation is run_script. "
     + "Say what you want done and how you will know it is right, the way you would brief somebody "
     + "who can see the files but was not in this conversation: it reads none of what was said here. "
     + "Name the files it should touch by their paths, say what to leave alone, and give it the check "
@@ -883,36 +892,36 @@ export function scriptTools(db: Db): ToolSpec[] {
   if (!scriptDockerWorks()) {
     return out;
   }
-  out.push(scriptTool(scriptEnvNames(db)));
-  // Only where there is a zone to answer on: without one there is no address to
-  // give back, and a tool that cannot succeed is worse than one that is absent.
-  if (envZone() != "") {
-    out.push(serveTool());
-  }
-  // And only where an image with a daemon in it is registered and switched on.
+  // Only where an image with a daemon in it is registered and switched on.
   // The deployment seeds that row itself, so this is normally there; an
   // operator who disabled it has said this deployment does not delegate, and
   // offering the tool anyway would be offering one that can only refuse.
   if (scriptImageForEnv(db, "", JOULE_ENV_NAME) != "") {
     out.push(delegateEnvTool());
   }
+  out.push(scriptTool(scriptEnvNames(db)));
+  // Only where there is a zone to answer on: without one there is no address to
+  // give back, and a tool that cannot succeed is worse than one that is absent.
+  if (envZone() != "") {
+    out.push(serveTool());
+  }
   return out;
 }
 
-/** delegate_to_env: hand the brief over, follow the turn, say what happened.
+/** delegate_to_joule_code: hand the brief over, follow the turn, say what happened.
  *
  *  Dispatched beside callScriptTool and callServeTool and shaped like them —
  *  the argument checking is here, the machinery is in joule-task.ts, the way
  *  run_script's is in run-script.ts. */
 export function callJouleTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
-  if (call.threadId == "" || call.name != "delegate_to_env") {
+  if (call.threadId == "" || call.name != "delegate_to_joule_code") {
     return not;
   }
   if (jsonFind(call.args, "task") < 0) {
     let unnamed: FileToolResult = {
       handled: true, ok: false,
-      text: "delegate_to_env needs a member named \"task\" — the whole brief, since it is all"
+      text: "delegate_to_joule_code needs a member named \"task\" — the whole brief, since it is all"
         + " the agent is told.",
       line: 0, changed: "",
     };

@@ -44,10 +44,9 @@ test("what is submitted is the brief plus the two things the delegate cannot kno
 
   // The brief itself, trimmed, first and whole.
   expect(sent.indexOf("Make the tests pass.") == 0);
-  // Where it is, because a delegate that prints a patch has done nothing: only
-  // the files come back.
-  expect(sent.indexOf("/workspace") > 0);
-  expect(sent.indexOf("Edit them in place") > 0);
+  expect(sent.indexOf("current working directory") > 0);
+  expect(sent.indexOf("/workspace") < 0);
+  expect(sent.indexOf("Edit files in place") > 0);
   // And that nobody is there, because full-auto removes the approval gate and
   // not the habit of ending a turn on a question.
   expect(sent.indexOf("Nobody is attached") > 0);
