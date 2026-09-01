@@ -96,8 +96,34 @@ const MAKE_DECK_BODY: string = `Build a real .pptx deck:
 
     make-deck slides.json out.pptx
 
-One slide per entry, with the layout PowerPoint expects, so the file opens
-and edits like a deck somebody made by hand.
+The spec is the whole surface. Colours, charts and speaker notes are in it,
+so there is no python-pptx to write:
+
+    {"title": "Roast & Rove", "subtitle": "Coffee, weekly",
+     "theme": {"accent": "#E07A1B", "background": "#101418", "text": "#F5F0EA"},
+     "slides": [
+       {"title": "The Problem", "bullets": ["Beans arrive stale"], "notes": ""},
+       {"title": "Growth", "chart": {"kind": "column",
+                                     "categories": ["Q1", "Q2", "Q3"],
+                                     "series": [{"name": "Subscribers",
+                                                 "values": [120, 340, 810]}]}}]}
+
+theme applies to every slide and every part is optional. chart takes kind
+column, bar, line or pie, and a slide may carry bullets and a chart together.
+Colours are #RRGGBB.
+
+Write the deck this way rather than by hand. python-pptx has no Chart.format
+and no Plot.format — a series is coloured through its own format and nothing
+else is — so code written from memory spends its turns finding that out.
+
+A picture from the web comes through one command, because the shell's own
+fetching is refused with nobody there to approve it:
+
+    fetch-image https://host/photo.jpg /artifacts/photo.jpg
+
+It reads https, refuses anything that is not an image, and cannot reach
+inside this network. A picture that has to be drawn rather than found is
+Pillow's job, and Pillow is here.
 
 These commands live in the conversation's environment, so the way to use them
 is to hand the job to delegate_to_joule_code and say in the brief which command
@@ -128,7 +154,9 @@ export function seedOfficeSkills(db: Db): void {
   let i: int = 0;
   while (i < seeds.length) {
     let s = seeds[i];
-    if (findById(db, skillsMapping(), s.id) == "") {
+    let held = findById(db, skillsMapping(), s.id);
+    let stale = held == "" ? true : JSON.parse<SkillRow>(held).body != s.body;
+    if (stale) {
       let row: SkillRow = {
         id: s.id,
         skillName: s.skillName,
@@ -141,6 +169,9 @@ export function seedOfficeSkills(db: Db): void {
         sourceUrl: "",
       };
       persist(db, skillsMapping(), JSON.stringify(row));
+      if (held != "") {
+        console.log("the \"" + s.skillName + "\" skill says something new");
+      }
     }
     retireOlderSkill(db, s.id, s.skillName, now);
     i = i + 1;
