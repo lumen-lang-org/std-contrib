@@ -41,6 +41,7 @@ RUN ln -sf /usr/bin/python3 /usr/local/bin/python
 # against this.
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
       pillow cairosvg svgwrite requests \
+      matplotlib numpy \
       playwright==1.56.0 beautifulsoup4 \
       python-docx==1.1.2 \
       openpyxl==3.1.5 \
