@@ -145,6 +145,13 @@ export type JouleRead = {
  *  Field by field off each frame rather than by decoding it: the frame set has
  *  28 shapes and grows, and a reader that parses whole frames is a reader that
  *  stops working when one of them gains a field. */
+export function jouleParted(said: string): string {
+  if (said == "" || said.endsWith("\n\n")) {
+    return said;
+  }
+  return said.trimEnd() + "\n\n";
+}
+
 export function jouleReadTurn(frames: JouleFrame[], turnId: string): JouleRead {
   let tools: string[] = [];
   let errors: string[] = [];
@@ -164,10 +171,12 @@ export function jouleReadTurn(frames: JouleFrame[], turnId: string): JouleRead {
     }
     if (f.type == "tool.call") {
       tools.push(jsonStringMemberAt(f.json, 0, "tool"));
+      said = jouleParted(said);
     } else if (f.type == "text.delta") {
       said = said + jsonStringMemberAt(f.json, 0, "text");
     } else if (f.type == "approval.request") {
       approvals = approvals + 1;
+      said = jouleParted(said);
     }
   }
   let whole = said.trim();

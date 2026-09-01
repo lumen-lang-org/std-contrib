@@ -154,9 +154,7 @@ export function seedOfficeSkills(db: Db): void {
   let i: int = 0;
   while (i < seeds.length) {
     let s = seeds[i];
-    let held = findById(db, skillsMapping(), s.id);
-    let stale = held == "" ? true : JSON.parse<SkillRow>(held).body != s.body;
-    if (stale) {
+    if (findById(db, skillsMapping(), s.id) == "") {
       let row: SkillRow = {
         id: s.id,
         skillName: s.skillName,
@@ -169,9 +167,6 @@ export function seedOfficeSkills(db: Db): void {
         sourceUrl: "",
       };
       persist(db, skillsMapping(), JSON.stringify(row));
-      if (held != "") {
-        console.log("the \"" + s.skillName + "\" skill says something new");
-      }
     }
     retireOlderSkill(db, s.id, s.skillName, now);
     i = i + 1;

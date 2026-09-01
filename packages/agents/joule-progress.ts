@@ -3,6 +3,7 @@ import { jsonStringMemberAt } from "../ai/core/jsonscan.ts";
 import { EnvRow, envMarkAgent, envMarkSynced, envServing } from "./environments.ts";
 import { envSyncClock, envSyncOut, envSyncRunDir, envSyncScratch } from "./env-sync.ts";
 import { JOULE_ENV_NAME, JouleFrame, jouleFrameBool, jouleIsTaskTurn, jouleTail } from "./joule-bridge.ts";
+import { jouleParted } from "./joule-task.ts";
 import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordPartial, stepsOfRound } from "./steps.ts";
 
 // What the delegate is doing, while it is doing it, in the conversation that
@@ -334,6 +335,7 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
   let ended = "";
   let endedTurn = watch.endedTurn;
   let saidMoved = false;
+  let spoke = false;
   let i: int = 0;
   while (i < frames.length) {
     let f = frames[i];
@@ -380,6 +382,11 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
       continue;
     }
     if (f.type == "tool.call") {
+      if (spoke) {
+        said = jouleParted(said);
+        saidMoved = true;
+        spoke = false;
+      }
       if (seq < 0) {
         continue;
       }
@@ -427,6 +434,7 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
     } else if (f.type == "text.delta") {
       said = jouleCut(said + jsonStringMemberAt(f.json, 0, "text"));
       saidMoved = true;
+      spoke = true;
     } else if (f.type == "approval.request") {
       // Counted here and shouted about by the loop. The daemon is started with
       // --mode full-auto and in full-auto nothing asks, so one of these means
