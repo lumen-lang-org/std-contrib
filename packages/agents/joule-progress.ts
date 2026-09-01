@@ -267,6 +267,23 @@ export function jouleNextIdx(db: Db, threadId: string, seq: int): int {
 export const JOULE_UNATTENDED: string = "this call asked for an approval, and nobody is"
   + " attached to answer one: the environment's daemon is not in full-auto";
 
+const JOULE_PIPELINE_MARK: string = "pipeline:";
+
+function joulePipelineStep(db: Db, threadId: string, seq: int, idx: int, id: string, text: string, now: string): int {
+  if (threadId == "" || seq < 0) {
+    return idx;
+  }
+  let none: number = 0.0;
+  let one: JouleCall = { callId: "", idx: idx, name: jouleStepName("pipeline"), args: id + ": " + text, at: now, atMs: none };
+  let s = jouleStepOf(threadId, seq, one);
+  beginStep(db, s);
+  let close: StepClose = {
+    ok: true, endedAt: now, millis: 0, line: 0, changed: "", result: "",
+  };
+  endStepAt(db, s, close);
+  return idx + 1;
+}
+
 /** How a delegated tool is named in the thread.
  *
  *  Qualified by the environment because the names collide: joule calls its
@@ -355,6 +372,18 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
   while (i < frames.length) {
     let f = frames[i];
     i = i + 1;
+    if (f.turnId.startsWith(JOULE_PIPELINE_MARK)) {
+      if (f.type == "text.delta") {
+        let stageText = jsonStringMemberAt(f.json, 0, "text").trim();
+        if (stageText != "") {
+          let stageSeq = seq >= 0 ? seq : latestRound(db, threadId);
+          let stageIdx = (turnId != "" && stageSeq == seq) ? idx : jouleNextIdx(db, threadId, stageSeq);
+          let moved = joulePipelineStep(db, threadId, stageSeq, stageIdx, f.turnId.slice(JOULE_PIPELINE_MARK.length), stageText, now);
+          if (turnId != "" && stageSeq == seq) { idx = moved; }
+        }
+      }
+      continue;
+    }
     if (jouleIsTaskTurn(f.turnId)) {
       continue;
     }
