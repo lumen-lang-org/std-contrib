@@ -62,7 +62,8 @@ RUN chmod +x /opt/office/*.py \
  && ln -sf /opt/office/make_docx.py /usr/local/bin/make-doc \
  && ln -sf /opt/office/make_xlsx.py /usr/local/bin/make-sheet \
  && ln -sf /opt/office/make_pptx.py /usr/local/bin/make-deck \
- && ln -sf /opt/office/extract_image.py /usr/local/bin/extract-image \n && ln -sf /opt/office/fetch_image.py /usr/local/bin/fetch-image
+ && ln -sf /opt/office/extract_image.py /usr/local/bin/extract-image \
+ && ln -sf /opt/office/fetch_image.py /usr/local/bin/fetch-image
 
 # The pin, and the one line to change when bumping it. A tag rather than
 # latest: a delegated turn's behaviour is the daemon's behaviour, and an image
