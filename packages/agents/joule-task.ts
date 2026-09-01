@@ -104,7 +104,14 @@ export function joulePrompt(task: string): string {
     + " an absolute path and do not write outside this directory, since the"
     + " rest of the filesystem is read-only. Edit files in place; what you"
     + " write here is what comes back, and a patch printed instead of applied"
-    + " is lost. Nobody is attached to answer a question, so finish the work"
+    + " is lost."
+    + " A file people open — a deck, a document, a spreadsheet, a picture — has a command"
+    + " here that makes one, and these are commands on PATH rather than skills to load:"
+    + " make-deck, make-doc, make-sheet, fill-docx, read-docx, extract-image, fetch-image."
+    + " Run one with no arguments to read its spec, and prefer it to writing the library"
+    + " by hand, which is where turns go. fetch-image is how a picture comes from the web:"
+    + " the shell's own fetching is refused with nobody here to approve it."
+    + " Nobody is attached to answer a question, so finish the work"
     + " rather than asking about it."
     + " Your steps are limited and a turn that runs out is a turn that failed, so spend them"
     + " on the work: take the first approach that will do, run it, and stop when the task is"
@@ -138,6 +145,13 @@ export type JouleRead = {
  *  Field by field off each frame rather than by decoding it: the frame set has
  *  28 shapes and grows, and a reader that parses whole frames is a reader that
  *  stops working when one of them gains a field. */
+export function jouleParted(said: string): string {
+  if (said == "" || said.endsWith("\n\n")) {
+    return said;
+  }
+  return said.trimEnd() + "\n\n";
+}
+
 export function jouleReadTurn(frames: JouleFrame[], turnId: string): JouleRead {
   let tools: string[] = [];
   let errors: string[] = [];
@@ -157,10 +171,12 @@ export function jouleReadTurn(frames: JouleFrame[], turnId: string): JouleRead {
     }
     if (f.type == "tool.call") {
       tools.push(jsonStringMemberAt(f.json, 0, "tool"));
+      said = jouleParted(said);
     } else if (f.type == "text.delta") {
       said = said + jsonStringMemberAt(f.json, 0, "text");
     } else if (f.type == "approval.request") {
       approvals = approvals + 1;
+      said = jouleParted(said);
     }
   }
   let whole = said.trim();
