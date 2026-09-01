@@ -1,5 +1,5 @@
 import { Db } from "../plume/driver.ts";
-import { persist, findById } from "../plume/plume.ts";
+import { persist, findById, listWhere, placeholderAt } from "../plume/plume.ts";
 import { SkillRow, skillsMapping } from "./schema.ts";
 import { stamp } from "./api-core.ts";
 
@@ -142,6 +142,35 @@ export function seedOfficeSkills(db: Db): void {
       };
       persist(db, skillsMapping(), JSON.stringify(row));
     }
+    retireOlderSkill(db, s.id, s.skillName, now);
     i = i + 1;
+  }
+}
+
+function retireOlderSkill(db: Db, keep: string, named: string, now: string): void {
+  let listed = listWhere(db, skillsMapping(),
+    "skill_name = " + placeholderAt(db, 1) + " AND visibility = 'public' AND id <> " + placeholderAt(db, 2),
+    [named, keep]);
+  if (listed == "" || listed == "[]") {
+    return;
+  }
+  let rows = JSON.parse<SkillRow[]>(listed);
+  let i: int = 0;
+  while (i < rows.length) {
+    let old = rows[i];
+    i = i + 1;
+    let hidden: SkillRow = {
+      id: old.id,
+      skillName: old.skillName,
+      description: old.description,
+      body: old.body,
+      updatedAt: now,
+      visibility: "private",
+      featuredRank: old.featuredRank,
+      source: old.source,
+      sourceUrl: old.sourceUrl,
+    };
+    persist(db, skillsMapping(), JSON.stringify(hidden));
+    console.log("retired the older \"" + old.skillName + "\" skill " + old.id);
   }
 }

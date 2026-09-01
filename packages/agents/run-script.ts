@@ -213,7 +213,8 @@ function reconcileFault(why: string): ScriptReconciled {
 
 export function scriptRasterKind(path: string): string {
   let lower = path.toLowerCase();
-  let kinds = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff"];
+  let kinds = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff",
+    ".pdf", ".pptx", ".docx", ".xlsx", ".odt", ".ods", ".odp"];
   let i: int = 0;
   while (i < kinds.length) {
     if (lower.endsWith(kinds[i])) {
@@ -257,10 +258,11 @@ export function scriptReconcile(db: Db, run: ScriptReconcile): ScriptReconciled 
     if (raster != "" && delegates) {
       let sendIt: ScriptRefusal = {
         path: path,
-        fault: path + " is a " + raster + ", and a picture is not a by-product of a script"
-          + " here: hand the whole task to delegate_to_joule_code, which writes the code,"
-          + " looks at what came out and fixes it before it answers. Ask it for the file and"
-          + " let the file it produces come back as the artifact.",
+        fault: path + " is a " + raster + ", and a file somebody opens is not a by-product of"
+          + " a script here: hand the whole task to delegate_to_joule_code, which writes the"
+          + " code, opens what came out and fixes it before it answers. It has the same"
+          + " libraries this environment does. Ask it for the file and let the file it"
+          + " produces come back as the artifact.",
       };
       refused.push(sendIt);
       i = i + 1;
