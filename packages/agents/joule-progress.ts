@@ -4,7 +4,7 @@ import { EnvRow, envMarkAgent, envMarkSynced, envServing } from "./environments.
 import { envSyncClock, envSyncOut, envSyncRunDir, envSyncScratch } from "./env-sync.ts";
 import { JOULE_ENV_NAME, JouleFrame, jouleFrameBool, jouleIsTaskTurn, jouleTail } from "./joule-bridge.ts";
 import { jouleParted } from "./joule-task.ts";
-import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordPartial, stepsOfRound } from "./steps.ts";
+import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordThought, stepsOfRound } from "./steps.ts";
 
 // What the delegate is doing, while it is doing it, in the conversation that
 // asked for it.
@@ -68,6 +68,18 @@ import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordPartial,
  *  and the share below stretches the worst case past a few seconds. Either one
  *  makes a tail process worth its lifecycle; neither is true today. */
 export const JOULE_PROGRESS_MS: int = 2000;
+
+export const JOULE_VOICE_DEPTH: int = 1;
+
+export function jouleVoiced(kept: string, said: string): string {
+  if (kept == "") {
+    return said;
+  }
+  if (said == "") {
+    return kept;
+  }
+  return kept + "\n\n" + said;
+}
 
 /** How many environments one tick reads.
  *
@@ -145,6 +157,7 @@ export type JouleWatch = {
   idx: int,
   open: JouleCall[],
   said: string,
+  voice: string,
   approvals: int,
   /** Why the turn ended, set for exactly the tick that read the turn.end
    *  frame. The caller harvests on it and clears it. */
@@ -157,7 +170,7 @@ export function jouleWatchNew(envId: string, threadId: string): JouleWatch {
   let none: JouleCall[] = [];
   let fresh: JouleWatch = {
     envId: envId, threadId: threadId, turnId: "", seq: -1, idx: JOULE_STEP_IDX,
-    open: none, said: "", approvals: 0, ended: "", endedTurn: "",
+    open: none, said: "", voice: "", approvals: 0, ended: "", endedTurn: "",
   };
   return fresh;
 }
@@ -166,7 +179,7 @@ export function jouleWatchNew(envId: string, threadId: string): JouleWatch {
 export function jouleWatchRested(w: JouleWatch): JouleWatch {
   let calm: JouleWatch = {
     envId: w.envId, threadId: w.threadId, turnId: w.turnId, seq: w.seq, idx: w.idx,
-    open: w.open, said: w.said, approvals: w.approvals, ended: "", endedTurn: w.endedTurn,
+    open: w.open, said: w.said, voice: w.voice, approvals: w.approvals, ended: "", endedTurn: w.endedTurn,
   };
   return calm;
 }
@@ -336,6 +349,7 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
   let endedTurn = watch.endedTurn;
   let saidMoved = false;
   let spoke = false;
+  let voice = watch.voice;
   let i: int = 0;
   while (i < frames.length) {
     let f = frames[i];
@@ -462,8 +476,9 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
       let none: JouleCall[] = [];
       open = none;
       if (saidMoved && seq >= 0) {
-        recordPartial(db, threadId, seq, said, now);
+        recordThought(db, threadId, seq, JOULE_VOICE_DEPTH, 0, jouleVoiced(voice, said), now);
       }
+      voice = jouleVoiced(voice, said);
       said = "";
       saidMoved = false;
       turnId = "";
@@ -473,11 +488,12 @@ export function jouleApply(db: Db, watch: JouleWatch, frames: JouleFrame[], now:
     // Once per tail rather than once per delta: a turn's text arrives in
     // hundreds of frames and each one would be a write of the whole answer so
     // far into a row that holds exactly one of them.
-    recordPartial(db, threadId, seq, said, now);
+    recordThought(db, threadId, seq, JOULE_VOICE_DEPTH, 0, jouleVoiced(voice, said), now);
   }
   let after: JouleWatch = {
     envId: watch.envId, threadId: threadId, turnId: turnId, seq: seq, idx: idx,
-    open: open, said: said, approvals: approvals, ended: ended, endedTurn: endedTurn,
+    open: open, said: said, voice: voice, approvals: approvals, ended: ended,
+    endedTurn: endedTurn,
   };
   return after;
 }

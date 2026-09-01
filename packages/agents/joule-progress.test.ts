@@ -205,7 +205,19 @@ test("a turn with no reason ended anyway", () => {
   expect(after.ended == "done");
 });
 
-test("the delegate's text is the round's streaming answer", () => {
+function voiceSaid(seq: int, rotation: int): string {
+  let said = thoughtsOfRound(database, "t-prog", seq);
+  let i: int = 0;
+  while (i < said.length) {
+    if (said[i].depth == JOULE_VOICE_DEPTH && said[i].rotation == rotation) {
+      return said[i].text;
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
+test("the delegate's text is its own voice, and a round keeps all of it", () => {
   fresh();
   let one = jouleApply(database, watching(), framesOf([
     "{\"v\":1,\"seq\":1,\"type\":\"turn.start\",\"turnId\":\"t1\",\"prompt\":\"do it\"}",
@@ -214,19 +226,23 @@ test("the delegate's text is the round's streaming answer", () => {
   ]), "2000");
 
   expect(one.said == "I will edit it.");
-  expect(partialOf(database, "t-prog", 7) == "I will edit it.");
-  // Not visible from another round, which is what keeps a turn that outlives
-  // its tool call from writing over the answer of the round after it.
-  expect(partialOf(database, "t-prog", 8) == "");
+  expect(voiceSaid(7, 0) == "I will edit it.");
+  expect(partialOf(database, "t-prog", 7) != "I will edit it.");
+  expect(voiceSaid(8, 0) == "");
 
   let two = jouleApply(database, one, framesOf([
     "{\"v\":1,\"seq\":4,\"type\":\"text.delta\",\"turnId\":\"t1\",\"text\":\" Done.\"}",
     "{\"v\":1,\"seq\":5,\"type\":\"turn.end\",\"turnId\":\"t1\",\"reason\":\"done\"}",
   ]), "3000");
-  expect(partialOf(database, "t-prog", 7) == "I will edit it. Done.");
+  expect(voiceSaid(7, 0) == "I will edit it. Done.");
   // Cleared with the turn, so the next one does not continue somebody else's
   // sentence.
   expect(two.said == "");
+  jouleApply(database, two, framesOf([
+    "{\"v\":1,\"seq\":6,\"type\":\"turn.start\",\"turnId\":\"t2\",\"prompt\":\"again\"}",
+    "{\"v\":1,\"seq\":7,\"type\":\"text.delta\",\"turnId\":\"t2\",\"text\":\"Once more.\"}",
+  ]), "4000");
+  expect(voiceSaid(7, 0) == "I will edit it. Done.\n\nOnce more.");
 });
 
 test("an error frame belongs to the turn the window was reading", () => {
