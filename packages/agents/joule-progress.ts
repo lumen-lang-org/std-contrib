@@ -2,6 +2,7 @@ import { Db } from "../plume/driver.ts";
 import { jsonStringMemberAt } from "../ai/core/jsonscan.ts";
 import { EnvRow, envMarkAgent, envMarkSynced, envServing } from "./environments.ts";
 import { envSyncClock, envSyncOut, envSyncRunDir, envSyncScratch } from "./env-sync.ts";
+import { officeWarmThread } from "./office-render.ts";
 import { JOULE_ENV_NAME, JouleFrame, jouleFrameBool, jouleIsTaskTurn, jouleTail } from "./joule-bridge.ts";
 import { jouleParted } from "./joule-task.ts";
 import { StepClose, StepStart, beginStep, endStepAt, latestRound, recordThought, stepsOfRound } from "./steps.ts";
@@ -553,6 +554,10 @@ function jouleHarvest(db: Db, row: EnvRow, w: JouleWatch, now: string): void {
   }
   console.log("brought " + `${brought}` + " file(s) back from "
     + row.threadId + ":" + row.name + " on turn.end of " + w.endedTurn + " (" + w.ended + ")");
+  let warmed = officeWarmThread(db, row.threadId, now);
+  if (warmed > 0) {
+    console.log("warmed " + `${warmed}` + " document(s) for " + row.threadId);
+  }
 }
 
 function joulePoll(db: Db, row: EnvRow, watch: JouleWatch, now: string): JouleWatch {

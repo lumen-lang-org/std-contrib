@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip python3-venv \
       libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi8 \
       libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress \
+      unoconv python3-uno \
       pandoc poppler-utils zip unzip \
       curl ca-certificates git \
       fonts-dejavu-core fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea \

@@ -2,10 +2,15 @@ import { Db } from "../plume/driver.ts";
 import { findById, persist } from "../plume/plume.ts";
 import { EnvDockerReply, envDockerBin } from "./environments.ts";
 import { OfficeRenderRow, officeRendersMapping } from "./schema.ts";
+import { getVersion, listArtifacts } from "./artifacts.ts";
 
 export const OFFICE_RENDER_IMAGE: string = "agents-all:1";
 
 const OFFICE_RENDER_SECONDS: int = 120;
+
+const OFFICE_RESIDENT_NAME: string = "agents-office-resident";
+
+const OFFICE_UNO_PORT: string = "2002";
 
 const OFFICE_RENDER_MAX: int = 12000000;
 
@@ -71,25 +76,65 @@ function officeRenderDocker(args: string[]): EnvDockerReply {
   return reply;
 }
 
-function officeRenderRunArgs(container: string): string[] {
-  let out: string[] = ["run", "-d", "--name", container];
+function officeResidentListenerCmd(): string {
+  return "mkdir -p /tmp/lo && cd /tmp && exec soffice --headless --invisible"
+    + " --nodefault --nologo --norestore -env:UserInstallation=file:///tmp/lo"
+    + " --accept=\"socket,host=127.0.0.1,port=" + OFFICE_UNO_PORT + ";urp;\"";
+}
+
+function officeResidentRunArgs(): string[] {
+  let out: string[] = ["run", "-d", "--name", OFFICE_RESIDENT_NAME];
   out.push("--network"); out.push("none");
   out.push("--memory"); out.push("1g");
   out.push("--cpus"); out.push("2");
   out.push("--pids-limit"); out.push("256");
   out.push("--security-opt"); out.push("no-new-privileges");
   out.push("--cap-drop"); out.push("ALL");
-  out.push("--entrypoint"); out.push("sleep");
-  out.push(officeRenderImage()); out.push("infinity");
+  out.push("--user"); out.push("65534:65534");
+  out.push("--entrypoint"); out.push("sh");
+  out.push(officeRenderImage());
+  out.push("-c"); out.push(officeResidentListenerCmd());
   return out;
 }
 
-function officeRenderCommand(ext: string): string {
-  return "cd /work && HOME=/work XDG_CACHE_HOME=/work"
-    + " timeout " + `${OFFICE_RENDER_SECONDS}`
-    + " soffice --headless --norestore --nolockcheck"
-    + " -env:UserInstallation=file:///work/lo"
-    + " --convert-to pdf --outdir /work /work/in." + ext
+let officeResidentUp: bool = false;
+
+export function officeResidentForget(): void {
+  officeResidentUp = false;
+}
+
+function officeResidentReady(): bool {
+  let seen = officeRenderDocker(["inspect", "-f", "{{.State.Running}}", OFFICE_RESIDENT_NAME]);
+  let up = seen.status == 0 && seen.stdout.trim() == "true";
+  officeResidentUp = up;
+  return up;
+}
+
+function officeResidentWait(): void {
+  officeRenderDocker(["exec", OFFICE_RESIDENT_NAME, "python3", "-c",
+    "import socket,time\nfor _ in range(60):\n try:\n  socket.create_connection((\"127.0.0.1\","
+    + OFFICE_UNO_PORT + "),0.5).close(); break\n except Exception:\n  time.sleep(0.5)"]);
+}
+
+function officeResidentEnsure(): string {
+  if (officeResidentUp) {
+    return "";
+  }
+  if (officeResidentReady()) {
+    return "";
+  }
+  officeRenderDocker(["rm", "-f", OFFICE_RESIDENT_NAME]);
+  let made = officeRenderDocker(officeResidentRunArgs());
+  if (made.status != 0) {
+    return "the document converter could not start (" + officeRenderImage() + " — is it built?)";
+  }
+  officeResidentWait();
+  return "";
+}
+
+function officeUnoconvCmd(inName: string, outName: string): string {
+  return "HOME=/tmp timeout " + `${OFFICE_RENDER_SECONDS}`
+    + " unoconv -f pdf -p " + OFFICE_UNO_PORT + " -o " + outName + " " + inName
     + " >/dev/null 2>&1";
 }
 
@@ -216,6 +261,34 @@ export type OfficeRenderAsk = {
   now: string,
 };
 
+export function officeWarmThread(db: Db, threadId: string, now: string): int {
+  let arts = listArtifacts(db, threadId);
+  let warmed: int = 0;
+  let i: int = 0;
+  while (i < arts.length) {
+    let a = arts[i];
+    i = i + 1;
+    if (officeRenderExt(a.path) == "" || a.currentVersion < 1) {
+      continue;
+    }
+    if (officeRenderCached(db, a.id, a.currentVersion) != "") {
+      continue;
+    }
+    let v = getVersion(db, a.id, a.currentVersion);
+    if (v.body == "") {
+      continue;
+    }
+    let ask: OfficeRenderAsk = {
+      artifactId: a.id, version: a.currentVersion, path: a.path, body: v.body, now: now,
+    };
+    let out = officeRender(db, ask);
+    if (out.ok) {
+      warmed = warmed + 1;
+    }
+  }
+  return warmed;
+}
+
 export function officeRender(db: Db, ask: OfficeRenderAsk): OfficeRendered {
   let ext = officeRenderExt(ask.path);
   if (ext == "") {
@@ -248,39 +321,45 @@ export function officeRender(db: Db, ask: OfficeRenderAsk): OfficeRendered {
     return officeRenderRefused(decoded);
   }
 
-  let container = "agents-render-" + officeRenderDigits(ask.now) + "-" + `${officeRenderSeq}`;
-  let made = officeRenderDocker(officeRenderRunArgs(container));
-  if (made.status != 0) {
+  let tag = officeRenderDigits(ask.now) + "-" + `${officeRenderSeq}`;
+  let ready = officeResidentEnsure();
+  if (ready != "") {
     officeRenderDrop(stage);
-    return officeRenderRefused("the document converter could not start ("
-      + officeRenderImage() + " — is it built?)");
+    return officeRenderRefused(ready);
   }
-
-  let out = officeRenderConvert(db, container, stage, ext, ask);
-  officeRenderDocker(["rm", "-f", container]);
+  let out = officeRenderConvert(db, tag, stage, ext, ask);
+  if (!out.ok && !officeResidentReady()) {
+    let again = officeResidentEnsure();
+    if (again == "") {
+      out = officeRenderConvert(db, tag, stage, ext, ask);
+    }
+  }
   officeRenderDrop(stage);
   return out;
 }
 
-function officeRenderConvert(db: Db, container: string, stage: string, ext: string, ask: OfficeRenderAsk): OfficeRendered {
-  let placed = officeRenderDocker(["cp", stage + "/in." + ext, container + ":/work/in." + ext]);
+function officeRenderConvert(db: Db, tag: string, stage: string, ext: string, ask: OfficeRenderAsk): OfficeRendered {
+  let inName = "/tmp/in-" + tag + "." + ext;
+  let outName = "/tmp/out-" + tag + ".pdf";
+  let placed = officeRenderDocker(["cp", stage + "/in." + ext, OFFICE_RESIDENT_NAME + ":" + inName]);
   if (placed.status != 0) {
     return officeRenderRefused("the document could not be handed to the converter");
   }
-  let ran = officeRenderDocker(["exec", "--user", "65534:65534", container,
-    "sh", "-c", officeRenderCommand(ext)]);
+  let ran = officeRenderDocker(["exec", OFFICE_RESIDENT_NAME, "sh", "-c",
+    officeUnoconvCmd(inName, outName)]);
   if (ran.status != 0) {
+    officeRenderDocker(["exec", OFFICE_RESIDENT_NAME, "rm", "-f", inName]);
     if (ran.status == 124) {
       return officeRenderRefused("this document took longer than "
         + `${OFFICE_RENDER_SECONDS}` + " seconds to convert, so it was stopped");
     }
     return officeRenderRefused("this document could not be converted — it may be corrupt");
   }
-  let back = officeRenderDocker(["cp", container + ":/work/in.pdf", stage + "/out.pdf"]);
+  let back = officeRenderDocker(["cp", OFFICE_RESIDENT_NAME + ":" + outName, stage + "/out.pdf"]);
+  officeRenderDocker(["exec", OFFICE_RESIDENT_NAME, "rm", "-f", inName, outName]);
   if (back.status != 0) {
     return officeRenderRefused("the converter produced no PDF for this document");
   }
-
   let b64 = officeRenderEncode(stage + "/out.pdf");
   if (b64 == "") {
     return officeRenderRefused("the converted PDF could not be read back");
@@ -425,6 +504,19 @@ function officeTextInside(container: string, stage: string, inExt: string, comma
   return done;
 }
 
+function officeTextRunArgs(container: string): string[] {
+  let out: string[] = ["run", "-d", "--name", container];
+  out.push("--network"); out.push("none");
+  out.push("--memory"); out.push("1g");
+  out.push("--cpus"); out.push("2");
+  out.push("--pids-limit"); out.push("256");
+  out.push("--security-opt"); out.push("no-new-privileges");
+  out.push("--cap-drop"); out.push("ALL");
+  out.push("--entrypoint"); out.push("sleep");
+  out.push(officeRenderImage()); out.push("infinity");
+  return out;
+}
+
 function officeTextRun(inExt: string, body: string, command: string, now: string): OfficeTextRun {
   let stage = officeRenderStage(now);
   let staged = officeRenderHostDir(stage);
@@ -438,7 +530,7 @@ function officeTextRun(inExt: string, body: string, command: string, now: string
   }
 
   let container = "agents-render-" + officeRenderDigits(now) + "-" + `${officeRenderSeq}`;
-  let made = officeRenderDocker(officeRenderRunArgs(container));
+  let made = officeRenderDocker(officeTextRunArgs(container));
   if (made.status != 0) {
     officeRenderDrop(stage);
     return officeTextFailed("the document reader could not start ("
