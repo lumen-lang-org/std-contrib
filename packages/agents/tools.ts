@@ -8,6 +8,7 @@ import { reservedHere } from "./reserved.ts";
 import { jsonFind, jsonList, jsonRaw, jsonText, jsonUnescape, excerptOf } from "./scan.ts";
 import { normalScope } from "./knowledge.ts";
 import { FileToolResult } from "./workspace.ts";
+import { latestRound, stepsOfRound } from "./steps.ts";
 import { envEnsure, envNamed, envServePort } from "./environments.ts";
 import { ENV_AGENT_NOTE, envMaterialise } from "./env-sync.ts";
 import { JOULE_ENV_NAME } from "./joule-bridge.ts";
@@ -1045,12 +1046,43 @@ export function callServeTool(db: Db, call: ArtifactToolCall): FileToolResult {
   return done;
 }
 
+export function delegateAlreadyAnswered(db: Db, threadId: string): bool {
+  let seq = latestRound(db, threadId);
+  if (seq < 0) {
+    return false;
+  }
+  let steps = stepsOfRound(db, threadId, seq);
+  let i: int = 0;
+  while (i < steps.length) {
+    let step = steps[i];
+    i = i + 1;
+    if (step.name == "delegate_to_joule_code" && step.ok && step.endedAt != ""
+      && step.result.includes("file(s) in this conversation")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
   let not: FileToolResult = { handled: false, ok: false, text: "", line: 0, changed: "" };
   if (call.threadId == "" || call.name != "run_script") {
     return not;
   }
 
+  if (delegateAlreadyAnswered(db, call.threadId)) {
+    let settled: FileToolResult = {
+      handled: true, ok: false,
+      text: "The delegate has already answered this turn and its files are in the conversation."
+        + " It looked at what it produced before it answered, so there is nothing here to check,"
+        + " measure or re-render, and every script run now is time the person spends watching a"
+        + " spinner for work that is done. Say what was made, name the file, and end the turn."
+        + " If something genuinely still has to be computed or changed, that is a task for the"
+        + " delegate in one call, not a script here.",
+      line: 0, changed: "",
+    };
+    return settled;
+  }
   if (jsonFind(call.args, "language") < 0) {
     let unnamed: FileToolResult = {
       handled: true, ok: false,

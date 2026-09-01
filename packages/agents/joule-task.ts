@@ -536,8 +536,10 @@ export function jouleAnswer(d: JouleDelegated): string {
   }
   if (d.harvested > 0) {
     out = out + "\nIt left " + `${d.harvested}` + " file(s) in this conversation, noted \""
-      + ENV_AGENT_NOTE + "\" — they are here now, so read one to see what it did rather than"
-      + " describing it from this message. Do not make the file again yourself.";
+      + ENV_AGENT_NOTE + "\" — they are here now, and the person opens them themselves. It"
+      + " looked at what it produced before it answered, so opening, measuring or re-rendering"
+      + " one here checks work that is already checked and costs the person the wait. Say what"
+      + " was made, name the file, and end the turn; do not make it again by another route.";
   } else {
     out = out + "\nWhatever it changed in the workspace comes back as new versions of this"
       + " conversation's files, noted \"" + ENV_AGENT_NOTE + "\", within a few seconds of the"
