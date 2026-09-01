@@ -84,6 +84,26 @@ function stepAt(idx: int): string {
   return "";
 }
 
+test("a pipeline stage transition is drawn as a finished step, and its turn end is not the turn's", () => {
+  fresh();
+  let after = jouleApply(database, watching(), framesOf([
+    "{\"v\":1,\"seq\":1,\"type\":\"turn.start\",\"turnId\":\"t1\"}",
+    "{\"v\":1,\"seq\":2,\"type\":\"text.delta\",\"turnId\":\"pipeline:pipe-1\",\"text\":\"stage 1/2 (survey) started: agent-1\\n\"}",
+    "{\"v\":1,\"seq\":3,\"type\":\"turn.end\",\"turnId\":\"pipeline:pipe-1\",\"reason\":\"done\"}",
+  ]), "2000");
+  expect(after.turnId == "t1");
+  let held = stepsOfRound(database, "t-prog", 7);
+  let hit = 0;
+  let i: int = 0;
+  while (i < held.length) {
+    if (held[i].name == jouleStepName("pipeline") && held[i].args == "pipe-1: stage 1/2 (survey) started: agent-1") {
+      hit = hit + 1;
+    }
+    i = i + 1;
+  }
+  expect(hit == 1);
+});
+
 test("a delegated tool call is a step in the round that asked for it", () => {
   fresh();
   let after = jouleApply(database, watching(), framesOf([
