@@ -517,7 +517,7 @@ function jouleHarvest(db: Db, row: EnvRow, w: JouleWatch, now: string): void {
     return;
   }
   let carried = envSyncOut(db, row, row.syncAt, now);
-  let ran = envSyncRunDir(db, row, now);
+  let ran = envSyncRunDir(db, row, row.syncAt, now);
   let made = envSyncScratch(db, row, now);
   let brought = carried.changed.length + ran.changed.length + made.changed.length;
   // Carries the cursor with it: envMarkSynced writes the whole row, and the

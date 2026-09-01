@@ -318,8 +318,11 @@ export function envBaseName(path: string): string {
 export function envSyncScratch(db: Db, row: EnvRow, now: string): EnvSynced {
   let none: string[] = [];
   let container = envContainerName(row.threadId, row.name);
+  let newerScratch = row.syncAt == "" || row.syncAt == "0"
+    ? ""
+    : " -newermt '@" + row.syncAt + "'";
   let found = envSyncDocker(["exec", container, "sh", "-c",
-    "find " + ENV_WORKSPACE + "/.joule/scratch -type f -print 2>/dev/null; true"]);
+    "find " + ENV_WORKSPACE + "/.joule/scratch -type f" + newerScratch + " -print 2>/dev/null; true"]);
   if (found.status != 0) {
     let bad: EnvSynced = { ok: false, changed: none, skipped: 0, fault: "the scratch directory could not be read" };
     return bad;
@@ -373,17 +376,20 @@ export function envHarvestNow(db: Db, row: EnvRow, now: string): int {
     return -1;
   }
   let carried = envSyncOut(db, row, row.syncAt, now);
-  let ran = envSyncRunDir(db, row, now);
+  let ran = envSyncRunDir(db, row, row.syncAt, now);
   let made = envSyncScratch(db, row, now);
   envMarkSynced(db, row, stamp);
   return carried.changed.length + ran.changed.length + made.changed.length;
 }
 
-export function envSyncRunDir(db: Db, row: EnvRow, now: string): EnvSynced {
+export function envSyncRunDir(db: Db, row: EnvRow, sinceEpochSeconds: string, now: string): EnvSynced {
   let none: string[] = [];
   let container = envContainerName(row.threadId, row.name);
+  let newer = sinceEpochSeconds == "" || sinceEpochSeconds == "0"
+    ? ""
+    : " -newermt '@" + sinceEpochSeconds + "'";
   let found = envSyncDocker(["exec", container, "sh", "-c",
-    "cd " + ENV_RUN_DIR + " 2>/dev/null && find . -type f -print; true"]);
+    "cd " + ENV_RUN_DIR + " 2>/dev/null && find . -type f" + newer + " -print; true"]);
   if (found.status != 0) {
     let bad: EnvSynced = { ok: false, changed: none, skipped: 0, fault: "the run directory could not be read" };
     return bad;
@@ -426,10 +432,6 @@ export function envSyncRunDir(db: Db, row: EnvRow, now: string): EnvSynced {
       console.error("run dir refused " + at + ": " + put.fault);
       skipped = skipped + 1;
     }
-  }
-  if (skipped == 0) {
-    envSyncDocker(["exec", container, "sh", "-c",
-      "rm -rf " + ENV_RUN_DIR + "/* " + ENV_RUN_DIR + "/.[!.]* 2>/dev/null; true"]);
   }
   let done: EnvSynced = { ok: true, changed: changed, skipped: skipped, fault: "" };
   return done;
