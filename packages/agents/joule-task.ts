@@ -56,8 +56,19 @@ export function jouleWaitOverride(seconds: int): void {
   jouleWaitChosen = seconds;
 }
 
-function jouleWaitSeconds(): int {
-  return jouleWaitChosen > 0 ? jouleWaitChosen : JOULE_WAIT_SECONDS;
+export function jouleWaitSeconds(): int {
+  if (jouleWaitChosen > 0) {
+    return jouleWaitChosen;
+  }
+  let said = (process.env("AGENTS_JOULE_WAIT_SECONDS") ?? "").trim();
+  if (said == "") {
+    return JOULE_WAIT_SECONDS;
+  }
+  let asked = parseInt(said) ?? 0;
+  if (asked < 30 || asked > 900) {
+    return JOULE_WAIT_SECONDS;
+  }
+  return asked;
 }
 
 /** How much of what the delegate said is carried back. A turn's text is a

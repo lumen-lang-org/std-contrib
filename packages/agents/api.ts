@@ -75,7 +75,7 @@ import { TURN_SEQ_NONE, artifactPlan } from "./artifacts.ts";
 import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepMillis, thoughtsOfRound, thoughtsOfThread, LiveStep, Thought, partialOf } from "./steps.ts";
 import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envNetworkReap, envMarkSynced, envReforward, envServing } from "./environments.ts";
 import { envGrantsPlan, envGrantSweep } from "./env-grants.ts";
-import { envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
+import { envHarvestNow, envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
 import { JOULE_PROGRESS_MS, jouleProgress } from "./joule-progress.ts";
 import { FEED_PORT, feedPlan } from "./feed.ts";
 import { feedLoop } from "./feed-server.ts";
@@ -241,6 +241,13 @@ function sweepWorkspaces(db: Db): void {
       // Silent skips are how the last two bugs hid. If the container will not
       // say what time it is, the sync cannot run and somebody should know.
       console.error(`workspace ${row.threadId}:${row.name} — its clock did not answer`);
+      continue;
+    }
+    if (row.agentConn != "") {
+      let brought = envHarvestNow(db, row, `${Date.now()}`);
+      if (brought > 0) {
+        console.log(`brought ${brought} file(s) back from ${row.threadId}:${row.name}`);
+      }
       continue;
     }
     let carried = envSyncOut(db, row, row.syncAt, `${Date.now()}`);
