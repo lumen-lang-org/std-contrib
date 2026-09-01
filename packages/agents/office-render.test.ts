@@ -4,7 +4,7 @@ import { connectDatabase, execute, createTableSql } from "../plume/plume.ts";
 import { Migration, migrate, migration, forgetMigrations } from "../plume/migrate.ts";
 import { officeRendersMapping } from "./schema.ts";
 import { envDockerOverride } from "./environments.ts";
-import { OfficeRenderAsk, OfficeRendered, OfficeTexted, officeRender, officeRenderCached, officeRenderExt, officeRenderImageOverride, officeText, officeTextCached, officeTextExt } from "./office-render.ts";
+import { OfficeRenderAsk, OfficeRendered, OfficeTexted, officeRender, officeRenderCached, officeRenderExt, officeRenderImageOverride, officeResidentForget, officeText, officeTextCached, officeTextExt } from "./office-render.ts";
 
 let database: Db = sqlite();
 
@@ -19,6 +19,7 @@ function fresh(): void {
   ];
   migrate(database, plan);
   officeRenderImageOverride("agents-office-render:test");
+  officeResidentForget();
 }
 
 const FAKE_DIR = "/tmp/agents_render_fake";
@@ -38,6 +39,16 @@ function fakeDocker(script: string): void {
 function dockerConverts(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; exit 0; fi\n"
+    + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
+    + "if [ \"$1\" = \"cp\" ]; then case \"$2\" in *:*) printf '%%PDF-1.4' > \"$3\";; esac; fi\n"
+    + "exit 0\n");
+}
+
+function dockerColdStart(): void {
+  fakeDocker("#!/bin/sh\n"
+    + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo false; exit 0; fi\n"
     + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
     + "if [ \"$1\" = \"cp\" ]; then case \"$2\" in *:*) printf '%%PDF-1.4' > \"$3\";; esac; fi\n"
     + "exit 0\n");
@@ -53,17 +64,31 @@ function dockerAbsent(): void {
 function dockerTimesOut(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; exit 0; fi\n"
     + "if [ \"$1\" = \"run\" ]; then echo c0ffee; exit 0; fi\n"
-    + "if [ \"$1\" = \"exec\" ]; then exit 124; fi\n"
+    + "case \"$*\" in *unoconv*) exit 124;; esac\n"
     + "exit 0\n");
 }
 
 function dockerWritesNothing(): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; exit 0; fi\n"
     + "if [ \"$1\" = \"run\" ]; then echo c0ffee; exit 0; fi\n"
     + "if [ \"$1\" = \"cp\" ]; then case \"$2\" in *:*) exit 1;; esac; fi\n"
     + "exit 0\n");
+}
+
+function lineWith(said: string): string {
+  let all = argvLines();
+  let i: int = 0;
+  while (i < all.length) {
+    if (all[i].indexOf(said) >= 0) {
+      return all[i];
+    }
+    i = i + 1;
+  }
+  return "";
 }
 
 function argvLines(): string[] {
@@ -115,47 +140,48 @@ test("a format that is not converted is refused before any container exists", ()
   expect(argvLines().length == 0);
 });
 
-test("the converter runs with no network, no capabilities and bounded resources", () => {
+test("the resident converter runs with no network, no capabilities and unprivileged", () => {
   fresh();
-  dockerConverts();
+  dockerColdStart();
   render("/a.docx", 1, SOME_BODY);
-  let made = argvLines()[0];
+  let made = lineWith("run -d --name agents-office-resident");
 
-  expect(made.indexOf("run -d --name agents-render-") == 0);
+  expect(made != "");
   expect(made.indexOf("--network none") > 0);
   expect(made.indexOf("--memory 1g") > 0);
   expect(made.indexOf("--cpus 2") > 0);
   expect(made.indexOf("--pids-limit 256") > 0);
   expect(made.indexOf("--security-opt no-new-privileges") > 0);
   expect(made.indexOf("--cap-drop ALL") > 0);
+  expect(made.indexOf("--user 65534:65534") > 0);
   expect(made.indexOf("--cap-add") < 0);
   expect(made.indexOf("--privileged") < 0);
-  expect(made.indexOf("agents-office-render:test infinity") > 0);
+  expect(made.indexOf("agents-office-render:test") > 0);
+  expect(made.indexOf("soffice --headless") > 0);
 });
 
-test("the document is handed over unprivileged, and the container is destroyed after", () => {
+test("the document goes in, the PDF comes out, the scratch is cleared, the resident stays", () => {
   fresh();
   dockerConverts();
   render("/a.docx", 1, SOME_BODY);
   let asked = argvLines();
 
-  expect(asked.length == 5);
-  expect(asked[1].indexOf("cp ") == 0);
-  expect(asked[1].indexOf(":/work/in.docx") > 0);
-  expect(asked[2].indexOf("exec --user 65534:65534") == 0);
-  expect(asked[2].indexOf("soffice --headless") > 0);
-  expect(asked[3].indexOf(":/work/in.pdf") > 0);
-  expect(asked[4].indexOf("rm -f agents-render-") == 0);
+  expect(lineWith("agents-office-resident:/tmp/in-").indexOf("cp ") == 0);
+  expect(lineWith("unoconv").indexOf("exec agents-office-resident") == 0);
+  expect(lineWith("cp agents-office-resident:/tmp/out-") != "");
+  expect(lineWith("rm -f /tmp/in-") != "");
+  let last = asked[asked.length - 1];
+  expect(last.indexOf("rm -f agents-office-resident") < 0);
 });
 
-test("the container is destroyed even when the conversion fails", () => {
+test("a failed conversion clears its input and leaves the resident running", () => {
   fresh();
   dockerTimesOut();
   let out = render("/a.docx", 1, SOME_BODY);
 
   expect(!out.ok);
-  let asked = argvLines();
-  expect(asked[asked.length - 1].indexOf("rm -f agents-render-") == 0);
+  expect(lineWith("rm -f /tmp/in-") != "");
+  expect(lineWith("rm -f agents-office-resident") == "");
 });
 
 test("nothing derived from the artifact reaches the container", () => {
@@ -164,9 +190,9 @@ test("nothing derived from the artifact reaches the container", () => {
   render("/artifacts/docs/'; rm -rf /; echo '.docx", 1, SOME_BODY);
   let asked = argvLines();
 
-  let exec = asked[2];
+  let exec = lineWith("unoconv");
   expect(exec.indexOf("rm -rf") < 0);
-  expect(exec.indexOf("/work/in.docx") > 0);
+  expect(exec.indexOf("/tmp/in-") > 0);
 });
 
 test("a converted version is stored, and the second read converts nothing", () => {
@@ -270,6 +296,7 @@ test("a body that is not base64 is refused without starting a conversion", () =>
 function dockerReads(said: string): void {
   fakeDocker("#!/bin/sh\n"
     + "echo \"$@\" >> " + FAKE_LOG + "\n"
+    + "if [ \"$1\" = \"inspect\" ]; then echo true; exit 0; fi\n"
     + "if [ \"$1\" = \"run\" ]; then echo c0ffee; fi\n"
     + "if [ \"$1\" = \"cp\" ]; then case \"$2\" in\n"
     + "  *:*out.txt) printf '" + said + "' > \"$3\";;\n"
@@ -346,11 +373,8 @@ test("a deck still goes through the page it is drawn on", () => {
   let out = readText("/a.pptx", 1, SOME_BODY);
 
   expect(out.ok);
-  // A PDF first, then the text out of it: LibreOffice has no honest text
-  // filter for slides, and the PDF is the one we already draw for the reader.
-  expect(argvLines().length == 10);
-  expect(argvLines()[2].indexOf("--convert-to pdf") > 0);
-  expect(argvLines()[7].indexOf("pdftotext") > 0);
+  expect(lineWith("unoconv") != "");
+  expect(lineWith("pdftotext") != "");
 });
 
 test("the words are kept against the version, so the second read runs nothing", () => {

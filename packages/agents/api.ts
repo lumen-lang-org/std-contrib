@@ -76,6 +76,7 @@ import { stepPlan, stepsOfRound, stepsOfThread, roundRunning, latestRound, stepM
 import { EnvSweep, ENV_IDLE_MS, envEnsure, envList, envPlan, envIdle, envNetworkReap, envMarkSynced, envReforward, envServing } from "./environments.ts";
 import { envGrantsPlan, envGrantSweep } from "./env-grants.ts";
 import { envHarvestNow, envMaterialise, envSyncClock, envSyncOut } from "./env-sync.ts";
+import { officeWarmThread } from "./office-render.ts";
 import { JOULE_PROGRESS_MS, jouleProgress } from "./joule-progress.ts";
 import { FEED_PORT, feedPlan } from "./feed.ts";
 import { feedLoop } from "./feed-server.ts";
@@ -247,6 +248,7 @@ function sweepWorkspaces(db: Db): void {
       let brought = envHarvestNow(db, row, `${Date.now()}`);
       if (brought > 0) {
         console.log(`brought ${brought} file(s) back from ${row.threadId}:${row.name}`);
+        officeWarmThread(db, row.threadId, `${Date.now()}`);
       }
       continue;
     }
