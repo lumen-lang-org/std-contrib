@@ -12,7 +12,7 @@ import { latestRound, stepsOfRound } from "./steps.ts";
 import { envEnsure, envNamed, envServePort } from "./environments.ts";
 import { ENV_AGENT_NOTE, envMaterialise } from "./env-sync.ts";
 import { JOULE_ENV_NAME } from "./joule-bridge.ts";
-import { JOULE_WAIT_SECONDS, jouleAnswer, jouleDelegate } from "./joule-task.ts";
+import { jouleAnswer, jouleDelegate, jouleWaitSeconds } from "./joule-task.ts";
 import { EnvGranted, envGrantMint, envHostFor, envThreadOwner, envZone } from "./env-grants.ts";
 import { putArtifact, getArtifact, getVersion, binaryKind, kindOf, utf8Length } from "./artifacts.ts";
 import { officeText } from "./office-render.ts";
@@ -914,7 +914,7 @@ export function delegateEnvTool(): ToolSpec {
     + "should have that decision in it. "
     + "The environment is created on the first call and kept for the conversation, so the second "
     + "call finds everything the first one installed. This call waits up to "
-    + `${JOULE_WAIT_SECONDS}` + " seconds and then hands back what happened — the turn's id, what it "
+    + `${jouleWaitSeconds()}` + " seconds and then hands back what happened — the turn's id, what it "
     + "ran, what it said. Work that is still going carries on in the container and its files still "
     + "come back; the reply says which of the two happened. Read the files afterwards rather than "
     + "describing the result from the reply.",
@@ -1056,8 +1056,7 @@ export function delegateAlreadyAnswered(db: Db, threadId: string): bool {
   while (i < steps.length) {
     let step = steps[i];
     i = i + 1;
-    if (step.name == "delegate_to_joule_code" && step.ok && step.endedAt != ""
-      && step.result.includes("file(s) in this conversation")) {
+    if (step.name == "delegate_to_joule_code" && step.ok && step.endedAt != "") {
       return true;
     }
   }
@@ -1073,12 +1072,13 @@ export function callScriptTool(db: Db, call: ArtifactToolCall): FileToolResult {
   if (delegateAlreadyAnswered(db, call.threadId)) {
     let settled: FileToolResult = {
       handled: true, ok: false,
-      text: "The delegate has already answered this turn and its files are in the conversation."
-        + " It looked at what it produced before it answered, so there is nothing here to check,"
-        + " measure or re-render, and every script run now is time the person spends watching a"
-        + " spinner for work that is done. Say what was made, name the file, and end the turn."
-        + " If something genuinely still has to be computed or changed, that is a task for the"
-        + " delegate in one call, not a script here.",
+      text: "The delegate has already answered this turn. Whatever it made arrives as files"
+        + " here on its own, and it looked at what it produced before it answered, so there is"
+        + " nothing for a script to check, measure or re-render — and if its turn is still"
+        + " running, a script cannot make it finish sooner. Every run now is time the person"
+        + " spends watching a spinner. Say what happened, name the file if there is one, and end"
+        + " the turn. Something that genuinely still has to be made or changed is one more task"
+        + " for the delegate, not a script here.",
       line: 0, changed: "",
     };
     return settled;

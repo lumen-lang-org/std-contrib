@@ -1,6 +1,6 @@
 import { Db } from "../plume/driver.ts";
 import { ENV_RUN_DIR, EnvRow, envBySlug, envContainerName, envDockerBin, envMarkSynced, envOwnVolumes } from "./environments.ts";
-import { ArtifactWrite, TURN_SEQ_NONE, binaryKind, getVersion, kindOf, listArtifacts, putArtifact } from "./artifacts.ts";
+import { ArtifactWrite, TURN_SEQ_NONE, binaryKind, getArtifact, getVersion, kindOf, listArtifacts, putArtifact } from "./artifacts.ts";
 
 // The container is a cache; the artifacts are the record.
 //
@@ -277,6 +277,10 @@ export function envSyncOut(db: Db, row: EnvRow, sinceEpochSeconds: string, now: 
       turnSeq: TURN_SEQ_NONE,
       now: now,
     };
+    if (envAlreadyHeld(db, row.threadId, at, body)) {
+      i = i;
+      continue;
+    }
     let put = putArtifact(db, write);
     if (put.ok) {
       changed.push(at);
@@ -358,6 +362,10 @@ export function envSyncScratch(db: Db, row: EnvRow, now: string): EnvSynced {
       turnSeq: TURN_SEQ_NONE,
       now: now,
     };
+    if (envAlreadyHeld(db, row.threadId, at, body)) {
+      i = i;
+      continue;
+    }
     let put = putArtifact(db, write);
     if (put.ok) {
       changed.push(at);
@@ -368,6 +376,15 @@ export function envSyncScratch(db: Db, row: EnvRow, now: string): EnvSynced {
   }
   let done: EnvSynced = { ok: true, changed: changed, skipped: skipped, fault: "" };
   return done;
+}
+
+export function envAlreadyHeld(db: Db, threadId: string, path: string, body: string): bool {
+  let held = getArtifact(db, threadId, path);
+  if (held.id == "" || held.currentVersion < 1) {
+    return false;
+  }
+  let latest = getVersion(db, held.id, held.currentVersion);
+  return latest.body == body;
 }
 
 export function envHarvestNow(db: Db, row: EnvRow, now: string): int {
@@ -425,6 +442,10 @@ export function envSyncRunDir(db: Db, row: EnvRow, sinceEpochSeconds: string, no
       turnSeq: TURN_SEQ_NONE,
       now: now,
     };
+    if (envAlreadyHeld(db, row.threadId, at, body)) {
+      i = i;
+      continue;
+    }
     let put = putArtifact(db, write);
     if (put.ok) {
       changed.push(at);
