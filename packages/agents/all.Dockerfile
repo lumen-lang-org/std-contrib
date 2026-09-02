@@ -69,7 +69,7 @@ RUN chmod +x /opt/office/*.py \
 # latest: a delegated turn's behaviour is the daemon's behaviour, and an image
 # that quietly picked up a new release would change what a conversation does
 # with nothing in this repository having moved.
-ARG JOULE_VERSION=v0.23.24
+ARG JOULE_VERSION=v0.23.25
 
 RUN set -eu; \
     url="https://github.com/joule-sh/code/releases/download/${JOULE_VERSION}/code-x86_64-linux.tar.gz"; \
