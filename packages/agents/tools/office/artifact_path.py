@@ -42,6 +42,17 @@ def resolve_output(path: str) -> str:
     can reach — the container is thrown away at the end of the run — and the
     script still prints "wrote", which is the failure that reads as success.
     """
+    # A make-* output is always the deliverable, so a /tmp target is a
+    # mistake: /tmp is scratch the reconcile throws away, and the older rule
+    # below would bury it at RUN_DIR + the whole /tmp path — saving the deck
+    # under a name nobody asked for, which is how one deck became two artifacts
+    # (/night-run-club.pptx and /tmp/artifacts/night-run-club.pptx from one
+    # run). Collapse a /tmp deliverable to its basename at the artifact root.
+    if path.startswith("/tmp/") and os.path.isdir(RUN_DIR):
+        at = RUN_DIR + "/" + os.path.basename(path)
+        print(f"note: {path} is under /tmp and would be thrown away; writing {at}",
+              file=sys.stderr)
+        return at
     if path.startswith("/") and not path.startswith(RUN_DIR + "/") and os.path.isdir(RUN_DIR):
         under = RUN_DIR + path
         print(f"note: {path} is outside {RUN_DIR} and would not be saved; writing {under}",
