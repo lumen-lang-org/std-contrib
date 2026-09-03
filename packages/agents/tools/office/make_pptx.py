@@ -10,6 +10,7 @@ spec.json:
      "theme": {"accent": "#E07A1B", "background": "#FFFFFF", "text": "#1A1A1A"},
      "slides": [
        {"title": "Problem", "bullets": ["First point", "Second"], "notes": ""},
+       {"title": "The route", "image": "start.jpg"},
        {"title": "Growth", "chart": {"kind": "column",
                                      "categories": ["Q1", "Q2", "Q3"],
                                      "series": [{"name": "Subscribers",
@@ -27,10 +28,15 @@ chart is optional, one per slide, and takes kind column, bar, line or pie
 with its categories and one or more named series. A slide may carry both
 bullets and a chart; the chart sits under them.
 
+image is optional, one per slide: the path to a picture file, placed below
+the title (and below the bullets if the slide has any), scaled to fit and
+centred. Get one with fetch-image first, then name its path here. A slide
+carries a chart or an image, not both.
+
 This exists because a model writing python-pptx code from memory invents
 imports and APIs — Chart.format and Plot.format are the usual two, and
-neither exists. A model filling in this spec and running one command does
-not have to know that. The spec is the whole surface.
+add_picture sizing is another. A model filling in this spec and running one
+command does not have to know that. The spec is the whole surface.
 """
 from __future__ import annotations
 
@@ -140,6 +146,26 @@ def draw(slide, said: dict, look: dict, top_in: float) -> None:
         chart.font.color.rgb = look["text"]
 
 
+def place(slide, path: str, top_in: float) -> None:
+    from pptx.util import Inches
+
+    img = Path(path)
+    if not img.is_file():
+        raise SystemExit(
+            f'image "{path}" is not a file — fetch or create it first (fetch-image),'
+            " then name its path here")
+    left, box_w, box_h = Inches(0.8), Inches(8.4), Inches(6.6 - top_in)
+    # add_picture with no size gives the picture its native pixels; python-pptx
+    # sizing from memory is the third API a model invents, so scale here to fit
+    # the box while keeping the aspect ratio, then centre what is left over.
+    pic = slide.shapes.add_picture(str(img), left, Inches(top_in))
+    scale = min(box_w / pic.width, box_h / pic.height)
+    pic.width = int(pic.width * scale)
+    pic.height = int(pic.height * scale)
+    pic.left = left + (box_w - pic.width) // 2
+    pic.top = Inches(top_in) + (box_h - pic.height) // 2
+
+
 def build(spec: dict, out: Path) -> int:
     from pptx import Presentation
     from pptx.util import Pt
@@ -160,8 +186,15 @@ def build(spec: dict, out: Path) -> int:
         chart = s.get("chart")
         if chart is not None and not isinstance(chart, dict):
             raise SystemExit(f'slides[{i}]["chart"] is an object, or leave it out')
+        image = s.get("image")
+        if image is not None and not isinstance(image, str):
+            raise SystemExit(f'slides[{i}]["image"] is a path string, or leave it out')
+        if chart is not None and image:
+            raise SystemExit(
+                f"slides[{i}] has both a chart and an image — a slide carries one"
+                " visual, not both; split them across two slides")
         bullets = s.get("bullets") or []
-        layout = 5 if chart is not None and not bullets else 1
+        layout = 5 if (chart is not None or image) and not bullets else 1
         slide = deck.slides.add_slide(deck.slide_layouts[layout])
         slide.shapes.title.text = str(s.get("title", ""))
         if bullets:
@@ -175,13 +208,21 @@ def build(spec: dict, out: Path) -> int:
         paint(slide, look)
         if chart is not None:
             draw(slide, chart, look, 3.6 if bullets else 1.8)
+        if image:
+            place(slide, image, 3.6 if bullets else 1.8)
     parent = os.path.dirname(str(out))
     if parent:
         os.makedirs(parent, exist_ok=True)
     deck.save(str(out))
     charts = sum(1 for s in slides if isinstance(s, dict) and s.get("chart"))
+    images = sum(1 for s in slides if isinstance(s, dict) and s.get("image"))
+    extra = []
+    if charts:
+        extra.append(f"{charts} with a chart")
+    if images:
+        extra.append(f"{images} with an image")
     said = f"wrote {out} ({len(slides)} slides"
-    print(said + (f", {charts} with a chart)" if charts else ")"))
+    print(said + (", " + ", ".join(extra) + ")" if extra else ")"))
     return 0
 
 
