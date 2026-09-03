@@ -103,6 +103,7 @@ so there is no python-pptx to write:
      "theme": {"accent": "#E07A1B", "background": "#101418", "text": "#F5F0EA"},
      "slides": [
        {"title": "The Problem", "bullets": ["Beans arrive stale"], "notes": ""},
+       {"title": "Our roastery", "image": "photo.jpg"},
        {"title": "Growth", "chart": {"kind": "column",
                                      "categories": ["Q1", "Q2", "Q3"],
                                      "series": [{"name": "Subscribers",
@@ -110,7 +111,8 @@ so there is no python-pptx to write:
 
 theme applies to every slide and every part is optional. chart takes kind
 column, bar, line or pie, and a slide may carry bullets and a chart together.
-Colours are #RRGGBB.
+image is the path to a picture file, placed below the title and centred; a
+slide carries a chart or an image, not both. Colours are #RRGGBB.
 
 Write the deck this way rather than by hand. python-pptx has no Chart.format
 and no Plot.format — a series is coloured through its own format and nothing
@@ -122,7 +124,8 @@ fetching is refused with nobody there to approve it:
     fetch-image https://host/photo.jpg /artifacts/photo.jpg
 
 It reads https, refuses anything that is not an image, and cannot reach
-inside this network. A picture that has to be drawn rather than found is
+inside this network. Put the path it saved into a slide's image field and
+make-deck places it — there is no python-pptx to write for a picture either. A picture that has to be drawn rather than found is
 Pillow's job, and Pillow is here.
 
 These commands live in the conversation's environment, so the way to use them
